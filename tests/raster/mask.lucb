@@ -250,7 +250,8 @@ func mask_from_alpha(t: Test*):
     defer pixmap.release()
     pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
 
-    let mask = Mask.from_pixmap(pixmap.as_ref(), MaskType.alpha)
+    var mask = Mask.from_pixmap(pixmap.as_ref(), MaskType.alpha)
+    defer mask.release()
 
     harness.expect_mask_png(t, &mask, "mask/mask-from-alpha.png")
 
@@ -267,7 +268,8 @@ func mask_from_luma(t: Test*):
     defer pixmap.release()
     pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
 
-    let mask = Mask.from_pixmap(pixmap.as_ref(), MaskType.luminance)
+    var mask = Mask.from_pixmap(pixmap.as_ref(), MaskType.luminance)
+    defer mask.release()
 
     harness.expect_mask_png(t, &mask, "mask/mask-from-luma.png")
 

@@ -13,7 +13,6 @@
 #==============================================================================================
 
 import harness
-import raster
 from harness import Test, TestCase
 from raster import Paint, PathBuilder, Pixmap, PixmapPaint, Transform, Rect, Point, Color, ColorU8, Stroke, StrokeDash, LineCap, LineJoin, FillRule, BlendMode, SpreadMode, FilterQuality, GradientStop, LinearGradient, RadialGradient, SweepGradient, Pattern, Mask, MaskType, IntRect, ColorSpace, Shader
 
@@ -51,7 +50,9 @@ func gamma(t: Test*):
 
     let colors: ColorSpace[4] = [ColorSpace.linear, ColorSpace.gamma2, ColorSpace.simple_srgb, ColorSpace.full_srgb_gamma]
 
-    for (i, color) in colors.indexed():
+    # (an index loop: compiler-issues/indexed_iteration_leaks)
+    for i in 0..<colors.length:
+        let color = colors[i]
         let xf = Transform.from_translate(0.0, 4.0 * (f32)i)
 
         paint.colorspace = color

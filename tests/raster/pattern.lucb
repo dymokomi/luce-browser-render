@@ -36,7 +36,8 @@ func crate_triangle() -> Pixmap:
     return pixmap
 
 func pad_nearest(t: Test*):
-    let triangle = crate_triangle()
+    var triangle = crate_triangle()
+    defer triangle.release()
 
     var paint = Paint()
     defer paint.release()
@@ -53,7 +54,8 @@ func pad_nearest(t: Test*):
     harness.expect_png(t, &pixmap, "pattern/pad-nearest.png")
 
 func repeat_nearest(t: Test*):
-    let triangle = crate_triangle()
+    var triangle = crate_triangle()
+    defer triangle.release()
 
     var paint = Paint()
     defer paint.release()
@@ -70,7 +72,8 @@ func repeat_nearest(t: Test*):
     harness.expect_png(t, &pixmap, "pattern/repeat-nearest.png")
 
 func reflect_nearest(t: Test*):
-    let triangle = crate_triangle()
+    var triangle = crate_triangle()
+    defer triangle.release()
 
     var paint = Paint()
     defer paint.release()
@@ -89,7 +92,8 @@ func reflect_nearest(t: Test*):
 # We have to test tile mode for bilinear/bicubic separately,
 # because they're using a different algorithm from nearest.
 func pad_bicubic(t: Test*):
-    let triangle = crate_triangle()
+    var triangle = crate_triangle()
+    defer triangle.release()
 
     var paint = Paint()
     defer paint.release()
@@ -106,7 +110,8 @@ func pad_bicubic(t: Test*):
     harness.expect_png(t, &pixmap, "pattern/pad-bicubic.png")
 
 func repeat_bicubic(t: Test*):
-    let triangle = crate_triangle()
+    var triangle = crate_triangle()
+    defer triangle.release()
 
     var paint = Paint()
     defer paint.release()
@@ -123,7 +128,8 @@ func repeat_bicubic(t: Test*):
     harness.expect_png(t, &pixmap, "pattern/repeat-bicubic.png")
 
 func reflect_bicubic(t: Test*):
-    let triangle = crate_triangle()
+    var triangle = crate_triangle()
+    defer triangle.release()
 
     var paint = Paint()
     defer paint.release()
@@ -140,7 +146,8 @@ func reflect_bicubic(t: Test*):
     harness.expect_png(t, &pixmap, "pattern/reflect-bicubic.png")
 
 func filter_nearest_no_ts(t: Test*):
-    let triangle = crate_triangle()
+    var triangle = crate_triangle()
+    defer triangle.release()
 
     var paint = Paint()
     defer paint.release()
@@ -157,7 +164,8 @@ func filter_nearest_no_ts(t: Test*):
     harness.expect_png(t, &pixmap, "pattern/filter-nearest-no-ts.png")
 
 func filter_nearest(t: Test*):
-    let triangle = crate_triangle()
+    var triangle = crate_triangle()
+    defer triangle.release()
 
     var paint = Paint()
     defer paint.release()
@@ -174,7 +182,8 @@ func filter_nearest(t: Test*):
     harness.expect_png(t, &pixmap, "pattern/filter-nearest.png")
 
 func filter_bilinear(t: Test*):
-    let triangle = crate_triangle()
+    var triangle = crate_triangle()
+    defer triangle.release()
 
     var paint = Paint()
     defer paint.release()
@@ -191,7 +200,8 @@ func filter_bilinear(t: Test*):
     harness.expect_png(t, &pixmap, "pattern/filter-bilinear.png")
 
 func filter_bicubic(t: Test*):
-    let triangle = crate_triangle()
+    var triangle = crate_triangle()
+    defer triangle.release()
 
     var paint = Paint()
     defer paint.release()

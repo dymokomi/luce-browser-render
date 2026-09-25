@@ -77,7 +77,9 @@ func adjust_dash_offset(offset0: f32, len: f32) -> f32:
 
 func find_first_interval(dash_array: const f32[], dash_offset0: f32) -> (f32, usize):
     var dash_offset = dash_offset0
-    for (i, gap) in dash_array.indexed():
+    # workaround: compiler-issues/indexed_iteration_leaks (Rust: `.iter().copied().enumerate()`)
+    for i in 0..<dash_array.length:
+        let gap = dash_array[i]
         if dash_offset > gap or (dash_offset == gap and gap != 0.0):
             dash_offset -= gap
         else:
