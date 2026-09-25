@@ -1,0 +1,176 @@
+#==============================================================================================
+#
+#   bench - a rough benchmark of the rasterizer
+#
+#   DESCRIPTION:
+#       The workloads of a matching tiny-skia program (the same paths, paints and iteration
+#       counts; kept outside the repository): anti-aliased and non-AA fills through the lowp
+#       and highp pipelines, gradients, strokes, dashes, hairlines and transformed pattern
+#       sampling, on a 1000x1000 pixmap. Prints microseconds per call and a checksum of the
+#       pixels (equal to tiny-skia's). Build: luce-base build tests/raster/bench.lucb -o
+#       build/raster_bench
+#
+#==============================================================================================
+
+import time
+import math32
+from raster import Paint, PathBuilder, Path, Pixmap, PixmapPaint, Transform, Rect, Point, Color, Stroke, StrokeDash, LineJoin, FillRule, SpreadMode, FilterQuality, GradientStop, LinearGradient, RadialGradient
+
+func circle_path() -> Path:
+    return PathBuilder.from_circle(500.0, 500.0, 400.0) else trap("circle")
+
+func star_path() -> Path:
+    var pb = PathBuilder.new_()
+    let pi: f32 = 3.14159265358979323846
+    for i in 0..<5:
+        let a = (f32)i * 4.0 * pi / 5.0
+        let x = 500.0 + 450.0 * math32.sin(a)
+        let y = 500.0 - 450.0 * math32.cos(a)
+        if i == 0:
+            pb.move_to(x, y)
+        else:
+            pb.line_to(x, y)
+    pb.close()
+    return pb.finish() else trap("star")
+
+func curvy_path() -> Path:
+    var pb = PathBuilder.new_()
+    pb.move_to(100.0, 100.0)
+    for i in 0..<40:
+        let x = 100.0 + (f32)i * 20.0
+        pb.cubic_to(x + 5.0, 900.0, x + 15.0, 100.0, x + 20.0, 500.0 + (f32)(i % 7) * 30.0)
+    return pb.finish() else trap("curvy")
+
+struct Bench:
+    var pixmap: Pixmap
+    var circle: Path
+    var star: Path
+    var curvy: Path
+    var small: Pixmap
+
+func report(name: str, iters: u32, start: u64):
+    let us = time.since(start) // 1000 // (u64)iters
+    print(f"{name} {us} us")
+
+pub func main(arguments: str[]) -> i32:
+    var pixmap = Pixmap.new_(1000, 1000) else trap("pixmap")
+    defer pixmap.release()
+    var circle = circle_path()
+    defer circle.release()
+    var star = star_path()
+    defer star.release()
+    var curvy = curvy_path()
+    defer curvy.release()
+
+    var solid = Paint()
+    solid.set_color_rgba8(50, 127, 150, 200)
+
+    let rect = Rect.from_xywh(10.3, 10.7, 950.5, 950.2) else trap("rect")
+    pixmap.fill_rect(rect, &solid, Transform.identity(), none)
+    var start = time.now()
+    for _i in 0..<200:
+        pixmap.fill_rect(rect, &solid, Transform.identity(), none)
+    report("fill_rect aa (lowp)               ", 200, start)
+
+    pixmap.fill_path(&circle, &solid, .winding, Transform.identity(), none)
+    start = time.now()
+    for _i in 0..<50:
+        pixmap.fill_path(&circle, &solid, .winding, Transform.identity(), none)
+    report("fill_path circle aa (lowp)        ", 50, start)
+
+    pixmap.fill_path(&star, &solid, .even_odd, Transform.identity(), none)
+    start = time.now()
+    for _i in 0..<50:
+        pixmap.fill_path(&star, &solid, .even_odd, Transform.identity(), none)
+    report("fill_path star even-odd aa        ", 50, start)
+
+    var opaque = Paint()
+    opaque.set_color_rgba8(50, 127, 150, 255)
+    opaque.anti_alias = false
+    pixmap.fill_path(&circle, &opaque, .winding, Transform.identity(), none)
+    start = time.now()
+    for _i in 0..<50:
+        pixmap.fill_path(&circle, &opaque, .winding, Transform.identity(), none)
+    report("fill_path circle non-aa opaque    ", 50, start)
+
+    var linear = Paint()
+    let linear_stops: GradientStop[2] = [GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180))]
+    linear.shader = LinearGradient.new_(Point.from_xy(100.0, 100.0), Point.from_xy(900.0, 900.0), linear_stops, SpreadMode.pad_, Transform.identity()) else trap("linear")
+    defer linear.release()
+    pixmap.fill_path(&circle, &linear, .winding, Transform.identity(), none)
+    start = time.now()
+    for _i in 0..<50:
+        pixmap.fill_path(&circle, &linear, .winding, Transform.identity(), none)
+    report("fill_path linear gradient (lowp)  ", 50, start)
+
+    var radial = Paint()
+    let radial_stops: GradientStop[3] = [GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(0.5, Color.from_rgba8(20, 200, 75, 255)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180))]
+    radial.shader = RadialGradient.new_(Point.from_xy(400.0, 400.0), 0.0, Point.from_xy(500.0, 500.0), 450.0, radial_stops, SpreadMode.reflect, Transform.identity()) else trap("radial")
+    defer radial.release()
+    pixmap.fill_path(&circle, &radial, .winding, Transform.identity(), none)
+    start = time.now()
+    for _i in 0..<20:
+        pixmap.fill_path(&circle, &radial, .winding, Transform.identity(), none)
+    report("fill_path radial gradient (highp) ", 20, start)
+
+    var hq = solid
+    hq.force_hq_pipeline = true
+    pixmap.fill_path(&circle, &hq, .winding, Transform.identity(), none)
+    start = time.now()
+    for _i in 0..<20:
+        pixmap.fill_path(&circle, &hq, .winding, Transform.identity(), none)
+    report("fill_path circle aa (highp)       ", 20, start)
+
+    var stroke = Stroke()
+    stroke.width = 6.0
+    stroke.line_join = LineJoin.round
+    pixmap.stroke_path(&curvy, &solid, &stroke, Transform.identity(), none)
+    start = time.now()
+    for _i in 0..<20:
+        pixmap.stroke_path(&curvy, &solid, &stroke, Transform.identity(), none)
+    report("stroke_path curvy width 6         ", 20, start)
+
+    var dashed = stroke
+    dashed.dash = StrokeDash.new_([10.0, 5.0], 0.0)
+    pixmap.stroke_path(&curvy, &solid, &dashed, Transform.identity(), none)
+    start = time.now()
+    for _i in 0..<20:
+        pixmap.stroke_path(&curvy, &solid, &dashed, Transform.identity(), none)
+    report("stroke_path curvy dashed          ", 20, start)
+    if let d = dashed.dash:
+        var dd = d
+        dd.release()
+
+    let hair = Stroke()
+    pixmap.stroke_path(&curvy, &solid, &hair, Transform.identity(), none)
+    start = time.now()
+    for _i in 0..<50:
+        pixmap.stroke_path(&curvy, &solid, &hair, Transform.identity(), none)
+    report("hairline curvy aa                 ", 50, start)
+
+    var small = Pixmap.new_(200, 200) else trap("small")
+    defer small.release()
+    var small_circle = PathBuilder.from_circle(100.0, 100.0, 90.0) else trap("circle")
+    defer small_circle.release()
+    small.fill_path(&small_circle, &solid, .winding, Transform.identity(), none)
+    var pp = PixmapPaint()
+    pp.quality = FilterQuality.bicubic
+    let ts = Transform.from_row(3.0, 0.5, -0.5, 3.0, 300.0, 100.0)
+    pixmap.draw_pixmap(0, 0, small.as_ref(), &pp, ts, none)
+    start = time.now()
+    for _i in 0..<10:
+        pixmap.draw_pixmap(0, 0, small.as_ref(), &pp, ts, none)
+    report("draw_pixmap bicubic rotated       ", 10, start)
+
+    pp.quality = FilterQuality.bilinear
+    pixmap.draw_pixmap(0, 0, small.as_ref(), &pp, ts, none)
+    start = time.now()
+    for _i in 0..<10:
+        pixmap.draw_pixmap(0, 0, small.as_ref(), &pp, ts, none)
+    report("draw_pixmap bilinear rotated      ", 10, start)
+
+    var sum: u64 = 0
+    for b in pixmap.data():
+        sum += (u64)b
+    print(f"checksum {sum}")
+    return 0

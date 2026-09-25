@@ -9,68 +9,76 @@
 #
 #==============================================================================================
 
-type LowpBlendKernel = func(U16x16, U16x16, U16x16, U16x16) -> U16x16
+# The blend kernels work on one half (8 lanes) of the u16x16 registers, called directly per
+# half by the stage: through a function pointer on whole registers they were several times
+# slower.
 
-func lowp_blend_fn(p: LowpPipeline*, f: LowpBlendKernel):
-    p.r = f(p.r, p.dr, p.a, p.da)
-    p.g = f(p.g, p.dg, p.a, p.da)
-    p.b = f(p.b, p.db, p.a, p.da)
-    p.a = f(p.a, p.da, p.a, p.da)
+func lowp_blend_fn(p: LowpPipeline*, f: func(U16x8, U16x8, U16x8, U16x8) -> U16x8):
+    for h: usize in 0..<2:
+        let sa = p.a[h]
+        let da = p.da[h]
+        p.r[h] = f(p.r[h], p.dr[h], sa, da)
+        p.g[h] = f(p.g[h], p.dg[h], sa, da)
+        p.b[h] = f(p.b[h], p.db[h], sa, da)
+        p.a[h] = f(sa, da, sa, da)
 
     lowp_next_stage(p)
 
 # The same logic applied to color, and source_over for alpha.
-func lowp_blend_fn2(p: LowpPipeline*, f: LowpBlendKernel):
-    p.r = f(p.r, p.dr, p.a, p.da)
-    p.g = f(p.g, p.dg, p.a, p.da)
-    p.b = f(p.b, p.db, p.a, p.da)
-    p.a = u16_add(p.a, div255(u16_mul(p.da, lowp_inv(p.a))))
+func lowp_blend_fn2(p: LowpPipeline*, f: func(U16x8, U16x8, U16x8, U16x8) -> U16x8):
+    for h: usize in 0..<2:
+        let sa = p.a[h]
+        let da = p.da[h]
+        p.r[h] = f(p.r[h], p.dr[h], sa, da)
+        p.g[h] = f(p.g[h], p.dg[h], sa, da)
+        p.b[h] = f(p.b[h], p.db[h], sa, da)
+        p.a[h] = sa +% div255(da *% lowp_inv(sa))
 
     lowp_next_stage(p)
 
 # mark: blend_fn! =============================================================================
 
-func lowp_clear_k(_s: U16x16, _d: U16x16, _sa: U16x16, _da: U16x16) -> U16x16:
-    return u16_splat(0)
+func lowp_clear_k(_s: U16x8, _d: U16x8, _sa: U16x8, _da: U16x8) -> U16x8:
+    return u16[8](0)
 
-func lowp_source_atop_k(s: U16x16, d: U16x16, sa: U16x16, da: U16x16) -> U16x16:
-    return div255(u16_add(u16_mul(s, da), u16_mul(d, lowp_inv(sa))))
+func lowp_source_atop_k(s: U16x8, d: U16x8, sa: U16x8, da: U16x8) -> U16x8:
+    return div255(s *% da +% d *% lowp_inv(sa))
 
-func lowp_destination_atop_k(s: U16x16, d: U16x16, sa: U16x16, da: U16x16) -> U16x16:
-    return div255(u16_add(u16_mul(d, sa), u16_mul(s, lowp_inv(da))))
+func lowp_destination_atop_k(s: U16x8, d: U16x8, sa: U16x8, da: U16x8) -> U16x8:
+    return div255(d *% sa +% s *% lowp_inv(da))
 
-func lowp_source_in_k(s: U16x16, _d: U16x16, _sa: U16x16, da: U16x16) -> U16x16:
-    return div255(u16_mul(s, da))
+func lowp_source_in_k(s: U16x8, _d: U16x8, _sa: U16x8, da: U16x8) -> U16x8:
+    return div255(s *% da)
 
-func lowp_destination_in_k(_s: U16x16, d: U16x16, sa: U16x16, _da: U16x16) -> U16x16:
-    return div255(u16_mul(d, sa))
+func lowp_destination_in_k(_s: U16x8, d: U16x8, sa: U16x8, _da: U16x8) -> U16x8:
+    return div255(d *% sa)
 
-func lowp_source_out_k(s: U16x16, _d: U16x16, _sa: U16x16, da: U16x16) -> U16x16:
-    return div255(u16_mul(s, lowp_inv(da)))
+func lowp_source_out_k(s: U16x8, _d: U16x8, _sa: U16x8, da: U16x8) -> U16x8:
+    return div255(s *% lowp_inv(da))
 
-func lowp_destination_out_k(_s: U16x16, d: U16x16, sa: U16x16, _da: U16x16) -> U16x16:
-    return div255(u16_mul(d, lowp_inv(sa)))
+func lowp_destination_out_k(_s: U16x8, d: U16x8, sa: U16x8, _da: U16x8) -> U16x8:
+    return div255(d *% lowp_inv(sa))
 
-func lowp_source_over_k(s: U16x16, d: U16x16, sa: U16x16, _da: U16x16) -> U16x16:
-    return u16_add(s, div255(u16_mul(d, lowp_inv(sa))))
+func lowp_source_over_k(s: U16x8, d: U16x8, sa: U16x8, _da: U16x8) -> U16x8:
+    return s +% div255(d *% lowp_inv(sa))
 
-func lowp_destination_over_k(s: U16x16, d: U16x16, _sa: U16x16, da: U16x16) -> U16x16:
-    return u16_add(d, div255(u16_mul(s, lowp_inv(da))))
+func lowp_destination_over_k(s: U16x8, d: U16x8, _sa: U16x8, da: U16x8) -> U16x8:
+    return d +% div255(s *% lowp_inv(da))
 
-func lowp_modulate_k(s: U16x16, d: U16x16, _sa: U16x16, _da: U16x16) -> U16x16:
-    return div255(u16_mul(s, d))
+func lowp_modulate_k(s: U16x8, d: U16x8, _sa: U16x8, _da: U16x8) -> U16x8:
+    return div255(s *% d)
 
-func lowp_multiply_k(s: U16x16, d: U16x16, sa: U16x16, da: U16x16) -> U16x16:
-    return div255(u16_add(u16_add(u16_mul(s, lowp_inv(da)), u16_mul(d, lowp_inv(sa))), u16_mul(s, d)))
+func lowp_multiply_k(s: U16x8, d: U16x8, sa: U16x8, da: U16x8) -> U16x8:
+    return div255(s *% lowp_inv(da) +% d *% lowp_inv(sa) +% s *% d)
 
-func lowp_screen_k(s: U16x16, d: U16x16, _sa: U16x16, _da: U16x16) -> U16x16:
-    return u16_sub(u16_add(s, d), div255(u16_mul(s, d)))
+func lowp_screen_k(s: U16x8, d: U16x8, _sa: U16x8, _da: U16x8) -> U16x8:
+    return s +% d -% div255(s *% d)
 
-func lowp_xor_k(s: U16x16, d: U16x16, sa: U16x16, da: U16x16) -> U16x16:
-    return div255(u16_add(u16_mul(s, lowp_inv(da)), u16_mul(d, lowp_inv(sa))))
+func lowp_xor_k(s: U16x8, d: U16x8, sa: U16x8, da: U16x8) -> U16x8:
+    return div255(s *% lowp_inv(da) +% d *% lowp_inv(sa))
 
-func lowp_plus_k(s: U16x16, d: U16x16, _sa: U16x16, _da: U16x16) -> U16x16:
-    return u16_min(u16_add(s, d), u16_splat(255))
+func lowp_plus_k(s: U16x8, d: U16x8, _sa: U16x8, _da: U16x8) -> U16x8:
+    return u16x8_min(s +% d, u16[8](255))
 
 func lowp_clear(p: LowpPipeline*):
     lowp_blend_fn(p, lowp_clear_k)
@@ -94,7 +102,14 @@ func lowp_destination_out(p: LowpPipeline*):
     lowp_blend_fn(p, lowp_destination_out_k)
 
 func lowp_source_over(p: LowpPipeline*):
-    lowp_blend_fn(p, lowp_source_over_k)
+    for h: usize in 0..<2:
+        let inv_a = lowp_inv(p.a[h])
+        p.r[h] = p.r[h] +% div255(p.dr[h] *% inv_a)
+        p.g[h] = p.g[h] +% div255(p.dg[h] *% inv_a)
+        p.b[h] = p.b[h] +% div255(p.db[h] *% inv_a)
+        p.a[h] = p.a[h] +% div255(p.da[h] *% inv_a)
+
+    lowp_next_stage(p)
 
 func lowp_destination_over(p: LowpPipeline*):
     lowp_blend_fn(p, lowp_destination_over_k)
@@ -116,25 +131,25 @@ func lowp_plus(p: LowpPipeline*):
 
 # mark: blend_fn2! ============================================================================
 
-func lowp_darken_k(s: U16x16, d: U16x16, sa: U16x16, da: U16x16) -> U16x16:
-    return u16_sub(u16_add(s, d), div255(u16_max(u16_mul(s, da), u16_mul(d, sa))))
+func lowp_darken_k(s: U16x8, d: U16x8, sa: U16x8, da: U16x8) -> U16x8:
+    return s +% d -% div255(u16x8_max(s *% da, d *% sa))
 
-func lowp_lighten_k(s: U16x16, d: U16x16, sa: U16x16, da: U16x16) -> U16x16:
-    return u16_sub(u16_add(s, d), div255(u16_min(u16_mul(s, da), u16_mul(d, sa))))
+func lowp_lighten_k(s: U16x8, d: U16x8, sa: U16x8, da: U16x8) -> U16x8:
+    return s +% d -% div255(u16x8_min(s *% da, d *% sa))
 
-func lowp_exclusion_k(s: U16x16, d: U16x16, _sa: U16x16, _da: U16x16) -> U16x16:
-    return u16_sub(u16_add(s, d), u16_mul(u16_splat(2), div255(u16_mul(s, d))))
+func lowp_exclusion_k(s: U16x8, d: U16x8, _sa: U16x8, _da: U16x8) -> U16x8:
+    return s +% d -% u16[8](2) *% div255(s *% d)
 
-func lowp_difference_k(s: U16x16, d: U16x16, sa: U16x16, da: U16x16) -> U16x16:
-    return u16_sub(u16_add(s, d), u16_mul(u16_splat(2), div255(u16_min(u16_mul(s, da), u16_mul(d, sa)))))
+func lowp_difference_k(s: U16x8, d: U16x8, sa: U16x8, da: U16x8) -> U16x8:
+    return s +% d -% u16[8](2) *% div255(u16x8_min(s *% da, d *% sa))
 
-func lowp_hard_light_k(s: U16x16, d: U16x16, sa: U16x16, da: U16x16) -> U16x16:
-    let two = u16_splat(2)
-    return div255(u16_add(u16_add(u16_mul(s, lowp_inv(da)), u16_mul(d, lowp_inv(sa))), u16_blend(u16_cmp_le(u16_add(s, s), sa), u16_mul(u16_mul(two, s), d), u16_sub(u16_mul(sa, da), u16_mul(u16_mul(two, u16_sub(sa, s)), u16_sub(da, d))))))
+func lowp_hard_light_k(s: U16x8, d: U16x8, sa: U16x8, da: U16x8) -> U16x8:
+    let two = u16[8](2)
+    return div255(s *% lowp_inv(da) +% d *% lowp_inv(sa) +% u16x8_blend(u16x8_cmp_le(s +% s, sa), two *% s *% d, sa *% da -% two *% (sa -% s) *% (da -% d)))
 
-func lowp_overlay_k(s: U16x16, d: U16x16, sa: U16x16, da: U16x16) -> U16x16:
-    let two = u16_splat(2)
-    return div255(u16_add(u16_add(u16_mul(s, lowp_inv(da)), u16_mul(d, lowp_inv(sa))), u16_blend(u16_cmp_le(u16_add(d, d), da), u16_mul(u16_mul(two, s), d), u16_sub(u16_mul(sa, da), u16_mul(u16_mul(two, u16_sub(sa, s)), u16_sub(da, d))))))
+func lowp_overlay_k(s: U16x8, d: U16x8, sa: U16x8, da: U16x8) -> U16x8:
+    let two = u16[8](2)
+    return div255(s *% lowp_inv(da) +% d *% lowp_inv(sa) +% u16x8_blend(u16x8_cmp_le(d +% d, da), two *% s *% d, sa *% da -% two *% (sa -% s) *% (da -% d)))
 
 func lowp_darken(p: LowpPipeline*):
     lowp_blend_fn2(p, lowp_darken_k)
@@ -155,6 +170,7 @@ func lowp_overlay(p: LowpPipeline*):
     lowp_blend_fn2(p, lowp_overlay_k)
 
 # mark: Shaders ===============================================================================
+# Coordinates are f32x16 (`F16`, four F4 quarters) carried in the u16 registers.
 
 func lowp_transform(p: LowpPipeline*):
     let ts = p.ctx.transform
@@ -162,8 +178,11 @@ func lowp_transform(p: LowpPipeline*):
     let x = lowp_join(p.r, p.g)
     let y = lowp_join(p.b, p.a)
 
-    let nx = lowp_mad(x, f16_splat(ts.sx), lowp_mad(y, f16_splat(ts.kx), f16_splat(ts.tx)))
-    let ny = lowp_mad(x, f16_splat(ts.ky), lowp_mad(y, f16_splat(ts.sy), f16_splat(ts.ty)))
+    var nx: F16 = ---
+    var ny: F16 = ---
+    for q: usize in 0..<4:
+        nx[q] = lowp_mad(x[q], f32[4](ts.sx), lowp_mad(y[q], f32[4](ts.kx), f32[4](ts.tx)))
+        ny[q] = lowp_mad(x[q], f32[4](ts.ky), lowp_mad(y[q], f32[4](ts.sy), f32[4](ts.ty)))
 
     lowp_split(nx, &p.r, &p.g)
     lowp_split(ny, &p.b, &p.a)
@@ -171,24 +190,28 @@ func lowp_transform(p: LowpPipeline*):
     lowp_next_stage(p)
 
 func lowp_pad_x1(p: LowpPipeline*):
-    let x = f16_normalize(lowp_join(p.r, p.g))
+    var x = lowp_join(p.r, p.g)
+    for q: usize in 0..<4:
+        x[q] = f4_normalize(x[q])
     lowp_split(x, &p.r, &p.g)
 
     lowp_next_stage(p)
 
 func lowp_reflect_x1(p: LowpPipeline*):
-    let x = lowp_join(p.r, p.g)
-    let one = f16_splat(1.0)
-    let fl = f16_floor(f16_mul(f16_sub(x, one), f16_splat(0.5)))
-    let x2 = f16_normalize(f16_abs(f16_sub(f16_sub(f16_sub(x, one), f16_add(fl, fl)), one)))
-    lowp_split(x2, &p.r, &p.g)
+    var x = lowp_join(p.r, p.g)
+    let one = f32[4](1.0)
+    for q: usize in 0..<4:
+        let fl = f16_floor_quarter((x[q] - one) * f32[4](0.5))
+        x[q] = f4_normalize(f4_abs(x[q] - one - (fl + fl) - one))
+    lowp_split(x, &p.r, &p.g)
 
     lowp_next_stage(p)
 
 func lowp_repeat_x1(p: LowpPipeline*):
-    let x = lowp_join(p.r, p.g)
-    let x2 = f16_normalize(f16_sub(x, f16_floor(x)))
-    lowp_split(x2, &p.r, &p.g)
+    var x = lowp_join(p.r, p.g)
+    for q: usize in 0..<4:
+        x[q] = f4_normalize(x[q] - f16_floor_quarter(x[q]))
+    lowp_split(x, &p.r, &p.g)
 
     lowp_next_stage(p)
 
@@ -210,21 +233,25 @@ func lowp_evenly_spaced_2_stop_gradient(p: LowpPipeline*):
     let ctx = p.ctx.evenly_spaced_2_stop_gradient
 
     let t = lowp_join(p.r, p.g)
-    round_f32_to_u16(
-        lowp_mad(t, f16_splat(ctx.factor.r), f16_splat(ctx.bias.r)),
-        lowp_mad(t, f16_splat(ctx.factor.g), f16_splat(ctx.bias.g)),
-        lowp_mad(t, f16_splat(ctx.factor.b), f16_splat(ctx.bias.b)),
-        lowp_mad(t, f16_splat(ctx.factor.a), f16_splat(ctx.bias.a)),
-        &p.r, &p.g, &p.b, &p.a,
-    )
+    var rf: F16 = ---
+    var gf: F16 = ---
+    var bf: F16 = ---
+    var af: F16 = ---
+    for q: usize in 0..<4:
+        rf[q] = lowp_mad(t[q], f32[4](ctx.factor.r), f32[4](ctx.bias.r))
+        gf[q] = lowp_mad(t[q], f32[4](ctx.factor.g), f32[4](ctx.bias.g))
+        bf[q] = lowp_mad(t[q], f32[4](ctx.factor.b), f32[4](ctx.bias.b))
+        af[q] = lowp_mad(t[q], f32[4](ctx.factor.a), f32[4](ctx.bias.a))
+    round_f32_to_u16(&rf, &gf, &bf, &af, &p.r, &p.g, &p.b, &p.a)
 
     lowp_next_stage(p)
 
 func lowp_xy_to_radius(p: LowpPipeline*):
-    let x = lowp_join(p.r, p.g)
+    var x = lowp_join(p.r, p.g)
     let y = lowp_join(p.b, p.a)
-    let x2 = f16_sqrt(f16_add(f16_mul(x, x), f16_mul(y, y)))
-    lowp_split(x2, &p.r, &p.g)
+    for q: usize in 0..<4:
+        x[q] = f4_sqrt(x[q] * x[q] + y[q] * y[q])
+    lowp_split(x, &p.r, &p.g)
     lowp_split(y, &p.b, &p.a)
 
     lowp_next_stage(p)
@@ -259,20 +286,30 @@ func lowp_gradient_lookup(ctx: const GradientCtx*, idx: U16x16, t: F16, r: U16x1
         bb[h][k] = bias.b
         ba[h][k] = bias.a
 
-    round_f32_to_u16(lowp_mad(t, fr, br), lowp_mad(t, fg, bg), lowp_mad(t, fb, bb), lowp_mad(t, fa, ba), r, g, b, a)
+    for q: usize in 0..<4:
+        fr[q] = lowp_mad(t[q], fr[q], br[q])
+        fg[q] = lowp_mad(t[q], fg[q], bg[q])
+        fb[q] = lowp_mad(t[q], fb[q], bb[q])
+        fa[q] = lowp_mad(t[q], fa[q], ba[q])
+    round_f32_to_u16(&fr, &fg, &fb, &fa, r, g, b, a)
 
-func round_f32_to_u16(rf0: F16, gf0: F16, bf0: F16, af0: F16, r: U16x16*, g: U16x16*, b: U16x16*, a: U16x16*):
+func round_f32_to_u16(rf: const F16*, gf: const F16*, bf: const F16*, af: const F16*, r: U16x16*, g: U16x16*, b: U16x16*, a: U16x16*):
     # TODO: may produce a slightly different result to Skia
     #       affects the two_stops_linear_mirror test
 
-    let scale = f16_splat(255.0)
-    let half_ = f16_splat(0.5)
-    let rf = f16_add(f16_mul(f16_normalize(rf0), scale), half_)
-    let gf = f16_add(f16_mul(f16_normalize(gf0), scale), half_)
-    let bf = f16_add(f16_mul(f16_normalize(bf0), scale), half_)
-    let af = f16_add(f16_mul(af0, scale), half_)
+    let scale = f32[4](255.0)
+    let half_ = f32[4](0.5)
+    for q: usize in 0..<4:
+        let rq = f4_normalize((*rf)[q]) * scale + half_
+        let gq = f4_normalize((*gf)[q]) * scale + half_
+        let bq = f4_normalize((*bf)[q]) * scale + half_
+        let aq = (*af)[q] * scale + half_
 
-    f16_save_to_u16x16(rf, r)
-    f16_save_to_u16x16(gf, g)
-    f16_save_to_u16x16(bf, b)
-    f16_save_to_u16x16(af, a)
+        # Do not use to_i32x8, because it involves rounding, and Skia cast's without it.
+        let h = q >> 1
+        let o = (q & 1) * 4
+        for k: usize in 0..<4:
+            (*r)[h][o + k] = (u16)rq[k]
+            (*g)[h][o + k] = (u16)gq[k]
+            (*b)[h][o + k] = (u16)bq[k]
+            (*a)[h][o + k] = (u16)aq[k]

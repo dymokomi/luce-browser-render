@@ -177,28 +177,30 @@ func lowp_move_destination_to_source(p: LowpPipeline*):
     lowp_next_stage(p)
 
 func lowp_premultiply(p: LowpPipeline*):
-    p.r = div255(u16_mul(p.r, p.a))
-    p.g = div255(u16_mul(p.g, p.a))
-    p.b = div255(u16_mul(p.b, p.a))
+    for h: usize in 0..<2:
+        p.r[h] = div255(p.r[h] *% p.a[h])
+        p.g[h] = div255(p.g[h] *% p.a[h])
+        p.b[h] = div255(p.b[h] *% p.a[h])
 
     lowp_next_stage(p)
 
 func lowp_uniform_color(p: LowpPipeline*):
-    let ctx = p.ctx.uniform_color
-    p.r = u16_splat(ctx.rgba[0])
-    p.g = u16_splat(ctx.rgba[1])
-    p.b = u16_splat(ctx.rgba[2])
-    p.a = u16_splat(ctx.rgba[3])
+    let rgba = p.ctx.uniform_color.rgba
+    p.r = u16_splat(rgba[0])
+    p.g = u16_splat(rgba[1])
+    p.b = u16_splat(rgba[2])
+    p.a = u16_splat(rgba[3])
 
     lowp_next_stage(p)
 
 func lowp_seed_shader(p: LowpPipeline*):
     let iota: F16 = [[0.5, 1.5, 2.5, 3.5], [4.5, 5.5, 6.5, 7.5], [8.5, 9.5, 10.5, 11.5], [12.5, 13.5, 14.5, 15.5]]
 
-    let x = f16_add(f16_splat((f32)p.dx), iota)
-    let y = f16_splat((f32)p.dy + 0.5)
+    let dx = (f32)p.dx
+    let x: F16 = [f32[4](dx) + iota[0], f32[4](dx) + iota[1], f32[4](dx) + iota[2], f32[4](dx) + iota[3]]
+    let y = f32[4]((f32)p.dy + 0.5)
     lowp_split(x, &p.r, &p.g)
-    lowp_split(y, &p.b, &p.a)
+    lowp_split([y, y, y, y], &p.b, &p.a)
 
     lowp_next_stage(p)
 
@@ -219,11 +221,11 @@ func lowp_load_dst_tail(p: LowpPipeline*):
     lowp_next_stage(p)
 
 func lowp_store(p: LowpPipeline*):
-    lowp_store_8888(p.r, p.g, p.b, p.a, lowp_dst_pixels(p))
+    lowp_store_8888(&p.r, &p.g, &p.b, &p.a, lowp_dst_pixels(p))
     lowp_next_stage(p)
 
 func lowp_store_tail(p: LowpPipeline*):
-    lowp_store_8888_tail(p.r, p.g, p.b, p.a, p.tail, lowp_dst_pixels(p))
+    lowp_store_8888_tail(&p.r, &p.g, &p.b, &p.a, p.tail, lowp_dst_pixels(p))
     lowp_next_stage(p)
 
 func lowp_load_dst_u8(p: LowpPipeline*):
@@ -243,8 +245,11 @@ func lowp_load_dst_u8_tail(p: LowpPipeline*):
 
 func lowp_store_u8(p: LowpPipeline*):
     let data = lowp_dst_mask(p)
+    if data.length < 16:
+        trap("index out of bounds")
+    let dst = (u8*)data.data
     for i: usize in 0..<16:
-        data[i] = (u8)p.a[i >> 3][i & 7]
+        dst[i] = (u8)p.a[i >> 3][i & 7]
 
     lowp_next_stage(p)
 
@@ -277,81 +282,91 @@ func lowp_mask_u8(p: LowpPipeline*):
     for i in 0..<p.tail:
         c[i >> 3][i & 7] = (u16)p.mask_ctx.data[offset + i]
 
-    if u16_is_zero(c):
+    let any = c[0] | c[1]
+    var all_zero = true
+    for i: usize in 0..<8:
+        if any[i] != 0:
+            all_zero = false
+    if all_zero:
         return
 
-    p.r = div255(u16_mul(p.r, c))
-    p.g = div255(u16_mul(p.g, c))
-    p.b = div255(u16_mul(p.b, c))
-    p.a = div255(u16_mul(p.a, c))
+    for h: usize in 0..<2:
+        p.r[h] = div255(p.r[h] *% c[h])
+        p.g[h] = div255(p.g[h] *% c[h])
+        p.b[h] = div255(p.b[h] *% c[h])
+        p.a[h] = div255(p.a[h] *% c[h])
 
     lowp_next_stage(p)
 
 func lowp_scale_u8(p: LowpPipeline*):
     # Load u8xTail and cast it to u16x16.
     let data = p.aa_mask_ctx.copy_at_xy(p.dx, p.dy, p.tail)
-    var c = u16_splat(0)
-    c[0][0] = (u16)data[0]
-    c[0][1] = (u16)data[1]
+    let c0: U16x8 = [(u16)data[0], (u16)data[1], 0, 0, 0, 0, 0, 0]
+    let c1 = u16[8](0)
 
-    p.r = div255(u16_mul(p.r, c))
-    p.g = div255(u16_mul(p.g, c))
-    p.b = div255(u16_mul(p.b, c))
-    p.a = div255(u16_mul(p.a, c))
+    p.r = [div255(p.r[0] *% c0), div255(p.r[1] *% c1)]
+    p.g = [div255(p.g[0] *% c0), div255(p.g[1] *% c1)]
+    p.b = [div255(p.b[0] *% c0), div255(p.b[1] *% c1)]
+    p.a = [div255(p.a[0] *% c0), div255(p.a[1] *% c1)]
 
     lowp_next_stage(p)
 
 func lowp_lerp_u8(p: LowpPipeline*):
     # Load u8xTail and cast it to u16x16.
     let data = p.aa_mask_ctx.copy_at_xy(p.dx, p.dy, p.tail)
-    var c = u16_splat(0)
-    c[0][0] = (u16)data[0]
-    c[0][1] = (u16)data[1]
+    let c: U16x16 = [[(u16)data[0], (u16)data[1], 0, 0, 0, 0, 0, 0], u16[8](0)]
 
-    p.r = lowp_lerp(p.dr, p.r, c)
-    p.g = lowp_lerp(p.dg, p.g, c)
-    p.b = lowp_lerp(p.db, p.b, c)
-    p.a = lowp_lerp(p.da, p.a, c)
+    for h: usize in 0..<2:
+        p.r[h] = lowp_lerp(p.dr[h], p.r[h], c[h])
+        p.g[h] = lowp_lerp(p.dg[h], p.g[h], c[h])
+        p.b[h] = lowp_lerp(p.db[h], p.b[h], c[h])
+        p.a[h] = lowp_lerp(p.da[h], p.a[h], c[h])
 
     lowp_next_stage(p)
 
 func lowp_scale_1_float(p: LowpPipeline*):
     let c = lowp_from_float(p.ctx.current_coverage)
-    p.r = div255(u16_mul(p.r, c))
-    p.g = div255(u16_mul(p.g, c))
-    p.b = div255(u16_mul(p.b, c))
-    p.a = div255(u16_mul(p.a, c))
+    for h: usize in 0..<2:
+        p.r[h] = div255(p.r[h] *% c)
+        p.g[h] = div255(p.g[h] *% c)
+        p.b[h] = div255(p.b[h] *% c)
+        p.a[h] = div255(p.a[h] *% c)
 
     lowp_next_stage(p)
 
 func lowp_lerp_1_float(p: LowpPipeline*):
     let c = lowp_from_float(p.ctx.current_coverage)
-    p.r = lowp_lerp(p.dr, p.r, c)
-    p.g = lowp_lerp(p.dg, p.g, c)
-    p.b = lowp_lerp(p.db, p.b, c)
-    p.a = lowp_lerp(p.da, p.a, c)
+    for h: usize in 0..<2:
+        p.r[h] = lowp_lerp(p.dr[h], p.r[h], c)
+        p.g[h] = lowp_lerp(p.dg[h], p.g[h], c)
+        p.b[h] = lowp_lerp(p.db[h], p.b[h], c)
+        p.a[h] = lowp_lerp(p.da[h], p.a[h], c)
 
     lowp_next_stage(p)
 
 func lowp_source_over_rgba(p: LowpPipeline*):
     let pixels = lowp_dst_pixels(p)
     lowp_load_8888(pixels, &p.dr, &p.dg, &p.db, &p.da)
-    p.r = u16_add(p.r, div255(u16_mul(p.dr, lowp_inv(p.a))))
-    p.g = u16_add(p.g, div255(u16_mul(p.dg, lowp_inv(p.a))))
-    p.b = u16_add(p.b, div255(u16_mul(p.db, lowp_inv(p.a))))
-    p.a = u16_add(p.a, div255(u16_mul(p.da, lowp_inv(p.a))))
-    lowp_store_8888(p.r, p.g, p.b, p.a, pixels)
+    for h: usize in 0..<2:
+        let inv_a = u16[8](255) -% p.a[h]
+        p.r[h] = p.r[h] +% div255(p.dr[h] *% inv_a)
+        p.g[h] = p.g[h] +% div255(p.dg[h] *% inv_a)
+        p.b[h] = p.b[h] +% div255(p.db[h] *% inv_a)
+        p.a[h] = p.a[h] +% div255(p.da[h] *% inv_a)
+    lowp_store_8888(&p.r, &p.g, &p.b, &p.a, pixels)
 
     lowp_next_stage(p)
 
 func lowp_source_over_rgba_tail(p: LowpPipeline*):
     let pixels = lowp_dst_pixels(p)
     lowp_load_8888_tail(p.tail, pixels, &p.dr, &p.dg, &p.db, &p.da)
-    p.r = u16_add(p.r, div255(u16_mul(p.dr, lowp_inv(p.a))))
-    p.g = u16_add(p.g, div255(u16_mul(p.dg, lowp_inv(p.a))))
-    p.b = u16_add(p.b, div255(u16_mul(p.db, lowp_inv(p.a))))
-    p.a = u16_add(p.a, div255(u16_mul(p.da, lowp_inv(p.a))))
-    lowp_store_8888_tail(p.r, p.g, p.b, p.a, p.tail, pixels)
+    for h: usize in 0..<2:
+        let inv_a = u16[8](255) -% p.a[h]
+        p.r[h] = p.r[h] +% div255(p.dr[h] *% inv_a)
+        p.g[h] = p.g[h] +% div255(p.dg[h] *% inv_a)
+        p.b[h] = p.b[h] +% div255(p.db[h] *% inv_a)
+        p.a[h] = p.a[h] +% div255(p.da[h] *% inv_a)
+    lowp_store_8888_tail(&p.r, &p.g, &p.b, &p.a, p.tail, pixels)
 
     lowp_next_stage(p)
 
@@ -362,14 +377,28 @@ func lowp_null_fn(_p: LowpPipeline*):
     return # Just for unsupported functions in STAGES.
 
 # mark: Load and store ========================================================================
+# The 16 pixels are checked to be in bounds once (Rust's `first_chunk_mut().unwrap()`), then
+# read and written through a pointer.
 
 func lowp_load_8888(data: const PremultipliedColorU8[], r: U16x16*, g: U16x16*, b: U16x16*, a: U16x16*):
-    for i: usize in 0..<16:
-        let c = data[i]
-        (*r)[i >> 3][i & 7] = (u16)c.rgba[0]
-        (*g)[i >> 3][i & 7] = (u16)c.rgba[1]
-        (*b)[i >> 3][i & 7] = (u16)c.rgba[2]
-        (*a)[i >> 3][i & 7] = (u16)c.rgba[3]
+    if data.length < 16:
+        trap("index out of bounds")
+    let src = (const u8*)data.data
+    for h: usize in 0..<2:
+        var rr: U16x8 = ---
+        var gg: U16x8 = ---
+        var bb: U16x8 = ---
+        var aa: U16x8 = ---
+        for l: usize in 0..<8:
+            let q = (h * 8 + l) * 4
+            rr[l] = (u16)src[q]
+            gg[l] = (u16)src[q + 1]
+            bb[l] = (u16)src[q + 2]
+            aa[l] = (u16)src[q + 3]
+        (*r)[h] = rr
+        (*g)[h] = gg
+        (*b)[h] = bb
+        (*a)[h] = aa
 
 func lowp_load_8888_tail(tail: usize, data: const PremultipliedColorU8[], r: U16x16*, g: U16x16*, b: U16x16*, a: U16x16*):
     # Fill a dummy array with `tail` values. `tail` is always in a 1..STAGE_WIDTH-1 range.
@@ -379,35 +408,51 @@ func lowp_load_8888_tail(tail: usize, data: const PremultipliedColorU8[], r: U16
         tmp[i] = data[i]
     lowp_load_8888(tmp, r, g, b, a)
 
-func lowp_store_8888(r: U16x16, g: U16x16, b: U16x16, a: U16x16, data: PremultipliedColorU8[]):
-    for i: usize in 0..<16:
-        let h = i >> 3
-        let l = i & 7
-        data[i] = PremultipliedColorU8(rgba = [(u8)r[h][l], (u8)g[h][l], (u8)b[h][l], (u8)a[h][l]])
+func lowp_store_8888(r: const U16x16*, g: const U16x16*, b: const U16x16*, a: const U16x16*, data: PremultipliedColorU8[]):
+    if data.length < 16:
+        trap("index out of bounds")
+    let dst = (u8*)data.data
+    for h: usize in 0..<2:
+        let rr = (*r)[h]
+        let gg = (*g)[h]
+        let bb = (*b)[h]
+        let aa = (*a)[h]
+        for l: usize in 0..<8:
+            let q = (h * 8 + l) * 4
+            dst[q] = (u8)rr[l]
+            dst[q + 1] = (u8)gg[l]
+            dst[q + 2] = (u8)bb[l]
+            dst[q + 3] = (u8)aa[l]
 
-func lowp_store_8888_tail(r: U16x16, g: U16x16, b: U16x16, a: U16x16, tail: usize, data: PremultipliedColorU8[]):
+func lowp_store_8888_tail(r: const U16x16*, g: const U16x16*, b: const U16x16*, a: const U16x16*, tail: usize, data: PremultipliedColorU8[]):
     for i in 0..<tail:
         let h = i >> 3
         let l = i & 7
-        data[i] = PremultipliedColorU8(rgba = [(u8)r[h][l], (u8)g[h][l], (u8)b[h][l], (u8)a[h][l]])
+        data[i] = PremultipliedColorU8(rgba = [(u8)(*r)[h][l], (u8)(*g)[h][l], (u8)(*b)[h][l], (u8)(*a)[h][l]])
 
 func lowp_load_8(data: const u8[], a: U16x16*):
-    for i: usize in 0..<16:
-        (*a)[i >> 3][i & 7] = (u16)data[i]
+    if data.length < 16:
+        trap("index out of bounds")
+    let src = (const u8*)data.data
+    for h: usize in 0..<2:
+        var aa: U16x8 = ---
+        for l: usize in 0..<8:
+            aa[l] = (u16)src[h * 8 + l]
+        (*a)[h] = aa
 
-func div255(v: U16x16) -> U16x16:
+func div255(v: U16x8) -> U16x8:
     # Skia uses `vrshrq_n_u16(vrsraq_n_u16(v, v, 8), 8)` here when NEON is available, but it
     # doesn't affect performance much and breaks reproducible result. Ignore it.
-    return [(v[0] +% u16[8](255)) >> 8, (v[1] +% u16[8](255)) >> 8]
+    return (v +% u16[8](255)) >> 8
 
-func lowp_inv(v: U16x16) -> U16x16:
-    return [u16[8](255) -% v[0], u16[8](255) -% v[1]]
+func lowp_inv(v: U16x8) -> U16x8:
+    return u16[8](255) -% v
 
-func lowp_from_float(f: f32) -> U16x16:
-    return u16_splat((u16)(f * 255.0 + 0.5))
+func lowp_from_float(f: f32) -> U16x8:
+    return u16[8]((u16)(f * 255.0 + 0.5))
 
-func lowp_lerp(from_: U16x16, to: U16x16, t: U16x16) -> U16x16:
-    return div255(u16_add(u16_mul(from_, lowp_inv(t)), u16_mul(to, t)))
+func lowp_lerp(from_: U16x8, to: U16x8, t: U16x8) -> U16x8:
+    return div255(from_ *% lowp_inv(t) +% to *% t)
 
 union LaneBits:
     u: U16x16
@@ -429,6 +474,6 @@ func lowp_join(lo: U16x16, hi: U16x16) -> F16:
     b.u = hi
     return [a.f[0], a.f[1], b.f[0], b.f[1]]
 
-func lowp_mad(f: F16, m: F16, a: F16) -> F16:
+func lowp_mad(f: F4, m: F4, a: F4) -> F4:
     # NEON vmlaq_f32 doesn't seem to affect performance in any way. Ignore it.
-    return f16_add(f16_mul(f, m), a)
+    return f * m + a

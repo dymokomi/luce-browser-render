@@ -5,11 +5,14 @@
 #   DESCRIPTION:
 #       Port of tiny-skia wide/ (f32x4, f32x8, f32x16, i32x4, i32x8, u32x4, u32x8, u16x16),
 #       following their portable (non-SIMD) code paths bit for bit. Luce vectors hold 16
-#       bytes, so f32x8 is `F8 = F4[2]` (two f32[4]), f32x16 is `F16 = F4[4]` and u16x16 is
-#       `U16x16 = U16x8[2]`; `+ - * /` are Luce's lane-wise vector operators, the rest are
-#       per-lane helpers. Comparisons answer lane masks (all ones or zero, `M8 = U4[2]`) and
-#       `blend(mask, t, f)` selects, as the SIMD code does. Integer lanes wrap, as SIMD
-#       lanes do.
+#       bytes, so the pipelines' registers are arrays of vectors: f32x8 is `F8 = F4[2]`,
+#       f32x16 is `F16 = F4[4]` and u16x16 is `U16x16 = U16x8[2]`, and the stages compute
+#       one 16-byte vector at a time (`for h in 0..<2`) where it is hot. The helpers work
+#       on one vector (`f4_`, `u16x8_`) or, as thin wrappers, on a register (`f8_`): `+ - * /`
+#       are Luce's lane-wise operators, the rest are per-lane helpers. Comparisons answer
+#       lane masks (all ones or zero) and `blend(mask, t, f)` selects bitwise, as the SIMD
+#       code does. Integer lanes wrap, as SIMD lanes do. (Helpers over whole 32-byte
+#       registers were measured 3-6x slower than per-vector code with the native backend.)
 #
 #==============================================================================================
 
@@ -25,19 +28,38 @@ type U16x16 = U16x8[2]
 
 let all_ones: u32 = 0xFFFFFFFF
 
+union F4Bits:
+    f: F4
+    u: U4
+    i: I4
+
 # mark: f32x4 =================================================================================
 
+## faster_min per lane (NaN does not matter).
 func f4_min(a: F4, b: F4) -> F4:
-    return [pmin(a[0], b[0]), pmin(a[1], b[1]), pmin(a[2], b[2]), pmin(a[3], b[3])]
+    return [b[0] if b[0] < a[0] else a[0], b[1] if b[1] < a[1] else a[1], b[2] if b[2] < a[2] else a[2], b[3] if b[3] < a[3] else a[3]]
 
+## faster_max per lane (NaN does not matter).
 func f4_max(a: F4, b: F4) -> F4:
-    return [pmax(a[0], b[0]), pmax(a[1], b[1]), pmax(a[2], b[2]), pmax(a[3], b[3])]
+    return [b[0] if a[0] < b[0] else a[0], b[1] if a[1] < b[1] else a[1], b[2] if a[2] < b[2] else a[2], b[3] if a[3] < b[3] else a[3]]
+
+func f4_to_bits(a: F4) -> U4:
+    var bits: F4Bits
+    bits.f = a
+    return bits.u
+
+func f4_from_bits(a: U4) -> F4:
+    var bits: F4Bits
+    bits.u = a
+    return bits.f
+
+func f4_to_i4_bitcast(a: F4) -> I4:
+    var bits: F4Bits
+    bits.f = a
+    return bits.i
 
 func f4_abs(a: F4) -> F4:
-    var r: F4 = ---
-    for i: usize in 0..<4:
-        r[i] = f32.bits(a[i].bits() & 0x7FFFFFFF)
-    return r
+    return f4_from_bits(f4_to_bits(a) & u32[4](0x7FFFFFFF))
 
 func f4_sqrt(a: F4) -> F4:
     return [math32.sqrt(a[0]), math32.sqrt(a[1]), math32.sqrt(a[2]), math32.sqrt(a[3])]
@@ -74,21 +96,79 @@ func f4_round(a: F4) -> F4:
     return [f32_round(a[0]), f32_round(a[1]), f32_round(a[2]), f32_round(a[3])]
 
 func f4_round_int(a: F4) -> I4:
-    let r = f4_round(a)
-    return [(i32)r[0], (i32)r[1], (i32)r[2], (i32)r[3]]
+    return [(i32)f32_round(a[0]), (i32)f32_round(a[1]), (i32)f32_round(a[2]), (i32)f32_round(a[3])]
+
+func f4_cmp_eq(a: F4, b: F4) -> U4:
+    return [all_ones if a[0] == b[0] else 0, all_ones if a[1] == b[1] else 0, all_ones if a[2] == b[2] else 0, all_ones if a[3] == b[3] else 0]
+
+func f4_cmp_ne(a: F4, b: F4) -> U4:
+    return [all_ones if a[0] != b[0] else 0, all_ones if a[1] != b[1] else 0, all_ones if a[2] != b[2] else 0, all_ones if a[3] != b[3] else 0]
+
+func f4_cmp_ge(a: F4, b: F4) -> U4:
+    return [all_ones if a[0] >= b[0] else 0, all_ones if a[1] >= b[1] else 0, all_ones if a[2] >= b[2] else 0, all_ones if a[3] >= b[3] else 0]
 
 func f4_cmp_gt(a: F4, b: F4) -> U4:
     return [all_ones if a[0] > b[0] else 0, all_ones if a[1] > b[1] else 0, all_ones if a[2] > b[2] else 0, all_ones if a[3] > b[3] else 0]
 
-func f4_blend(m: U4, t: F4, f: F4) -> F4:
-    return [t[0] if m[0] != 0 else f[0], t[1] if m[1] != 0 else f[1], t[2] if m[2] != 0 else f[2], t[3] if m[3] != 0 else f[3]]
+func f4_cmp_le(a: F4, b: F4) -> U4:
+    return [all_ones if a[0] <= b[0] else 0, all_ones if a[1] <= b[1] else 0, all_ones if a[2] <= b[2] else 0, all_ones if a[3] <= b[3] else 0]
 
-## The portable f32x4::floor: via a truncating round trip.
+func f4_cmp_lt(a: F4, b: F4) -> U4:
+    return [all_ones if a[0] < b[0] else 0, all_ones if a[1] < b[1] else 0, all_ones if a[2] < b[2] else 0, all_ones if a[3] < b[3] else 0]
+
+## generic_bit_blend(mask, t, f): the bits of `t` where the mask is set, of `f` elsewhere.
+func f4_blend(m: U4, t: F4, f: F4) -> F4:
+    return f4_from_bits((f4_to_bits(t) & m) | (f4_to_bits(f) & ~m))
+
+## The portable f32x4::floor: via a truncating round trip (f32x8::floor).
 func f4_floor(a: F4) -> F4:
     let roundtrip = i4_to_f4(f4_trunc_int(a))
     return roundtrip - f4_blend(f4_cmp_gt(roundtrip, a), f32[4](1.0), f32[4](0.0))
 
+## f32x8::fract.
+func f4_fract(a: F4) -> F4:
+    return a - f4_floor(a)
+
+## f32x8::normalize: clamp to [0, 1].
+func f4_normalize(a: F4) -> F4:
+    return f4_min(f4_max(a, f32[4](0.0)), f32[4](1.0))
+
+## f32x4::recip_fast (the portable one is exact).
+func f4_recip_fast(a: F4) -> F4:
+    return f32[4](1.0) / a
+
+## f32x8::powf: Skia's approximation; x is assumed positive.
+func f4_powf(x: F4, exp: f32) -> F4:
+    # We assume sign(x) is positive so we can use vectorized i32->f32 conversions
+    let e = i4_to_f4(f4_to_i4_bitcast(x)) * f32[4](1.0 / 8388608.0)
+    let m = f4_from_bits((f4_to_bits(x) & u32[4](0x007fffff)) | u32[4](0x3f000000))
+
+    let log2_x = e - f32[4](124.225514990) - f32[4](1.498030302) * m - f32[4](1.725879990) / (f32[4](0.3520887068) + m)
+
+    let xx = log2_x * f32[4](exp)
+
+    let f = xx - f4_floor(xx)
+
+    var a = xx + f32[4](121.274057500)
+    a = a - f * f32[4](1.490129070)
+    a = a + f32[4](27.728023300) / (f32[4](4.84252568) - f)
+    a = a * f32[4](8388608.0)
+
+    let inf_bits = f32[4]((f32)(u32)0x7f800000)
+
+    let r = f4_round_int(f4_min(f4_max(a, f32[4](0.0)), inf_bits))
+    let result = f4_from_bits([(u32)r[0], (u32)r[1], (u32)r[2], (u32)r[3]])
+
+    let skip = f4_cmp_eq(x, f32[4](0.0)) | f4_cmp_eq(x, f32[4](1.0))
+    return f4_blend(skip, x, result)
+
 # mark: f32x8 =================================================================================
+# Whole-register helpers, one F4 half at a time. The hot stages (load, store, source-over,
+# scale, lerp) loop over the halves themselves instead.
+
+## A lane of an f32x8.
+func f8_lane(a: F8, i: usize) -> f32:
+    return a[i >> 2][i & 3]
 
 func f8_splat(x: f32) -> F8:
     return [f32[4](x), f32[4](x)]
@@ -127,10 +207,10 @@ func f8_floor(a: F8) -> F8:
     return [f4_floor(a[0]), f4_floor(a[1])]
 
 func f8_fract(a: F8) -> F8:
-    return f8_sub(a, f8_floor(a))
+    return [f4_fract(a[0]), f4_fract(a[1])]
 
 func f8_normalize(a: F8) -> F8:
-    return f8_min(f8_max(a, f8_splat(0.0)), f8_splat(1.0))
+    return [f4_normalize(a[0]), f4_normalize(a[1])]
 
 func f8_round_int(a: F8) -> I8:
     return [f4_round_int(a[0]), f4_round_int(a[1])]
@@ -139,76 +219,37 @@ func f8_trunc_int(a: F8) -> I8:
     return [f4_trunc_int(a[0]), f4_trunc_int(a[1])]
 
 func f8_recip_fast(a: F8) -> F8:
-    return f8_div(f8_splat(1.0), a)
+    return [f4_recip_fast(a[0]), f4_recip_fast(a[1])]
 
 func i8_to_f8(a: I8) -> F8:
     return [i4_to_f4(a[0]), i4_to_f4(a[1])]
 
-func f8_lane(a: F8, i: usize) -> f32:
-    return a[i >> 2][i & 3]
-
 func f8_to_bits(a: F8) -> M8:
-    var r: M8 = ---
-    for h: usize in 0..<2:
-        for i: usize in 0..<4:
-            r[h][i] = a[h][i].bits()
-    return r
+    return [f4_to_bits(a[0]), f4_to_bits(a[1])]
 
 func f8_from_bits(a: M8) -> F8:
-    var r: F8 = ---
-    for h: usize in 0..<2:
-        for i: usize in 0..<4:
-            r[h][i] = f32.bits(a[h][i])
-    return r
+    return [f4_from_bits(a[0]), f4_from_bits(a[1])]
 
 func f8_to_i8_bitcast(a: F8) -> I8:
-    var r: I8 = ---
-    for h: usize in 0..<2:
-        for i: usize in 0..<4:
-            r[h][i] = (i32)a[h][i].bits()
-    return r
+    return [f4_to_i4_bitcast(a[0]), f4_to_i4_bitcast(a[1])]
 
 func f8_cmp_eq(a: F8, b: F8) -> M8:
-    var m: M8 = ---
-    for h: usize in 0..<2:
-        for i: usize in 0..<4:
-            m[h][i] = all_ones if a[h][i] == b[h][i] else 0
-    return m
+    return [f4_cmp_eq(a[0], b[0]), f4_cmp_eq(a[1], b[1])]
 
 func f8_cmp_ne(a: F8, b: F8) -> M8:
-    var m: M8 = ---
-    for h: usize in 0..<2:
-        for i: usize in 0..<4:
-            m[h][i] = all_ones if a[h][i] != b[h][i] else 0
-    return m
+    return [f4_cmp_ne(a[0], b[0]), f4_cmp_ne(a[1], b[1])]
 
 func f8_cmp_ge(a: F8, b: F8) -> M8:
-    var m: M8 = ---
-    for h: usize in 0..<2:
-        for i: usize in 0..<4:
-            m[h][i] = all_ones if a[h][i] >= b[h][i] else 0
-    return m
+    return [f4_cmp_ge(a[0], b[0]), f4_cmp_ge(a[1], b[1])]
 
 func f8_cmp_gt(a: F8, b: F8) -> M8:
-    var m: M8 = ---
-    for h: usize in 0..<2:
-        for i: usize in 0..<4:
-            m[h][i] = all_ones if a[h][i] > b[h][i] else 0
-    return m
+    return [f4_cmp_gt(a[0], b[0]), f4_cmp_gt(a[1], b[1])]
 
 func f8_cmp_le(a: F8, b: F8) -> M8:
-    var m: M8 = ---
-    for h: usize in 0..<2:
-        for i: usize in 0..<4:
-            m[h][i] = all_ones if a[h][i] <= b[h][i] else 0
-    return m
+    return [f4_cmp_le(a[0], b[0]), f4_cmp_le(a[1], b[1])]
 
 func f8_cmp_lt(a: F8, b: F8) -> M8:
-    var m: M8 = ---
-    for h: usize in 0..<2:
-        for i: usize in 0..<4:
-            m[h][i] = all_ones if a[h][i] < b[h][i] else 0
-    return m
+    return [f4_cmp_lt(a[0], b[0]), f4_cmp_lt(a[1], b[1])]
 
 func m8_or(a: M8, b: M8) -> M8:
     return [a[0] | b[0], a[1] | b[1]]
@@ -221,7 +262,7 @@ func m8_and(a: M8, b: M8) -> M8:
 
 ## generic_bit_blend(mask, t, f): the bits of `t` where the mask is set, of `f` elsewhere.
 func f8_blend(m: M8, t: F8, f: F8) -> F8:
-    return f8_from_bits(m8_or(m8_and(f8_to_bits(t), m), m8_and(f8_to_bits(f), m8_not(m))))
+    return [f4_blend(m[0], t[0], f[0]), f4_blend(m[1], t[1], f[1])]
 
 func i8_mul(a: I8, b: I8) -> I8:
     return [a[0] *% b[0], a[1] *% b[1]]
@@ -230,119 +271,38 @@ func i8_add(a: I8, b: I8) -> I8:
     return [a[0] +% b[0], a[1] +% b[1]]
 
 func f8_powf(x: F8, exp: f32) -> F8:
-    # We assume sign(x) is positive so we can use vectorized i32->f32 conversions
-    let e = f8_mul(i8_to_f8(f8_to_i8_bitcast(x)), f8_splat(1.0 / 8388608.0))
-    let bits = f8_to_bits(x)
-    var mbits: M8 = ---
-    for h: usize in 0..<2:
-        mbits[h] = (bits[h] & u32[4](0x007fffff)) | u32[4](0x3f000000)
-    let m = f8_from_bits(mbits)
-
-    let log2_x = f8_sub(f8_sub(f8_sub(e, f8_splat(124.225514990)), f8_mul(f8_splat(1.498030302), m)), f8_div(f8_splat(1.725879990), f8_add(f8_splat(0.3520887068), m)))
-
-    let xx = f8_mul(log2_x, f8_splat(exp))
-
-    let f = f8_sub(xx, f8_floor(xx))
-
-    var a = f8_add(xx, f8_splat(121.274057500))
-    a = f8_sub(a, f8_mul(f, f8_splat(1.490129070)))
-    a = f8_add(a, f8_div(f8_splat(27.728023300), f8_sub(f8_splat(4.84252568), f)))
-    a = f8_mul(a, f8_splat(8388608.0))
-
-    let inf_bits = f8_splat((f32)(u32)0x7f800000)
-
-    let r = f8_round_int(f8_min(f8_max(a, f8_splat(0.0)), inf_bits))
-    var rbits: M8 = ---
-    for h: usize in 0..<2:
-        for i: usize in 0..<4:
-            rbits[h][i] = (u32)r[h][i]
-    let result = f8_from_bits(rbits)
-
-    let skip = m8_or(f8_cmp_eq(x, f8_splat(0.0)), f8_cmp_eq(x, f8_splat(1.0)))
-    return f8_blend(skip, x, result)
+    return [f4_powf(x[0], exp), f4_powf(x[1], exp)]
 
 # mark: f32x16 ================================================================================
 
-func f16_splat(x: f32) -> F16:
-    return [f32[4](x), f32[4](x), f32[4](x), f32[4](x)]
-
-func f16_add(a: F16, b: F16) -> F16:
-    return [a[0] + b[0], a[1] + b[1], a[2] + b[2], a[3] + b[3]]
-
-func f16_sub(a: F16, b: F16) -> F16:
-    return [a[0] - b[0], a[1] - b[1], a[2] - b[2], a[3] - b[3]]
-
-func f16_mul(a: F16, b: F16) -> F16:
-    return [a[0] * b[0], a[1] * b[1], a[2] * b[2], a[3] * b[3]]
-
-func f16_abs(a: F16) -> F16:
+## f32x16::floor (lowp) on a quarter of the lanes: Skia rounds, then steps down.
+func f16_floor_quarter(a: F4) -> F4:
     # Yes, Skia does it in the same way.
-    return [f4_abs(a[0]), f4_abs(a[1]), f4_abs(a[2]), f4_abs(a[3])]
-
-func f16_normalize(a: F16) -> F16:
-    var r: F16 = ---
-    for i: usize in 0..<4:
-        r[i] = f4_min(f4_max(a[i], f32[4](0.0)), f32[4](1.0))
-    return r
-
-func f16_floor(a: F16) -> F16:
-    # Yes, Skia does it in the same way.
-    var r: F16 = ---
-    for i: usize in 0..<4:
-        let roundtrip = f4_round(a[i])
-        r[i] = roundtrip - f4_blend(f4_cmp_gt(roundtrip, a[i]), f32[4](1.0), f32[4](0.0))
-    return r
-
-func f16_sqrt(a: F16) -> F16:
-    return [f4_sqrt(a[0]), f4_sqrt(a[1]), f4_sqrt(a[2]), f4_sqrt(a[3])]
-
-# This method is too heavy and shouldn't be inlined.
-func f16_save_to_u16x16(a: F16, dst: U16x16*):
-    # Do not use to_i32x8, because it involves rounding, and Skia cast's without it.
-    for i: usize in 0..<16:
-        (*dst)[i >> 3][i & 7] = (u16)a[i >> 2][i & 3]
+    let roundtrip = f4_round(a)
+    return roundtrip - f4_blend(f4_cmp_gt(roundtrip, a), f32[4](1.0), f32[4](0.0))
 
 # mark: u16x16 ================================================================================
 
 func u16_splat(x: u16) -> U16x16:
     return [u16[8](x), u16[8](x)]
 
-func u16_add(a: U16x16, b: U16x16) -> U16x16:
-    return [a[0] +% b[0], a[1] +% b[1]]
-
-func u16_sub(a: U16x16, b: U16x16) -> U16x16:
-    return [a[0] -% b[0], a[1] -% b[1]]
-
-func u16_mul(a: U16x16, b: U16x16) -> U16x16:
-    return [a[0] *% b[0], a[1] *% b[1]]
-
-func u16_min(a: U16x16, b: U16x16) -> U16x16:
-    var r: U16x16 = ---
-    for h: usize in 0..<2:
-        for i: usize in 0..<8:
-            r[h][i] = a[h][i] if a[h][i] < b[h][i] else b[h][i]
-    return r
-
-func u16_max(a: U16x16, b: U16x16) -> U16x16:
-    var r: U16x16 = ---
-    for h: usize in 0..<2:
-        for i: usize in 0..<8:
-            r[h][i] = a[h][i] if a[h][i] > b[h][i] else b[h][i]
-    return r
-
-func u16_cmp_le(a: U16x16, b: U16x16) -> U16x16:
-    var r: U16x16 = ---
-    for h: usize in 0..<2:
-        for i: usize in 0..<8:
-            r[h][i] = 0xFFFF if a[h][i] <= b[h][i] else 0
-    return r
-
-func u16_blend(m: U16x16, t: U16x16, e: U16x16) -> U16x16:
-    return [(t[0] & m[0]) | (e[0] & ~m[0]), (t[1] & m[1]) | (e[1] & ~m[1])]
-
-func u16_is_zero(a: U16x16) -> bool:
-    let v = a[0] | a[1]
+func u16x8_min(a: U16x8, b: U16x8) -> U16x8:
+    var r: U16x8 = ---
     for i: usize in 0..<8:
-        if v[i] != 0:
-            return false
-    return true
+        r[i] = a[i] if a[i] < b[i] else b[i]
+    return r
+
+func u16x8_max(a: U16x8, b: U16x8) -> U16x8:
+    var r: U16x8 = ---
+    for i: usize in 0..<8:
+        r[i] = a[i] if a[i] > b[i] else b[i]
+    return r
+
+func u16x8_cmp_le(a: U16x8, b: U16x8) -> U16x8:
+    var r: U16x8 = ---
+    for i: usize in 0..<8:
+        r[i] = 0xFFFF if a[i] <= b[i] else 0
+    return r
+
+func u16x8_blend(m: U16x8, t: U16x8, e: U16x8) -> U16x8:
+    return (t & m) | (e & ~m)
