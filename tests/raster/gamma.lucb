@@ -1,0 +1,75 @@
+#==============================================================================================
+#
+#   gamma - tiny-skia's integration tests: gamma.rs
+#
+#   DESCRIPTION:
+#       Port of tiny-skia 0.12.0 tests/integration/gamma.rs. Each test renders with the
+#       rasterizer and compares against tiny-skia's reference image, pixel for pixel.
+#
+#       Copyright (c) 2020 Yevhenii Reizner (tiny-skia's tests)
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-tiny-skia)
+#
+#==============================================================================================
+
+import harness
+import raster
+from harness import Test, TestCase
+from raster import Paint, PathBuilder, Pixmap, PixmapPaint, Transform, Rect, Point, Color, ColorU8, Stroke, StrokeDash, LineCap, LineJoin, FillRule, BlendMode, SpreadMode, FilterQuality, GradientStop, LinearGradient, RadialGradient, SweepGradient, Pattern, Mask, MaskType, IntRect, ColorSpace, Shader
+
+func gamma(t: Test*):
+    var paint = Paint()
+    let stroke = Stroke()
+    let wide = Stroke(width = 3.0)
+
+    let solid = Shader.solid_color(color = Color.from_rgba8(255, 100, 20, 255))
+    let grad2_stops: GradientStop[2] = [
+        GradientStop.new_(0.0, Color.from_rgba8(255, 0, 0, 255)),
+        GradientStop.new_(1.0, Color.from_rgba8(0, 255, 0, 255)),
+    ]
+    var grad2 = LinearGradient.new_(Point.from_xy(50.0, 2.0), Point.from_xy(450.0, 2.0), grad2_stops, SpreadMode.pad_, Transform.identity()) else trap("unwrap")
+    defer grad2.release()
+
+    let grad3_stops: GradientStop[3] = [
+        GradientStop.new_(0.0, Color.from_rgba8(255, 0, 0, 255)),
+        GradientStop.new_(0.5, Color.from_rgba8(0, 0, 255, 255)),
+        GradientStop.new_(1.0, Color.from_rgba8(128, 128, 128, 128)),
+    ]
+    var grad3 = LinearGradient.new_(Point.from_xy(50.0, 2.0), Point.from_xy(450.0, 2.0), grad3_stops, SpreadMode.pad_, Transform.identity()) else trap("unwrap")
+    defer grad3.release()
+
+    var pixmap = Pixmap.new_(500, 60) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill(Color.black())
+
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(20.0, 2.0)
+    pb.line_to(480.0, 3.0)
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+
+    let colors: ColorSpace[4] = [ColorSpace.linear, ColorSpace.gamma2, ColorSpace.simple_srgb, ColorSpace.full_srgb_gamma]
+
+    for (i, color) in colors.indexed():
+        let xf = Transform.from_translate(0.0, 4.0 * (f32)i)
+
+        paint.colorspace = color
+        # (the shaders are shared, not cloned: drawing does not modify them)
+        paint.shader = solid
+        pixmap.stroke_path(&path, &paint, &stroke, xf, none)
+
+        let xf2 = Transform.from_translate(0.0, 20.0 + 10.0 * (f32)i)
+        paint.shader = grad2
+        pixmap.stroke_path(&path, &paint, &wide, xf2, none)
+
+        let xf3 = Transform.from_translate(0.0, 22.5 + 10.0 * (f32)i)
+        paint.shader = grad3
+        pixmap.stroke_path(&path, &paint, &wide, xf3, none)
+
+    # pixmap.save_png("tests/images/gamma.png").unwrap();
+    harness.expect_png(t, &pixmap, "gamma.png")
+
+pub let tests: TestCase[1] = [
+    TestCase(name = "gamma::gamma", run = gamma),
+]

@@ -39,112 +39,113 @@ pub enum Shader:
     ## A pattern shader.
     pattern(p: Pattern)
 
-## Checks if the shader is guaranteed to produce only opaque colors.
-pub func shader_is_opaque(shader: const Shader*) -> bool:
-    match *shader:
-        .solid_color(c): return c.is_opaque()
-        .linear_gradient(g): return g.base.colors_are_opaque
-        # A radial gradient may have points that are "undefined" so we just assume that it
-        # is not opaque.
-        .radial_gradient(_): return false
-        .sweep_gradient(g): return g.base.colors_are_opaque
-        .pattern(_): return false
+    ## Checks if the shader is guaranteed to produce only opaque colors.
+    pub func is_opaque() -> bool:
+        match self:
+            .solid_color(c): return c.is_opaque()
+            .linear_gradient(g): return g.base.colors_are_opaque
+            # A radial gradient may have points that are "undefined" so we just assume that it
+            # is not opaque.
+            .radial_gradient(_): return false
+            .sweep_gradient(g): return g.base.colors_are_opaque
+            .pattern(_): return false
 
-# Unlike Skia, we do not have is_constant, because we don't have Color shaders.
+    # Unlike Skia, we do not have is_constant, because we don't have Color shaders.
 
-func shader_push_stages(shader: const Shader*, cs: ColorSpace, p: RasterPipelineBuilder*) -> bool:
-    match *shader:
-        .solid_color(color):
-            let c = colorspace_expand_color(cs, color).premultiply()
-            p.push_uniform_color(c)
-            return true
-        .linear_gradient(g): return g.push_stages(cs, p)
-        .radial_gradient(g): return g.push_stages(cs, p)
-        .sweep_gradient(g): return g.push_stages(cs, p)
-        .pattern(patt): return patt.push_stages(cs, p)
+    func push_stages(cs: ColorSpace, p: RasterPipelineBuilder*) -> bool:
+        match self:
+            .solid_color(color):
+                let c = colorspace_expand_color(cs, color).premultiply()
+                p.push_uniform_color(c)
+                return true
+            .linear_gradient(g): return g.push_stages(cs, p)
+            .radial_gradient(g): return g.push_stages(cs, p)
+            .sweep_gradient(g): return g.push_stages(cs, p)
+            .pattern(patt): return patt.push_stages(cs, p)
 
-## Transforms the shader.
-pub func shader_transform(shader: Shader*, ts: Transform):
-    match *shader:
-        .solid_color(_):
-            return
-        .linear_gradient(g):
-            var ng = g
-            ng.base.transform = ng.base.transform.post_concat(ts)
-            *shader = .linear_gradient(g = ng)
-        .radial_gradient(g):
-            var ng = g
-            ng.base.transform = ng.base.transform.post_concat(ts)
-            *shader = .radial_gradient(g = ng)
-        .sweep_gradient(g):
-            var ng = g
-            ng.base.transform = ng.base.transform.post_concat(ts)
-            *shader = .sweep_gradient(g = ng)
-        .pattern(p):
-            var np = p
-            np.transform = np.transform.post_concat(ts)
-            *shader = .pattern(p = np)
+    ## Transforms the shader.
+    pub mutating func transform(ts: Transform):
+        match self:
+            .solid_color(_):
+                return
+            .linear_gradient(g):
+                var ng = g
+                ng.base.transform = ng.base.transform.post_concat(ts)
+                self = .linear_gradient(g = ng)
+            .radial_gradient(g):
+                var ng = g
+                ng.base.transform = ng.base.transform.post_concat(ts)
+                self = .radial_gradient(g = ng)
+            .sweep_gradient(g):
+                var ng = g
+                ng.base.transform = ng.base.transform.post_concat(ts)
+                self = .sweep_gradient(g = ng)
+            .pattern(p):
+                var np = p
+                np.transform = np.transform.post_concat(ts)
+                self = .pattern(p = np)
 
-## Shifts shader's opacity. `opacity` will be clamped to the 0..=1 range. This is roughly
-## the same as Skia's `SkPaint::setAlpha`. Unlike Skia, we do not support global alpha/opacity,
-## which is in Skia is set via the alpha channel of the `SkPaint::fColor4f`. Instead, you can
-## shift the opacity of the shader to whatever value you need.
-pub func shader_apply_opacity(shader: Shader*, opacity: f32):
-    match *shader:
-        .solid_color(c):
-            var nc = c
-            nc.apply_opacity(opacity)
-            *shader = .solid_color(color = nc)
-        .linear_gradient(g):
-            var ng = g
-            ng.base.apply_opacity(opacity)
-            *shader = .linear_gradient(g = ng)
-        .radial_gradient(g):
-            var ng = g
-            ng.base.apply_opacity(opacity)
-            *shader = .radial_gradient(g = ng)
-        .sweep_gradient(g):
-            var ng = g
-            ng.base.apply_opacity(opacity)
-            *shader = .sweep_gradient(g = ng)
-        .pattern(p):
-            var np = p
-            np.opacity = normalized_new(np.opacity * bound(opacity, 0.0, 1.0)) else trap("unreachable")
-            *shader = .pattern(p = np)
+    ## Shifts shader's opacity. `opacity` will be clamped to the 0..=1 range. This is roughly
+    ## the same as Skia's `SkPaint::setAlpha`. Unlike Skia, we do not support global alpha/opacity,
+    ## which is in Skia is set via the alpha channel of the `SkPaint::fColor4f`. Instead, you can
+    ## shift the opacity of the shader to whatever value you need.
+    pub mutating func apply_opacity(opacity: f32):
+        match self:
+            .solid_color(c):
+                var nc = c
+                nc.apply_opacity(opacity)
+                self = .solid_color(color = nc)
+            .linear_gradient(g):
+                var ng = g
+                ng.base.apply_opacity(opacity)
+                self = .linear_gradient(g = ng)
+            .radial_gradient(g):
+                var ng = g
+                ng.base.apply_opacity(opacity)
+                self = .radial_gradient(g = ng)
+            .sweep_gradient(g):
+                var ng = g
+                ng.base.apply_opacity(opacity)
+                self = .sweep_gradient(g = ng)
+            .pattern(p):
+                var np = p
+                np.opacity = normalized_new(np.opacity * bound(opacity, 0.0, 1.0)) else trap("unreachable")
+                self = .pattern(p = np)
 
-## A copy of the shader; a gradient's stops are copied (Rust's `Shader::clone`).
-pub func shader_clone(shader: const Shader*) -> Shader:
-    match *shader:
-        .linear_gradient(g):
-            var ng = g
-            ng.base.stops = g.base.stops.clone()
-            return .linear_gradient(g = ng)
-        .radial_gradient(g):
-            var ng = g
-            ng.base.stops = g.base.stops.clone()
-            return .radial_gradient(g = ng)
-        .sweep_gradient(g):
-            var ng = g
-            ng.base.stops = g.base.stops.clone()
-            return .sweep_gradient(g = ng)
-        _:
-            return *shader
+    ## A copy of the shader; a gradient's stops are copied (Rust's `Shader::clone`).
+    pub func clone() -> Shader:
+        match self:
+            .linear_gradient(g):
+                var ng = g
+                ng.base.stops = g.base.stops.clone()
+                return .linear_gradient(g = ng)
+            .radial_gradient(g):
+                var ng = g
+                ng.base.stops = g.base.stops.clone()
+                return .radial_gradient(g = ng)
+            .sweep_gradient(g):
+                var ng = g
+                ng.base.stops = g.base.stops.clone()
+                return .sweep_gradient(g = ng)
+            _:
+                return self
 
-## Frees a gradient shader's stops (Rust's `Drop`).
-pub func shader_release(shader: Shader*):
-    match *shader:
-        .linear_gradient(g):
-            var ng = g
-            ng.base.stops.release()
-        .radial_gradient(g):
-            var ng = g
-            ng.base.stops.release()
-        .sweep_gradient(g):
-            var ng = g
-            ng.base.stops.release()
-        _:
-            return
-    *shader = .solid_color(color = Color.black())
+    ## Frees a gradient shader's stops (Rust's `Drop`).
+    pub mutating func release():
+        match self:
+            .linear_gradient(g):
+                var ng = g
+                ng.base.stops.release()
+            .radial_gradient(g):
+                var ng = g
+                ng.base.stops.release()
+            .sweep_gradient(g):
+                var ng = g
+                ng.base.stops.release()
+            _:
+                return
+        self = .solid_color(color = Color.black())
+
 
 # mark: Gradient ==============================================================================
 

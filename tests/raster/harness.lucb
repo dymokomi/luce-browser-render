@@ -112,4 +112,140 @@ pub func expect_png(t: Test*, pixmap: const raster.Pixmap*, image: str):
         files.create_directory("build/raster-failures") catch:
             recover ()
     var buffer: u8[512]
-    save_png(pixmap, path_buffer(buffer, f"build/raster-failures/{t.name}.png"))
+    save_png(pixmap, path_buffer(buffer, f"build/raster-failures/{file_name(t.name)}.png"))
+
+## Rust's `Drop` of a Stroke: frees its dash array.
+pub func release_stroke(stroke: raster.Stroke*):
+    if let dash = stroke.dash:
+        var d = dash
+        d.release()
+        stroke.dash = none
+
+## `pb.finish().is_none()`.
+pub func finish_is_none(pb: raster.PathBuilder*) -> bool:
+    if let path = pb.finish():
+        var p = path
+        p.release()
+        return false
+    return true
+
+## `pixmap.is_none()` for an optional pixmap (released when it is some).
+pub func pixmap_is_none(pixmap: raster.Pixmap?) -> bool:
+    if let p = pixmap:
+        var pm = p
+        pm.release()
+        return false
+    return true
+
+## `assert_eq!(actual, expected)` for optional rects.
+pub func expect_rect(t: Test*, actual: raster.Rect?, expected: raster.Rect?):
+    if actual == none and expected == none:
+        return
+    let a = actual else trap("expected a rect")
+    let e = expected else trap("expected no rect")
+    if a.left() != e.left() or a.top() != e.top() or a.right() != e.right() or a.bottom() != e.bottom():
+        t.fail(f"rect ({a.left()}, {a.top()}, {a.right()}, {a.bottom()}) != ({e.left()}, {e.top()}, {e.right()}, {e.bottom()})")
+
+func points_equal(a: raster.Point, b: raster.Point) -> bool:
+    return a.x == b.x and a.y == b.y
+
+func segment_equals(a: raster.PathSegment, b: raster.PathSegment) -> bool:
+    match a:
+        .close:
+            match b:
+                .close: return true
+                _: return false
+        .move_to(p):
+            match b:
+                .move_to(q): return points_equal(p, q)
+                _: return false
+        .line_to(p):
+            match b:
+                .line_to(q): return points_equal(p, q)
+                _: return false
+        .quad_to(p1, p):
+            match b:
+                .quad_to(q1, q): return points_equal(p1, q1) and points_equal(p, q)
+                _: return false
+        .cubic_to(p1, p2, p):
+            match b:
+                .cubic_to(q1, q2, q): return points_equal(p1, q1) and points_equal(p2, q2) and points_equal(p, q)
+                _: return false
+
+## `assert_eq!(path.segments().collect::<Vec<_>>(), expected)`.
+pub func expect_segments(t: Test*, path: const raster.Path*, expected: const raster.PathSegment[]):
+    var iter = path.segments()
+    var i: usize = 0
+    while let seg = iter.next():
+        if i >= expected.length:
+            t.fail("more segments than expected")
+            return
+        if not segment_equals(seg, expected[i]):
+            t.fail(f"segment {i} differs")
+            return
+        i += 1
+    if i != expected.length:
+        t.fail(f"{i} segments, expected {expected.length}")
+
+## `assert_eq!(pixmap.pixel(x, y).unwrap(), expected)`.
+pub func expect_pixel(t: Test*, pixmap: const raster.Pixmap*, x: u32, y: u32, expected: raster.PremultipliedColorU8):
+    let px = pixmap.pixel(x, y) else trap("no pixel")
+    if not px.equals(expected):
+        t.fail(f"pixel {x},{y} is ({px.red()}, {px.green()}, {px.blue()}, {px.alpha()}), expected ({expected.red()}, {expected.green()}, {expected.blue()}, {expected.alpha()})")
+
+## `assert_eq!(pixmap.pixels(), expected)`.
+pub func expect_pixels(t: Test*, pixmap: const raster.Pixmap*, expected: const raster.PremultipliedColorU8[]):
+    let pixels = pixmap.pixels()
+    if pixels.length != expected.length:
+        t.fail("pixel count differs")
+        return
+    for i in 0..<pixels.length:
+        if not pixels[i].equals(expected[i]):
+            let px = pixels[i]
+            t.fail(f"pixel {i} is ({px.red()}, {px.green()}, {px.blue()}, {px.alpha()})")
+            return
+
+## `assert_eq!(mask, Mask::load_png(image))`: a grayscale reference.
+pub func expect_mask_png(t: Test*, mask: const raster.Mask*, image: str):
+    var expected = load_png(image)
+    defer expected.release()
+    if mask.width() != expected.width() or mask.height() != expected.height():
+        t.fail(f"mask size differs from {image}")
+        return
+    let data = mask.data()
+    let pixels = expected.pixels()
+    var differ: u32 = 0
+    for i in 0..<data.length:
+        if data[i] != pixels[i].red():
+            differ += 1
+    if differ != 0:
+        t.fail(f"{differ} mask values differ from {image}")
+
+## `StrokeDash::new(array, offset).is_some()`.
+pub func dash_is_some(array: const f32[], offset: f32) -> bool:
+    if let dash = raster.StrokeDash.new_(array, offset):
+        var d = dash
+        d.release()
+        return true
+    return false
+
+## A test name as a file name: `fill::quad` is `fill__quad`.
+func file_name(name: str) -> str:
+    var i: usize = 0
+    let bytes = name.bytes
+    while i < bytes.length:
+        if bytes[i] == ':':
+            return file_name_buffer(name)
+        i += 1
+    return name
+
+var name_storage: u8[256]
+
+func file_name_buffer(name: str) -> str:
+    var n: usize = 0
+    for b in name.bytes:
+        if n + 1 >= name_storage.length:
+            break
+        name_storage[n] = '_' if b == ':' else b
+        n += 1
+    return (str)name_storage[..<n]

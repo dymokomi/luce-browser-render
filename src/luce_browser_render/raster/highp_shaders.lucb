@@ -91,6 +91,14 @@ func bicubic_far(t: F8) -> F8:
     # 0/18 + 0/18*t - 6/18t^2 + 7/18t^3 == t^2 (7/18t - 6/18)
     return f8_mul(f8_mul(t, t), highp_mad(f8_splat(7.0 / 18.0), t, f8_splat(-6.0 / 18.0)))
 
+# The rr, gg, bb, aa locals of the samplers (a struct is a workaround:
+# compiler-issues/c_backend_address_of_local_array).
+struct Rgba8:
+    var r: F8
+    var g: F8
+    var b: F8
+    var a: F8
+
 func sampler_2x2(pixmap: PixmapRef, ctx: SamplerCtx, cx: F8, cy: F8, wx: const F8[], wy: const F8[], r: F8*, g: F8*, b: F8*, a: F8*):
     *r = f8_splat(0.0)
     *g = f8_splat(0.0)
@@ -103,17 +111,14 @@ func sampler_2x2(pixmap: PixmapRef, ctx: SamplerCtx, cx: F8, cy: F8, wx: const F
     for j: usize in 0..<2:
         var x = f8_add(cx, f8_splat(start))
         for i: usize in 0..<2:
-            var rr = f8_splat(0.0)
-            var gg = f8_splat(0.0)
-            var bb = f8_splat(0.0)
-            var aa = f8_splat(0.0)
-            sample(pixmap, ctx, x, y, &rr, &gg, &bb, &aa)
+            var c = Rgba8(r = f8_splat(0.0), g = f8_splat(0.0), b = f8_splat(0.0), a = f8_splat(0.0))
+            sample(pixmap, ctx, x, y, &c.r, &c.g, &c.b, &c.a)
 
             let w = f8_mul(wx[i], wy[j])
-            *r = highp_mad(w, rr, *r)
-            *g = highp_mad(w, gg, *g)
-            *b = highp_mad(w, bb, *b)
-            *a = highp_mad(w, aa, *a)
+            *r = highp_mad(w, c.r, *r)
+            *g = highp_mad(w, c.g, *g)
+            *b = highp_mad(w, c.b, *b)
+            *a = highp_mad(w, c.a, *a)
 
             x = f8_add(x, one)
 
@@ -131,17 +136,14 @@ func sampler_4x4(pixmap: PixmapRef, ctx: SamplerCtx, cx: F8, cy: F8, wx: const F
     for j: usize in 0..<4:
         var x = f8_add(cx, f8_splat(start))
         for i: usize in 0..<4:
-            var rr = f8_splat(0.0)
-            var gg = f8_splat(0.0)
-            var bb = f8_splat(0.0)
-            var aa = f8_splat(0.0)
-            sample(pixmap, ctx, x, y, &rr, &gg, &bb, &aa)
+            var c = Rgba8(r = f8_splat(0.0), g = f8_splat(0.0), b = f8_splat(0.0), a = f8_splat(0.0))
+            sample(pixmap, ctx, x, y, &c.r, &c.g, &c.b, &c.a)
 
             let w = f8_mul(wx[i], wy[j])
-            *r = highp_mad(w, rr, *r)
-            *g = highp_mad(w, gg, *g)
-            *b = highp_mad(w, bb, *b)
-            *a = highp_mad(w, aa, *a)
+            *r = highp_mad(w, c.r, *r)
+            *g = highp_mad(w, c.g, *g)
+            *b = highp_mad(w, c.b, *b)
+            *a = highp_mad(w, c.a, *a)
 
             x = f8_add(x, one)
 

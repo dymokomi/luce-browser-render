@@ -1,0 +1,287 @@
+#==============================================================================================
+#
+#   mask - tiny-skia's integration tests: mask.rs
+#
+#   DESCRIPTION:
+#       Port of tiny-skia 0.12.0 tests/integration/mask.rs. Each test renders with the
+#       rasterizer and compares against tiny-skia's reference image, pixel for pixel.
+#
+#       Copyright (c) 2020 Yevhenii Reizner (tiny-skia's tests)
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-tiny-skia)
+#
+#==============================================================================================
+
+import harness
+from harness import Test, TestCase
+from raster import Paint, PathBuilder, Pixmap, PixmapPaint, Transform, Rect, Point, Color, ColorU8, Stroke, StrokeDash, LineCap, LineJoin, FillRule, BlendMode, SpreadMode, FilterQuality, GradientStop, LinearGradient, RadialGradient, SweepGradient, Pattern, Mask, MaskType, IntRect, ColorSpace, Shader
+
+func rect_(t: Test*):
+    var clip_path = PathBuilder.from_rect((Rect.from_xywh(10.0, 10.0, 80.0, 80.0) else trap("unwrap")))
+    defer clip_path.release()
+    var mask = Mask.new_(100, 100) else trap("mask")
+    defer mask.release()
+    mask.fill_path(&clip_path, FillRule.winding, false, Transform.identity())
+
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = false
+
+    var pixmap = Pixmap.new_(100, 100) else trap("pixmap")
+    defer pixmap.release()
+    let rect = (Rect.from_xywh(0.0, 0.0, 100.0, 100.0) else trap("unwrap"))
+    pixmap.fill_rect(rect, &paint, Transform.identity(), (&mask))
+
+    harness.expect_png(t, &pixmap, "mask/rect.png")
+
+func rect_aa(t: Test*):
+    var clip_path = PathBuilder.from_rect((Rect.from_xywh(10.5, 10.0, 80.0, 80.5) else trap("unwrap")))
+    defer clip_path.release()
+    var mask = Mask.new_(100, 100) else trap("mask")
+    defer mask.release()
+    mask.fill_path(&clip_path, FillRule.winding, true, Transform.identity())
+
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = false
+
+    var pixmap = Pixmap.new_(100, 100) else trap("pixmap")
+    defer pixmap.release()
+    let rect = (Rect.from_xywh(0.0, 0.0, 100.0, 100.0) else trap("unwrap"))
+    pixmap.fill_rect(rect, &paint, Transform.identity(), (&mask))
+
+    harness.expect_png(t, &pixmap, "mask/rect-aa.png")
+
+func rect_ts(t: Test*):
+    var pixmap = Pixmap.new_(100, 100) else trap("pixmap")
+    defer pixmap.release()
+
+    var clip_path = PathBuilder.from_rect((Rect.from_xywh(10.0, 10.0, 80.0, 80.0) else trap("unwrap")))
+    defer clip_path.release()
+    if not clip_path.transform(Transform.from_row(1.0, -0.3, 0.0, 1.0, 0.0, 15.0)):
+        trap("unwrap")
+
+    var mask = Mask.new_(100, 100) else trap("mask")
+    defer mask.release()
+    mask.fill_path(&clip_path, FillRule.winding, false, Transform.identity())
+
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = false
+
+    let rect = (Rect.from_xywh(0.0, 0.0, 100.0, 100.0) else trap("unwrap"))
+    pixmap.fill_rect(rect, &paint, Transform.identity(), (&mask))
+
+    harness.expect_png(t, &pixmap, "mask/rect-ts.png")
+
+func circle_bottom_right_aa(t: Test*):
+    var pixmap = Pixmap.new_(100, 100) else trap("pixmap")
+    defer pixmap.release()
+
+    var clip_path = PathBuilder.from_circle(100.0, 100.0, 50.0) else trap("path")
+    defer clip_path.release()
+    var mask = Mask.new_(100, 100) else trap("mask")
+    defer mask.release()
+    mask.fill_path(&clip_path, FillRule.winding, true, Transform.identity())
+
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = false
+
+    let rect = (Rect.from_xywh(0.0, 0.0, 100.0, 100.0) else trap("unwrap"))
+    pixmap.fill_rect(rect, &paint, Transform.identity(), (&mask))
+
+    harness.expect_png(t, &pixmap, "mask/circle-bottom-right-aa.png")
+
+func stroke_(t: Test*):
+    var pixmap = Pixmap.new_(100, 100) else trap("pixmap")
+    defer pixmap.release()
+
+    var clip_path = PathBuilder.from_rect((Rect.from_xywh(10.0, 10.0, 80.0, 80.0) else trap("unwrap")))
+    defer clip_path.release()
+    var mask = Mask.new_(100, 100) else trap("mask")
+    defer mask.release()
+    mask.fill_path(&clip_path, FillRule.winding, false, Transform.identity())
+
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = false
+
+    var stroke = Stroke()
+    defer harness.release_stroke(&stroke)
+    stroke.width = 10.0
+
+    var path = PathBuilder.from_rect((Rect.from_xywh(10.0, 10.0, 80.0, 80.0) else trap("unwrap")))
+    defer path.release()
+    pixmap.stroke_path(&path, &paint, &stroke, Transform.identity(), (&mask))
+
+    harness.expect_png(t, &pixmap, "mask/stroke.png")
+
+# Make sure we're clipping only source and not source and destination
+func skip_dest(t: Test*):
+    var pixmap = Pixmap.new_(100, 100) else trap("pixmap")
+    defer pixmap.release()
+
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = false
+
+    var tmp_path1 = PathBuilder.from_rect((Rect.from_xywh(5.0, 5.0, 60.0, 60.0) else trap("unwrap")))
+    defer tmp_path1.release()
+    pixmap.fill_path( &tmp_path1, &paint, FillRule.winding, Transform.identity(), none, )
+
+    var pixmap2 = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap2.release()
+    var tmp_path2 = PathBuilder.from_rect((Rect.from_xywh(35.0, 35.0, 60.0, 60.0) else trap("unwrap")))
+    defer tmp_path2.release()
+    var pixmap2_mut = pixmap2.as_mut()
+    pixmap2_mut.fill_path( &tmp_path2, &paint, FillRule.winding, Transform.identity(), none, )
+
+    var clip_path = PathBuilder.from_rect((Rect.from_xywh(40.0, 40.0, 40.0, 40.0) else trap("unwrap")))
+    defer clip_path.release()
+    var mask = Mask.new_(100, 100) else trap("mask")
+    defer mask.release()
+    mask.fill_path(&clip_path, FillRule.winding, true, Transform.identity())
+
+    let pixmap_paint = PixmapPaint()
+    pixmap.draw_pixmap(0, 0, pixmap2.as_ref(), &pixmap_paint, Transform.identity(), &mask)
+
+    harness.expect_png(t, &pixmap, "mask/skip-dest.png")
+
+func intersect_aa(t: Test*):
+    var circle1 = PathBuilder.from_circle(75.0, 75.0, 50.0) else trap("path")
+    defer circle1.release()
+    var circle2 = PathBuilder.from_circle(125.0, 125.0, 50.0) else trap("path")
+    defer circle2.release()
+
+    var mask = Mask.new_(200, 200) else trap("mask")
+    defer mask.release()
+    mask.fill_path(&circle1, FillRule.winding, true, Transform.identity())
+    mask.intersect_path(&circle2, FillRule.winding, true, Transform.identity())
+
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = false
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_rect( (Rect.from_xywh(0.0, 0.0, 200.0, 200.0) else trap("unwrap")), &paint, Transform.identity(), (&mask), )
+
+    harness.expect_png(t, &pixmap, "mask/intersect-aa.png")
+
+func ignore_memset(t: Test*):
+    var clip_path = PathBuilder.from_rect((Rect.from_xywh(10.0, 10.0, 80.0, 80.0) else trap("unwrap")))
+    defer clip_path.release()
+
+    var mask = Mask.new_(100, 100) else trap("mask")
+    defer mask.release()
+    mask.fill_path(&clip_path, FillRule.winding, false, Transform.identity())
+
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 255)
+    paint.anti_alias = false
+
+    var pixmap = Pixmap.new_(100, 100) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_rect( (Rect.from_xywh(0.0, 0.0, 100.0, 100.0) else trap("unwrap")), &paint, Transform.identity(), (&mask), )
+
+    harness.expect_png(t, &pixmap, "mask/ignore-memset.png")
+
+func ignore_source(t: Test*):
+    var clip_path = PathBuilder.from_rect((Rect.from_xywh(10.0, 10.0, 80.0, 80.0) else trap("unwrap")))
+    defer clip_path.release()
+
+    var mask = Mask.new_(100, 100) else trap("mask")
+    defer mask.release()
+    mask.fill_path(&clip_path, FillRule.winding, false, Transform.identity())
+
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 255)
+    paint.blend_mode = BlendMode.source_over
+    paint.anti_alias = false
+
+    var pixmap = Pixmap.new_(100, 100) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill(Color.white())
+    pixmap.fill_rect( (Rect.from_xywh(0.0, 0.0, 100.0, 100.0) else trap("unwrap")), &paint, Transform.identity(), (&mask), )
+
+    harness.expect_png(t, &pixmap, "mask/ignore-source.png")
+
+func apply_mask(t: Test*):
+    var pixmap = Pixmap.new_(100, 100) else trap("pixmap")
+    defer pixmap.release()
+
+    var clip_path = PathBuilder.from_circle(100.0, 100.0, 50.0) else trap("path")
+    defer clip_path.release()
+    var mask = Mask.new_(100, 100) else trap("mask")
+    defer mask.release()
+    mask.fill_path(&clip_path, FillRule.winding, true, Transform.identity())
+
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = false
+
+    let rect = (Rect.from_xywh(0.0, 0.0, 100.0, 100.0) else trap("unwrap"))
+    pixmap.fill_rect(rect, &paint, Transform.identity(), none)
+    pixmap.apply_mask(&mask)
+
+    harness.expect_png(t, &pixmap, "mask/apply-mask.png")
+
+func mask_from_alpha(t: Test*):
+    var path = PathBuilder.from_circle(100.0, 100.0, 50.0) else trap("path")
+    defer path.release()
+
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = true
+
+    var pixmap = Pixmap.new_(100, 100) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    let mask = Mask.from_pixmap(pixmap.as_ref(), MaskType.alpha)
+
+    harness.expect_mask_png(t, &mask, "mask/mask-from-alpha.png")
+
+func mask_from_luma(t: Test*):
+    var path = PathBuilder.from_circle(100.0, 100.0, 50.0) else trap("path")
+    defer path.release()
+
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = true
+
+    var pixmap = Pixmap.new_(100, 100) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    let mask = Mask.from_pixmap(pixmap.as_ref(), MaskType.luminance)
+
+    harness.expect_mask_png(t, &mask, "mask/mask-from-luma.png")
+
+pub let tests: TestCase[12] = [
+    TestCase(name = "mask::rect", run = rect_),
+    TestCase(name = "mask::rect_aa", run = rect_aa),
+    TestCase(name = "mask::rect_ts", run = rect_ts),
+    TestCase(name = "mask::circle_bottom_right_aa", run = circle_bottom_right_aa),
+    TestCase(name = "mask::stroke", run = stroke_),
+    TestCase(name = "mask::skip_dest", run = skip_dest),
+    TestCase(name = "mask::intersect_aa", run = intersect_aa),
+    TestCase(name = "mask::ignore_memset", run = ignore_memset),
+    TestCase(name = "mask::ignore_source", run = ignore_source),
+    TestCase(name = "mask::apply_mask", run = apply_mask),
+    TestCase(name = "mask::mask_from_alpha", run = mask_from_alpha),
+    TestCase(name = "mask::mask_from_luma", run = mask_from_luma),
+]

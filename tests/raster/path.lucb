@@ -1,0 +1,326 @@
+#==============================================================================================
+#
+#   path - tiny-skia's integration tests: path.rs
+#
+#   DESCRIPTION:
+#       Port of tiny-skia 0.12.0 tests/integration/path.rs: building paths, their segments
+#       and bounds, transforms and tight bounds.
+#
+#       Copyright (c) 2020 Yevhenii Reizner (tiny-skia's tests)
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-tiny-skia)
+#
+#==============================================================================================
+
+import harness
+from harness import Test, TestCase
+from raster import PathBuilder, PathSegment, Point, Rect, Transform
+
+func empty(t: Test*):
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    t.check(harness.finish_is_none(&pb), "finish must be none")
+
+func line(t: Test*):
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(10.0, 20.0)
+    pb.line_to(30.0, 40.0)
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+    harness.expect_rect(t, path.bounds(), Rect.from_ltrb(10.0, 20.0, 30.0, 40.0))
+    let expected: PathSegment[2] = [
+        PathSegment.move_to(p = Point.from_xy(10.0, 20.0)),
+        PathSegment.line_to(p = Point.from_xy(30.0, 40.0)),
+    ]
+    harness.expect_segments(t, &path, expected)
+    # Rust's Debug formatting of a Path ("Path { segments: \"M 10 20 L 30 40\", bounds: ...")
+    # has no Luce counterpart; the segments and bounds it prints are checked above.
+
+func no_move_before_line(t: Test*):
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.line_to(30.0, 40.0)
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+    harness.expect_rect(t, path.bounds(), Rect.from_ltrb(0.0, 0.0, 30.0, 40.0))
+    let expected: PathSegment[2] = [
+        PathSegment.move_to(p = Point.from_xy(0.0, 0.0)),
+        PathSegment.line_to(p = Point.from_xy(30.0, 40.0)),
+    ]
+    harness.expect_segments(t, &path, expected)
+
+func no_move_before_quad(t: Test*):
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.quad_to(40.0, 30.0, 60.0, 75.0)
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+    harness.expect_rect(t, path.bounds(), Rect.from_ltrb(0.0, 0.0, 60.0, 75.0))
+    let expected: PathSegment[2] = [
+        PathSegment.move_to(p = Point.from_xy(0.0, 0.0)),
+        PathSegment.quad_to(p1 = Point.from_xy(40.0, 30.0), p = Point.from_xy(60.0, 75.0)),
+    ]
+    harness.expect_segments(t, &path, expected)
+
+func no_move_before_cubic(t: Test*):
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.cubic_to(40.0, 30.0, 60.0, 75.0, 33.0, 66.0)
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+    harness.expect_rect(t, path.bounds(), Rect.from_ltrb(0.0, 0.0, 60.0, 75.0))
+    let expected: PathSegment[2] = [
+        PathSegment.move_to(p = Point.from_xy(0.0, 0.0)),
+        PathSegment.cubic_to(p1 = Point.from_xy(40.0, 30.0), p2 = Point.from_xy(60.0, 75.0), p = Point.from_xy(33.0, 66.0)),
+    ]
+    harness.expect_segments(t, &path, expected)
+
+func no_move_before_close(t: Test*):
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.close()
+    t.check(harness.finish_is_none(&pb), "finish must be none")
+
+func double_close(t: Test*):
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(10.0, 10.0)
+    pb.line_to(20.0, 10.0)
+    pb.line_to(20.0, 20.0)
+    pb.close()
+    pb.close()
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+    harness.expect_rect(t, path.bounds(), Rect.from_ltrb(10.0, 10.0, 20.0, 20.0))
+    let expected: PathSegment[4] = [
+        PathSegment.move_to(p = Point.from_xy(10.0, 10.0)),
+        PathSegment.line_to(p = Point.from_xy(20.0, 10.0)),
+        PathSegment.line_to(p = Point.from_xy(20.0, 20.0)),
+        PathSegment.close,
+    ]
+    harness.expect_segments(t, &path, expected)
+
+func double_move_to_1(t: Test*):
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(10.0, 20.0)
+    pb.move_to(30.0, 40.0)
+    t.check(harness.finish_is_none(&pb), "finish must be none")
+
+func double_move_to_2(t: Test*):
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(10.0, 20.0)
+    pb.move_to(20.0, 10.0)
+    pb.line_to(30.0, 40.0)
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+    harness.expect_rect(t, path.bounds(), Rect.from_ltrb(20.0, 10.0, 30.0, 40.0))
+    let expected: PathSegment[2] = [
+        PathSegment.move_to(p = Point.from_xy(20.0, 10.0)),
+        PathSegment.line_to(p = Point.from_xy(30.0, 40.0)),
+    ]
+    harness.expect_segments(t, &path, expected)
+
+func two_contours(t: Test*):
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(10.0, 20.0)
+    pb.line_to(30.0, 40.0)
+    pb.move_to(100.0, 200.0)
+    pb.line_to(300.0, 400.0)
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+    harness.expect_rect(t, path.bounds(), Rect.from_ltrb(10.0, 20.0, 300.0, 400.0))
+    let expected: PathSegment[4] = [
+        PathSegment.move_to(p = Point.from_xy(10.0, 20.0)),
+        PathSegment.line_to(p = Point.from_xy(30.0, 40.0)),
+        PathSegment.move_to(p = Point.from_xy(100.0, 200.0)),
+        PathSegment.line_to(p = Point.from_xy(300.0, 400.0)),
+    ]
+    harness.expect_segments(t, &path, expected)
+
+func two_closed_contours(t: Test*):
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(10.0, 20.0)
+    pb.line_to(30.0, 40.0)
+    pb.close()
+    pb.move_to(100.0, 200.0)
+    pb.line_to(300.0, 400.0)
+    pb.close()
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+    harness.expect_rect(t, path.bounds(), Rect.from_ltrb(10.0, 20.0, 300.0, 400.0))
+    let expected: PathSegment[6] = [
+        PathSegment.move_to(p = Point.from_xy(10.0, 20.0)),
+        PathSegment.line_to(p = Point.from_xy(30.0, 40.0)),
+        PathSegment.close,
+        PathSegment.move_to(p = Point.from_xy(100.0, 200.0)),
+        PathSegment.line_to(p = Point.from_xy(300.0, 400.0)),
+        PathSegment.close,
+    ]
+    harness.expect_segments(t, &path, expected)
+
+func line_after_close(t: Test*):
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(10.0, 20.0)
+    pb.line_to(30.0, 40.0)
+    pb.close()
+    pb.line_to(20.0, 20.0)
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+    harness.expect_rect(t, path.bounds(), Rect.from_ltrb(10.0, 20.0, 30.0, 40.0))
+    let expected: PathSegment[5] = [
+        PathSegment.move_to(p = Point.from_xy(10.0, 20.0)),
+        PathSegment.line_to(p = Point.from_xy(30.0, 40.0)),
+        PathSegment.close,
+        PathSegment.move_to(p = Point.from_xy(10.0, 20.0)),
+        PathSegment.line_to(p = Point.from_xy(20.0, 20.0)),
+    ]
+    harness.expect_segments(t, &path, expected)
+
+func hor_line(t: Test*):
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(10.0, 10.0)
+    pb.line_to(20.0, 10.0)
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+    harness.expect_rect(t, path.bounds(), Rect.from_ltrb(10.0, 10.0, 20.0, 10.0))
+    let expected: PathSegment[2] = [
+        PathSegment.move_to(p = Point.from_xy(10.0, 10.0)),
+        PathSegment.line_to(p = Point.from_xy(20.0, 10.0)),
+    ]
+    harness.expect_segments(t, &path, expected)
+
+func ver_line(t: Test*):
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(10.0, 10.0)
+    pb.line_to(10.0, 20.0)
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+    harness.expect_rect(t, path.bounds(), Rect.from_ltrb(10.0, 10.0, 10.0, 20.0))
+    let expected: PathSegment[2] = [
+        PathSegment.move_to(p = Point.from_xy(10.0, 10.0)),
+        PathSegment.line_to(p = Point.from_xy(10.0, 20.0)),
+    ]
+    harness.expect_segments(t, &path, expected)
+
+func translate(t: Test*):
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(10.0, 20.0)
+    pb.line_to(30.0, 40.0)
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+    t.check(path.transform(Transform.from_translate(10.0, 20.0)), "transform")
+    let expected: PathSegment[2] = [
+        PathSegment.move_to(p = Point.from_xy(20.0, 40.0)),
+        PathSegment.line_to(p = Point.from_xy(40.0, 60.0)),
+    ]
+    harness.expect_segments(t, &path, expected)
+
+func scale(t: Test*):
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(10.0, 20.0)
+    pb.line_to(30.0, 40.0)
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+    t.check(path.transform(Transform.from_scale(2.0, 0.5)), "transform")
+    let expected: PathSegment[2] = [
+        PathSegment.move_to(p = Point.from_xy(20.0, 10.0)),
+        PathSegment.line_to(p = Point.from_xy(60.0, 20.0)),
+    ]
+    harness.expect_segments(t, &path, expected)
+
+func transform(t: Test*):
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(10.0, 20.0)
+    pb.line_to(30.0, 40.0)
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+    t.check(path.transform(Transform.from_row(2.0, 0.7, -0.3, 0.5, 10.0, 20.0)), "transform")
+    let expected: PathSegment[2] = [
+        PathSegment.move_to(p = Point.from_xy(24.0, 37.0)),
+        PathSegment.line_to(p = Point.from_xy(58.0, 61.0)),
+    ]
+    harness.expect_segments(t, &path, expected)
+
+func invalid_transform(t: Test*):
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(10.0, 20.0)
+    pb.line_to(30.0, 40.0)
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+    # will produce infinity
+    t.check(not path.transform(Transform.from_scale(3.40282347e+38, 3.40282347e+38)), "the transform must fail")
+
+func circle(t: Test*):
+    var path = PathBuilder.from_circle(250.0, 250.0, 300.0) else trap("must be some") # Must not panic.
+    path.release()
+
+func large_circle(t: Test*):
+    var path = PathBuilder.from_circle(250.0, 250.0, 2000.0) else trap("must be some") # Must not panic.
+    path.release()
+
+func tight_bounds_1(t: Test*):
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(50.0, 85.0)
+    pb.line_to(65.0, 135.0)
+    pb.line_to(150.0, 135.0)
+    pb.line_to(85.0, 135.0)
+    pb.quad_to(100.0, 45.0, 50.0, 85.0)
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+    let tight_bounds = path.compute_tight_bounds() else trap("tight bounds")
+    harness.expect_rect(t, path.bounds(), Rect.from_xywh(50.0, 45.0, 100.0, 90.0))
+    harness.expect_rect(t, tight_bounds, Rect.from_xywh(50.0, 72.692307, 100.0, 62.307693))
+
+func tight_bounds_2(t: Test*):
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(-19.309214, 72.11173)
+    pb.cubic_to(-24.832062, 67.477516, -20.490944, 62.16584, -9.61306, 60.247776)
+    pb.cubic_to(1.2648277, 58.329712, 14.560249, 60.53159, 20.083096, 65.16581)
+    pb.cubic_to(14.560249, 60.53159, 18.901363, 55.219913, 29.779247, 53.30185)
+    pb.cubic_to(40.65713, 51.383785, 53.952557, 53.585663, 59.475407, 58.21988)
+    pb.quad_to(74.4754, 70.80637, 50.083096, 90.3388)
+    pb.quad_to(-4.3092155, 84.69823, -19.309214, 72.11173)
+    pb.close()
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+    let tight_bounds = path.compute_tight_bounds() else trap("tight bounds")
+    harness.expect_rect(t, tight_bounds, Rect.from_xywh(-21.707121, 52.609154, 86.894302, 37.729645))
+
+pub let tests: TestCase[22] = [
+    TestCase(name = "path::empty", run = empty),
+    TestCase(name = "path::line", run = line),
+    TestCase(name = "path::no_move_before_line", run = no_move_before_line),
+    TestCase(name = "path::no_move_before_quad", run = no_move_before_quad),
+    TestCase(name = "path::no_move_before_cubic", run = no_move_before_cubic),
+    TestCase(name = "path::no_move_before_close", run = no_move_before_close),
+    TestCase(name = "path::double_close", run = double_close),
+    TestCase(name = "path::double_move_to_1", run = double_move_to_1),
+    TestCase(name = "path::double_move_to_2", run = double_move_to_2),
+    TestCase(name = "path::two_contours", run = two_contours),
+    TestCase(name = "path::two_closed_contours", run = two_closed_contours),
+    TestCase(name = "path::line_after_close", run = line_after_close),
+    TestCase(name = "path::hor_line", run = hor_line),
+    TestCase(name = "path::ver_line", run = ver_line),
+    TestCase(name = "path::translate", run = translate),
+    TestCase(name = "path::scale", run = scale),
+    TestCase(name = "path::transform", run = transform),
+    TestCase(name = "path::invalid_transform", run = invalid_transform),
+    TestCase(name = "path::circle", run = circle),
+    TestCase(name = "path::large_circle", run = large_circle),
+    TestCase(name = "path::tight_bounds_1", run = tight_bounds_1),
+    TestCase(name = "path::tight_bounds_2", run = tight_bounds_2),
+]

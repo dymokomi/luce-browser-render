@@ -1,0 +1,392 @@
+#==============================================================================================
+#
+#   gradients - tiny-skia's integration tests: gradients.rs
+#
+#   DESCRIPTION:
+#       Port of tiny-skia 0.12.0 tests/integration/gradients.rs. Each test renders with the
+#       rasterizer and compares against tiny-skia's reference image, pixel for pixel.
+#
+#       Copyright (c) 2020 Yevhenii Reizner (tiny-skia's tests)
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-tiny-skia)
+#
+#==============================================================================================
+
+import harness
+from harness import Test, TestCase
+from raster import Paint, PathBuilder, Pixmap, PixmapPaint, Transform, Rect, Point, Color, ColorU8, Stroke, StrokeDash, LineCap, LineJoin, FillRule, BlendMode, SpreadMode, FilterQuality, GradientStop, LinearGradient, RadialGradient, SweepGradient, Pattern, Mask, MaskType, IntRect, ColorSpace, Shader
+
+func two_stops_linear_pad_lq(t: Test*):
+    var paint = Paint()
+    defer paint.release()
+    paint.anti_alias = false
+    paint.shader = (LinearGradient.new_( Point.from_xy(10.0, 10.0), Point.from_xy(190.0, 190.0), [ GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "gradients/two-stops-linear-pad-lq.png")
+
+func two_stops_linear_repeat_lq(t: Test*):
+    var paint = Paint()
+    defer paint.release()
+    paint.anti_alias = false
+    paint.shader = (LinearGradient.new_( Point.from_xy(10.0, 10.0), Point.from_xy(100.0, 100.0), [ GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.repeat, Transform.identity(), ) else trap("unwrap"))
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "gradients/two-stops-linear-repeat-lq.png")
+
+func two_stops_linear_reflect_lq(t: Test*):
+    var paint = Paint()
+    defer paint.release()
+    paint.anti_alias = false
+    paint.shader = (LinearGradient.new_( Point.from_xy(10.0, 10.0), Point.from_xy(100.0, 100.0), [ GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.reflect, Transform.identity(), ) else trap("unwrap"))
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "gradients/two-stops-linear-reflect-lq.png")
+
+func three_stops_evenly_spaced_lq(t: Test*):
+    var paint = Paint()
+    defer paint.release()
+    paint.anti_alias = false
+    paint.shader = (LinearGradient.new_( Point.from_xy(10.0, 10.0), Point.from_xy(190.0, 190.0), [ GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(0.50, Color.from_rgba8(220, 140, 75, 180)), GradientStop.new_(0.75, Color.from_rgba8(40, 180, 55, 160)), ],  SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "gradients/three-stops-evenly-spaced-lq.png")
+
+func two_stops_unevenly_spaced_lq(t: Test*):
+    var paint = Paint()
+    defer paint.release()
+    paint.anti_alias = false
+    paint.shader = (LinearGradient.new_( Point.from_xy(10.0, 10.0), Point.from_xy(190.0, 190.0), [ GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(0.75, Color.from_rgba8(220, 140, 75, 180)), ],  SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "gradients/two-stops-unevenly-spaced-lq.png")
+
+func two_stops_linear_pad_hq(t: Test*):
+    var paint = Paint()
+    defer paint.release()
+    paint.force_hq_pipeline = true
+    paint.anti_alias = false
+    paint.shader = (LinearGradient.new_( Point.from_xy(10.0, 10.0), Point.from_xy(190.0, 190.0), [ GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "gradients/two-stops-linear-pad-hq.png")
+
+func two_stops_linear_repeat_hq(t: Test*):
+    var paint = Paint()
+    defer paint.release()
+    paint.force_hq_pipeline = true
+    paint.anti_alias = false
+    paint.shader = (LinearGradient.new_( Point.from_xy(10.0, 10.0), Point.from_xy(100.0, 100.0), [ GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.repeat, Transform.identity(), ) else trap("unwrap"))
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "gradients/two-stops-linear-repeat-hq.png")
+
+func two_stops_linear_reflect_hq(t: Test*):
+    var paint = Paint()
+    defer paint.release()
+    paint.force_hq_pipeline = true
+    paint.anti_alias = false
+    paint.shader = (LinearGradient.new_( Point.from_xy(10.0, 10.0), Point.from_xy(100.0, 100.0), [ GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.reflect, Transform.identity(), ) else trap("unwrap"))
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "gradients/two-stops-linear-reflect-hq.png")
+
+func three_stops_evenly_spaced_hq(t: Test*):
+    var paint = Paint()
+    defer paint.release()
+    paint.force_hq_pipeline = true
+    paint.anti_alias = false
+    paint.shader = (LinearGradient.new_( Point.from_xy(10.0, 10.0), Point.from_xy(190.0, 190.0), [ GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(0.50, Color.from_rgba8(220, 140, 75, 180)), GradientStop.new_(0.75, Color.from_rgba8(40, 180, 55, 160)), ],  SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "gradients/three-stops-evenly-spaced-hq.png")
+
+func two_stops_unevenly_spaced_hq(t: Test*):
+    var paint = Paint()
+    defer paint.release()
+    paint.force_hq_pipeline = true
+    paint.anti_alias = false
+    paint.shader = (LinearGradient.new_( Point.from_xy(10.0, 10.0), Point.from_xy(190.0, 190.0), [ GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(0.75, Color.from_rgba8(220, 140, 75, 180)), ],  SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "gradients/two-stops-unevenly-spaced-hq.png")
+
+# The radial gradient is only supported by the high quality pipeline.
+# Therefore we do not have a lq/hq split.
+
+func well_behaved_radial(t: Test*):
+    var paint = Paint()
+    defer paint.release()
+    paint.anti_alias = false
+    paint.shader = (RadialGradient.new_( Point.from_xy(100.0, 100.0), 0.0, Point.from_xy(120.0, 80.0), 100.0, [ GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(0.75, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "gradients/well-behaved-radial.png")
+
+func focal_on_circle_radial(t: Test*):
+    var paint = Paint()
+    defer paint.release()
+    paint.anti_alias = false
+    paint.shader = (RadialGradient.new_( Point.from_xy(100.0, 100.0), 0.0, Point.from_xy(120.0, 80.0), 28.29, [ GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(0.75, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "gradients/focal-on-circle-radial.png")
+
+func conical_greater_radial(t: Test*):
+    var paint = Paint()
+    defer paint.release()
+    paint.anti_alias = false
+    paint.shader = (RadialGradient.new_( Point.from_xy(100.0, 100.0), 0.0, Point.from_xy(120.0, 80.0), 10.0, [ GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(0.75, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "gradients/conical-greater-radial.png")
+
+func simple_radial_lq(t: Test*):
+    var paint = Paint()
+    defer paint.release()
+    paint.anti_alias = false
+    paint.shader = (RadialGradient.new_( Point.from_xy(100.0, 100.0), 0.0, Point.from_xy(100.0, 100.0), 100.0, [ GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.00, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "gradients/simple-radial-lq.png")
+
+func simple_radial_hq(t: Test*):
+    var paint = Paint()
+    defer paint.release()
+    paint.force_hq_pipeline = true
+    paint.anti_alias = false
+    paint.shader = (RadialGradient.new_( Point.from_xy(100.0, 100.0), 0.0, Point.from_xy(100.0, 100.0), 100.0, [ GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.00, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "gradients/simple-radial-hq.png")
+
+func simple_radial_with_ts_hq(t: Test*):
+    var paint = Paint()
+    defer paint.release()
+    paint.force_hq_pipeline = true
+    paint.anti_alias = false
+    paint.shader = (RadialGradient.new_( Point.from_xy(100.0, 100.0), 0.0, Point.from_xy(100.0, 100.0), 100.0, [ GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.00, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.pad_, Transform.from_row(2.0, 0.3, -0.7, 1.2, 10.5, -12.3), ) else trap("unwrap"))
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "gradients/simple-radial-with-ts-hq.png")
+
+# Gradient doesn't add the Premultiply stage when all stops are opaque.
+# But it checks colors only on creation, so we have to recheck them after calling `apply_opacity`.
+func global_opacity(t: Test*):
+    var paint = Paint()
+    defer paint.release()
+    paint.anti_alias = false
+    paint.shader = (RadialGradient.new_( Point.from_xy(100.0, 100.0), 0.0, Point.from_xy(100.0, 100.0), 100.0, [ GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 255)), GradientStop.new_(1.00, Color.from_rgba8(220, 140, 75, 255)), ], SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+    paint.shader.apply_opacity(0.5)
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "gradients/global-opacity.png")
+
+func strip_gradient(t: Test*):
+    # Equal radii, different centers creates a Strip gradient
+    var paint = Paint()
+    defer paint.release()
+    paint.anti_alias = false
+    paint.shader = (RadialGradient.new_( Point.from_xy(50.0, 100.0), 50.0, Point.from_xy(150.0, 100.0), 50.0, [ GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "gradients/strip-gradient.png")
+
+func concentric_radial(t: Test*):
+    # Same center, non-zero start radius (concentric gradient)
+    var paint = Paint()
+    defer paint.release()
+    paint.anti_alias = false
+    paint.shader = (RadialGradient.new_( Point.from_xy(100.0, 100.0), 30.0, Point.from_xy(100.0, 100.0), 90.0, [ GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "gradients/concentric-radial.png")
+
+func conical_smaller_radial(t: Test*):
+    # Configuration that triggers XYTo2PtConicalSmaller stage
+    # r0=60, r1=30, distance=50
+    # r0_norm=1.2, r1_norm=0.6, focal_x = 1.2/0.6 = 2.0 > 1.0
+    # self.r1 = 0.6 / |1.0 - 2.0| = 0.6, so is_well_behaved() = false
+    # (1.0 - focal_x) < 0.0 is true, triggering XYTo2PtConicalSmaller
+    var paint = Paint()
+    defer paint.release()
+    paint.anti_alias = false
+    paint.shader = (RadialGradient.new_( Point.from_xy(100.0, 100.0), 60.0, Point.from_xy(150.0, 100.0), 30.0, [ GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "gradients/conical-smaller-radial.png")
+
+func sweep_gradient(t: Test*):
+    var paint = Paint()
+    defer paint.release()
+    paint.anti_alias = false
+    paint.shader = (SweepGradient.new_( Point.from_xy(100.0, 100.0), 135.0, 225.0, [ GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path( &path, &paint, FillRule.winding, Transform.identity(), none, )
+
+    harness.expect_png(t, &pixmap, "gradients/sweep-gradient.png")
+
+func sweep_gradient_full(t: Test*):
+    var paint = Paint()
+    defer paint.release()
+    paint.anti_alias = false
+    paint.shader = (SweepGradient.new_( Point.from_xy(100.0, 100.0), 0.0, 360.0, [ GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path( &path, &paint, FillRule.winding, Transform.identity(), none, )
+
+    harness.expect_png(t, &pixmap, "gradients/sweep-gradient-full.png")
+
+pub let tests: TestCase[22] = [
+    TestCase(name = "gradients::two_stops_linear_pad_lq", run = two_stops_linear_pad_lq),
+    TestCase(name = "gradients::two_stops_linear_repeat_lq", run = two_stops_linear_repeat_lq),
+    TestCase(name = "gradients::two_stops_linear_reflect_lq", run = two_stops_linear_reflect_lq),
+    TestCase(name = "gradients::three_stops_evenly_spaced_lq", run = three_stops_evenly_spaced_lq),
+    TestCase(name = "gradients::two_stops_unevenly_spaced_lq", run = two_stops_unevenly_spaced_lq),
+    TestCase(name = "gradients::two_stops_linear_pad_hq", run = two_stops_linear_pad_hq),
+    TestCase(name = "gradients::two_stops_linear_repeat_hq", run = two_stops_linear_repeat_hq),
+    TestCase(name = "gradients::two_stops_linear_reflect_hq", run = two_stops_linear_reflect_hq),
+    TestCase(name = "gradients::three_stops_evenly_spaced_hq", run = three_stops_evenly_spaced_hq),
+    TestCase(name = "gradients::two_stops_unevenly_spaced_hq", run = two_stops_unevenly_spaced_hq),
+    TestCase(name = "gradients::well_behaved_radial", run = well_behaved_radial),
+    TestCase(name = "gradients::focal_on_circle_radial", run = focal_on_circle_radial),
+    TestCase(name = "gradients::conical_greater_radial", run = conical_greater_radial),
+    TestCase(name = "gradients::simple_radial_lq", run = simple_radial_lq),
+    TestCase(name = "gradients::simple_radial_hq", run = simple_radial_hq),
+    TestCase(name = "gradients::simple_radial_with_ts_hq", run = simple_radial_with_ts_hq),
+    TestCase(name = "gradients::global_opacity", run = global_opacity),
+    TestCase(name = "gradients::strip_gradient", run = strip_gradient),
+    TestCase(name = "gradients::concentric_radial", run = concentric_radial),
+    TestCase(name = "gradients::conical_smaller_radial", run = conical_smaller_radial),
+    TestCase(name = "gradients::sweep_gradient", run = sweep_gradient),
+    TestCase(name = "gradients::sweep_gradient_full", run = sweep_gradient_full),
+]

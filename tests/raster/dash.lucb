@@ -1,0 +1,210 @@
+#==============================================================================================
+#
+#   dash - tiny-skia's integration tests: dash.rs
+#
+#   DESCRIPTION:
+#       Port of tiny-skia 0.12.0 tests/integration/dash.rs. Each test renders with the
+#       rasterizer and compares against tiny-skia's reference image, pixel for pixel.
+#
+#       Copyright (c) 2020 Yevhenii Reizner (tiny-skia's tests)
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-tiny-skia)
+#
+#==============================================================================================
+
+import harness
+from harness import Test, TestCase
+from raster import Paint, PathBuilder, Pixmap, PixmapPaint, Transform, Rect, Point, Color, ColorU8, Stroke, StrokeDash, LineCap, LineJoin, FillRule, BlendMode, SpreadMode, FilterQuality, GradientStop, LinearGradient, RadialGradient, SweepGradient, Pattern, Mask, MaskType, IntRect, ColorSpace, Shader
+
+func line(t: Test*):
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(10.0, 20.0)
+    pb.line_to(90.0, 80.0)
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = false
+
+    var stroke = Stroke()
+    defer harness.release_stroke(&stroke)
+    stroke.dash = StrokeDash.new_([5.0, 10.0], 0.0)
+    stroke.width = 2.0
+
+    var pixmap = Pixmap.new_(100, 100) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.stroke_path(&path, &paint, &stroke, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "dash/line.png")
+
+func quad(t: Test*):
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(10.0, 20.0)
+    pb.quad_to(35.0, 75.0, 90.0, 80.0)
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = false
+
+    var stroke = Stroke()
+    defer harness.release_stroke(&stroke)
+    stroke.dash = StrokeDash.new_([5.0, 10.0], 0.0)
+    stroke.width = 2.0
+
+    var pixmap = Pixmap.new_(100, 100) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.stroke_path(&path, &paint, &stroke, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "dash/quad.png")
+
+func cubic(t: Test*):
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(10.0, 20.0)
+    pb.cubic_to(95.0, 35.0, 0.0, 75.0, 75.0, 90.0)
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = false
+
+    var stroke = Stroke()
+    defer harness.release_stroke(&stroke)
+    stroke.dash = StrokeDash.new_([5.0, 10.0], 0.0)
+    stroke.width = 2.0
+
+    var pixmap = Pixmap.new_(100, 100) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.stroke_path(&path, &paint, &stroke, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "dash/cubic.png")
+
+func hairline(t: Test*):
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(10.0, 20.0)
+    pb.cubic_to(95.0, 35.0, 0.0, 75.0, 75.0, 90.0)
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = true
+
+    var stroke = Stroke()
+    defer harness.release_stroke(&stroke)
+    stroke.dash = StrokeDash.new_([5.0, 10.0], 0.0)
+    stroke.width = 0.5
+
+    var pixmap = Pixmap.new_(100, 100) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.stroke_path(&path, &paint, &stroke, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "dash/hairline.png")
+
+func complex(t: Test*):
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(28.7, 23.9)
+    pb.line_to(177.4, 35.2)
+    pb.line_to(177.4, 68.0)
+    pb.line_to(129.7, 68.0)
+    pb.cubic_to(81.6, 59.3, 41.8, 63.3, 33.4, 115.2)
+    pb.cubic_to(56.8, 128.7, 77.3, 143.8, 53.3, 183.8)
+    pb.cubic_to(113.8, 185.7, 91.0, 109.7, 167.3, 111.8)
+    pb.cubic_to(-56.2, 90.3, 177.3, 68.0, 110.2, 95.5)
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = true
+
+    var stroke = Stroke()
+    defer harness.release_stroke(&stroke)
+    stroke.dash = StrokeDash.new_([10.0, 5.0], 2.0)
+    stroke.width = 2.0
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.stroke_path(&path, &paint, &stroke, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "dash/complex.png")
+
+func multi_subpaths(t: Test*):
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(49.0, 76.0)
+    pb.cubic_to(22.0, 150.0, 11.0, 213.0, 186.0, 151.0)
+    pb.cubic_to(194.0, 106.0, 195.0, 64.0, 169.0, 26.0)
+    pb.move_to(124.0, 41.0)
+    pb.line_to(162.0, 105.0)
+    pb.cubic_to(135.0, 175.0, 97.0, 166.0, 53.0, 128.0)
+    pb.line_to(93.0, 71.0)
+    pb.move_to(24.0, 52.0)
+    pb.line_to(108.0, 20.0)
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = true
+
+    var stroke = Stroke()
+    defer harness.release_stroke(&stroke)
+    stroke.dash = StrokeDash.new_([10.0, 5.0], 2.0)
+    stroke.width = 2.0
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.stroke_path(&path, &paint, &stroke, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "dash/multi_subpaths.png")
+
+func closed(t: Test*):
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(22.0, 22.0)
+    pb.cubic_to(63.0, 16.0, 82.0, 24.0, 84.0, 46.0)
+    pb.cubic_to(86.0, 73.0, 15.0, 58.0, 16.0, 89.0)
+    pb.close()
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = true
+
+    var stroke = Stroke()
+    defer harness.release_stroke(&stroke)
+    stroke.dash = StrokeDash.new_([10.0, 5.0], 2.0)
+    stroke.width = 2.0
+
+    var pixmap = Pixmap.new_(100, 100) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.stroke_path(&path, &paint, &stroke, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "dash/closed.png")
+
+pub let tests: TestCase[7] = [
+    TestCase(name = "dash::line", run = line),
+    TestCase(name = "dash::quad", run = quad),
+    TestCase(name = "dash::cubic", run = cubic),
+    TestCase(name = "dash::hairline", run = hairline),
+    TestCase(name = "dash::complex", run = complex),
+    TestCase(name = "dash::multi_subpaths", run = multi_subpaths),
+    TestCase(name = "dash::closed", run = closed),
+]

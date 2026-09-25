@@ -1,0 +1,66 @@
+#==============================================================================================
+#
+#   skia_dash - tiny-skia's integration tests: skia_dash.rs
+#
+#   DESCRIPTION:
+#       Port of tiny-skia 0.12.0 tests/integration/skia_dash.rs. Each test renders with the
+#       rasterizer and compares against tiny-skia's reference image, pixel for pixel.
+#
+#       Copyright (c) 2020 Yevhenii Reizner (tiny-skia's tests)
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-tiny-skia)
+#
+#==============================================================================================
+
+import harness
+from harness import Test, TestCase
+from raster import Paint, PathBuilder, Pixmap, PixmapPaint, Transform, Rect, Point, Color, ColorU8, Stroke, StrokeDash, LineCap, LineJoin, FillRule, BlendMode, SpreadMode, FilterQuality, GradientStop, LinearGradient, RadialGradient, SweepGradient, Pattern, Mask, MaskType, IntRect, ColorSpace, Shader
+
+func crbug_140642(t: Test*):
+    # We used to see this construct, and due to rounding as we accumulated
+    # our length, the loop where we apply the phase would run off the end of
+    # the array, since it relied on just -= each interval value, which did not
+    # behave as "expected". Now the code explicitly checks for walking off the
+    # end of that array.
+    # 
+    # A different (better) fix might be to rewrite dashing to do all of its
+    # length/phase/measure math using double, but this may need to be
+    # coordinated with SkPathMeasure, to be consistent between the two.
+    t.check(harness.dash_is_some([27734.0, 35660.0, 2157846850.0, 247.0], -248.135982067), "assert")
+
+func crbug_124652(t: Test*):
+    # http://code.google.com/p/chromium/issues/detail?id=124652
+    # This particular test/bug only applies to the float case, where
+    # large values can "swamp" small ones.
+    t.check(harness.dash_is_some([837099584.0, 33450.0], -10.0), "assert")
+
+# Extremely large path_length/dash_length ratios may cause infinite looping
+# due to single precision rounding.
+func infinite_dash(t: Test*):
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(0.0, 5.0)
+    pb.line_to(5000000.0, 5.0)
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = true
+
+    var stroke = Stroke()
+    defer harness.release_stroke(&stroke)
+    stroke.dash = StrokeDash.new_([0.2, 0.2], 0.0)
+
+    var pixmap = Pixmap.new_(100, 100) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.stroke_path(&path, &paint, &stroke, Transform.identity(), none)
+
+    t.check(true, "assert")
+
+pub let tests: TestCase[3] = [
+    TestCase(name = "skia_dash::crbug_140642", run = crbug_140642),
+    TestCase(name = "skia_dash::crbug_124652", run = crbug_124652),
+    TestCase(name = "skia_dash::infinite_dash", run = infinite_dash),
+]

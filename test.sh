@@ -14,3 +14,9 @@ if [ -f src/luce_browser_render/raster/ORDER ]; then
     echo "== luce-base test src/luce_browser_render/raster"
     luce-base test src/luce_browser_render/raster
 fi
+
+# raster: tiny-skia's integration suite against its reference images (tests/raster).
+if [ -f tests/raster/run.lucb ]; then
+    echo "== tests/run_raster.py"
+    python3 tests/run_raster.py
+fi

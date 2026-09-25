@@ -1,0 +1,153 @@
+#==============================================================================================
+#
+#   pixmap - tiny-skia's integration tests: pixmap.rs
+#
+#   DESCRIPTION:
+#       Port of tiny-skia 0.12.0 tests/integration/pixmap.rs. Each test renders with the
+#       rasterizer and compares against tiny-skia's reference image, pixel for pixel.
+#
+#       Copyright (c) 2020 Yevhenii Reizner (tiny-skia's tests)
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-tiny-skia)
+#
+#==============================================================================================
+
+import harness
+from harness import Test, TestCase
+from raster import Paint, PathBuilder, Pixmap, PixmapPaint, Transform, Rect, Point, Color, ColorU8, Stroke, StrokeDash, LineCap, LineJoin, FillRule, BlendMode, SpreadMode, FilterQuality, GradientStop, LinearGradient, RadialGradient, SweepGradient, Pattern, Mask, MaskType, IntRect, ColorSpace, Shader
+
+func clone_rect_1(t: Test*):
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = true
+
+    var tmp_path1 = PathBuilder.from_circle(100.0, 100.0, 80.0) else trap("unwrap")
+    defer tmp_path1.release()
+    pixmap.fill_path( &tmp_path1, &paint, FillRule.winding, Transform.identity(), none, )
+
+    var part = pixmap.as_ref().clone_rect((IntRect.from_xywh(10, 15, 80, 90) else trap("unwrap"))) else trap("unwrap")
+    defer part.release()
+
+    harness.expect_png(t, &part, "pixmap/clone-rect-1.png")
+
+func clone_rect_2(t: Test*):
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = true
+
+    var tmp_path2 = PathBuilder.from_circle(100.0, 100.0, 80.0) else trap("unwrap")
+    defer tmp_path2.release()
+    pixmap.fill_path( &tmp_path2, &paint, FillRule.winding, Transform.identity(), none, )
+
+    var part = pixmap.as_ref().clone_rect((IntRect.from_xywh(130, 120, 80, 90) else trap("unwrap"))) else trap("unwrap")
+    defer part.release()
+
+    harness.expect_png(t, &part, "pixmap/clone-rect-2.png")
+
+func clone_rect_out_of_bound(t: Test*):
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = true
+
+    var tmp_path3 = PathBuilder.from_circle(100.0, 100.0, 80.0) else trap("unwrap")
+    defer tmp_path3.release()
+    pixmap.fill_path( &tmp_path3, &paint, FillRule.winding, Transform.identity(), none, )
+
+    t.check(harness.pixmap_is_none(pixmap.as_ref().clone_rect((IntRect.from_xywh(250, 15, 80, 90) else trap("unwrap")))), "assert")
+    t.check(harness.pixmap_is_none(pixmap.as_ref().clone_rect((IntRect.from_xywh(10, 250, 80, 90) else trap("unwrap")))), "assert")
+    t.check(harness.pixmap_is_none(pixmap.as_ref().clone_rect((IntRect.from_xywh(10, -250, 80, 90) else trap("unwrap")))), "assert")
+
+func fill(t: Test*):
+    let c = Color.from_rgba8(50, 100, 150, 200)
+    var pixmap = Pixmap.new_(10, 10) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill(c)
+    harness.expect_pixel(t, &pixmap, 1, 1, c.premultiply().to_color_u8())
+
+func draw_pixmap(t: Test*):
+    # Tests that painting algorithm will switch `Bicubic`/`Bilinear` to `Nearest`.
+    # Otherwise we will get a blurry image.
+
+    # A pixmap with the bottom half filled with solid color.
+    var sub_paint = Paint()
+    sub_paint.set_color_rgba8(50, 127, 150, 200)
+    sub_paint.anti_alias = false
+    let rect = Rect.from_xywh(0.0, 50.0, 100.0, 50.0) else trap("unwrap")
+    var sub_pixmap = Pixmap.new_(100, 100) else trap("unwrap")
+    defer sub_pixmap.release()
+    sub_pixmap.fill_rect(rect, &sub_paint, Transform.identity(), none)
+
+    var paint = PixmapPaint()
+    paint.quality = FilterQuality.bicubic
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.draw_pixmap(20, 20, sub_pixmap.as_ref(), &paint, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "canvas/draw-pixmap.png")
+
+func triangle_pixmap() -> Pixmap:
+    var paint = Paint()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = true
+
+    var pb = PathBuilder.new_()
+    pb.move_to(0.0, 100.0)
+    pb.line_to(100.0, 100.0)
+    pb.line_to(50.0, 0.0)
+    pb.close()
+    var path = pb.finish() else trap("unwrap")
+    defer path.release()
+
+    var pixmap = Pixmap.new_(100, 100) else trap("unwrap")
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+    return pixmap
+
+func draw_pixmap_ts(t: Test*):
+    var triangle = triangle_pixmap()
+    defer triangle.release()
+
+    var paint = PixmapPaint()
+    paint.quality = FilterQuality.bicubic
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.draw_pixmap(5, 10, triangle.as_ref(), &paint, Transform.from_row(1.2, 0.5, 0.5, 1.2, 0.0, 0.0), none)
+
+    harness.expect_png(t, &pixmap, "canvas/draw-pixmap-ts.png")
+
+func draw_pixmap_opacity(t: Test*):
+    var triangle = triangle_pixmap()
+    defer triangle.release()
+
+    var paint = PixmapPaint()
+    paint.quality = FilterQuality.bicubic
+    paint.opacity = 0.5
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.draw_pixmap(5, 10, triangle.as_ref(), &paint, Transform.from_row(1.2, 0.5, 0.5, 1.2, 0.0, 0.0), none)
+
+    harness.expect_png(t, &pixmap, "canvas/draw-pixmap-opacity.png")
+
+pub let tests: TestCase[7] = [
+    TestCase(name = "pixmap::clone_rect_1", run = clone_rect_1),
+    TestCase(name = "pixmap::clone_rect_2", run = clone_rect_2),
+    TestCase(name = "pixmap::clone_rect_out_of_bound", run = clone_rect_out_of_bound),
+    TestCase(name = "pixmap::fill", run = fill),
+    TestCase(name = "pixmap::draw_pixmap", run = draw_pixmap),
+    TestCase(name = "pixmap::draw_pixmap_ts", run = draw_pixmap_ts),
+    TestCase(name = "pixmap::draw_pixmap_opacity", run = draw_pixmap_opacity),
+]

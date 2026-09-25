@@ -53,7 +53,7 @@ pub struct Paint:
 
     ## Frees the shader's gradient stops.
     pub mutating func release():
-        shader_release(&self.shader)
+        self.shader.release()
 
 # mark: fill_rect =============================================================================
 
@@ -109,7 +109,7 @@ func painter_fill_path(pixmap: PixmapMut*, path: const Path*, paint: const Paint
                 if not tiled.transform(ts):
                     # log::warn!("path transformation failed")
                     return
-                shader_transform(&tile_paint.shader, ts)
+                tile_paint.shader.transform(ts)
 
                 let clip_rect = tile.size().to_screen_int_rect(0, 0)
                 if let subpix0 = pixmap.subpixmap(tile.to_int_rect()):
@@ -131,7 +131,7 @@ func painter_fill_path(pixmap: PixmapMut*, path: const Path*, paint: const Paint
                 let ts2 = Transform.from_translate((f32)tile.x(), (f32)tile.y())
                 if not tiled.transform(ts2):
                     return # technically unreachable
-                shader_transform(&tile_paint.shader, ts2)
+                tile_paint.shader.transform(ts2)
         else:
             let clip_rect = pixmap.size().to_screen_int_rect(0, 0)
             var submask: SubMaskRef? = none
@@ -153,7 +153,7 @@ func painter_fill_path(pixmap: PixmapMut*, path: const Path*, paint: const Paint
             return
 
         var transformed_paint = *paint
-        shader_transform(&transformed_paint.shader, transform)
+        transformed_paint.shader.transform(transform)
 
         painter_fill_path(pixmap, &transformed, &transformed_paint, fill_rule, Transform.identity(), mask)
 
@@ -185,7 +185,7 @@ func painter_stroke_path_impl(pixmap: PixmapMut*, path: const Path*, paint: cons
             # different.
             let scale = (i32)(coverage * 256.0)
             let new_alpha = (255 * scale) >> 8
-            shader_apply_opacity(&hair_paint.shader, (f32)new_alpha / 255.0)
+            hair_paint.shader.apply_opacity((f32)new_alpha / 255.0)
 
         if let tiler0 = DrawTiler.new_(pixmap.width(), pixmap.height()):
             var tiler = tiler0
@@ -193,7 +193,7 @@ func painter_stroke_path_impl(pixmap: PixmapMut*, path: const Path*, paint: cons
             defer tiled.release()
 
             if not transform.is_identity():
-                shader_transform(&hair_paint.shader, transform)
+                hair_paint.shader.transform(transform)
                 if not tiled.transform(transform):
                     # log::warn!("path transformation failed")
                     return
@@ -203,7 +203,7 @@ func painter_stroke_path_impl(pixmap: PixmapMut*, path: const Path*, paint: cons
                 if not tiled.transform(ts):
                     # log::warn!("path transformation failed")
                     return
-                shader_transform(&hair_paint.shader, ts)
+                hair_paint.shader.transform(ts)
 
                 if let subpix0 = pixmap.subpixmap(tile.to_int_rect()):
                     var subpix = subpix0
@@ -219,14 +219,14 @@ func painter_stroke_path_impl(pixmap: PixmapMut*, path: const Path*, paint: cons
                 let ts2 = Transform.from_translate((f32)tile.x(), (f32)tile.y())
                 if not tiled.transform(ts2):
                     return
-                shader_transform(&hair_paint.shader, ts2)
+                hair_paint.shader.transform(ts2)
         else:
             var subpix = pixmap.as_subpixmap()
             var submask: SubMaskRef? = none
             if let m = mask:
                 submask = m.as_submask()
             if not transform.is_identity():
-                shader_transform(&hair_paint.shader, transform)
+                hair_paint.shader.transform(transform)
 
                 # TODO: avoid clone
                 var transformed = path.clone()
@@ -247,7 +247,7 @@ func painter_stroke_path_impl(pixmap: PixmapMut*, path: const Path*, paint: cons
 ## A copy of the paint whose gradient stops are its own (release it).
 func shader_clone_paint(paint: const Paint*) -> Paint:
     var copy = *paint
-    copy.shader = shader_clone(&paint.shader)
+    copy.shader = paint.shader.clone()
     return copy
 
 func stroke_hairline(path: const Path*, paint: const Paint*, line_cap: LineCap, mask: SubMaskRef?, pixmap: SubPixmapMut*):

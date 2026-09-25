@@ -226,15 +226,13 @@ func highp_hue(p: HighpPipeline*):
     let db = p.db
     let da = p.da
 
-    var rr = f8_mul(r, a)
-    var gg = f8_mul(g, a)
-    var bb = f8_mul(b, a)
+    var c = Rgb8(r = f8_mul(r, a), g = f8_mul(g, a), b = f8_mul(b, a))
 
-    set_sat(&rr, &gg, &bb, f8_mul(sat(dr, dg, db), a))
-    set_lum(&rr, &gg, &bb, f8_mul(lum(dr, dg, db), a))
-    clip_color(&rr, &gg, &bb, f8_mul(a, da))
+    set_sat(&c, f8_mul(sat(dr, dg, db), a))
+    set_lum(&c, f8_mul(lum(dr, dg, db), a))
+    clip_color(&c, f8_mul(a, da))
 
-    highp_blend_fn3_finish(p, rr, gg, bb)
+    highp_blend_fn3_finish(p, c)
 
 func highp_saturation(p: HighpPipeline*):
     let r = p.r
@@ -246,15 +244,13 @@ func highp_saturation(p: HighpPipeline*):
     let db = p.db
     let da = p.da
 
-    var rr = f8_mul(dr, a)
-    var gg = f8_mul(dg, a)
-    var bb = f8_mul(db, a)
+    var c = Rgb8(r = f8_mul(dr, a), g = f8_mul(dg, a), b = f8_mul(db, a))
 
-    set_sat(&rr, &gg, &bb, f8_mul(sat(r, g, b), da))
-    set_lum(&rr, &gg, &bb, f8_mul(lum(dr, dg, db), a)) # (This is not redundant.)
-    clip_color(&rr, &gg, &bb, f8_mul(a, da))
+    set_sat(&c, f8_mul(sat(r, g, b), da))
+    set_lum(&c, f8_mul(lum(dr, dg, db), a)) # (This is not redundant.)
+    clip_color(&c, f8_mul(a, da))
 
-    highp_blend_fn3_finish(p, rr, gg, bb)
+    highp_blend_fn3_finish(p, c)
 
 func highp_color(p: HighpPipeline*):
     let r = p.r
@@ -266,14 +262,12 @@ func highp_color(p: HighpPipeline*):
     let db = p.db
     let da = p.da
 
-    var rr = f8_mul(r, da)
-    var gg = f8_mul(g, da)
-    var bb = f8_mul(b, da)
+    var c = Rgb8(r = f8_mul(r, da), g = f8_mul(g, da), b = f8_mul(b, da))
 
-    set_lum(&rr, &gg, &bb, f8_mul(lum(dr, dg, db), a))
-    clip_color(&rr, &gg, &bb, f8_mul(a, da))
+    set_lum(&c, f8_mul(lum(dr, dg, db), a))
+    clip_color(&c, f8_mul(a, da))
 
-    highp_blend_fn3_finish(p, rr, gg, bb)
+    highp_blend_fn3_finish(p, c)
 
 func highp_luminosity(p: HighpPipeline*):
     let r = p.r
@@ -285,17 +279,25 @@ func highp_luminosity(p: HighpPipeline*):
     let db = p.db
     let da = p.da
 
-    var rr = f8_mul(dr, a)
-    var gg = f8_mul(dg, a)
-    var bb = f8_mul(db, a)
+    var c = Rgb8(r = f8_mul(dr, a), g = f8_mul(dg, a), b = f8_mul(db, a))
 
-    set_lum(&rr, &gg, &bb, f8_mul(lum(r, g, b), da))
-    clip_color(&rr, &gg, &bb, f8_mul(a, da))
+    set_lum(&c, f8_mul(lum(r, g, b), da))
+    clip_color(&c, f8_mul(a, da))
 
-    highp_blend_fn3_finish(p, rr, gg, bb)
+    highp_blend_fn3_finish(p, c)
+
+# The rr, gg, bb of the non-separable kernels (Rust passes three `&mut f32x8`; the struct is a
+# workaround: compiler-issues/c_backend_address_of_local_array).
+struct Rgb8:
+    var r: F8
+    var g: F8
+    var b: F8
 
 # The shared tail of the four non-separable kernels.
-func highp_blend_fn3_finish(p: HighpPipeline*, rr: F8, gg: F8, bb: F8):
+func highp_blend_fn3_finish(p: HighpPipeline*, c: Rgb8):
+    let rr = c.r
+    let gg = c.g
+    let bb = c.b
     let r = p.r
     let g = p.g
     let b = p.b
@@ -318,32 +320,32 @@ func sat(r: F8, g: F8, b: F8) -> F8:
 func lum(r: F8, g: F8, b: F8) -> F8:
     return f8_add(f8_add(f8_mul(r, f8_splat(0.30)), f8_mul(g, f8_splat(0.59))), f8_mul(b, f8_splat(0.11)))
 
-func set_sat(r: F8*, g: F8*, b: F8*, s: F8):
-    let mn = f8_min(*r, f8_min(*g, *b))
-    let mx = f8_max(*r, f8_max(*g, *b))
+func set_sat(c: Rgb8*, s: F8):
+    let mn = f8_min(c.r, f8_min(c.g, c.b))
+    let mx = f8_max(c.r, f8_max(c.g, c.b))
     let sat_ = f8_sub(mx, mn)
 
     # Map min channel to 0, max channel to s, and scale the middle proportionally.
     let zero = f8_splat(0.0)
     let is_zero = f8_cmp_eq(sat_, zero)
-    *r = f8_blend(is_zero, zero, f8_div(f8_mul(f8_sub(*r, mn), s), sat_))
-    *g = f8_blend(is_zero, zero, f8_div(f8_mul(f8_sub(*g, mn), s), sat_))
-    *b = f8_blend(is_zero, zero, f8_div(f8_mul(f8_sub(*b, mn), s), sat_))
+    c.r = f8_blend(is_zero, zero, f8_div(f8_mul(f8_sub(c.r, mn), s), sat_))
+    c.g = f8_blend(is_zero, zero, f8_div(f8_mul(f8_sub(c.g, mn), s), sat_))
+    c.b = f8_blend(is_zero, zero, f8_div(f8_mul(f8_sub(c.b, mn), s), sat_))
 
-func set_lum(r: F8*, g: F8*, b: F8*, l: F8):
-    let diff = f8_sub(l, lum(*r, *g, *b))
-    *r = f8_add(*r, diff)
-    *g = f8_add(*g, diff)
-    *b = f8_add(*b, diff)
+func set_lum(c: Rgb8*, l: F8):
+    let diff = f8_sub(l, lum(c.r, c.g, c.b))
+    c.r = f8_add(c.r, diff)
+    c.g = f8_add(c.g, diff)
+    c.b = f8_add(c.b, diff)
 
-func clip_color(r: F8*, g: F8*, b: F8*, a: F8):
-    let mn = f8_min(*r, f8_min(*g, *b))
-    let mx = f8_max(*r, f8_max(*g, *b))
-    let l = lum(*r, *g, *b)
+func clip_color(c: Rgb8*, a: F8):
+    let mn = f8_min(c.r, f8_min(c.g, c.b))
+    let mx = f8_max(c.r, f8_max(c.g, c.b))
+    let l = lum(c.r, c.g, c.b)
 
-    *r = clip_channel(*r, mn, mx, l, a)
-    *g = clip_channel(*g, mn, mx, l, a)
-    *b = clip_channel(*b, mn, mx, l, a)
+    c.r = clip_channel(c.r, mn, mx, l, a)
+    c.g = clip_channel(c.g, mn, mx, l, a)
+    c.b = clip_channel(c.b, mn, mx, l, a)
 
 func clip_channel(c0: F8, mn: F8, mx: F8, l: F8, a: F8) -> F8:
     let zero = f8_splat(0.0)

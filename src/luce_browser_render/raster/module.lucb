@@ -38,6 +38,9 @@
 #         wrapping operators.
 #       - Rust's f32::min/max ignore NaN: `fmin`/`fmax`. tiny-skia's "faster" min/max are
 #         `pmin`/`pmax`.
+#       - Bit-exactness needs IEEE f32 arithmetic without contraction: the native backend
+#         gives it; the C backend (luce-base 0.23.0) fuses `a * b + c` into FMA, see
+#         .donors/luce-browser-tools/compiler-issues/c_backend_float_contraction.lucb.
 #       - The two crates and their Rust submodules share one Luce module, so free
 #         functions whose names collide carry the name of their Rust module as a prefix:
 #         `highp_`/`lowp_` for the pipeline stages, `scan_`, `scan_aa_`, `hairline_`,

@@ -35,12 +35,12 @@ struct RasterPipelineBlitter: Blitter:
         if paint.blend_mode == .destination:
             # `Destination` keep the pixmap unchanged. Nothing to do here.
             return none
-        if paint.blend_mode == .destination_in and shader_is_opaque(&paint.shader) and paint.is_solid_color():
+        if paint.blend_mode == .destination_in and paint.shader.is_opaque() and paint.is_solid_color():
             return none
 
         # We can strength-reduce SourceOver into Source when opaque.
         var blend_mode = paint.blend_mode
-        if shader_is_opaque(&paint.shader) and blend_mode == .source_over and not has_mask:
+        if paint.shader.is_opaque() and blend_mode == .source_over and not has_mask:
             blend_mode = .source
 
         # When we're drawing a constant color in Source mode, we can sometimes just memset.
@@ -61,7 +61,7 @@ struct RasterPipelineBlitter: Blitter:
 
         var anti_h = RasterPipelineBuilder.new_()
         anti_h.set_force_hq_pipeline(paint.force_hq_pipeline)
-        if not shader_push_stages(&paint.shader, paint.colorspace, &anti_h):
+        if not paint.shader.push_stages(paint.colorspace, &anti_h):
             anti_h.release()
             return none
 
@@ -92,7 +92,7 @@ struct RasterPipelineBlitter: Blitter:
 
         var rect_p = RasterPipelineBuilder.new_()
         rect_p.set_force_hq_pipeline(paint.force_hq_pipeline)
-        if not shader_push_stages(&paint.shader, paint.colorspace, &rect_p):
+        if not paint.shader.push_stages(paint.colorspace, &rect_p):
             rect_p.release()
             blit_anti_h_rp.release()
             return none
@@ -121,7 +121,7 @@ struct RasterPipelineBlitter: Blitter:
 
         var mask_p = RasterPipelineBuilder.new_()
         mask_p.set_force_hq_pipeline(paint.force_hq_pipeline)
-        if not shader_push_stages(&paint.shader, paint.colorspace, &mask_p):
+        if not paint.shader.push_stages(paint.colorspace, &mask_p):
             mask_p.release()
             blit_anti_h_rp.release()
             blit_rect_rp.release()

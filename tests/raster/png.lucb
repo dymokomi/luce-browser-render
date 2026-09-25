@@ -1,0 +1,51 @@
+#==============================================================================================
+#
+#   png - tiny-skia's integration tests: png.rs
+#
+#   DESCRIPTION:
+#       Port of tiny-skia 0.12.0 tests/integration/png.rs. Each test renders with the
+#       rasterizer and compares against tiny-skia's reference image, pixel for pixel.
+#
+#       Copyright (c) 2020 Yevhenii Reizner (tiny-skia's tests)
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-tiny-skia)
+#
+#==============================================================================================
+
+import harness
+from harness import Test, TestCase
+from raster import Paint, PathBuilder, Pixmap, PixmapPaint, Transform, Rect, Point, Color, ColorU8, Stroke, StrokeDash, LineCap, LineJoin, FillRule, BlendMode, SpreadMode, FilterQuality, GradientStop, LinearGradient, RadialGradient, SweepGradient, Pattern, Mask, MaskType, IntRect, ColorSpace, Shader
+
+func decode_grayscale(t: Test*):
+    var pixmap = harness.load_png("pngs/grayscale.png")
+    defer pixmap.release()
+    harness.expect_pixel(t, &pixmap, 10, 10, ColorU8.from_rgba(255, 255, 255, 255).premultiply())
+    harness.expect_pixel(t, &pixmap, 50, 50, ColorU8.from_rgba(0, 0, 0, 255).premultiply())
+
+func decode_grayscale_alpha(t: Test*):
+    var pixmap = harness.load_png("pngs/grayscale-alpha.png")
+    defer pixmap.release()
+    harness.expect_pixel(t, &pixmap, 10, 10, ColorU8.from_rgba(0, 0, 0, 0).premultiply())
+    harness.expect_pixel(t, &pixmap, 50, 50, ColorU8.from_rgba(0, 0, 0, 255).premultiply())
+
+func decode_rgb(t: Test*):
+    var pixmap = harness.load_png("pngs/rgb.png")
+    defer pixmap.release()
+    harness.expect_pixel(t, &pixmap, 10, 10, ColorU8.from_rgba(255, 255, 255, 255).premultiply())
+    harness.expect_pixel(t, &pixmap, 50, 50, ColorU8.from_rgba(36, 191, 49, 255).premultiply())
+
+func decode_rgba(t: Test*):
+    var pixmap = harness.load_png("pngs/rgba.png")
+    defer pixmap.release()
+    harness.expect_pixel(t, &pixmap, 10, 10, ColorU8.from_rgba(0, 0, 0, 0).premultiply())
+    harness.expect_pixel(t, &pixmap, 25, 25, ColorU8.from_rgba(161, 227, 165, 108).premultiply())
+    harness.expect_pixel(t, &pixmap, 50, 50, ColorU8.from_rgba(33, 190, 47, 252).premultiply())
+
+# TODO: test encoding, somehow
+
+pub let tests: TestCase[4] = [
+    TestCase(name = "png::decode_grayscale", run = decode_grayscale),
+    TestCase(name = "png::decode_grayscale_alpha", run = decode_grayscale_alpha),
+    TestCase(name = "png::decode_rgb", run = decode_rgb),
+    TestCase(name = "png::decode_rgba", run = decode_rgba),
+]

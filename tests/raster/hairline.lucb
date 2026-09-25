@@ -1,0 +1,290 @@
+#==============================================================================================
+#
+#   hairline - tiny-skia's integration tests: hairline.rs
+#
+#   DESCRIPTION:
+#       Port of tiny-skia 0.12.0 tests/integration/hairline.rs. Each test renders with the
+#       rasterizer and compares against tiny-skia's reference image, pixel for pixel.
+#
+#       Copyright (c) 2020 Yevhenii Reizner (tiny-skia's tests)
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-tiny-skia)
+#
+#==============================================================================================
+
+import harness
+from harness import Test, TestCase
+from raster import Paint, PathBuilder, Pixmap, PixmapPaint, Transform, Rect, Point, Color, ColorU8, Stroke, StrokeDash, LineCap, LineJoin, FillRule, BlendMode, SpreadMode, FilterQuality, GradientStop, LinearGradient, RadialGradient, SweepGradient, Pattern, Mask, MaskType, IntRect, ColorSpace, Shader
+
+func draw_line(x0: f32, y0: f32, x1: f32, y1: f32, anti_alias: bool, width: f32, line_cap: LineCap) -> Pixmap:
+    var pixmap = Pixmap.new_(100, 100) else trap("pixmap")
+
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(x0, y0)
+    pb.line_to(x1, y1)
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = anti_alias
+
+    var stroke = Stroke()
+    defer harness.release_stroke(&stroke)
+    stroke.width = width
+    stroke.line_cap = line_cap
+    pixmap.stroke_path(&path, &paint, &stroke, Transform.identity(), none)
+
+    return pixmap
+
+func hline_05(t: Test*):
+    var result = draw_line(10.0, 10.0, 90.0, 10.0, false, 0.5, LineCap.butt)
+    defer result.release()
+    harness.expect_png(t, &result, "hairline/hline-05.png")
+
+func hline_05_aa(t: Test*):
+    var result = draw_line(10.0, 10.0, 90.0, 10.0, true, 0.5, LineCap.butt)
+    defer result.release()
+    harness.expect_png(t, &result, "hairline/hline-05-aa.png")
+
+func hline_05_aa_round(t: Test*):
+    var result = draw_line(10.0, 10.0, 90.0, 10.0, true, 0.5, LineCap.round)
+    defer result.release()
+    harness.expect_png(t, &result, "hairline/hline-05-aa-round.png")
+
+func vline_05(t: Test*):
+    var result = draw_line(10.0, 10.0, 10.0, 90.0, false, 0.5, LineCap.butt)
+    defer result.release()
+    harness.expect_png(t, &result, "hairline/vline-05.png")
+
+func vline_05_aa(t: Test*):
+    var result = draw_line(10.0, 10.0, 10.0, 90.0, true, 0.5, LineCap.butt)
+    defer result.release()
+    harness.expect_png(t, &result, "hairline/vline-05-aa.png")
+
+func vline_05_aa_round(t: Test*):
+    var result = draw_line(10.0, 10.0, 10.0, 90.0, true, 0.5, LineCap.round)
+    defer result.release()
+    harness.expect_png(t, &result, "hairline/vline-05-aa-round.png")
+
+func horish_05_aa(t: Test*):
+    var result = draw_line(10.0, 10.0, 90.0, 70.0, true, 0.5, LineCap.butt)
+    defer result.release()
+    harness.expect_png(t, &result, "hairline/horish-05-aa.png")
+
+func vertish_05_aa(t: Test*):
+    var result = draw_line(10.0, 10.0, 70.0, 90.0, true, 0.5, LineCap.butt)
+    defer result.release()
+    harness.expect_png(t, &result, "hairline/vertish-05-aa.png")
+
+func clip_line_05_aa(t: Test*):
+    var result = draw_line(-10.0, 10.0, 110.0, 70.0, true, 0.5, LineCap.butt)
+    defer result.release()
+    harness.expect_png(t, &result, "hairline/clip-line-05-aa.png")
+
+func clip_line_00(t: Test*):
+    var result = draw_line(-10.0, 10.0, 110.0, 70.0, false, 0.0, LineCap.butt)
+    defer result.release()
+    harness.expect_png(t, &result, "hairline/clip-line-00.png")
+
+func clip_line_00_v2(t: Test*):
+    var pixmap = Pixmap.new_(512, 512) else trap("pixmap")
+    defer pixmap.release()
+
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = false
+
+    var stroke = Stroke()
+    defer harness.release_stroke(&stroke)
+    stroke.width = 0.0
+
+    var builder = PathBuilder.new_()
+    defer builder.release()
+    builder.move_to(369.26462, 577.8069)
+    builder.line_to(488.0846, 471.04388)
+    var path = builder.finish() else trap("finish")
+    defer path.release()
+    pixmap.stroke_path(&path, &paint, &stroke, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "hairline/clip-line-00-v2.png")
+
+func clip_hline_top_aa(t: Test*):
+    var result = draw_line(-1.0, 0.0, 101.0, 0.0, true, 1.0, LineCap.butt)
+    defer result.release()
+    harness.expect_png(t, &result, "hairline/clip-hline-top-aa.png")
+
+func clip_hline_bottom_aa(t: Test*):
+    var result = draw_line(-1.0, 100.0, 101.0, 100.0, true, 1.0, LineCap.butt)
+    defer result.release()
+    harness.expect_png(t, &result, "hairline/clip-hline-bottom-aa.png")
+
+func clip_vline_left_aa(t: Test*):
+    var result = draw_line(0.0, -1.0, 0.0, 101.0, true, 1.0, LineCap.butt)
+    defer result.release()
+    harness.expect_png(t, &result, "hairline/clip-vline-left-aa.png")
+
+func clip_vline_right_aa(t: Test*):
+    var result = draw_line(100.0, -1.0, 100.0, 101.0, true, 1.0, LineCap.butt)
+    defer result.release()
+    harness.expect_png(t, &result, "hairline/clip-vline-right-aa.png")
+
+func draw_quad(anti_alias: bool, width: f32, line_cap: LineCap) -> Pixmap:
+    var pixmap = Pixmap.new_(200, 100) else trap("pixmap")
+
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(25.0, 80.0)
+    pb.quad_to(155.0, 75.0, 175.0, 20.0)
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = anti_alias
+
+    var stroke = Stroke()
+    defer harness.release_stroke(&stroke)
+    stroke.width = width
+    stroke.line_cap = line_cap
+    pixmap.stroke_path(&path, &paint, &stroke, Transform.identity(), none)
+
+    return pixmap
+
+func quad_width_05_aa(t: Test*):
+    var result = draw_quad(true, 0.5, LineCap.butt)
+    defer result.release()
+    harness.expect_png(t, &result, "hairline/quad-width-05-aa.png")
+
+func quad_width_05_aa_round(t: Test*):
+    var result = draw_quad(true, 0.5, LineCap.round)
+    defer result.release()
+    harness.expect_png(t, &result, "hairline/quad-width-05-aa-round.png")
+
+func quad_width_00(t: Test*):
+    var result = draw_quad(false, 0.0, LineCap.butt)
+    defer result.release()
+    harness.expect_png(t, &result, "hairline/quad-width-00.png")
+
+func draw_cubic(points: const f32[], anti_alias: bool, width: f32, line_cap: LineCap) -> Pixmap:
+    var pixmap = Pixmap.new_(200, 100) else trap("pixmap")
+
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(points[0], points[1])
+    pb.cubic_to(points[2], points[3], points[4], points[5], points[6], points[7])
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = anti_alias
+
+    var stroke = Stroke()
+    defer harness.release_stroke(&stroke)
+    stroke.width = width
+    stroke.line_cap = line_cap
+    pixmap.stroke_path(&path, &paint, &stroke, Transform.identity(), none)
+
+    return pixmap
+
+func cubic_width_10_aa(t: Test*):
+    var result = draw_cubic([25.0, 80.0, 55.0, 25.0, 155.0, 75.0, 175.0, 20.0], true, 1.0, LineCap.butt)
+    defer result.release()
+    harness.expect_png(t, &result, "hairline/cubic-width-10-aa.png")
+
+func cubic_width_05_aa(t: Test*):
+    var result = draw_cubic([25.0, 80.0, 55.0, 25.0, 155.0, 75.0, 175.0, 20.0], true, 0.5, LineCap.butt)
+    defer result.release()
+    harness.expect_png(t, &result, "hairline/cubic-width-05-aa.png")
+
+func cubic_width_00_aa(t: Test*):
+    var result = draw_cubic([25.0, 80.0, 55.0, 25.0, 155.0, 75.0, 175.0, 20.0], true, 0.0, LineCap.butt)
+    defer result.release()
+    harness.expect_png(t, &result, "hairline/cubic-width-00-aa.png")
+
+func cubic_width_00(t: Test*):
+    var result = draw_cubic([25.0, 80.0, 55.0, 25.0, 155.0, 75.0, 175.0, 20.0], false, 0.0, LineCap.butt)
+    defer result.release()
+    harness.expect_png(t, &result, "hairline/cubic-width-00.png")
+
+func cubic_width_05_aa_round(t: Test*):
+    var result = draw_cubic([25.0, 80.0, 55.0, 25.0, 155.0, 75.0, 175.0, 20.0], true, 0.5, LineCap.round)
+    defer result.release()
+    harness.expect_png(t, &result, "hairline/cubic-width-05-aa-round.png")
+
+func cubic_width_00_round(t: Test*):
+    var result = draw_cubic([25.0, 80.0, 55.0, 25.0, 155.0, 75.0, 175.0, 20.0], false, 0.0, LineCap.round)
+    defer result.release()
+    harness.expect_png(t, &result, "hairline/cubic-width-00-round.png")
+
+func chop_cubic_01(t: Test*):
+    # This curve will invoke `path_geometry::chop_cubic_at_max_curvature` branch of `hair_cubic`.
+    var result = draw_cubic([57.0, 13.0, 17.0, 15.0, 55.0, 97.0, 89.0, 62.0], true, 0.5, LineCap.butt)
+    defer result.release()
+    harness.expect_png(t, &result, "hairline/chop-cubic-01.png")
+
+func clip_cubic_05_aa(t: Test*):
+    var result = draw_cubic([-25.0, 80.0, 55.0, 25.0, 155.0, 75.0, 175.0, 20.0], true, 0.5, LineCap.butt)
+    defer result.release()
+    harness.expect_png(t, &result, "hairline/clip-cubic-05-aa.png")
+
+func clip_cubic_00(t: Test*):
+    var result = draw_cubic([-25.0, 80.0, 55.0, 25.0, 155.0, 75.0, 175.0, 20.0], false, 0.0, LineCap.butt)
+    defer result.release()
+    harness.expect_png(t, &result, "hairline/clip-cubic-00.png")
+
+func clipped_circle_aa(t: Test*):
+    var pixmap = Pixmap.new_(100, 100) else trap("pixmap")
+    defer pixmap.release()
+
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = true
+
+    var stroke = Stroke()
+    defer harness.release_stroke(&stroke)
+    stroke.width = 0.5
+
+    var path = PathBuilder.from_circle(50.0, 50.0, 55.0) else trap("path")
+    defer path.release()
+    pixmap.stroke_path(&path, &paint, &stroke, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "hairline/clipped-circle-aa.png")
+
+pub let tests: TestCase[28] = [
+    TestCase(name = "hairline::hline_05", run = hline_05),
+    TestCase(name = "hairline::hline_05_aa", run = hline_05_aa),
+    TestCase(name = "hairline::hline_05_aa_round", run = hline_05_aa_round),
+    TestCase(name = "hairline::vline_05", run = vline_05),
+    TestCase(name = "hairline::vline_05_aa", run = vline_05_aa),
+    TestCase(name = "hairline::vline_05_aa_round", run = vline_05_aa_round),
+    TestCase(name = "hairline::horish_05_aa", run = horish_05_aa),
+    TestCase(name = "hairline::vertish_05_aa", run = vertish_05_aa),
+    TestCase(name = "hairline::clip_line_05_aa", run = clip_line_05_aa),
+    TestCase(name = "hairline::clip_line_00", run = clip_line_00),
+    TestCase(name = "hairline::clip_line_00_v2", run = clip_line_00_v2),
+    TestCase(name = "hairline::clip_hline_top_aa", run = clip_hline_top_aa),
+    TestCase(name = "hairline::clip_hline_bottom_aa", run = clip_hline_bottom_aa),
+    TestCase(name = "hairline::clip_vline_left_aa", run = clip_vline_left_aa),
+    TestCase(name = "hairline::clip_vline_right_aa", run = clip_vline_right_aa),
+    TestCase(name = "hairline::quad_width_05_aa", run = quad_width_05_aa),
+    TestCase(name = "hairline::quad_width_05_aa_round", run = quad_width_05_aa_round),
+    TestCase(name = "hairline::quad_width_00", run = quad_width_00),
+    TestCase(name = "hairline::cubic_width_10_aa", run = cubic_width_10_aa),
+    TestCase(name = "hairline::cubic_width_05_aa", run = cubic_width_05_aa),
+    TestCase(name = "hairline::cubic_width_00_aa", run = cubic_width_00_aa),
+    TestCase(name = "hairline::cubic_width_00", run = cubic_width_00),
+    TestCase(name = "hairline::cubic_width_05_aa_round", run = cubic_width_05_aa_round),
+    TestCase(name = "hairline::cubic_width_00_round", run = cubic_width_00_round),
+    TestCase(name = "hairline::chop_cubic_01", run = chop_cubic_01),
+    TestCase(name = "hairline::clip_cubic_05_aa", run = clip_cubic_05_aa),
+    TestCase(name = "hairline::clip_cubic_00", run = clip_cubic_00),
+    TestCase(name = "hairline::clipped_circle_aa", run = clipped_circle_aa),
+]

@@ -1,0 +1,221 @@
+#==============================================================================================
+#
+#   pattern - tiny-skia's integration tests: pattern.rs
+#
+#   DESCRIPTION:
+#       Port of tiny-skia 0.12.0 tests/integration/pattern.rs. Each test renders with the
+#       rasterizer and compares against tiny-skia's reference image, pixel for pixel.
+#
+#       Copyright (c) 2020 Yevhenii Reizner (tiny-skia's tests)
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-tiny-skia)
+#
+#==============================================================================================
+
+import harness
+from harness import Test, TestCase
+from raster import Paint, PathBuilder, Pixmap, PixmapPaint, Transform, Rect, Point, Color, ColorU8, Stroke, StrokeDash, LineCap, LineJoin, FillRule, BlendMode, SpreadMode, FilterQuality, GradientStop, LinearGradient, RadialGradient, SweepGradient, Pattern, Mask, MaskType, IntRect, ColorSpace, Shader
+
+func crate_triangle() -> Pixmap:
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = true
+
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(0.0, 20.0)
+    pb.line_to(20.0, 20.0)
+    pb.line_to(10.0, 0.0)
+    pb.close()
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+
+    var pixmap = Pixmap.new_(20, 20) else trap("pixmap")
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+    return pixmap
+
+func pad_nearest(t: Test*):
+    let triangle = crate_triangle()
+
+    var paint = Paint()
+    defer paint.release()
+    paint.anti_alias = false
+    paint.shader = Pattern.new_( triangle.as_ref(), SpreadMode.pad_, FilterQuality.nearest, 1.0, Transform.identity(), )
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "pattern/pad-nearest.png")
+
+func repeat_nearest(t: Test*):
+    let triangle = crate_triangle()
+
+    var paint = Paint()
+    defer paint.release()
+    paint.anti_alias = false
+    paint.shader = Pattern.new_( triangle.as_ref(), SpreadMode.repeat, FilterQuality.nearest, 1.0, Transform.identity(), )
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "pattern/repeat-nearest.png")
+
+func reflect_nearest(t: Test*):
+    let triangle = crate_triangle()
+
+    var paint = Paint()
+    defer paint.release()
+    paint.anti_alias = false
+    paint.shader = Pattern.new_( triangle.as_ref(), SpreadMode.reflect, FilterQuality.nearest, 1.0, Transform.identity(), )
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "pattern/reflect-nearest.png")
+
+# We have to test tile mode for bilinear/bicubic separately,
+# because they're using a different algorithm from nearest.
+func pad_bicubic(t: Test*):
+    let triangle = crate_triangle()
+
+    var paint = Paint()
+    defer paint.release()
+    paint.anti_alias = false
+    paint.shader = Pattern.new_( triangle.as_ref(), SpreadMode.pad_, FilterQuality.bicubic, 1.0,  Transform.from_row(1.1, 0.3, 0.0, 1.4, 0.0, 0.0), )
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "pattern/pad-bicubic.png")
+
+func repeat_bicubic(t: Test*):
+    let triangle = crate_triangle()
+
+    var paint = Paint()
+    defer paint.release()
+    paint.anti_alias = false
+    paint.shader = Pattern.new_( triangle.as_ref(), SpreadMode.repeat, FilterQuality.bicubic, 1.0,  Transform.from_row(1.1, 0.3, 0.0, 1.4, 0.0, 0.0), )
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "pattern/repeat-bicubic.png")
+
+func reflect_bicubic(t: Test*):
+    let triangle = crate_triangle()
+
+    var paint = Paint()
+    defer paint.release()
+    paint.anti_alias = false
+    paint.shader = Pattern.new_( triangle.as_ref(), SpreadMode.reflect, FilterQuality.bicubic, 1.0,  Transform.from_row(1.1, 0.3, 0.0, 1.4, 0.0, 0.0), )
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "pattern/reflect-bicubic.png")
+
+func filter_nearest_no_ts(t: Test*):
+    let triangle = crate_triangle()
+
+    var paint = Paint()
+    defer paint.release()
+    paint.anti_alias = false
+    paint.shader = Pattern.new_( triangle.as_ref(), SpreadMode.repeat, FilterQuality.nearest, 1.0, Transform.identity(), )
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "pattern/filter-nearest-no-ts.png")
+
+func filter_nearest(t: Test*):
+    let triangle = crate_triangle()
+
+    var paint = Paint()
+    defer paint.release()
+    paint.anti_alias = false
+    paint.shader = Pattern.new_( triangle.as_ref(), SpreadMode.repeat, FilterQuality.nearest, 1.0, Transform.from_row(1.5, 0.0, -0.4, -0.8, 5.0, 1.0), )
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "pattern/filter-nearest.png")
+
+func filter_bilinear(t: Test*):
+    let triangle = crate_triangle()
+
+    var paint = Paint()
+    defer paint.release()
+    paint.anti_alias = false
+    paint.shader = Pattern.new_( triangle.as_ref(), SpreadMode.repeat, FilterQuality.bilinear, 1.0, Transform.from_row(1.5, 0.0, -0.4, -0.8, 5.0, 1.0), )
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "pattern/filter-bilinear.png")
+
+func filter_bicubic(t: Test*):
+    let triangle = crate_triangle()
+
+    var paint = Paint()
+    defer paint.release()
+    paint.anti_alias = false
+    paint.shader = Pattern.new_( triangle.as_ref(), SpreadMode.repeat, FilterQuality.bicubic, 1.0, Transform.from_row(1.5, 0.0, -0.4, -0.8, 5.0, 1.0), )
+
+    var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
+    defer path.release()
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "pattern/filter-bicubic.png")
+
+pub let tests: TestCase[10] = [
+    TestCase(name = "pattern::pad_nearest", run = pad_nearest),
+    TestCase(name = "pattern::repeat_nearest", run = repeat_nearest),
+    TestCase(name = "pattern::reflect_nearest", run = reflect_nearest),
+    TestCase(name = "pattern::pad_bicubic", run = pad_bicubic),
+    TestCase(name = "pattern::repeat_bicubic", run = repeat_bicubic),
+    TestCase(name = "pattern::reflect_bicubic", run = reflect_bicubic),
+    TestCase(name = "pattern::filter_nearest_no_ts", run = filter_nearest_no_ts),
+    TestCase(name = "pattern::filter_nearest", run = filter_nearest),
+    TestCase(name = "pattern::filter_bilinear", run = filter_bilinear),
+    TestCase(name = "pattern::filter_bicubic", run = filter_bicubic),
+]

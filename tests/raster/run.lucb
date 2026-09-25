@@ -13,6 +13,17 @@
 
 import harness
 import fill
+import dash
+import skia_dash
+import stroke
+import hairline
+import gradients
+import mask
+import path
+import pattern
+import pixmap
+import png
+import gamma
 
 func run_case(case: harness.TestCase) -> bool:
     var t = harness.Test(name = case.name, failures = 0)
@@ -27,6 +38,39 @@ pub func main(arguments: str[]) -> i32:
     var cases: harness.TestCase[512] = ---
     var count: usize = 0
     for case in fill.tests:
+        cases[count] = case
+        count += 1
+    for case in dash.tests:
+        cases[count] = case
+        count += 1
+    for case in skia_dash.tests:
+        cases[count] = case
+        count += 1
+    for case in stroke.tests:
+        cases[count] = case
+        count += 1
+    for case in hairline.tests:
+        cases[count] = case
+        count += 1
+    for case in gradients.tests:
+        cases[count] = case
+        count += 1
+    for case in mask.tests:
+        cases[count] = case
+        count += 1
+    for case in path.tests:
+        cases[count] = case
+        count += 1
+    for case in pattern.tests:
+        cases[count] = case
+        count += 1
+    for case in pixmap.tests:
+        cases[count] = case
+        count += 1
+    for case in png.tests:
+        cases[count] = case
+        count += 1
+    for case in gamma.tests:
         cases[count] = case
         count += 1
 

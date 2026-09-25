@@ -1,0 +1,168 @@
+#==============================================================================================
+#
+#   stroke - tiny-skia's integration tests: stroke.rs
+#
+#   DESCRIPTION:
+#       Port of tiny-skia 0.12.0 tests/integration/stroke.rs. Each test renders with the
+#       rasterizer and compares against tiny-skia's reference image, pixel for pixel.
+#
+#       Copyright (c) 2020 Yevhenii Reizner (tiny-skia's tests)
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-tiny-skia)
+#
+#==============================================================================================
+
+import harness
+from harness import Test, TestCase
+from raster import Paint, PathBuilder, Pixmap, PixmapPaint, Transform, Rect, Point, Color, ColorU8, Stroke, StrokeDash, LineCap, LineJoin, FillRule, BlendMode, SpreadMode, FilterQuality, GradientStop, LinearGradient, RadialGradient, SweepGradient, Pattern, Mask, MaskType, IntRect, ColorSpace, Shader
+
+func round_caps_and_large_scale(t: Test*):
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = true
+
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(60.0 / 16.0, 100.0 / 16.0)
+    pb.line_to(140.0 / 16.0, 100.0 / 16.0)
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+
+    var stroke = Stroke()
+    defer harness.release_stroke(&stroke)
+    stroke.width = 6.0
+    stroke.line_cap = LineCap.round
+
+    let transform = Transform.from_scale(16.0, 16.0)
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.stroke_path(&path, &paint, &stroke, transform, none)
+
+    harness.expect_png(t, &pixmap, "stroke/round-caps-and-large-scale.png")
+
+func circle(t: Test*):
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = true
+
+    var path = PathBuilder.from_circle(100.0, 100.0, 50.0) else trap("path")
+    defer path.release()
+    var stroke = Stroke()
+    defer harness.release_stroke(&stroke)
+    stroke.width = 2.0
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.stroke_path(&path, &paint, &stroke, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "stroke/circle.png")
+
+func zero_len_subpath_butt_cap(t: Test*):
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = true
+
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(50.0, 50.0)
+    pb.line_to(50.0, 50.0)
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+
+    var stroke = Stroke()
+    defer harness.release_stroke(&stroke)
+    stroke.width = 20.0
+    stroke.line_cap = LineCap.butt
+
+    var pixmap = Pixmap.new_(100, 100) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.stroke_path(&path, &paint, &stroke, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "stroke/zero-len-subpath-butt-cap.png")
+
+func zero_len_subpath_round_cap(t: Test*):
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = true
+
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(50.0, 50.0)
+    pb.line_to(50.0, 50.0)
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+
+    var stroke = Stroke()
+    defer harness.release_stroke(&stroke)
+    stroke.width = 20.0
+    stroke.line_cap = LineCap.round
+
+    var pixmap = Pixmap.new_(100, 100) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.stroke_path(&path, &paint, &stroke, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "stroke/zero-len-subpath-round-cap.png")
+
+func zero_len_subpath_square_cap(t: Test*):
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = true
+
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(50.0, 50.0)
+    pb.line_to(50.0, 50.0)
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+
+    var stroke = Stroke()
+    defer harness.release_stroke(&stroke)
+    stroke.width = 20.0
+    stroke.line_cap = LineCap.square
+
+    var pixmap = Pixmap.new_(100, 100) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.stroke_path(&path, &paint, &stroke, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "stroke/zero-len-subpath-square-cap.png")
+
+func round_cap_join(t: Test*):
+    var paint = Paint()
+    defer paint.release()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = true
+
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(170.0, 30.0)
+    pb.line_to(30.553378, 99.048418)
+    pb.cubic_to(30.563658, 99.066835, 30.546308, 99.280724, 30.557592, 99.305282)
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+
+    var stroke = Stroke()
+    defer harness.release_stroke(&stroke)
+    stroke.width = 30.0
+    stroke.line_cap = LineCap.round
+    stroke.line_join = LineJoin.round
+
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.stroke_path(&path, &paint, &stroke, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "stroke/round-cap-join.png")
+
+pub let tests: TestCase[6] = [
+    TestCase(name = "stroke::round_caps_and_large_scale", run = round_caps_and_large_scale),
+    TestCase(name = "stroke::circle", run = circle),
+    TestCase(name = "stroke::zero_len_subpath_butt_cap", run = zero_len_subpath_butt_cap),
+    TestCase(name = "stroke::zero_len_subpath_round_cap", run = zero_len_subpath_round_cap),
+    TestCase(name = "stroke::zero_len_subpath_square_cap", run = zero_len_subpath_square_cap),
+    TestCase(name = "stroke::round_cap_join", run = round_cap_join),
+]
