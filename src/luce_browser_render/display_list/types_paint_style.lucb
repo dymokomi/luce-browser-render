@@ -55,6 +55,11 @@ pub struct ColorStop:
     pub var position: f32  # C++ default: AK :: NaN < float >
     pub var transition_hint: f32?  # C++ default: { }
 
+## The non-zero default member initializers of Web::Painting::ColorStop; the constructor runs them first.
+pub func color_stop_init_fields(this: ColorStop*):
+    # position: C++ default AK :: NaN < float > (not translated by the generator)
+    return
+
 # mark: SvgGradientPaintStyle ===================================================================
 
 ## Web::Painting::SVGGradientPaintStyle (Libraries/LibWeb/Painting/PaintStyle.h:31).
@@ -69,6 +74,10 @@ pub struct SvgGradientPaintStyle: IsSvgGradientPaintStyle, IsSvgPaintServerPaint
     func svg_gradient_paint_style() -> SvgGradientPaintStyle*: return (SvgGradientPaintStyle*)&self
 
     func svg_paint_server_paint_style() -> SvgPaintServerPaintStyle*: return (SvgPaintServerPaintStyle*)&self
+
+## The non-zero default member initializers of Web::Painting::SVGGradientPaintStyle; the constructor runs them first.
+pub func svg_gradient_paint_style_init_fields(this: SvgGradientPaintStyle*):
+    this.m_color_space = gfx.InterpolationColorSpace.srgb
 
 ## Upcast to Web::Painting::SVGGradientPaintStyle (implemented by every struct in its hierarchy).
 pub interface IsSvgGradientPaintStyle:

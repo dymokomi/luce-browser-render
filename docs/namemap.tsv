@@ -203,6 +203,7 @@ Gfx::Color::with_alpha	luce-browser-render	gfx	color_with_alpha	Libraries/LibGfx
 Gfx::Color::with_opacity	luce-browser-render	gfx	color_with_opacity	Libraries/LibGfx/Color.h:374	stub
 Gfx::Color::xored	luce-browser-render	gfx	color_xored	Libraries/LibGfx/Color.h:407	stub
 Gfx::ColorComponents	luce-browser-render	gfx	ColorComponents	Libraries/LibGfx/ColorConversion.h:17	struct
+Gfx::ColorComponents [default member initializers]	luce-browser-render	gfx	color_components_init_fields	Libraries/LibGfx/ColorConversion.h:17	init fields
 Gfx::ColorComponents::ColorComponents	luce-browser-render	gfx	color_components_construct	Libraries/LibGfx/ColorConversion.h:20	construct
 Gfx::ColorComponents::alpha	luce-browser-render	gfx	color_components_alpha	Libraries/LibGfx/ColorConversion.h:29	stub
 Gfx::ColorComponents::operator[]	luce-browser-render	gfx	color_components_at	Libraries/LibGfx/ColorConversion.h:26	stub
@@ -218,6 +219,7 @@ Gfx::ColorSpace::color_space	luce-browser-render	gfx	color_space_color_space_2	L
 Gfx::ColorSpace::from_cicp	luce-browser-render	gfx	color_space_from_cicp	Libraries/LibGfx/ColorSpace.cpp:52	stub
 Gfx::ColorSpace::load_from_icc_bytes	luce-browser-render	gfx	color_space_load_from_icc_bytes	Libraries/LibGfx/ColorSpace.cpp:134	stub
 Gfx::ColorStop	luce-browser-render	gfx	ColorStop	Libraries/LibGfx/Gradients.h:15	struct
+Gfx::ColorStop [default member initializers]	luce-browser-render	gfx	color_stop_init_fields	Libraries/LibGfx/Gradients.h:15	init fields
 Gfx::CompositingAndBlendingOperator	luce-browser-render	gfx	CompositingAndBlendingOperator	Libraries/LibGfx/CompositingAndBlendingOperator.h:12	enum
 Gfx::Details::ColorSpaceImpl	luce-browser-render	gfx	ColorSpaceImpl	Libraries/LibGfx/ColorSpace.cpp:20	struct
 Gfx::DrawGlyph	luce-browser-render	web_fonts	DrawGlyph	Libraries/LibGfx/TextLayout.h:26	struct
@@ -249,6 +251,7 @@ Gfx::FilterImpl::clone	luce-browser-render	gfx	filter_impl_clone	Libraries/LibGf
 Gfx::FilterImpl::create	luce-browser-render	gfx	filter_impl_create	Libraries/LibGfx/FilterImpl.h:18	stub
 Gfx::FlagRole	luce-browser-render	gfx	FlagRole	Libraries/LibGfx/SystemTheme.h:202	enum
 Gfx::Font	luce-browser-render	web_fonts	Font	Libraries/LibGfx/Font/Font.h:58	struct
+Gfx::Font [default member initializers]	luce-browser-render	web_fonts	font_init_fields	Libraries/LibGfx/Font/Font.h:58	init fields
 Gfx::Font::Font	luce-browser-render	web_fonts	font_construct	Libraries/LibGfx/Font/Font.cpp:25	construct
 Gfx::Font::ShapingCache	luce-browser-render	web_fonts	FontShapingCache	Libraries/LibGfx/Font/Font.h:89	struct
 Gfx::Font::ShapingCache::clear	luce-browser-render	web_fonts	font_shaping_cache_clear	Libraries/LibGfx/Font/Font.cpp:151	stub
@@ -631,6 +634,7 @@ Gfx::Path::to_svg_string	luce-browser-render	gfx	path_to_svg_string	Libraries/Li
 Gfx::Path::transform	luce-browser-render	gfx	path_transform	Libraries/LibGfx/Path.h:120	stub
 Gfx::Path::vertical_line_to	luce-browser-render	gfx	path_vertical_line_to	Libraries/LibGfx/Path.h:102	stub
 Gfx::PathFontProvider	luce-browser-render	web_fonts	PathFontProvider	Libraries/LibGfx/Font/PathFontProvider.h:17	struct
+Gfx::PathFontProvider [default member initializers]	luce-browser-render	web_fonts	path_font_provider_init_fields	Libraries/LibGfx/Font/PathFontProvider.h:17	init fields
 Gfx::PathFontProvider::PathFontProvider	luce-browser-render	web_fonts	path_font_provider_construct	Libraries/LibGfx/Font/PathFontProvider.cpp:18	construct
 Gfx::PathFontProvider::for_each_typeface_with_family_name	luce-browser-render	web_fonts	path_font_provider_for_each_typeface_with_family_name_impl	Libraries/LibGfx/Font/PathFontProvider.cpp:144	impl
 Gfx::PathFontProvider::get_font	luce-browser-render	web_fonts	path_font_provider_get_font_impl	Libraries/LibGfx/Font/PathFontProvider.cpp:81	impl
@@ -1160,6 +1164,7 @@ Gfx::Rect<AK::DistinctNumeric<i32, Web::__DevicePixels_tag, AK::DistinctNumericF
 Gfx::Rect<Web::CSSPixels>	luce-browser-render	gfx	CssPixelRect	Libraries/LibGfx/Rect.h:20	instantiation
 Gfx::Rect<f32>	luce-browser-render	gfx	FloatRect	Libraries/LibGfx/Rect.h:20	instantiation
 Gfx::SVGGradientPaintStyle	luce-browser-render	gfx	SvgGradientPaintStyle	Libraries/LibGfx/PaintStyle.h:183	struct
+Gfx::SVGGradientPaintStyle [default member initializers]	luce-browser-render	gfx	svg_gradient_paint_style_init_fields	Libraries/LibGfx/PaintStyle.h:183	init fields
 Gfx::SVGGradientPaintStyle::SpreadMethod	luce-browser-render	gfx	SvgGradientPaintStyleSpreadMethod	Libraries/LibGfx/PaintStyle.h:187	enum
 Gfx::SVGGradientPaintStyle::gradient_transform_scale	luce-browser-render	gfx	svg_gradient_paint_style_gradient_transform_scale	Libraries/LibGfx/PaintStyle.h:200	stub
 Gfx::SVGGradientPaintStyle::scale_adjusted_inverse_gradient_transform	luce-browser-render	gfx	svg_gradient_paint_style_scale_adjusted_inverse_gradient_transform	Libraries/LibGfx/PaintStyle.h:199	stub
@@ -1562,6 +1567,7 @@ WOFF::pow_2_less_than_or_equal	luce-browser-render	web_fonts	woff_pow_2_less_tha
 WOFF::try_load_from_bytes	luce-browser-render	web_fonts	woff_try_load_from_bytes	Libraries/LibGfx/Font/WOFF/Loader.cpp:105	stub
 WOFF::try_load_from_resource	luce-browser-render	web_fonts	woff_try_load_from_resource	Libraries/LibGfx/Font/WOFF/Loader.cpp:71	stub
 Web::CSS::BorderData	luce-browser-render	display_list	BorderData	Libraries/LibWeb/CSS/ComputedValues.h:390	struct
+Web::CSS::BorderData [default member initializers]	luce-browser-render	display_list	border_data_init_fields	Libraries/LibWeb/CSS/ComputedValues.h:390	init fields
 Web::CSS::ColorInterpolationMethodStyleValue::PolarColorInterpolationMethod	luce-browser-render	display_list	PolarColorInterpolationMethod	Libraries/LibWeb/CSS/StyleValues/ColorInterpolationMethodStyleValue.h:17	struct
 Web::CSSPixelFraction	luce-browser-render	gfx	CssPixelFraction	Libraries/LibWeb/PixelUnits.h:305	struct
 Web::CSSPixelFraction::CSSPixelFraction	luce-browser-render	gfx	css_pixel_fraction_construct	Libraries/LibWeb/PixelUnits.h:314	construct
@@ -1651,10 +1657,12 @@ Web::Painting::ApplyBackdropFilter::bounding_rect	luce-browser-render	display_li
 Web::Painting::ApplyBackdropFilter::command_name	luce-browser-render	display_list	apply_backdrop_filter_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:279	variable
 Web::Painting::ApplyBackdropFilter::dump	luce-browser-render	display_list	apply_backdrop_filter_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:134	stub
 Web::Painting::ApplyEffects	luce-browser-render	display_list	ApplyEffects	Libraries/LibWeb/Painting/DisplayListCommand.h:365	struct
+Web::Painting::ApplyEffects [default member initializers]	luce-browser-render	display_list	apply_effects_init_fields	Libraries/LibWeb/Painting/DisplayListCommand.h:365	init fields
 Web::Painting::ApplyEffects::command_name	luce-browser-render	display_list	apply_effects_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:366	variable
 Web::Painting::ApplyEffects::dump	luce-browser-render	display_list	apply_effects_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:158	stub
 Web::Painting::ApplyEffects::nesting_level_change	luce-browser-render	display_list	apply_effects_nesting_level_change	Libraries/LibWeb/Painting/DisplayListCommand.h:367	variable
 Web::Painting::BorderDataDevicePixels	luce-browser-render	display_list	BorderDataDevicePixels	Libraries/LibWeb/Painting/BordersData.h:24	struct
+Web::Painting::BorderDataDevicePixels [default member initializers]	luce-browser-render	display_list	border_data_device_pixels_init_fields	Libraries/LibWeb/Painting/BordersData.h:24	init fields
 Web::Painting::BorderEdge	luce-browser-render	display_list	BorderEdge	Libraries/LibWeb/Painting/BordersData.h:17	enum
 Web::Painting::BorderRadiiData	luce-browser-render	display_list	BorderRadiiData	Libraries/LibWeb/Painting/BorderRadiiData.h:109	struct
 Web::Painting::BorderRadiiData::contains	luce-browser-render	display_list	border_radii_data_contains	Libraries/LibWeb/Painting/BorderRadiiData.h:120	stub
@@ -1673,6 +1681,7 @@ Web::Painting::ClipData::ClipData	luce-browser-render	display_list	clip_data_con
 Web::Painting::ClipData::contains	luce-browser-render	display_list	clip_data_contains	Libraries/LibWeb/Painting/AccumulatedVisualContext.cpp:15	stub
 Web::Painting::ClipPathData	luce-browser-render	display_list	ClipPathData	Libraries/LibWeb/Painting/AccumulatedVisualContext.h:57	struct
 Web::Painting::ColorStop	luce-browser-render	display_list	ColorStop	Libraries/LibWeb/Painting/PaintStyle.h:25	struct
+Web::Painting::ColorStop [default member initializers]	luce-browser-render	display_list	color_stop_init_fields	Libraries/LibWeb/Painting/PaintStyle.h:25	init fields
 Web::Painting::ColorStopData	luce-browser-render	display_list	ColorStopData	Libraries/LibWeb/Painting/GradientData.h:19	struct
 Web::Painting::ConicGradientData	luce-browser-render	display_list	ConicGradientData	Libraries/LibWeb/Painting/GradientData.h:31	struct
 Web::Painting::CornerClip	luce-browser-render	display_list	CornerClip	Libraries/LibWeb/Painting/BorderRadiusCornerClipper.h:14	enum
@@ -1871,6 +1880,7 @@ Web::Painting::DrawScaledImmutableBitmap::bounding_rect	luce-browser-render	disp
 Web::Painting::DrawScaledImmutableBitmap::command_name	luce-browser-render	display_list	draw_scaled_immutable_bitmap_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:62	variable
 Web::Painting::DrawScaledImmutableBitmap::dump	luce-browser-render	display_list	draw_scaled_immutable_bitmap_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:38	stub
 Web::Painting::EffectsData	luce-browser-render	display_list	EffectsData	Libraries/LibWeb/Painting/AccumulatedVisualContext.h:63	struct
+Web::Painting::EffectsData [default member initializers]	luce-browser-render	display_list	effects_data_init_fields	Libraries/LibWeb/Painting/AccumulatedVisualContext.h:63	init fields
 Web::Painting::EffectsData::needs_layer	luce-browser-render	display_list	effects_data_needs_layer	Libraries/LibWeb/Painting/AccumulatedVisualContext.h:68	stub
 Web::Painting::ExternalContentSource	luce-browser-render	display_list	ExternalContentSource	Libraries/LibWeb/Painting/ExternalContentSource.h:16	struct
 Web::Painting::ExternalContentSource::clear	luce-browser-render	display_list	external_content_source_clear	Libraries/LibWeb/Painting/ExternalContentSource.cpp:27	stub
@@ -1882,6 +1892,7 @@ Web::Painting::FillEllipse::bounding_rect	luce-browser-render	display_list	fill_
 Web::Painting::FillEllipse::command_name	luce-browser-render	display_list	fill_ellipse_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:254	variable
 Web::Painting::FillEllipse::dump	luce-browser-render	display_list	fill_ellipse_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:124	stub
 Web::Painting::FillPath	luce-browser-render	display_list	FillPath	Libraries/LibWeb/Painting/DisplayListCommand.h:206	struct
+Web::Painting::FillPath [default member initializers]	luce-browser-render	display_list	fill_path_init_fields	Libraries/LibWeb/Painting/DisplayListCommand.h:206	init fields
 Web::Painting::FillPath::bounding_rect	luce-browser-render	display_list	fill_path_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:216	stub
 Web::Painting::FillPath::command_name	luce-browser-render	display_list	fill_path_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:207	variable
 Web::Painting::FillPath::dump	luce-browser-render	display_list	fill_path_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:110	stub
@@ -1932,6 +1943,7 @@ Web::Painting::Restore::command_name	luce-browser-render	display_list	restore_co
 Web::Painting::Restore::dump	luce-browser-render	display_list	restore_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:61	stub
 Web::Painting::Restore::nesting_level_change	luce-browser-render	display_list	restore_nesting_level_change	Libraries/LibWeb/Painting/DisplayListCommand.h:118	variable
 Web::Painting::SVGGradientPaintStyle	luce-browser-render	display_list	SvgGradientPaintStyle	Libraries/LibWeb/Painting/PaintStyle.h:31	struct
+Web::Painting::SVGGradientPaintStyle [default member initializers]	luce-browser-render	display_list	svg_gradient_paint_style_init_fields	Libraries/LibWeb/Painting/PaintStyle.h:31	init fields
 Web::Painting::SVGGradientPaintStyle::SpreadMethod	luce-browser-render	display_list	SvgGradientPaintStyleSpreadMethod	Libraries/LibWeb/Painting/PaintStyle.h:33	enum
 Web::Painting::SVGGradientPaintStyle::add_color_stop	luce-browser-render	display_list	svg_gradient_paint_style_add_color_stop_color_stop	Libraries/LibWeb/Painting/PaintStyle.h:50	stub
 Web::Painting::SVGGradientPaintStyle::add_color_stop	luce-browser-render	display_list	svg_gradient_paint_style_add_color_stop_f32	Libraries/LibWeb/Painting/PaintStyle.h:45	stub

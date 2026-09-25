@@ -16,3 +16,9 @@
 pub struct ColorComponents:
     pub var m_components: f32[3]  # C++ default: { 0 , 0 , 0 }
     pub var m_alpha: f32  # C++ default: { 1 }
+
+## The non-zero default member initializers of Gfx::ColorComponents; the constructor runs them first.
+pub func color_components_init_fields(this: ColorComponents*):
+    # m_components: C++ default 0 , 0 , 0 (not translated by the generator)
+    # m_alpha: C++ default 1 (not translated by the generator)
+    return

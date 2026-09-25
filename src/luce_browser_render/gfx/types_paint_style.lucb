@@ -322,6 +322,10 @@ pub struct SvgGradientPaintStyle: IsSvgGradientPaintStyle, IsGradientPaintStyle,
 
     func paint_style() -> PaintStyle*: return (PaintStyle*)&self
 
+## The non-zero default member initializers of Gfx::SVGGradientPaintStyle; the constructor runs them first.
+pub func svg_gradient_paint_style_init_fields(this: SvgGradientPaintStyle*):
+    this.m_scale = 1.0
+
 ## Upcast to Gfx::SVGGradientPaintStyle (implemented by every struct in its hierarchy).
 pub interface IsSvgGradientPaintStyle:
     func svg_gradient_paint_style() -> SvgGradientPaintStyle*

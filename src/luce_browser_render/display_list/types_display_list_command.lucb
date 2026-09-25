@@ -220,6 +220,10 @@ pub struct FillPath:
     pub var winding_rule: gfx.WindingRule
     pub var should_anti_alias: ShouldAntiAlias  # C++ default: { ShouldAntiAlias :: Yes }
 
+## The non-zero default member initializers of Web::Painting::FillPath; the constructor runs them first.
+pub func fill_path_init_fields(this: FillPath*):
+    this.opacity = 1.0
+
 ## Web::Painting::FillPath::command_name (Libraries/LibWeb/Painting/DisplayListCommand.h:207).
 # C++ initializer: "FillPath"sv
 pub var fill_path_command_name: ak.StringView
@@ -378,6 +382,11 @@ pub struct ApplyEffects:
     pub var compositing_and_blending_operator: gfx.CompositingAndBlendingOperator  # C++ default: { Gfx :: CompositingAndBlendingOperator :: Normal }
     pub var filter: gfx.Filter?  # C++ default: { }
     pub var mask_kind: gfx.MaskKind?  # C++ default: { }
+
+## The non-zero default member initializers of Web::Painting::ApplyEffects; the constructor runs them first.
+pub func apply_effects_init_fields(this: ApplyEffects*):
+    this.opacity = 1.0
+    this.compositing_and_blending_operator = gfx.CompositingAndBlendingOperator.normal
 
 ## Web::Painting::ApplyEffects::command_name (Libraries/LibWeb/Painting/DisplayListCommand.h:366).
 # C++ initializer: "ApplyEffects"sv

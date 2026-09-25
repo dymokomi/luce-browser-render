@@ -186,7 +186,7 @@ pub func font_database_install_system_font_provider(this: FontDatabase*, provide
     trap("unported: Gfx::FontDatabase::install_system_font_provider")
 
 ## Ported from Libraries/LibGfx/Font/FontDatabase.cpp:48 Gfx::FontDatabase::get.
-pub func font_database_get(this: FontDatabase*, family: ak.FlyString, point_size: f32, weight: u32, width: u32, slope: u32, font_variation_settings: FontVariationSettings?, shape_features: ak.Vector[ShapeFeature]?) -> Font*?:
+pub func font_database_get(this: FontDatabase*, family: ak.FlyString, point_size: f32, weight: u32, width: u32, slope: u32, font_variation_settings: FontVariationSettings? = none, shape_features: ak.Vector[ShapeFeature]? = none) -> Font*?:
     trap("unported: Gfx::FontDatabase::get")
 
 ## Ported from Libraries/LibGfx/Font/FontDatabase.cpp:53 Gfx::FontDatabase::get_font_for_code_point.
@@ -317,19 +317,19 @@ pub func font_cache_key_hash(this: const FontCacheKey*) -> u32:
     trap("unported: Gfx::FontCacheKey::hash")
 
 ## Ported from Libraries/LibGfx/Font/Typeface.cpp:16 Gfx::Typeface::try_load_from_resource.
-pub func typeface_try_load_from_resource(resource: ak.CoreResource, ttc_index: u32) -> Typeface*!:
+pub func typeface_try_load_from_resource(resource: ak.CoreResource, ttc_index: u32 = 0) -> Typeface*!:
     trap("unported: Gfx::Typeface::try_load_from_resource")
 
 ## Ported from Libraries/LibGfx/Font/Typeface.cpp:22 Gfx::Typeface::try_load_from_font_data.
-pub func typeface_try_load_from_font_data(font_data: FontData*, ttc_index: u32) -> Typeface*!:
+pub func typeface_try_load_from_font_data(font_data: FontData*, ttc_index: u32 = 0) -> Typeface*!:
     trap("unported: Gfx::Typeface::try_load_from_font_data")
 
 ## Ported from Libraries/LibGfx/Font/Typeface.cpp:29 Gfx::Typeface::try_load_from_temporary_memory.
-pub func typeface_try_load_from_temporary_memory(bytes: const u8[], ttc_index: u32) -> Typeface*!:
+pub func typeface_try_load_from_temporary_memory(bytes: const u8[], ttc_index: u32 = 0) -> Typeface*!:
     trap("unported: Gfx::Typeface::try_load_from_temporary_memory")
 
 ## Ported from Libraries/LibGfx/Font/Typeface.cpp:36 Gfx::Typeface::try_load_from_externally_owned_memory.
-pub func typeface_try_load_from_externally_owned_memory(bytes: const u8[], ttc_index: u32) -> Typeface*!:
+pub func typeface_try_load_from_externally_owned_memory(bytes: const u8[], ttc_index: u32 = 0) -> Typeface*!:
     trap("unported: Gfx::Typeface::try_load_from_externally_owned_memory")
 
 ## Ported from Libraries/LibGfx/Font/Typeface.h:70 Gfx::Typeface::glyph_count (virtual).
@@ -385,7 +385,7 @@ pub func typeface_ttc_index_impl(this: Typeface*) -> u32:
     trap("pure virtual: Gfx::Typeface::ttc_index")
 
 ## Ported from Libraries/LibGfx/Font/TypefaceSkia.h:18 Gfx::TypefaceSkia::load_from_buffer.
-pub func typeface_skia_load_from_buffer(arg0: const u8[], ttc_index: u32) -> TypefaceSkia*!:
+pub func typeface_skia_load_from_buffer(arg0: const u8[], ttc_index: u32 = 0) -> TypefaceSkia*!:
     trap("unported: Gfx::TypefaceSkia::load_from_buffer")
 
 ## Ported from Libraries/LibGfx/Font/TypefaceSkia.h:19 Gfx::TypefaceSkia::find_typeface_for_code_point.
@@ -445,7 +445,7 @@ pub func typeface_skia_impl(this: TypefaceSkia*) -> Impl*:
     trap("unported: Gfx::TypefaceSkia::impl")
 
 ## Ported from Libraries/LibGfx/Font/TypefaceSkia.h:42 Gfx::TypefaceSkia::TypefaceSkia.
-pub func typeface_skia_construct(this: TypefaceSkia*, arg0: Impl*, arg1: const u8[], ttc_index: u32):
+pub func typeface_skia_construct(this: TypefaceSkia*, arg0: Impl*, arg1: const u8[], ttc_index: u32 = 0):
     trap("unported: Gfx::TypefaceSkia::TypefaceSkia")
 
 ## Ported from Libraries/LibGfx/Font/TypefaceSkia.h:44 Gfx::TypefaceSkia::is_skia (override).
@@ -489,11 +489,11 @@ pub func unicode_range_eq(this: const UnicodeRange*, other: UnicodeRange) -> boo
     trap("unported: Gfx::UnicodeRange::operator==")
 
 ## Ported from Libraries/LibGfx/Font/WOFF/Loader.cpp:71 WOFF::try_load_from_resource.
-pub func woff_try_load_from_resource(resource: ak.CoreResource, index: u32) -> Typeface*!:
+pub func woff_try_load_from_resource(resource: ak.CoreResource, index: u32 = 0) -> Typeface*!:
     trap("unported: WOFF::try_load_from_resource")
 
 ## Ported from Libraries/LibGfx/Font/WOFF/Loader.cpp:105 WOFF::try_load_from_bytes.
-pub func woff_try_load_from_bytes(buffer: const u8[], index: u32) -> Typeface*!:
+pub func woff_try_load_from_bytes(buffer: const u8[], index: u32 = 0) -> Typeface*!:
     trap("unported: WOFF::try_load_from_bytes")
 
 ## Ported from Libraries/LibGfx/Font/WOFF/Loader.cpp:64 WOFF::pow_2_less_than_or_equal.
@@ -562,7 +562,7 @@ pub func font_cascade_list_extend(this: FontCascadeList*, other: FontCascadeList
     trap("unported: Gfx::FontCascadeList::extend")
 
 ## Ported from Libraries/LibGfx/FontCascadeList.cpp:61 Gfx::FontCascadeList::font_for_code_point.
-pub func font_cascade_list_font_for_code_point(this: const FontCascadeList*, code_point: u32, trigger_pending_loads: FontCascadeListTriggerPendingLoads) -> Font:
+pub func font_cascade_list_font_for_code_point(this: const FontCascadeList*, code_point: u32, trigger_pending_loads: FontCascadeListTriggerPendingLoads = FontCascadeListTriggerPendingLoads.no) -> Font:
     trap("unported: Gfx::FontCascadeList::font_for_code_point")
 
 ## Ported from Libraries/LibGfx/FontCascadeList.cpp:117 Gfx::FontCascadeList::equals.
@@ -646,11 +646,11 @@ pub func shape_text_f32(baseline_start: gfx.FloatPoint, letter_spacing: f32, str
     trap("unported: Gfx::shape_text")
 
 ## Ported from Libraries/LibGfx/TextLayout.cpp:115 Gfx::shape_text.
-pub func shape_text_utf16_view(baseline_start: gfx.FloatPoint, string: ak.Utf16View, font_cascade_list: FontCascadeList, letter_spacing: f32) -> ak.Vector[GlyphRun*]:
+pub func shape_text_utf16_view(baseline_start: gfx.FloatPoint, string: ak.Utf16View, font_cascade_list: FontCascadeList, letter_spacing: f32 = 0.0) -> ak.Vector[GlyphRun*]:
     trap("unported: Gfx::shape_text")
 
 ## Ported from Libraries/LibGfx/TextLayout.cpp:273 Gfx::measure_text_width.
-pub func measure_text_width(string: ak.Utf16View, font: Font, letter_spacing: f32) -> f32:
+pub func measure_text_width(string: ak.Utf16View, font: Font, letter_spacing: f32 = 0.0) -> f32:
     trap("unported: Gfx::measure_text_width")
 
 ## Ported from Libraries/LibGfx/TextLayout.cpp:154 Gfx::setup_text_shaping.

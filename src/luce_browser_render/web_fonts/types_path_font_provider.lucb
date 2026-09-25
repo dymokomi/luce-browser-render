@@ -22,6 +22,11 @@ pub struct PathFontProvider: IsPathFontProvider, IsSystemFontProvider:
 
     func system_font_provider() -> SystemFontProvider*: return (SystemFontProvider*)&self
 
+## The non-zero default member initializers of Gfx::PathFontProvider; the constructor runs them first.
+pub func path_font_provider_init_fields(this: PathFontProvider*):
+    # m_name: C++ default "Path"_string (not translated by the generator)
+    return
+
 ## Upcast to Gfx::PathFontProvider (implemented by every struct in its hierarchy).
 pub interface IsPathFontProvider:
     func path_font_provider() -> PathFontProvider*

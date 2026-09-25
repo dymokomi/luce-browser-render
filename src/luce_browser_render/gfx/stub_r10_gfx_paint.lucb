@@ -223,7 +223,7 @@ pub func bitmap_construct_core_anonymous_buffer(this: Bitmap*, format_: BitmapFo
     trap("unported: Gfx::Bitmap::Bitmap")
 
 ## Ported from Libraries/LibGfx/Bitmap.cpp:250 Gfx::Bitmap::allocate_backing_store.
-pub func bitmap_allocate_backing_store(format_: BitmapFormat, size: IntSize, initialize_backing_store: BitmapInitializeBackingStore) -> BackingStore!:
+pub func bitmap_allocate_backing_store(format_: BitmapFormat, size: IntSize, initialize_backing_store: BitmapInitializeBackingStore = BitmapInitializeBackingStore.yes) -> BackingStore!:
     trap("unported: Gfx::Bitmap::allocate_backing_store")
 
 ## Ported from Libraries/LibGfx/BitmapSequence.cpp:17 Gfx::get_metadata.
@@ -268,31 +268,31 @@ pub func filter_displacement_map(color: const Filter*?, displacement: const Filt
     trap("unported: Gfx::Filter::displacement_map")
 
 ## Ported from Libraries/LibGfx/Filter.cpp:117 Gfx::Filter::drop_shadow.
-pub func filter_drop_shadow(offset_x: f32, offset_y: f32, radius: f32, color: Color, input: const Filter*?) -> Filter:
+pub func filter_drop_shadow(offset_x: f32, offset_y: f32, radius: f32, color: Color, input: const Filter*? = none) -> Filter:
     trap("unported: Gfx::Filter::drop_shadow")
 
 ## Ported from Libraries/LibGfx/Filter.cpp:75 Gfx::Filter::blur.
-pub func filter_blur(radius_x: f32, radius_y: f32, input: const Filter*?) -> Filter:
+pub func filter_blur(radius_x: f32, radius_y: f32, input: const Filter*? = none) -> Filter:
     trap("unported: Gfx::Filter::blur")
 
 ## Ported from Libraries/LibGfx/Filter.cpp:127 Gfx::Filter::color.
-pub func filter_color(type_: ColorFilterType, amount: f32, input: const Filter*?) -> Filter:
+pub func filter_color(type_: ColorFilterType, amount: f32, input: const Filter*? = none) -> Filter:
     trap("unported: Gfx::Filter::color")
 
 ## Ported from Libraries/LibGfx/Filter.cpp:219 Gfx::Filter::color_matrix.
-pub func filter_color_matrix(matrix: f32[20], input: const Filter*?) -> Filter:
+pub func filter_color_matrix(matrix: f32[20], input: const Filter*? = none) -> Filter:
     trap("unported: Gfx::Filter::color_matrix")
 
 ## Ported from Libraries/LibGfx/Filter.cpp:226 Gfx::Filter::color_table.
-pub func filter_color_table(a: (const u8[])?, r: (const u8[])?, g: (const u8[])?, b: (const u8[])?, input: const Filter*?) -> Filter:
+pub func filter_color_table(a: (const u8[])?, r: (const u8[])?, g: (const u8[])?, b: (const u8[])?, input: const Filter*? = none) -> Filter:
     trap("unported: Gfx::Filter::color_table")
 
 ## Ported from Libraries/LibGfx/Filter.cpp:249 Gfx::Filter::saturate.
-pub func filter_saturate(value: f32, input: const Filter*?) -> Filter:
+pub func filter_saturate(value: f32, input: const Filter*? = none) -> Filter:
     trap("unported: Gfx::Filter::saturate")
 
 ## Ported from Libraries/LibGfx/Filter.cpp:259 Gfx::Filter::hue_rotate.
-pub func filter_hue_rotate(angle_degrees: f32, input: const Filter*?) -> Filter:
+pub func filter_hue_rotate(angle_degrees: f32, input: const Filter*? = none) -> Filter:
     trap("unported: Gfx::Filter::hue_rotate")
 
 ## Ported from Libraries/LibGfx/Filter.cpp:289 Gfx::Filter::image.
@@ -304,15 +304,15 @@ pub func filter_merge(inputs: ak.Vector[Filter?]) -> Filter:
     trap("unported: Gfx::Filter::merge")
 
 ## Ported from Libraries/LibGfx/Filter.cpp:320 Gfx::Filter::offset.
-pub func filter_offset(dx: f32, dy: f32, input: const Filter*?) -> Filter:
+pub func filter_offset(dx: f32, dy: f32, input: const Filter*? = none) -> Filter:
     trap("unported: Gfx::Filter::offset")
 
 ## Ported from Libraries/LibGfx/Filter.cpp:308 Gfx::Filter::erode.
-pub func filter_erode(radius_x: f32, radius_y: f32, input: Filter?) -> Filter:
+pub func filter_erode(radius_x: f32, radius_y: f32, input: Filter? = none) -> Filter:
     trap("unported: Gfx::Filter::erode")
 
 ## Ported from Libraries/LibGfx/Filter.cpp:314 Gfx::Filter::dilate.
-pub func filter_dilate(radius_x: f32, radius_y: f32, input: Filter?) -> Filter:
+pub func filter_dilate(radius_x: f32, radius_y: f32, input: Filter? = none) -> Filter:
     trap("unported: Gfx::Filter::dilate")
 
 ## Ported from Libraries/LibGfx/Filter.cpp:326 Gfx::Filter::turbulence.
@@ -482,11 +482,11 @@ pub func solid_color_paint_style_construct(this: SolidColorPaintStyle*, color: C
     return
 
 ## Ported from Libraries/LibGfx/PaintStyle.h:51 Gfx::GradientPaintStyle::add_color_stop.
-pub func gradient_paint_style_add_color_stop_f32(this: GradientPaintStyle*, position: f32, color: Color, transition_hint: f32?) -> !:
+pub func gradient_paint_style_add_color_stop_f32(this: GradientPaintStyle*, position: f32, color: Color, transition_hint: f32? = none) -> !:
     trap("unported: Gfx::GradientPaintStyle::add_color_stop")
 
 ## Ported from Libraries/LibGfx/PaintStyle.h:56 Gfx::GradientPaintStyle::add_color_stop.
-pub func gradient_paint_style_add_color_stop_color_stop(this: GradientPaintStyle*, stop: ColorStop, sort: bool) -> !:
+pub func gradient_paint_style_add_color_stop_color_stop(this: GradientPaintStyle*, stop: ColorStop, sort: bool = true) -> !:
     trap("unported: Gfx::GradientPaintStyle::add_color_stop")
 
 ## Ported from Libraries/LibGfx/PaintStyle.h:64 Gfx::GradientPaintStyle::set_repeat_length.
@@ -550,7 +550,7 @@ pub func canvas_linear_gradient_paint_style_construct(this: CanvasLinearGradient
     return
 
 ## Ported from Libraries/LibGfx/PaintStyle.h:135 Gfx::CanvasConicGradientPaintStyle::create.
-pub func canvas_conic_gradient_paint_style_create(center: FloatPoint, start_angle: f32) -> CanvasConicGradientPaintStyle*!:
+pub func canvas_conic_gradient_paint_style_create(center: FloatPoint, start_angle: f32 = 0.0) -> CanvasConicGradientPaintStyle*!:
     trap("unported: Gfx::CanvasConicGradientPaintStyle::create")
 
 ## Ported from Libraries/LibGfx/PaintStyle.h:140 Gfx::CanvasConicGradientPaintStyle::center.
@@ -723,7 +723,7 @@ pub func painting_surface_wrap_bitmap(bitmap: Bitmap*) -> PaintingSurface*:
     trap("unported: Gfx::PaintingSurface::wrap_bitmap")
 
 ## Ported from Libraries/LibGfx/PaintingSurface.cpp:132 Gfx::PaintingSurface::create_from_shared_image_buffer.
-pub func painting_surface_create_from_shared_image_buffer(shared_image_buffer: SharedImageBuffer*, context: SkiaBackendContext*, origin: PaintingSurfaceOrigin) -> PaintingSurface*:
+pub func painting_surface_create_from_shared_image_buffer(shared_image_buffer: SharedImageBuffer*, context: SkiaBackendContext*, origin: PaintingSurfaceOrigin = PaintingSurfaceOrigin.top_left) -> PaintingSurface*:
     trap("unported: Gfx::PaintingSurface::create_from_shared_image_buffer")
 
 ## Ported from Libraries/LibGfx/PaintingSurface.cpp:163 Gfx::PaintingSurface::read_into_bitmap.

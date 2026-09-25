@@ -17,3 +17,8 @@ pub struct ColorStop:
     pub var color: Color
     pub var position: f32  # C++ default: AK :: NaN < float >
     pub var transition_hint: f32?  # C++ default: { }
+
+## The non-zero default member initializers of Gfx::ColorStop; the constructor runs them first.
+pub func color_stop_init_fields(this: ColorStop*):
+    # position: C++ default AK :: NaN < float > (not translated by the generator)
+    return

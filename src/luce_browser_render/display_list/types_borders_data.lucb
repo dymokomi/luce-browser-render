@@ -25,6 +25,11 @@ pub struct BorderDataDevicePixels:
     pub var line_style: css_data.LineStyle  # C++ default: { CSS :: LineStyle :: None }
     pub var width: i32  # C++ default: { 0 }
 
+## The non-zero default member initializers of Web::Painting::BorderDataDevicePixels; the constructor runs them first.
+pub func border_data_device_pixels_init_fields(this: BorderDataDevicePixels*):
+    # color: C++ default Color :: Transparent (not translated by the generator)
+    return
+
 # mark: BordersDataDevicePixels =================================================================
 
 ## Web::Painting::BordersDataDevicePixels (Libraries/LibWeb/Painting/BordersData.h:31).

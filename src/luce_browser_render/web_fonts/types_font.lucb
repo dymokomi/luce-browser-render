@@ -67,6 +67,10 @@ pub struct Font:
     pub var m_pixel_metrics: FontPixelMetrics
     pub var m_pixel_size: f32  # C++ default: { 0.0f }
 
+## The non-zero default member initializers of Gfx::Font; the constructor runs them first.
+pub func font_init_fields(this: Font*):
+    this.m_is_emoji_font = ak.TriState.unknown
+
 # mark: FontShapingCache ========================================================================
 
 ## Gfx::Font::ShapingCache (Libraries/LibGfx/Font/Font.h:89).

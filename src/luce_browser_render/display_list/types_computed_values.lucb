@@ -17,3 +17,8 @@ pub struct BorderData:
     pub var color: gfx.Color  # C++ default: { Color :: Transparent }
     pub var line_style: css_data.LineStyle  # C++ default: { LineStyle :: None }
     pub var width: gfx.CssPixels  # C++ default: { 0 }
+
+## The non-zero default member initializers of Web::CSS::BorderData; the constructor runs them first.
+pub func border_data_init_fields(this: BorderData*):
+    # color: C++ default Color :: Transparent (not translated by the generator)
+    return

@@ -1,0 +1,4 @@
+# C++ functions of this package's regions the generator did not stub (port them by hand)
+# C++ name	file:line	reason
+AK::max	Libraries/LibGfx/VectorN.h:328	non-type template parameter
+AK::min	Libraries/LibGfx/VectorN.h:318	non-type template parameter

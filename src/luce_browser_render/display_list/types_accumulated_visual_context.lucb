@@ -59,6 +59,11 @@ pub struct EffectsData:
     pub var blend_mode: gfx.CompositingAndBlendingOperator  # C++ default: { Gfx :: CompositingAndBlendingOperator :: Normal }
     pub var gfx_filter: gfx.Filter?
 
+## The non-zero default member initializers of Web::Painting::EffectsData; the constructor runs them first.
+pub func effects_data_init_fields(this: EffectsData*):
+    this.opacity = 1.0
+    this.blend_mode = gfx.CompositingAndBlendingOperator.normal
+
 # mark: AccumulatedVisualContextNode ============================================================
 
 ## Web::Painting::AccumulatedVisualContextNode (Libraries/LibWeb/Painting/AccumulatedVisualContext.h:78).

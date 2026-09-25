@@ -297,43 +297,43 @@ pub func color_from_hsla(h_degrees: f32, s: f32, l: f32, a: f32) -> Color:
     trap("unported: Gfx::Color::from_hsla")
 
 ## Ported from Libraries/LibGfx/Color.cpp:479 Gfx::Color::from_a98rgb.
-pub func color_from_a98rgb(r: f32, g: f32, b: f32, alpha: f32) -> Color:
+pub func color_from_a98rgb(r: f32, g: f32, b: f32, alpha: f32 = 1.0) -> Color:
     trap("unported: Gfx::Color::from_a98rgb")
 
 ## Ported from Libraries/LibGfx/Color.cpp:486 Gfx::Color::from_display_p3.
-pub func color_from_display_p3(r: f32, g: f32, b: f32, alpha: f32) -> Color:
+pub func color_from_display_p3(r: f32, g: f32, b: f32, alpha: f32 = 1.0) -> Color:
     trap("unported: Gfx::Color::from_display_p3")
 
 ## Ported from Libraries/LibGfx/Color.cpp:518 Gfx::Color::from_lab.
-pub func color_from_lab(L: f32, a: f32, b: f32, alpha: f32) -> Color:
+pub func color_from_lab(L: f32, a: f32, b: f32, alpha: f32 = 1.0) -> Color:
     trap("unported: Gfx::Color::from_lab")
 
 ## Ported from Libraries/LibGfx/Color.cpp:472 Gfx::Color::from_linear_display_p3.
-pub func color_from_linear_display_p3(r: f32, g: f32, b: f32, alpha: f32) -> Color:
+pub func color_from_linear_display_p3(r: f32, g: f32, b: f32, alpha: f32 = 1.0) -> Color:
     trap("unported: Gfx::Color::from_linear_display_p3")
 
 ## Ported from Libraries/LibGfx/Color.cpp:467 Gfx::Color::from_linear_srgb.
-pub func color_from_linear_srgb_2(red: f32, green: f32, blue: f32, alpha: f32) -> Color:
+pub func color_from_linear_srgb_2(red: f32, green: f32, blue: f32, alpha: f32 = 1.0) -> Color:
     trap("unported: Gfx::Color::from_linear_srgb")
 
 ## Ported from Libraries/LibGfx/Color.cpp:493 Gfx::Color::from_pro_photo_rgb.
-pub func color_from_pro_photo_rgb(r: f32, g: f32, b: f32, alpha: f32) -> Color:
+pub func color_from_pro_photo_rgb(r: f32, g: f32, b: f32, alpha: f32 = 1.0) -> Color:
     trap("unported: Gfx::Color::from_pro_photo_rgb")
 
 ## Ported from Libraries/LibGfx/Color.cpp:500 Gfx::Color::from_rec2020.
-pub func color_from_rec2020(r: f32, g: f32, b: f32, alpha: f32) -> Color:
+pub func color_from_rec2020(r: f32, g: f32, b: f32, alpha: f32 = 1.0) -> Color:
     trap("unported: Gfx::Color::from_rec2020")
 
 ## Ported from Libraries/LibGfx/Color.cpp:506 Gfx::Color::from_xyz50.
-pub func color_from_xyz50(x: f32, y: f32, z: f32, alpha: f32) -> Color:
+pub func color_from_xyz50(x: f32, y: f32, z: f32, alpha: f32 = 1.0) -> Color:
     trap("unported: Gfx::Color::from_xyz50")
 
 ## Ported from Libraries/LibGfx/Color.cpp:512 Gfx::Color::from_xyz65.
-pub func color_from_xyz65(x: f32, y: f32, z: f32, alpha: f32) -> Color:
+pub func color_from_xyz65(x: f32, y: f32, z: f32, alpha: f32 = 1.0) -> Color:
     trap("unported: Gfx::Color::from_xyz65")
 
 ## Ported from Libraries/LibGfx/Color.h:193 Gfx::Color::from_oklab.
-pub func color_from_oklab(L: f32, a: f32, b: f32, alpha: f32) -> Color:
+pub func color_from_oklab(L: f32, a: f32, b: f32, alpha: f32 = 1.0) -> Color:
     trap("unported: Gfx::Color::from_oklab")
 
 ## Ported from Libraries/LibGfx/Color.h:199 Gfx::Color::to_premultiplied_oklab.
@@ -361,7 +361,7 @@ pub func color_alpha(this: const Color*) -> u8:
     trap("unported: Gfx::Color::alpha")
 
 ## Ported from Libraries/LibGfx/Color.h:222 Gfx::Color::set_alpha.
-pub func color_set_alpha(this: Color*, value: u8, alpha_type: AlphaType):
+pub func color_set_alpha(this: Color*, value: u8, alpha_type: AlphaType = AlphaType.unpremultiplied):
     trap("unported: Gfx::Color::set_alpha")
 
 ## Ported from Libraries/LibGfx/Color.h:239 Gfx::Color::set_red.
@@ -377,7 +377,7 @@ pub func color_set_blue(this: Color*, value: u8):
     trap("unported: Gfx::Color::set_blue")
 
 ## Ported from Libraries/LibGfx/Color.h:257 Gfx::Color::with_alpha.
-pub func color_with_alpha(this: const Color*, alpha: u8, alpha_type: AlphaType) -> Color:
+pub func color_with_alpha(this: const Color*, alpha: u8, alpha_type: AlphaType = AlphaType.unpremultiplied) -> Color:
     trap("unported: Gfx::Color::with_alpha")
 
 ## Ported from Libraries/LibGfx/Color.h:264 Gfx::Color::blend.
@@ -413,7 +413,7 @@ pub func color_to_grayscale(this: const Color*) -> Color:
     trap("unported: Gfx::Color::to_grayscale")
 
 ## Ported from Libraries/LibGfx/Color.h:347 Gfx::Color::sepia.
-pub func color_sepia(this: const Color*, amount: f32) -> Color:
+pub func color_sepia(this: const Color*, amount: f32 = 1.0) -> Color:
     trap("unported: Gfx::Color::sepia")
 
 ## Ported from Libraries/LibGfx/Color.cpp:354 Gfx::hex_string_to_color.
@@ -426,19 +426,19 @@ pub func color_with_opacity(this: const Color*, opacity: f32) -> Color:
     trap("unported: Gfx::Color::with_opacity")
 
 ## Ported from Libraries/LibGfx/Color.h:380 Gfx::Color::darkened.
-pub func color_darkened(this: const Color*, amount: f32) -> Color:
+pub func color_darkened(this: const Color*, amount: f32 = 0.5) -> Color:
     trap("unported: Gfx::Color::darkened")
 
 ## Ported from Libraries/LibGfx/Color.h:385 Gfx::Color::lightened.
-pub func color_lightened(this: const Color*, amount: f32) -> Color:
+pub func color_lightened(this: const Color*, amount: f32 = 1.2) -> Color:
     trap("unported: Gfx::Color::lightened")
 
 ## Ported from Libraries/LibGfx/Color.cpp:433 Gfx::Color::shades.
-pub func color_shades(this: const Color*, steps: u32, max: f32) -> ak.Vector[Color]:
+pub func color_shades(this: const Color*, steps: u32, max: f32 = 1.0) -> ak.Vector[Color]:
     trap("unported: Gfx::Color::shades")
 
 ## Ported from Libraries/LibGfx/Color.cpp:445 Gfx::Color::tints.
-pub func color_tints(this: const Color*, steps: u32, max: f32) -> ak.Vector[Color]:
+pub func color_tints(this: const Color*, steps: u32, max: f32 = 1.0) -> ak.Vector[Color]:
     trap("unported: Gfx::Color::tints")
 
 ## Ported from Libraries/LibGfx/Color.h:393 Gfx::Color::saturated_to.
@@ -462,7 +462,7 @@ pub func color_eq(this: const Color*, other: Color) -> bool:
     trap("unported: Gfx::Color::operator==")
 
 ## Ported from Libraries/LibGfx/Color.cpp:91 Gfx::Color::to_string.
-pub func color_to_string(this: const Color*, html_compatible_serialization: ColorHtmlCompatibleSerialization) -> ak.String:
+pub func color_to_string(this: const Color*, html_compatible_serialization: ColorHtmlCompatibleSerialization = ColorHtmlCompatibleSerialization.no) -> ak.String:
     trap("unported: Gfx::Color::to_string")
 
 ## Ported from Libraries/LibGfx/Color.cpp:114 Gfx::Color::to_string_without_alpha.
@@ -535,7 +535,7 @@ pub func ipc_decode_3(decoder: IpcDecoder*) -> Color!:
     trap("unported: IPC::decode")
 
 ## Ported from Libraries/LibGfx/ColorConversion.h:20 Gfx::ColorComponents::ColorComponents.
-pub func color_components_construct(this: ColorComponents*, first: f32, second: f32, third: f32, alpha: f32):
+pub func color_components_construct(this: ColorComponents*, first: f32, second: f32, third: f32, alpha: f32 = 1.0):
     return
 
 ## Ported from Libraries/LibGfx/ColorConversion.h:26 Gfx::ColorComponents::operator[].

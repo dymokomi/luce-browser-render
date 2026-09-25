@@ -699,15 +699,15 @@ pub func display_list_recorder_fill_rect_with_radial_gradient(this: DisplayListR
     trap("unported: Web::Painting::DisplayListRecorder::fill_rect_with_radial_gradient")
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:225 Web::Painting::DisplayListRecorder::draw_rect.
-pub func display_list_recorder_draw_rect(this: DisplayListRecorder*, rect: gfx.DevicePixelRect, color: gfx.Color, rough: bool):
+pub func display_list_recorder_draw_rect(this: DisplayListRecorder*, rect: gfx.DevicePixelRect, color: gfx.Color, rough: bool = false):
     trap("unported: Web::Painting::DisplayListRecorder::draw_rect")
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:242 Web::Painting::DisplayListRecorder::draw_scaled_immutable_bitmap.
-pub func display_list_recorder_draw_scaled_immutable_bitmap(this: DisplayListRecorder*, dst_rect: gfx.DevicePixelRect, clip_rect: gfx.DevicePixelRect, bitmap: gfx.ImmutableBitmap, scaling_mode: gfx.ScalingMode):
+pub func display_list_recorder_draw_scaled_immutable_bitmap(this: DisplayListRecorder*, dst_rect: gfx.DevicePixelRect, clip_rect: gfx.DevicePixelRect, bitmap: gfx.ImmutableBitmap, scaling_mode: gfx.ScalingMode = gfx.ScalingMode.nearest_neighbor):
     trap("unported: Web::Painting::DisplayListRecorder::draw_scaled_immutable_bitmap")
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:235 Web::Painting::DisplayListRecorder::draw_external_content.
-pub func display_list_recorder_draw_external_content(this: DisplayListRecorder*, dst_rect: gfx.DevicePixelRect, source: ExternalContentSource*, scaling_mode: gfx.ScalingMode):
+pub func display_list_recorder_draw_external_content(this: DisplayListRecorder*, dst_rect: gfx.DevicePixelRect, source: ExternalContentSource*, scaling_mode: gfx.ScalingMode = gfx.ScalingMode.nearest_neighbor):
     trap("unported: Web::Painting::DisplayListRecorder::draw_external_content")
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:254 Web::Painting::DisplayListRecorder::draw_repeated_immutable_bitmap.
@@ -715,7 +715,7 @@ pub func display_list_recorder_draw_repeated_immutable_bitmap(this: DisplayListR
     trap("unported: Web::Painting::DisplayListRecorder::draw_repeated_immutable_bitmap")
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:265 Web::Painting::DisplayListRecorder::draw_line.
-pub func display_list_recorder_draw_line(this: DisplayListRecorder*, from_: gfx.IntPoint, to: gfx.IntPoint, color: gfx.Color, thickness: i32, style: gfx.LineStyle, alternate_color: gfx.Color):
+pub func display_list_recorder_draw_line(this: DisplayListRecorder*, from_: gfx.IntPoint, to: gfx.IntPoint, color: gfx.Color, thickness: i32 = 1, style: gfx.LineStyle = gfx.LineStyle.solid, alternate_color: gfx.Color):
     trap("unported: Web::Painting::DisplayListRecorder::draw_line")
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:279 Web::Painting::DisplayListRecorder::draw_text.
@@ -811,7 +811,7 @@ pub func display_list_recorder_paint_scrollbar(this: DisplayListRecorder*, scrol
     trap("unported: Web::Painting::DisplayListRecorder::paint_scrollbar")
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:416 Web::Painting::DisplayListRecorder::apply_effects.
-pub func display_list_recorder_apply_effects(this: DisplayListRecorder*, opacity: f32, compositing_and_blending_operator: gfx.CompositingAndBlendingOperator, filter: gfx.Filter?, mask_kind: gfx.MaskKind?):
+pub func display_list_recorder_apply_effects(this: DisplayListRecorder*, opacity: f32 = 1.0, compositing_and_blending_operator: gfx.CompositingAndBlendingOperator = gfx.CompositingAndBlendingOperator.normal, filter: gfx.Filter? = none, mask_kind: gfx.MaskKind? = none):
     trap("unported: Web::Painting::DisplayListRecorder::apply_effects")
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:14 Web::Painting::DisplayListRecorder::DisplayListRecorder.
@@ -859,11 +859,11 @@ pub func svg_gradient_paint_style_set_spread_method(this: SvgGradientPaintStyle*
     trap("unported: Web::Painting::SVGGradientPaintStyle::set_spread_method")
 
 ## Ported from Libraries/LibWeb/Painting/PaintStyle.h:45 Web::Painting::SVGGradientPaintStyle::add_color_stop.
-pub func svg_gradient_paint_style_add_color_stop_f32(this: SvgGradientPaintStyle*, position: f32, color: gfx.Color, transition_hint: f32?):
+pub func svg_gradient_paint_style_add_color_stop_f32(this: SvgGradientPaintStyle*, position: f32, color: gfx.Color, transition_hint: f32? = none):
     trap("unported: Web::Painting::SVGGradientPaintStyle::add_color_stop")
 
 ## Ported from Libraries/LibWeb/Painting/PaintStyle.h:50 Web::Painting::SVGGradientPaintStyle::add_color_stop.
-pub func svg_gradient_paint_style_add_color_stop_color_stop(this: SvgGradientPaintStyle*, stop: ColorStop, sort: bool):
+pub func svg_gradient_paint_style_add_color_stop_color_stop(this: SvgGradientPaintStyle*, stop: ColorStop, sort: bool = true):
     trap("unported: Web::Painting::SVGGradientPaintStyle::add_color_stop")
 
 ## Ported from Libraries/LibWeb/Painting/PaintStyle.h:57 Web::Painting::SVGGradientPaintStyle::color_stops.
