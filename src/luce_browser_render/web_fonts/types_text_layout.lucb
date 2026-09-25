@@ -1,0 +1,46 @@
+#==============================================================================================
+#
+#   types_text_layout - declarations of Libraries/LibGfx/TextLayout.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/TextLayout.cpp, Libraries/LibGfx/TextLayout.h (Ladybird 47c82b38d0)
+#       by the skeleton generator (DESIGN.md §4.4). Regenerate rather than edit, except to
+#       fill a field the generator could not map.
+#
+#==============================================================================================
+
+## Gfx::GlyphRun::CachedTextBlob (Libraries/LibGfx/TextLayout.cpp:21): opaque in this phase (not in the phase-1 closure).
+pub struct GlyphRunCachedTextBlob:
+    pub var opaque_: u8
+
+## SkTextBlob (Libraries/LibGfx/TextLayout.h:22): opaque in this phase (not in the phase-1 closure).
+pub struct SkTextBlob:
+    pub var opaque_: u8
+
+# mark: DrawGlyph ===============================================================================
+
+## Gfx::DrawGlyph (Libraries/LibGfx/TextLayout.h:26).
+pub struct DrawGlyph:
+    pub var position: gfx.FloatPoint
+    pub var length_in_code_units: usize  # C++ default: { 0 }
+    pub var glyph_width: f32  # C++ default: { 0.0 }
+    pub var glyph_id: u32  # C++ default: { 0 }
+
+# mark: GlyphRun ================================================================================
+
+## Gfx::GlyphRun (Libraries/LibGfx/TextLayout.h:33).
+pub struct GlyphRun:
+    pub var m_glyphs: ak.Vector[DrawGlyph]
+    pub var m_font: const Font*
+    pub var m_text_type: GlyphRunTextType
+    pub var m_width: f32  # C++ default: { 0 }
+    pub var m_cached_text_blob: GlyphRunCachedTextBlob*?
+
+## Gfx::GlyphRun::TextType (Libraries/LibGfx/TextLayout.h:35).
+pub enum GlyphRunTextType as i32:
+    common = 0
+    context_dependent = 1
+    end_padding = 2
+    ltr = 3
+    rtl = 4

@@ -1,0 +1,15 @@
+#==============================================================================================
+#
+#   types_generated_sk_bitmap - declarations of Build/vcpkg_installed/arm64-osx-dynamic/include/skia/core/SkBitmap.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Build/vcpkg_installed/arm64-osx-dynamic/include/skia/core/SkBitmap.h (Ladybird
+#       47c82b38d0) by the skeleton generator (DESIGN.md §4.4). Regenerate rather than edit,
+#       except to fill a field the generator could not map.
+#
+#==============================================================================================
+
+## SkBitmap (Build/vcpkg_installed/arm64-osx-dynamic/include/skia/core/SkBitmap.h:0): opaque in this phase (not in the phase-1 closure).
+pub struct SkBitmap:
+    pub var opaque_: u8

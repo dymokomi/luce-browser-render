@@ -1,0 +1,120 @@
+#==============================================================================================
+#
+#   types_color - declarations of Libraries/LibGfx/Color.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/Color.h (Ladybird 47c82b38d0) by the skeleton generator (DESIGN.md
+#       §4.4). Regenerate rather than edit, except to fill a field the generator could not
+#       map.
+#
+#==============================================================================================
+
+## Gfx::AlphaType (Libraries/LibGfx/Color.h:25).
+pub enum AlphaType as i32:
+    premultiplied = 0
+    unpremultiplied = 1
+
+# mark: Hsv =====================================================================================
+
+## Gfx::HSV (Libraries/LibGfx/Color.h:40).
+pub struct Hsv:
+    pub var hue: f64  # C++ default: { 0 }
+    pub var saturation: f64  # C++ default: { 0 }
+    pub var value: f64  # C++ default: { 0 }
+
+# mark: Yuv =====================================================================================
+
+## Gfx::YUV (Libraries/LibGfx/Color.h:46).
+pub struct Yuv:
+    pub var y: f32  # C++ default: { 0 }
+    pub var u: f32  # C++ default: { 0 }
+    pub var v: f32  # C++ default: { 0 }
+
+# mark: Oklab ===================================================================================
+
+## Gfx::Oklab (Libraries/LibGfx/Color.h:52).
+pub struct Oklab:
+    pub var L: f32  # C++ default: { 0 }
+    pub var a: f32  # C++ default: { 0 }
+    pub var b: f32  # C++ default: { 0 }
+
+# mark: Color ===================================================================================
+
+## Gfx::Color (Libraries/LibGfx/Color.h:58).
+pub struct Color:
+    pub var m_value: u32  # C++ default: { 0 }
+
+## Gfx::Color::NamedColor (Libraries/LibGfx/Color.h:60).
+pub enum ColorNamedColor as i32:
+    transparent = 0
+    black = 1
+    white = 2
+    red = 3
+    green = 4
+    cyan = 5
+    blue = 6
+    yellow = 7
+    magenta = 8
+    dark_gray = 9
+    mid_gray = 10
+    light_gray = 11
+    warm_gray = 12
+    dark_cyan = 13
+    dark_green = 14
+    dark_blue = 15
+    dark_red = 16
+    mid_cyan = 17
+    mid_green = 18
+    mid_red = 19
+    mid_blue = 20
+    mid_magenta = 21
+    light_blue = 22
+
+## Gfx::Color::BrandedColor (Libraries/LibGfx/Color.h:88).
+pub enum ColorBrandedColor as i32:
+    indigo10 = 0
+    indigo20 = 1
+    indigo30 = 2
+    indigo40 = 3
+    indigo50 = 4
+    indigo60 = 5
+    indigo80 = 6
+    indigo100 = 7
+    indigo300 = 8
+    indigo500 = 9
+    indigo900 = 10
+    violet10 = 11
+    violet20 = 12
+    violet30 = 13
+    violet40 = 14
+    violet50 = 15
+    violet60 = 16
+    violet80 = 17
+    violet100 = 18
+    violet300 = 19
+    violet500 = 20
+    violet900 = 21
+    slate_blue10 = 22
+    slate_blue20 = 23
+    slate_blue30 = 24
+    slate_blue40 = 25
+    slate_blue50 = 26
+    slate_blue60 = 27
+    slate_blue80 = 28
+    slate_blue100 = 29
+    slate_blue300 = 30
+    slate_blue500 = 31
+    slate_blue900 = 32
+
+## Gfx::Color::BrandedColor::Violet (a second name for violet100).
+pub let color_branded_color_violet: ColorBrandedColor = ColorBrandedColor.violet100
+## Gfx::Color::BrandedColor::Indigo (a second name for indigo100).
+pub let color_branded_color_indigo: ColorBrandedColor = ColorBrandedColor.indigo100
+## Gfx::Color::BrandedColor::SlateBlue (a second name for slate_blue100).
+pub let color_branded_color_slate_blue: ColorBrandedColor = ColorBrandedColor.slate_blue100
+
+## Gfx::Color::HTMLCompatibleSerialization (Libraries/LibGfx/Color.h:419).
+pub enum ColorHtmlCompatibleSerialization as i32:
+    no = 0
+    yes = 1

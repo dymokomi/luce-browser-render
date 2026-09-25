@@ -1,0 +1,36 @@
+#==============================================================================================
+#
+#   types_font_support - declarations of Libraries/LibGfx/Font/FontSupport.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/Font/FontSupport.h (Ladybird 47c82b38d0) by the skeleton generator
+#       (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the generator
+#       could not map.
+#
+#==============================================================================================
+
+## Gfx::FontFormat (Libraries/LibGfx/Font/FontSupport.h:13).
+pub enum FontFormat as u8:
+    embedded_open_type = 0
+    open_type = 1
+    svg = 2
+    true_type = 3
+    true_type_collection = 4
+    woff = 5
+    woff2 = 6
+
+## Gfx::FontTech (Libraries/LibGfx/Font/FontSupport.h:23).
+pub enum FontTech as u8:
+    avar2 = 0
+    color_cbdt = 1
+    color_colrv0 = 2
+    color_colrv1 = 3
+    color_sbix = 4
+    color_svg = 5
+    features_aat = 6
+    features_graphite = 7
+    features_opentype = 8
+    incremental = 9
+    palettes = 10
+    variations = 11

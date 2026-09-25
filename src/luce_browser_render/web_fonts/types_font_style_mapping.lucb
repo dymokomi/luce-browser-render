@@ -1,0 +1,30 @@
+#==============================================================================================
+#
+#   types_font_style_mapping - declarations of Libraries/LibGfx/Font/FontStyleMapping.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/Font/FontStyleMapping.h (Ladybird 47c82b38d0) by the skeleton
+#       generator (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the
+#       generator could not map.
+#
+#==============================================================================================
+
+# mark: FontStyleMapping ========================================================================
+
+## Gfx::FontStyleMapping (Libraries/LibGfx/Font/FontStyleMapping.h:14).
+pub struct FontStyleMapping:
+    pub var style: i32  # C++ default: { 0 }
+    pub var name: ak.StringView
+
+## Gfx::font_weight_names (Libraries/LibGfx/Font/FontStyleMapping.h:19).
+# C++ initializer: { { { 100 , "Thin"sv } , { 200 , "Extra Light"sv } , { 300 , "Light"sv } , { 400 , "Regular"sv } , {
+pub var font_weight_names: FontStyleMapping[10]
+
+## Gfx::font_slope_names (Libraries/LibGfx/Font/FontStyleMapping.h:32).
+# C++ initializer: { { { 0 , "Regular"sv } , { 1 , "Italic"sv } , { 2 , "Oblique"sv } , { 3 , "Reclined"sv } , } }
+pub var font_slope_names: FontStyleMapping[4]
+
+## Gfx::font_width_names (Libraries/LibGfx/Font/FontStyleMapping.h:39).
+# C++ initializer: { { { 1 , "Ultra Condensed"sv } , { 2 , "Extra Condensed"sv } , { 3 , "Condensed"sv } , { 4 , "Semi 
+pub var font_width_names: FontStyleMapping[9]

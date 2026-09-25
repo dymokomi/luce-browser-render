@@ -1,0 +1,24 @@
+#==============================================================================================
+#
+#   types_font_variation_settings - declarations of Libraries/LibGfx/Font/FontVariationSettings.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/Font/FontVariationSettings.h (Ladybird 47c82b38d0) by the skeleton
+#       generator (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the
+#       generator could not map.
+#
+#==============================================================================================
+
+# mark: FontVariationAxis =======================================================================
+
+## Gfx::FontVariationAxis (Libraries/LibGfx/Font/FontVariationSettings.h:16).
+pub struct FontVariationAxis:
+    pub var tag: gfx.FourCc
+    pub var value: f32
+
+# mark: FontVariationSettings ===================================================================
+
+## Gfx::FontVariationSettings (Libraries/LibGfx/Font/FontVariationSettings.h:33).
+pub struct FontVariationSettings:
+    pub var axes: ak.HashMap[gfx.FourCc, f32, gfx.FourCcTraits]

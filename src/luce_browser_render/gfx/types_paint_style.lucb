@@ -1,0 +1,447 @@
+#==============================================================================================
+#
+#   types_paint_style - declarations of Libraries/LibGfx/PaintStyle.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/PaintStyle.h (Ladybird 47c82b38d0) by the skeleton generator
+#       (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the generator
+#       could not map.
+#
+#==============================================================================================
+
+# mark: PaintStyle ==============================================================================
+
+## Gfx::PaintStyle (Libraries/LibGfx/PaintStyle.h:23).
+pub struct PaintStyle: IsPaintStyle:
+    pub var vtable: const PaintStyleVTable*
+    pub var class_id: u16
+
+    func paint_style() -> PaintStyle*: return (PaintStyle*)&self
+
+## Upcast to Gfx::PaintStyle (implemented by every struct in its hierarchy).
+pub interface IsPaintStyle:
+    func paint_style() -> PaintStyle*
+
+## Virtual functions introduced by Gfx::PaintStyle.
+pub struct PaintStyleVTable:
+    pub let class_info: const ak.ClassInfo*
+    pub let is_visible: func(PaintStyle*) -> bool = paint_style_is_visible_impl
+
+## Virtual: Gfx::PaintStyle::is_visible.
+pub func paint_style_is_visible(this: PaintStyle*) -> bool:
+    return ((const PaintStyleVTable*)this.vtable).is_visible(this)
+
+## The vtable of Gfx::PaintStyle.
+pub let paint_style_vtable: PaintStyleVTable = PaintStyleVTable(class_info = &paint_style_class)
+
+## Class information of Gfx::PaintStyle: name, class-id range (pre-order), size, vtable.
+pub let paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "PaintStyle", first_id = 0, last_id = 9, size = sizeof(PaintStyle), vtable = (const void*)&paint_style_vtable)
+
+## is<Gfx::PaintStyle>: the class-id range test.
+pub func is_paint_style[P: IsPaintStyle](p: P*) -> bool:
+    let id = p.paint_style().class_id
+    return id >= paint_style_class.first_id and id <= paint_style_class.last_id
+
+## as_if<Gfx::PaintStyle>.
+pub func as_if_paint_style[P: IsPaintStyle](p: P*) -> PaintStyle*?:
+    if is_paint_style(p): return (PaintStyle*)p
+    return none
+
+## as<Gfx::PaintStyle> (verify_cast).
+pub func as_paint_style[P: IsPaintStyle](p: P*) -> PaintStyle*:
+    return as_if_paint_style(p) else trap("as<Gfx::PaintStyle> failed")
+
+# mark: SolidColorPaintStyle ====================================================================
+
+## Gfx::SolidColorPaintStyle (Libraries/LibGfx/PaintStyle.h:29).
+pub struct SolidColorPaintStyle: IsSolidColorPaintStyle, IsPaintStyle:
+    pub var paint_style_base: PaintStyle  # primary base
+    pub var m_color: Color
+
+    func solid_color_paint_style() -> SolidColorPaintStyle*: return (SolidColorPaintStyle*)&self
+
+    func paint_style() -> PaintStyle*: return (PaintStyle*)&self
+
+## Upcast to Gfx::SolidColorPaintStyle (implemented by every struct in its hierarchy).
+pub interface IsSolidColorPaintStyle:
+    func solid_color_paint_style() -> SolidColorPaintStyle*
+
+## Virtual functions introduced by Gfx::SolidColorPaintStyle.
+pub struct SolidColorPaintStyleVTable:
+    pub let paint_style_vtable: PaintStyleVTable
+
+## The vtable of Gfx::SolidColorPaintStyle.
+pub let solid_color_paint_style_vtable: SolidColorPaintStyleVTable = SolidColorPaintStyleVTable(paint_style_vtable = PaintStyleVTable(class_info = &solid_color_paint_style_class, is_visible = solid_color_paint_style_is_visible_impl))
+
+## Class information of Gfx::SolidColorPaintStyle: name, class-id range (pre-order), size, vtable.
+pub let solid_color_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "SolidColorPaintStyle", first_id = 9, last_id = 9, size = sizeof(SolidColorPaintStyle), vtable = (const void*)&solid_color_paint_style_vtable)
+
+## is<Gfx::SolidColorPaintStyle>: the class-id range test.
+pub func is_solid_color_paint_style[P: IsPaintStyle](p: P*) -> bool:
+    let id = p.paint_style().class_id
+    return id >= solid_color_paint_style_class.first_id and id <= solid_color_paint_style_class.last_id
+
+## as_if<Gfx::SolidColorPaintStyle>.
+pub func as_if_solid_color_paint_style[P: IsPaintStyle](p: P*) -> SolidColorPaintStyle*?:
+    if is_solid_color_paint_style(p): return (SolidColorPaintStyle*)p
+    return none
+
+## as<Gfx::SolidColorPaintStyle> (verify_cast).
+pub func as_solid_color_paint_style[P: IsPaintStyle](p: P*) -> SolidColorPaintStyle*:
+    return as_if_solid_color_paint_style(p) else trap("as<Gfx::SolidColorPaintStyle> failed")
+
+# mark: GradientPaintStyle ======================================================================
+
+## Gfx::GradientPaintStyle (Libraries/LibGfx/PaintStyle.h:49).
+pub struct GradientPaintStyle: IsGradientPaintStyle, IsPaintStyle:
+    pub var paint_style_base: PaintStyle  # primary base
+    pub var m_color_stops: ak.Vector[ColorStop]
+    pub var m_repeat_length: f32?
+
+    func gradient_paint_style() -> GradientPaintStyle*: return (GradientPaintStyle*)&self
+
+    func paint_style() -> PaintStyle*: return (PaintStyle*)&self
+
+## Upcast to Gfx::GradientPaintStyle (implemented by every struct in its hierarchy).
+pub interface IsGradientPaintStyle:
+    func gradient_paint_style() -> GradientPaintStyle*
+
+## Virtual functions introduced by Gfx::GradientPaintStyle.
+pub struct GradientPaintStyleVTable:
+    pub let paint_style_vtable: PaintStyleVTable
+
+## The vtable of Gfx::GradientPaintStyle.
+pub let gradient_paint_style_vtable: GradientPaintStyleVTable = GradientPaintStyleVTable(paint_style_vtable = PaintStyleVTable(class_info = &gradient_paint_style_class, is_visible = gradient_paint_style_is_visible_impl))
+
+## Class information of Gfx::GradientPaintStyle: name, class-id range (pre-order), size, vtable.
+pub let gradient_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "GradientPaintStyle", first_id = 2, last_id = 8, size = sizeof(GradientPaintStyle), vtable = (const void*)&gradient_paint_style_vtable)
+
+## is<Gfx::GradientPaintStyle>: the class-id range test.
+pub func is_gradient_paint_style[P: IsPaintStyle](p: P*) -> bool:
+    let id = p.paint_style().class_id
+    return id >= gradient_paint_style_class.first_id and id <= gradient_paint_style_class.last_id
+
+## as_if<Gfx::GradientPaintStyle>.
+pub func as_if_gradient_paint_style[P: IsPaintStyle](p: P*) -> GradientPaintStyle*?:
+    if is_gradient_paint_style(p): return (GradientPaintStyle*)p
+    return none
+
+## as<Gfx::GradientPaintStyle> (verify_cast).
+pub func as_gradient_paint_style[P: IsPaintStyle](p: P*) -> GradientPaintStyle*:
+    return as_if_gradient_paint_style(p) else trap("as<Gfx::GradientPaintStyle> failed")
+
+# mark: CanvasPatternPaintStyle =================================================================
+
+## Gfx::CanvasPatternPaintStyle (Libraries/LibGfx/PaintStyle.h:84).
+pub struct CanvasPatternPaintStyle: IsCanvasPatternPaintStyle, IsPaintStyle:
+    pub var paint_style_base: PaintStyle  # primary base
+    pub var m_image: ImmutableBitmap*?
+    pub var m_repetition: CanvasPatternPaintStyleRepetition  # C++ default: { Repetition :: Repeat }
+    pub var m_transform: AffineTransform?
+
+    func canvas_pattern_paint_style() -> CanvasPatternPaintStyle*: return (CanvasPatternPaintStyle*)&self
+
+    func paint_style() -> PaintStyle*: return (PaintStyle*)&self
+
+## Upcast to Gfx::CanvasPatternPaintStyle (implemented by every struct in its hierarchy).
+pub interface IsCanvasPatternPaintStyle:
+    func canvas_pattern_paint_style() -> CanvasPatternPaintStyle*
+
+## Virtual functions introduced by Gfx::CanvasPatternPaintStyle.
+pub struct CanvasPatternPaintStyleVTable:
+    pub let paint_style_vtable: PaintStyleVTable
+
+## The vtable of Gfx::CanvasPatternPaintStyle.
+pub let canvas_pattern_paint_style_vtable: CanvasPatternPaintStyleVTable = CanvasPatternPaintStyleVTable(paint_style_vtable = PaintStyleVTable(class_info = &canvas_pattern_paint_style_class))
+
+## Class information of Gfx::CanvasPatternPaintStyle: name, class-id range (pre-order), size, vtable.
+pub let canvas_pattern_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "CanvasPatternPaintStyle", first_id = 1, last_id = 1, size = sizeof(CanvasPatternPaintStyle), vtable = (const void*)&canvas_pattern_paint_style_vtable)
+
+## is<Gfx::CanvasPatternPaintStyle>: the class-id range test.
+pub func is_canvas_pattern_paint_style[P: IsPaintStyle](p: P*) -> bool:
+    let id = p.paint_style().class_id
+    return id >= canvas_pattern_paint_style_class.first_id and id <= canvas_pattern_paint_style_class.last_id
+
+## as_if<Gfx::CanvasPatternPaintStyle>.
+pub func as_if_canvas_pattern_paint_style[P: IsPaintStyle](p: P*) -> CanvasPatternPaintStyle*?:
+    if is_canvas_pattern_paint_style(p): return (CanvasPatternPaintStyle*)p
+    return none
+
+## as<Gfx::CanvasPatternPaintStyle> (verify_cast).
+pub func as_canvas_pattern_paint_style[P: IsPaintStyle](p: P*) -> CanvasPatternPaintStyle*:
+    return as_if_canvas_pattern_paint_style(p) else trap("as<Gfx::CanvasPatternPaintStyle> failed")
+
+## Gfx::CanvasPatternPaintStyle::Repetition (Libraries/LibGfx/PaintStyle.h:86).
+pub enum CanvasPatternPaintStyleRepetition as u8:
+    repeat = 0
+    repeat_x = 1
+    repeat_y = 2
+    no_repeat = 3
+
+# mark: CanvasLinearGradientPaintStyle ==========================================================
+
+## Gfx::CanvasLinearGradientPaintStyle (Libraries/LibGfx/PaintStyle.h:112).
+pub struct CanvasLinearGradientPaintStyle: IsCanvasLinearGradientPaintStyle, IsGradientPaintStyle, IsPaintStyle:
+    pub var gradient_paint_style_base: GradientPaintStyle  # primary base
+    pub var m_p0: FloatPoint
+    pub var m_p1: FloatPoint
+
+    func canvas_linear_gradient_paint_style() -> CanvasLinearGradientPaintStyle*: return (CanvasLinearGradientPaintStyle*)&self
+
+    func gradient_paint_style() -> GradientPaintStyle*: return (GradientPaintStyle*)&self
+
+    func paint_style() -> PaintStyle*: return (PaintStyle*)&self
+
+## Upcast to Gfx::CanvasLinearGradientPaintStyle (implemented by every struct in its hierarchy).
+pub interface IsCanvasLinearGradientPaintStyle:
+    func canvas_linear_gradient_paint_style() -> CanvasLinearGradientPaintStyle*
+
+## Virtual functions introduced by Gfx::CanvasLinearGradientPaintStyle.
+pub struct CanvasLinearGradientPaintStyleVTable:
+    pub let gradient_paint_style_vtable: GradientPaintStyleVTable
+
+## The vtable of Gfx::CanvasLinearGradientPaintStyle.
+pub let canvas_linear_gradient_paint_style_vtable: CanvasLinearGradientPaintStyleVTable = CanvasLinearGradientPaintStyleVTable(gradient_paint_style_vtable = GradientPaintStyleVTable(paint_style_vtable = PaintStyleVTable(class_info = &canvas_linear_gradient_paint_style_class, is_visible = gradient_paint_style_is_visible_impl)))
+
+## Class information of Gfx::CanvasLinearGradientPaintStyle: name, class-id range (pre-order), size, vtable.
+pub let canvas_linear_gradient_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "CanvasLinearGradientPaintStyle", first_id = 4, last_id = 4, size = sizeof(CanvasLinearGradientPaintStyle), vtable = (const void*)&canvas_linear_gradient_paint_style_vtable)
+
+## is<Gfx::CanvasLinearGradientPaintStyle>: the class-id range test.
+pub func is_canvas_linear_gradient_paint_style[P: IsPaintStyle](p: P*) -> bool:
+    let id = p.paint_style().class_id
+    return id >= canvas_linear_gradient_paint_style_class.first_id and id <= canvas_linear_gradient_paint_style_class.last_id
+
+## as_if<Gfx::CanvasLinearGradientPaintStyle>.
+pub func as_if_canvas_linear_gradient_paint_style[P: IsPaintStyle](p: P*) -> CanvasLinearGradientPaintStyle*?:
+    if is_canvas_linear_gradient_paint_style(p): return (CanvasLinearGradientPaintStyle*)p
+    return none
+
+## as<Gfx::CanvasLinearGradientPaintStyle> (verify_cast).
+pub func as_canvas_linear_gradient_paint_style[P: IsPaintStyle](p: P*) -> CanvasLinearGradientPaintStyle*:
+    return as_if_canvas_linear_gradient_paint_style(p) else trap("as<Gfx::CanvasLinearGradientPaintStyle> failed")
+
+# mark: CanvasConicGradientPaintStyle ===========================================================
+
+## Gfx::CanvasConicGradientPaintStyle (Libraries/LibGfx/PaintStyle.h:133).
+pub struct CanvasConicGradientPaintStyle: IsCanvasConicGradientPaintStyle, IsGradientPaintStyle, IsPaintStyle:
+    pub var gradient_paint_style_base: GradientPaintStyle  # primary base
+    pub var m_center: FloatPoint
+    pub var m_start_angle: f32  # C++ default: { 0.0f }
+
+    func canvas_conic_gradient_paint_style() -> CanvasConicGradientPaintStyle*: return (CanvasConicGradientPaintStyle*)&self
+
+    func gradient_paint_style() -> GradientPaintStyle*: return (GradientPaintStyle*)&self
+
+    func paint_style() -> PaintStyle*: return (PaintStyle*)&self
+
+## Upcast to Gfx::CanvasConicGradientPaintStyle (implemented by every struct in its hierarchy).
+pub interface IsCanvasConicGradientPaintStyle:
+    func canvas_conic_gradient_paint_style() -> CanvasConicGradientPaintStyle*
+
+## Virtual functions introduced by Gfx::CanvasConicGradientPaintStyle.
+pub struct CanvasConicGradientPaintStyleVTable:
+    pub let gradient_paint_style_vtable: GradientPaintStyleVTable
+
+## The vtable of Gfx::CanvasConicGradientPaintStyle.
+pub let canvas_conic_gradient_paint_style_vtable: CanvasConicGradientPaintStyleVTable = CanvasConicGradientPaintStyleVTable(gradient_paint_style_vtable = GradientPaintStyleVTable(paint_style_vtable = PaintStyleVTable(class_info = &canvas_conic_gradient_paint_style_class, is_visible = gradient_paint_style_is_visible_impl)))
+
+## Class information of Gfx::CanvasConicGradientPaintStyle: name, class-id range (pre-order), size, vtable.
+pub let canvas_conic_gradient_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "CanvasConicGradientPaintStyle", first_id = 3, last_id = 3, size = sizeof(CanvasConicGradientPaintStyle), vtable = (const void*)&canvas_conic_gradient_paint_style_vtable)
+
+## is<Gfx::CanvasConicGradientPaintStyle>: the class-id range test.
+pub func is_canvas_conic_gradient_paint_style[P: IsPaintStyle](p: P*) -> bool:
+    let id = p.paint_style().class_id
+    return id >= canvas_conic_gradient_paint_style_class.first_id and id <= canvas_conic_gradient_paint_style_class.last_id
+
+## as_if<Gfx::CanvasConicGradientPaintStyle>.
+pub func as_if_canvas_conic_gradient_paint_style[P: IsPaintStyle](p: P*) -> CanvasConicGradientPaintStyle*?:
+    if is_canvas_conic_gradient_paint_style(p): return (CanvasConicGradientPaintStyle*)p
+    return none
+
+## as<Gfx::CanvasConicGradientPaintStyle> (verify_cast).
+pub func as_canvas_conic_gradient_paint_style[P: IsPaintStyle](p: P*) -> CanvasConicGradientPaintStyle*:
+    return as_if_canvas_conic_gradient_paint_style(p) else trap("as<Gfx::CanvasConicGradientPaintStyle> failed")
+
+# mark: CanvasRadialGradientPaintStyle ==========================================================
+
+## Gfx::CanvasRadialGradientPaintStyle (Libraries/LibGfx/PaintStyle.h:154).
+pub struct CanvasRadialGradientPaintStyle: IsCanvasRadialGradientPaintStyle, IsGradientPaintStyle, IsPaintStyle:
+    pub var gradient_paint_style_base: GradientPaintStyle  # primary base
+    pub var m_start_center: FloatPoint
+    pub var m_start_radius: f32  # C++ default: { 0.0f }
+    pub var m_end_center: FloatPoint
+    pub var m_end_radius: f32  # C++ default: { 0.0f }
+
+    func canvas_radial_gradient_paint_style() -> CanvasRadialGradientPaintStyle*: return (CanvasRadialGradientPaintStyle*)&self
+
+    func gradient_paint_style() -> GradientPaintStyle*: return (GradientPaintStyle*)&self
+
+    func paint_style() -> PaintStyle*: return (PaintStyle*)&self
+
+## Upcast to Gfx::CanvasRadialGradientPaintStyle (implemented by every struct in its hierarchy).
+pub interface IsCanvasRadialGradientPaintStyle:
+    func canvas_radial_gradient_paint_style() -> CanvasRadialGradientPaintStyle*
+
+## Virtual functions introduced by Gfx::CanvasRadialGradientPaintStyle.
+pub struct CanvasRadialGradientPaintStyleVTable:
+    pub let gradient_paint_style_vtable: GradientPaintStyleVTable
+
+## The vtable of Gfx::CanvasRadialGradientPaintStyle.
+pub let canvas_radial_gradient_paint_style_vtable: CanvasRadialGradientPaintStyleVTable = CanvasRadialGradientPaintStyleVTable(gradient_paint_style_vtable = GradientPaintStyleVTable(paint_style_vtable = PaintStyleVTable(class_info = &canvas_radial_gradient_paint_style_class, is_visible = gradient_paint_style_is_visible_impl)))
+
+## Class information of Gfx::CanvasRadialGradientPaintStyle: name, class-id range (pre-order), size, vtable.
+pub let canvas_radial_gradient_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "CanvasRadialGradientPaintStyle", first_id = 5, last_id = 5, size = sizeof(CanvasRadialGradientPaintStyle), vtable = (const void*)&canvas_radial_gradient_paint_style_vtable)
+
+## is<Gfx::CanvasRadialGradientPaintStyle>: the class-id range test.
+pub func is_canvas_radial_gradient_paint_style[P: IsPaintStyle](p: P*) -> bool:
+    let id = p.paint_style().class_id
+    return id >= canvas_radial_gradient_paint_style_class.first_id and id <= canvas_radial_gradient_paint_style_class.last_id
+
+## as_if<Gfx::CanvasRadialGradientPaintStyle>.
+pub func as_if_canvas_radial_gradient_paint_style[P: IsPaintStyle](p: P*) -> CanvasRadialGradientPaintStyle*?:
+    if is_canvas_radial_gradient_paint_style(p): return (CanvasRadialGradientPaintStyle*)p
+    return none
+
+## as<Gfx::CanvasRadialGradientPaintStyle> (verify_cast).
+pub func as_canvas_radial_gradient_paint_style[P: IsPaintStyle](p: P*) -> CanvasRadialGradientPaintStyle*:
+    return as_if_canvas_radial_gradient_paint_style(p) else trap("as<Gfx::CanvasRadialGradientPaintStyle> failed")
+
+# mark: SvgGradientPaintStyle ===================================================================
+
+## Gfx::SVGGradientPaintStyle (Libraries/LibGfx/PaintStyle.h:183).
+pub struct SvgGradientPaintStyle: IsSvgGradientPaintStyle, IsGradientPaintStyle, IsPaintStyle:
+    pub var gradient_paint_style_base: GradientPaintStyle  # primary base
+    pub var m_inverse_transform: AffineTransform?  # C++ default: { }
+    pub var m_scale: f32  # C++ default: 1.0f
+    pub var m_spread_method: SvgGradientPaintStyleSpreadMethod  # C++ default: { SpreadMethod :: Pad }
+
+    func svg_gradient_paint_style() -> SvgGradientPaintStyle*: return (SvgGradientPaintStyle*)&self
+
+    func gradient_paint_style() -> GradientPaintStyle*: return (GradientPaintStyle*)&self
+
+    func paint_style() -> PaintStyle*: return (PaintStyle*)&self
+
+## Upcast to Gfx::SVGGradientPaintStyle (implemented by every struct in its hierarchy).
+pub interface IsSvgGradientPaintStyle:
+    func svg_gradient_paint_style() -> SvgGradientPaintStyle*
+
+## Virtual functions introduced by Gfx::SVGGradientPaintStyle.
+pub struct SvgGradientPaintStyleVTable:
+    pub let gradient_paint_style_vtable: GradientPaintStyleVTable
+
+## The vtable of Gfx::SVGGradientPaintStyle.
+pub let svg_gradient_paint_style_vtable: SvgGradientPaintStyleVTable = SvgGradientPaintStyleVTable(gradient_paint_style_vtable = GradientPaintStyleVTable(paint_style_vtable = PaintStyleVTable(class_info = &svg_gradient_paint_style_class, is_visible = gradient_paint_style_is_visible_impl)))
+
+## Class information of Gfx::SVGGradientPaintStyle: name, class-id range (pre-order), size, vtable.
+pub let svg_gradient_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "SVGGradientPaintStyle", first_id = 6, last_id = 8, size = sizeof(SvgGradientPaintStyle), vtable = (const void*)&svg_gradient_paint_style_vtable)
+
+## is<Gfx::SVGGradientPaintStyle>: the class-id range test.
+pub func is_svg_gradient_paint_style[P: IsPaintStyle](p: P*) -> bool:
+    let id = p.paint_style().class_id
+    return id >= svg_gradient_paint_style_class.first_id and id <= svg_gradient_paint_style_class.last_id
+
+## as_if<Gfx::SVGGradientPaintStyle>.
+pub func as_if_svg_gradient_paint_style[P: IsPaintStyle](p: P*) -> SvgGradientPaintStyle*?:
+    if is_svg_gradient_paint_style(p): return (SvgGradientPaintStyle*)p
+    return none
+
+## as<Gfx::SVGGradientPaintStyle> (verify_cast).
+pub func as_svg_gradient_paint_style[P: IsPaintStyle](p: P*) -> SvgGradientPaintStyle*:
+    return as_if_svg_gradient_paint_style(p) else trap("as<Gfx::SVGGradientPaintStyle> failed")
+
+## Gfx::SVGGradientPaintStyle::SpreadMethod (Libraries/LibGfx/PaintStyle.h:187).
+pub enum SvgGradientPaintStyleSpreadMethod as i32:
+    pad_ = 0
+    repeat = 1
+    reflect = 2
+
+# mark: SvgLinearGradientPaintStyle =============================================================
+
+## Gfx::SVGLinearGradientPaintStyle (Libraries/LibGfx/PaintStyle.h:209).
+pub struct SvgLinearGradientPaintStyle: IsSvgLinearGradientPaintStyle, IsSvgGradientPaintStyle, IsGradientPaintStyle, IsPaintStyle:
+    pub var svg_gradient_paint_style_base: SvgGradientPaintStyle  # primary base
+    pub var m_p0: FloatPoint
+    pub var m_p1: FloatPoint
+
+    func svg_linear_gradient_paint_style() -> SvgLinearGradientPaintStyle*: return (SvgLinearGradientPaintStyle*)&self
+
+    func svg_gradient_paint_style() -> SvgGradientPaintStyle*: return (SvgGradientPaintStyle*)&self
+
+    func gradient_paint_style() -> GradientPaintStyle*: return (GradientPaintStyle*)&self
+
+    func paint_style() -> PaintStyle*: return (PaintStyle*)&self
+
+## Upcast to Gfx::SVGLinearGradientPaintStyle (implemented by every struct in its hierarchy).
+pub interface IsSvgLinearGradientPaintStyle:
+    func svg_linear_gradient_paint_style() -> SvgLinearGradientPaintStyle*
+
+## Virtual functions introduced by Gfx::SVGLinearGradientPaintStyle.
+pub struct SvgLinearGradientPaintStyleVTable:
+    pub let svg_gradient_paint_style_vtable: SvgGradientPaintStyleVTable
+
+## The vtable of Gfx::SVGLinearGradientPaintStyle.
+pub let svg_linear_gradient_paint_style_vtable: SvgLinearGradientPaintStyleVTable = SvgLinearGradientPaintStyleVTable(svg_gradient_paint_style_vtable = SvgGradientPaintStyleVTable(gradient_paint_style_vtable = GradientPaintStyleVTable(paint_style_vtable = PaintStyleVTable(class_info = &svg_linear_gradient_paint_style_class, is_visible = gradient_paint_style_is_visible_impl))))
+
+## Class information of Gfx::SVGLinearGradientPaintStyle: name, class-id range (pre-order), size, vtable.
+pub let svg_linear_gradient_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "SVGLinearGradientPaintStyle", first_id = 7, last_id = 7, size = sizeof(SvgLinearGradientPaintStyle), vtable = (const void*)&svg_linear_gradient_paint_style_vtable)
+
+## is<Gfx::SVGLinearGradientPaintStyle>: the class-id range test.
+pub func is_svg_linear_gradient_paint_style[P: IsPaintStyle](p: P*) -> bool:
+    let id = p.paint_style().class_id
+    return id >= svg_linear_gradient_paint_style_class.first_id and id <= svg_linear_gradient_paint_style_class.last_id
+
+## as_if<Gfx::SVGLinearGradientPaintStyle>.
+pub func as_if_svg_linear_gradient_paint_style[P: IsPaintStyle](p: P*) -> SvgLinearGradientPaintStyle*?:
+    if is_svg_linear_gradient_paint_style(p): return (SvgLinearGradientPaintStyle*)p
+    return none
+
+## as<Gfx::SVGLinearGradientPaintStyle> (verify_cast).
+pub func as_svg_linear_gradient_paint_style[P: IsPaintStyle](p: P*) -> SvgLinearGradientPaintStyle*:
+    return as_if_svg_linear_gradient_paint_style(p) else trap("as<Gfx::SVGLinearGradientPaintStyle> failed")
+
+# mark: SvgRadialGradientPaintStyle =============================================================
+
+## Gfx::SVGRadialGradientPaintStyle (Libraries/LibGfx/PaintStyle.h:237).
+pub struct SvgRadialGradientPaintStyle: IsSvgRadialGradientPaintStyle, IsSvgGradientPaintStyle, IsGradientPaintStyle, IsPaintStyle:
+    pub var svg_gradient_paint_style_base: SvgGradientPaintStyle  # primary base
+    pub var m_start_center: FloatPoint
+    pub var m_start_radius: f32  # C++ default: { 0.0f }
+    pub var m_end_center: FloatPoint
+    pub var m_end_radius: f32  # C++ default: { 0.0f }
+
+    func svg_radial_gradient_paint_style() -> SvgRadialGradientPaintStyle*: return (SvgRadialGradientPaintStyle*)&self
+
+    func svg_gradient_paint_style() -> SvgGradientPaintStyle*: return (SvgGradientPaintStyle*)&self
+
+    func gradient_paint_style() -> GradientPaintStyle*: return (GradientPaintStyle*)&self
+
+    func paint_style() -> PaintStyle*: return (PaintStyle*)&self
+
+## Upcast to Gfx::SVGRadialGradientPaintStyle (implemented by every struct in its hierarchy).
+pub interface IsSvgRadialGradientPaintStyle:
+    func svg_radial_gradient_paint_style() -> SvgRadialGradientPaintStyle*
+
+## Virtual functions introduced by Gfx::SVGRadialGradientPaintStyle.
+pub struct SvgRadialGradientPaintStyleVTable:
+    pub let svg_gradient_paint_style_vtable: SvgGradientPaintStyleVTable
+
+## The vtable of Gfx::SVGRadialGradientPaintStyle.
+pub let svg_radial_gradient_paint_style_vtable: SvgRadialGradientPaintStyleVTable = SvgRadialGradientPaintStyleVTable(svg_gradient_paint_style_vtable = SvgGradientPaintStyleVTable(gradient_paint_style_vtable = GradientPaintStyleVTable(paint_style_vtable = PaintStyleVTable(class_info = &svg_radial_gradient_paint_style_class, is_visible = gradient_paint_style_is_visible_impl))))
+
+## Class information of Gfx::SVGRadialGradientPaintStyle: name, class-id range (pre-order), size, vtable.
+pub let svg_radial_gradient_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "SVGRadialGradientPaintStyle", first_id = 8, last_id = 8, size = sizeof(SvgRadialGradientPaintStyle), vtable = (const void*)&svg_radial_gradient_paint_style_vtable)
+
+## is<Gfx::SVGRadialGradientPaintStyle>: the class-id range test.
+pub func is_svg_radial_gradient_paint_style[P: IsPaintStyle](p: P*) -> bool:
+    let id = p.paint_style().class_id
+    return id >= svg_radial_gradient_paint_style_class.first_id and id <= svg_radial_gradient_paint_style_class.last_id
+
+## as_if<Gfx::SVGRadialGradientPaintStyle>.
+pub func as_if_svg_radial_gradient_paint_style[P: IsPaintStyle](p: P*) -> SvgRadialGradientPaintStyle*?:
+    if is_svg_radial_gradient_paint_style(p): return (SvgRadialGradientPaintStyle*)p
+    return none
+
+## as<Gfx::SVGRadialGradientPaintStyle> (verify_cast).
+pub func as_svg_radial_gradient_paint_style[P: IsPaintStyle](p: P*) -> SvgRadialGradientPaintStyle*:
+    return as_if_svg_radial_gradient_paint_style(p) else trap("as<Gfx::SVGRadialGradientPaintStyle> failed")

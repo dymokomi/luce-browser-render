@@ -1,0 +1,75 @@
+#==============================================================================================
+#
+#   types_accumulated_visual_context - declarations of Libraries/LibWeb/Painting/AccumulatedVisualContext.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibWeb/Painting/AccumulatedVisualContext.h (Ladybird 47c82b38d0) by the
+#       skeleton generator (DESIGN.md §4.4). Regenerate rather than edit, except to fill a
+#       field the generator could not map.
+#
+#==============================================================================================
+
+# mark: VisualContextIndexDecl ==================================================================
+
+## Web::Painting::VisualContextIndex_decl (Libraries/LibWeb/Painting/AccumulatedVisualContext.h:28).
+pub struct VisualContextIndexDecl:
+    pub var empty_: u8
+
+# mark: ScrollData ==============================================================================
+
+## Web::Painting::ScrollData (Libraries/LibWeb/Painting/AccumulatedVisualContext.h:30).
+pub struct ScrollData:
+    pub var scroll_frame_index: u64
+    pub var is_sticky: bool
+
+# mark: ClipData ================================================================================
+
+## Web::Painting::ClipData (Libraries/LibWeb/Painting/AccumulatedVisualContext.h:35).
+pub struct ClipData:
+    pub var rect: gfx.DevicePixelRect
+    pub var corner_radii: CornerRadii
+
+# mark: TransformData ===========================================================================
+
+## Web::Painting::TransformData (Libraries/LibWeb/Painting/AccumulatedVisualContext.h:48).
+pub struct TransformData:
+    pub var matrix: gfx.FloatMatrix4X4
+    pub var origin: gfx.FloatPoint
+
+# mark: PerspectiveData =========================================================================
+
+## Web::Painting::PerspectiveData (Libraries/LibWeb/Painting/AccumulatedVisualContext.h:53).
+pub struct PerspectiveData:
+    pub var matrix: gfx.FloatMatrix4X4
+
+# mark: ClipPathData ============================================================================
+
+## Web::Painting::ClipPathData (Libraries/LibWeb/Painting/AccumulatedVisualContext.h:57).
+pub struct ClipPathData:
+    pub var path: gfx.Path
+    pub var bounding_rect: gfx.DevicePixelRect
+    pub var fill_rule: gfx.WindingRule
+
+# mark: EffectsData =============================================================================
+
+## Web::Painting::EffectsData (Libraries/LibWeb/Painting/AccumulatedVisualContext.h:63).
+pub struct EffectsData:
+    pub var opacity: f32  # C++ default: { 1.0f }
+    pub var blend_mode: gfx.CompositingAndBlendingOperator  # C++ default: { Gfx :: CompositingAndBlendingOperator :: Normal }
+    pub var gfx_filter: gfx.Filter?
+
+# mark: AccumulatedVisualContextNode ============================================================
+
+## Web::Painting::AccumulatedVisualContextNode (Libraries/LibWeb/Painting/AccumulatedVisualContext.h:78).
+pub struct AccumulatedVisualContextNode:
+    pub var data: VisualContextData
+    pub var parent_index: u64  # C++ default: { }
+    pub var depth: usize  # C++ default: { 0 }
+    pub var has_empty_effective_clip: bool  # C++ default: { false }
+
+# mark: AccumulatedVisualContextTree ============================================================
+
+## Web::Painting::AccumulatedVisualContextTree (Libraries/LibWeb/Painting/AccumulatedVisualContext.h:85).
+pub struct AccumulatedVisualContextTree:
+    pub var m_nodes: ak.Vector[AccumulatedVisualContextNode]

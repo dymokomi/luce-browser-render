@@ -1,0 +1,31 @@
+#==============================================================================================
+#
+#   types_painting_surface - declarations of Libraries/LibGfx/PaintingSurface.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/PaintingSurface.cpp, Libraries/LibGfx/PaintingSurface.h (Ladybird
+#       47c82b38d0) by the skeleton generator (DESIGN.md §4.4). Regenerate rather than edit,
+#       except to fill a field the generator could not map.
+#
+#==============================================================================================
+
+## Gfx::PaintingSurface::Impl (Libraries/LibGfx/PaintingSurface.cpp:28): opaque in this phase (not in the phase-1 closure).
+pub struct PaintingSurfaceImpl:
+    pub var opaque_: u8
+
+## SkCanvas (Libraries/LibGfx/PaintingSurface.h:29): opaque in this phase (not in the phase-1 closure).
+pub struct SkCanvas:
+    pub var opaque_: u8
+
+# mark: PaintingSurface =========================================================================
+
+## Gfx::PaintingSurface (Libraries/LibGfx/PaintingSurface.h:34).
+pub struct PaintingSurface:
+    pub var on_flush: ak.Function1[PaintingSurface*, unit]
+    pub var m_impl: PaintingSurfaceImpl*
+
+## Gfx::PaintingSurface::Origin (Libraries/LibGfx/PaintingSurface.h:36).
+pub enum PaintingSurfaceOrigin as i32:
+    top_left = 0
+    bottom_left = 1

@@ -1,0 +1,42 @@
+#==============================================================================================
+#
+#   types_gradient_data - declarations of Libraries/LibWeb/Painting/GradientData.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibWeb/Painting/GradientData.h (Ladybird 47c82b38d0) by the skeleton
+#       generator (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the
+#       generator could not map.
+#
+#==============================================================================================
+
+# mark: ColorStopData ===========================================================================
+
+## Web::Painting::ColorStopData (Libraries/LibWeb/Painting/GradientData.h:19).
+pub struct ColorStopData:
+    pub var list: ak.Vector[gfx.ColorStop]
+    pub var repeat_length: f32?
+    pub var repeating: bool  # C++ default: { false }
+
+# mark: LinearGradientData ======================================================================
+
+## Web::Painting::LinearGradientData (Libraries/LibWeb/Painting/GradientData.h:25).
+pub struct LinearGradientData:
+    pub var gradient_angle: f32
+    pub var color_stops: ColorStopData
+    pub var interpolation_method: ColorInterpolationMethod
+
+# mark: ConicGradientData =======================================================================
+
+## Web::Painting::ConicGradientData (Libraries/LibWeb/Painting/GradientData.h:31).
+pub struct ConicGradientData:
+    pub var start_angle: f32
+    pub var color_stops: ColorStopData
+    pub var interpolation_method: ColorInterpolationMethod
+
+# mark: RadialGradientData ======================================================================
+
+## Web::Painting::RadialGradientData (Libraries/LibWeb/Painting/GradientData.h:37).
+pub struct RadialGradientData:
+    pub var color_stops: ColorStopData
+    pub var interpolation_method: ColorInterpolationMethod

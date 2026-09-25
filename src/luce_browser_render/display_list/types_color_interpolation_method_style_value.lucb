@@ -1,0 +1,18 @@
+#==============================================================================================
+#
+#   types_color_interpolation_method_style_value - declarations of Libraries/LibWeb/CSS/StyleValues/ColorInterpolationMethodStyleValue.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibWeb/CSS/StyleValues/ColorInterpolationMethodStyleValue.h (Ladybird
+#       47c82b38d0) by the skeleton generator (DESIGN.md §4.4). Regenerate rather than edit,
+#       except to fill a field the generator could not map.
+#
+#==============================================================================================
+
+# mark: PolarColorInterpolationMethod ===========================================================
+
+## Web::CSS::ColorInterpolationMethodStyleValue::PolarColorInterpolationMethod (Libraries/LibWeb/CSS/StyleValues/ColorInterpolationMethodStyleValue.h:17).
+pub struct PolarColorInterpolationMethod:
+    pub var color_space: css_data.PolarColorSpace
+    pub var hue_interpolation_method: css_data.HueInterpolationMethod  # C++ default: { HueInterpolationMethod :: Shorter }

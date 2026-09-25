@@ -1,0 +1,51 @@
+#==============================================================================================
+#
+#   types_path_font_provider - declarations of Libraries/LibGfx/Font/PathFontProvider.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/Font/PathFontProvider.h (Ladybird 47c82b38d0) by the skeleton
+#       generator (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the
+#       generator could not map.
+#
+#==============================================================================================
+
+# mark: PathFontProvider ========================================================================
+
+## Gfx::PathFontProvider (Libraries/LibGfx/Font/PathFontProvider.h:17).
+pub struct PathFontProvider: IsPathFontProvider, IsSystemFontProvider:
+    pub var system_font_provider_base: SystemFontProvider  # primary base
+    pub var m_typeface_by_family: ak.HashMap[ak.FlyString, ak.Vector[Typeface*], ak.AsciiCaseInsensitiveFlyStringTraits]
+    pub var m_name: ak.String  # C++ default: { "Path"_string }
+
+    func path_font_provider() -> PathFontProvider*: return (PathFontProvider*)&self
+
+    func system_font_provider() -> SystemFontProvider*: return (SystemFontProvider*)&self
+
+## Upcast to Gfx::PathFontProvider (implemented by every struct in its hierarchy).
+pub interface IsPathFontProvider:
+    func path_font_provider() -> PathFontProvider*
+
+## Virtual functions introduced by Gfx::PathFontProvider.
+pub struct PathFontProviderVTable:
+    pub let system_font_provider_vtable: SystemFontProviderVTable
+
+## The vtable of Gfx::PathFontProvider.
+pub let path_font_provider_vtable: PathFontProviderVTable = PathFontProviderVTable(system_font_provider_vtable = SystemFontProviderVTable(class_info = &path_font_provider_class, name = path_font_provider_name_impl, get_font = path_font_provider_get_font_impl, for_each_typeface_with_family_name = path_font_provider_for_each_typeface_with_family_name_impl))
+
+## Class information of Gfx::PathFontProvider: name, class-id range (pre-order), size, vtable.
+pub let path_font_provider_class: ak.ClassInfo = ak.ClassInfo(name = "PathFontProvider", first_id = 1, last_id = 1, size = sizeof(PathFontProvider), vtable = (const void*)&path_font_provider_vtable)
+
+## is<Gfx::PathFontProvider>: the class-id range test.
+pub func is_path_font_provider[P: IsSystemFontProvider](p: P*) -> bool:
+    let id = p.system_font_provider().class_id
+    return id >= path_font_provider_class.first_id and id <= path_font_provider_class.last_id
+
+## as_if<Gfx::PathFontProvider>.
+pub func as_if_path_font_provider[P: IsSystemFontProvider](p: P*) -> PathFontProvider*?:
+    if is_path_font_provider(p): return (PathFontProvider*)p
+    return none
+
+## as<Gfx::PathFontProvider> (verify_cast).
+pub func as_path_font_provider[P: IsSystemFontProvider](p: P*) -> PathFontProvider*:
+    return as_if_path_font_provider(p) else trap("as<Gfx::PathFontProvider> failed")

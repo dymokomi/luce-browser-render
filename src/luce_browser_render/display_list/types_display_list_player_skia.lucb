@@ -1,0 +1,53 @@
+#==============================================================================================
+#
+#   types_display_list_player_skia - declarations of Libraries/LibWeb/Painting/DisplayListPlayerSkia.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibWeb/Painting/DisplayListPlayerSkia.h (Ladybird 47c82b38d0) by the
+#       skeleton generator (DESIGN.md §4.4). Regenerate rather than edit, except to fill a
+#       field the generator could not map.
+#
+#==============================================================================================
+
+## SkPaint (Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:14): opaque in this phase (not in the phase-1 closure).
+pub struct SkPaint:
+    pub var opaque_: u8
+
+# mark: DisplayListPlayerSkia ===================================================================
+
+## Web::Painting::DisplayListPlayerSkia (Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:18).
+pub struct DisplayListPlayerSkia: IsDisplayListPlayerSkia, IsDisplayListPlayer:
+    pub var display_list_player_base: DisplayListPlayer  # primary base
+
+    func display_list_player_skia() -> DisplayListPlayerSkia*: return (DisplayListPlayerSkia*)&self
+
+    func display_list_player() -> DisplayListPlayer*: return (DisplayListPlayer*)&self
+
+## Upcast to Web::Painting::DisplayListPlayerSkia (implemented by every struct in its hierarchy).
+pub interface IsDisplayListPlayerSkia:
+    func display_list_player_skia() -> DisplayListPlayerSkia*
+
+## Virtual functions introduced by Web::Painting::DisplayListPlayerSkia.
+pub struct DisplayListPlayerSkiaVTable:
+    pub let display_list_player_vtable: DisplayListPlayerVTable
+
+## The vtable of Web::Painting::DisplayListPlayerSkia.
+pub let display_list_player_skia_vtable: DisplayListPlayerSkiaVTable = DisplayListPlayerSkiaVTable(display_list_player_vtable = DisplayListPlayerVTable(class_info = &display_list_player_skia_class, flush = display_list_player_skia_flush_impl, draw_glyph_run = display_list_player_skia_draw_glyph_run_impl, fill_rect = display_list_player_skia_fill_rect_impl, draw_scaled_immutable_bitmap = display_list_player_skia_draw_scaled_immutable_bitmap_impl, draw_repeated_immutable_bitmap = display_list_player_skia_draw_repeated_immutable_bitmap_impl, draw_external_content = display_list_player_skia_draw_external_content_impl, save = display_list_player_skia_save_impl, save_layer = display_list_player_skia_save_layer_impl, restore = display_list_player_skia_restore_impl, translate = display_list_player_skia_translate_impl, add_clip_rect = display_list_player_skia_add_clip_rect_impl, paint_linear_gradient = display_list_player_skia_paint_linear_gradient_impl, paint_radial_gradient = display_list_player_skia_paint_radial_gradient_impl, paint_conic_gradient = display_list_player_skia_paint_conic_gradient_impl, paint_outer_box_shadow = display_list_player_skia_paint_outer_box_shadow_impl, paint_inner_box_shadow = display_list_player_skia_paint_inner_box_shadow_impl, paint_text_shadow = display_list_player_skia_paint_text_shadow_impl, fill_rect_with_rounded_corners = display_list_player_skia_fill_rect_with_rounded_corners_impl, fill_path = display_list_player_skia_fill_path_impl, stroke_path = display_list_player_skia_stroke_path_impl, draw_ellipse = display_list_player_skia_draw_ellipse_impl, fill_ellipse = display_list_player_skia_fill_ellipse_impl, draw_line = display_list_player_skia_draw_line_impl, apply_backdrop_filter = display_list_player_skia_apply_backdrop_filter_impl, draw_rect = display_list_player_skia_draw_rect_impl, add_rounded_rect_clip = display_list_player_skia_add_rounded_rect_clip_impl, paint_nested_display_list = display_list_player_skia_paint_nested_display_list_impl, paint_scrollbar = display_list_player_skia_paint_scrollbar_impl, apply_effects = display_list_player_skia_apply_effects_impl, apply_transform = display_list_player_skia_apply_transform_impl, would_be_fully_clipped_by_painter = display_list_player_skia_would_be_fully_clipped_by_painter_impl, add_clip_path = display_list_player_skia_add_clip_path_impl))
+
+## Class information of Web::Painting::DisplayListPlayerSkia: name, class-id range (pre-order), size, vtable.
+pub let display_list_player_skia_class: ak.ClassInfo = ak.ClassInfo(name = "DisplayListPlayerSkia", first_id = 1, last_id = 1, size = sizeof(DisplayListPlayerSkia), vtable = (const void*)&display_list_player_skia_vtable)
+
+## is<Web::Painting::DisplayListPlayerSkia>: the class-id range test.
+pub func is_display_list_player_skia[P: IsDisplayListPlayer](p: P*) -> bool:
+    let id = p.display_list_player().class_id
+    return id >= display_list_player_skia_class.first_id and id <= display_list_player_skia_class.last_id
+
+## as_if<Web::Painting::DisplayListPlayerSkia>.
+pub func as_if_display_list_player_skia[P: IsDisplayListPlayer](p: P*) -> DisplayListPlayerSkia*?:
+    if is_display_list_player_skia(p): return (DisplayListPlayerSkia*)p
+    return none
+
+## as<Web::Painting::DisplayListPlayerSkia> (verify_cast).
+pub func as_display_list_player_skia[P: IsDisplayListPlayer](p: P*) -> DisplayListPlayerSkia*:
+    return as_if_display_list_player_skia(p) else trap("as<Web::Painting::DisplayListPlayerSkia> failed")

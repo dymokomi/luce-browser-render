@@ -1,0 +1,17 @@
+#==============================================================================================
+#
+#   types_affine_transform - declarations of Libraries/LibGfx/AffineTransform.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/AffineTransform.h (Ladybird 47c82b38d0) by the skeleton generator
+#       (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the generator
+#       could not map.
+#
+#==============================================================================================
+
+# mark: AffineTransform =========================================================================
+
+## Gfx::AffineTransform (Libraries/LibGfx/AffineTransform.h:17).
+pub struct AffineTransform:
+    pub var m_values: f32[6]

@@ -1,0 +1,123 @@
+#==============================================================================================
+#
+#   types_painter - declarations of Libraries/LibGfx/Painter.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/Painter.h (Ladybird 47c82b38d0) by the skeleton generator (DESIGN.md
+#       §4.4). Regenerate rather than edit, except to fill a field the generator could not
+#       map.
+#
+#==============================================================================================
+
+# mark: Painter =================================================================================
+
+## Gfx::Painter (Libraries/LibGfx/Painter.h:20).
+pub struct Painter: IsPainter:
+    pub var vtable: const PainterVTable*
+    pub var class_id: u16
+
+    func painter() -> Painter*: return (Painter*)&self
+
+## Upcast to Gfx::Painter (implemented by every struct in its hierarchy).
+pub interface IsPainter:
+    func painter() -> Painter*
+
+## Virtual functions introduced by Gfx::Painter.
+pub struct PainterVTable:
+    pub let class_info: const ak.ClassInfo*
+    pub let clear_rect: func(Painter*, FloatRect, Color) -> unit = painter_clear_rect_impl
+    pub let fill_rect: func(Painter*, FloatRect, Color) -> unit = painter_fill_rect_impl
+    pub let draw_bitmap: func(Painter*, FloatRect, ImmutableBitmap, DevicePixelRect, ScalingMode, Filter?, f32, CompositingAndBlendingOperator) -> unit = painter_draw_bitmap_impl
+    pub let stroke_path_color_f32: func(Painter*, Path, Color, f32) -> unit = painter_stroke_path_color_f32_impl
+    pub let stroke_path_color_f32_f32: func(Painter*, Path, Color, f32, f32, CompositingAndBlendingOperator, PathCapStyle, PathJoinStyle, f32, ak.Vector[f32], f32) -> unit = painter_stroke_path_color_f32_f32_impl
+    pub let stroke_path_paint_style_optional_filter_f32_f32_compositing_and_blending_opera: func(Painter*, Path, PaintStyle*, Filter?, f32, f32, CompositingAndBlendingOperator) -> unit = painter_stroke_path_paint_style_optional_filter_f32_f32_compositing_and_blending_opera_impl
+    pub let stroke_path_paint_style_optional_filter_f32_f32_compositing_and_blending_opera_path_cap_style: func(Painter*, Path, PaintStyle*, Filter?, f32, f32, CompositingAndBlendingOperator, PathCapStyle, PathJoinStyle, f32, ak.Vector[f32], f32) -> unit = painter_stroke_path_paint_style_optional_filter_f32_f32_compositing_and_blending_opera_path_cap_style_impl
+    pub let fill_path_color_winding_rule: func(Painter*, Path, Color, WindingRule) -> unit = painter_fill_path_color_winding_rule_impl
+    pub let fill_path_color_winding_rule_f32: func(Painter*, Path, Color, WindingRule, f32, CompositingAndBlendingOperator) -> unit = painter_fill_path_color_winding_rule_f32_impl
+    pub let fill_path_paint_style: func(Painter*, Path, PaintStyle*, Filter?, f32, CompositingAndBlendingOperator, WindingRule) -> unit = painter_fill_path_paint_style_impl
+    pub let set_transform: func(Painter*, AffineTransform) -> unit = painter_set_transform_impl
+    pub let save: func(Painter*) -> unit = painter_save_impl
+    pub let restore: func(Painter*) -> unit = painter_restore_impl
+    pub let clip: func(Painter*, Path, WindingRule) -> unit = painter_clip_impl
+    pub let reset: func(Painter*) -> unit = painter_reset_impl
+
+## Virtual: Gfx::Painter::clear_rect.
+pub func painter_clear_rect(this: Painter*, arg0: FloatRect, arg1: Color):
+    ((const PainterVTable*)this.vtable).clear_rect(this, arg0, arg1)
+
+## Virtual: Gfx::Painter::fill_rect.
+pub func painter_fill_rect(this: Painter*, arg0: FloatRect, arg1: Color):
+    ((const PainterVTable*)this.vtable).fill_rect(this, arg0, arg1)
+
+## Virtual: Gfx::Painter::draw_bitmap.
+pub func painter_draw_bitmap(this: Painter*, dst_rect: FloatRect, src_bitmap: ImmutableBitmap, src_rect: DevicePixelRect, arg3: ScalingMode, filters: Filter?, global_alpha: f32, compositing_and_blending_operator: CompositingAndBlendingOperator):
+    ((const PainterVTable*)this.vtable).draw_bitmap(this, dst_rect, src_bitmap, src_rect, arg3, filters, global_alpha, compositing_and_blending_operator)
+
+## Virtual: Gfx::Painter::stroke_path.
+pub func painter_stroke_path_color_f32(this: Painter*, arg0: Path, arg1: Color, thickness: f32):
+    ((const PainterVTable*)this.vtable).stroke_path_color_f32(this, arg0, arg1, thickness)
+
+## Virtual: Gfx::Painter::stroke_path.
+pub func painter_stroke_path_color_f32_f32(this: Painter*, arg0: Path, arg1: Color, thickness: f32, blur_radius: f32, compositing_and_blending_operator: CompositingAndBlendingOperator, arg5: PathCapStyle, arg6: PathJoinStyle, miter_limit: f32, dash_array: ak.Vector[f32], dash_offset: f32):
+    ((const PainterVTable*)this.vtable).stroke_path_color_f32_f32(this, arg0, arg1, thickness, blur_radius, compositing_and_blending_operator, arg5, arg6, miter_limit, dash_array, dash_offset)
+
+## Virtual: Gfx::Painter::stroke_path.
+pub func painter_stroke_path_paint_style_optional_filter_f32_f32_compositing_and_blending_opera(this: Painter*, arg0: Path, arg1: PaintStyle*, arg2: Filter?, thickness: f32, global_alpha: f32, compositing_and_blending_operator: CompositingAndBlendingOperator):
+    ((const PainterVTable*)this.vtable).stroke_path_paint_style_optional_filter_f32_f32_compositing_and_blending_opera(this, arg0, arg1, arg2, thickness, global_alpha, compositing_and_blending_operator)
+
+## Virtual: Gfx::Painter::stroke_path.
+pub func painter_stroke_path_paint_style_optional_filter_f32_f32_compositing_and_blending_opera_path_cap_style(this: Painter*, arg0: Path, arg1: PaintStyle*, arg2: Filter?, thickness: f32, global_alpha: f32, compositing_and_blending_operator: CompositingAndBlendingOperator, arg6: PathCapStyle, arg7: PathJoinStyle, miter_limit: f32, arg9: ak.Vector[f32], dash_offset: f32):
+    ((const PainterVTable*)this.vtable).stroke_path_paint_style_optional_filter_f32_f32_compositing_and_blending_opera_path_cap_style(this, arg0, arg1, arg2, thickness, global_alpha, compositing_and_blending_operator, arg6, arg7, miter_limit, arg9, dash_offset)
+
+## Virtual: Gfx::Painter::fill_path.
+pub func painter_fill_path_color_winding_rule(this: Painter*, arg0: Path, arg1: Color, arg2: WindingRule):
+    ((const PainterVTable*)this.vtable).fill_path_color_winding_rule(this, arg0, arg1, arg2)
+
+## Virtual: Gfx::Painter::fill_path.
+pub func painter_fill_path_color_winding_rule_f32(this: Painter*, arg0: Path, arg1: Color, arg2: WindingRule, blur_radius: f32, compositing_and_blending_operator: CompositingAndBlendingOperator):
+    ((const PainterVTable*)this.vtable).fill_path_color_winding_rule_f32(this, arg0, arg1, arg2, blur_radius, compositing_and_blending_operator)
+
+## Virtual: Gfx::Painter::fill_path.
+pub func painter_fill_path_paint_style(this: Painter*, arg0: Path, arg1: PaintStyle*, arg2: Filter?, global_alpha: f32, compositing_and_blending_operator: CompositingAndBlendingOperator, arg5: WindingRule):
+    ((const PainterVTable*)this.vtable).fill_path_paint_style(this, arg0, arg1, arg2, global_alpha, compositing_and_blending_operator, arg5)
+
+## Virtual: Gfx::Painter::set_transform.
+pub func painter_set_transform(this: Painter*, arg0: AffineTransform):
+    ((const PainterVTable*)this.vtable).set_transform(this, arg0)
+
+## Virtual: Gfx::Painter::save.
+pub func painter_save(this: Painter*):
+    ((const PainterVTable*)this.vtable).save(this)
+
+## Virtual: Gfx::Painter::restore.
+pub func painter_restore(this: Painter*):
+    ((const PainterVTable*)this.vtable).restore(this)
+
+## Virtual: Gfx::Painter::clip.
+pub func painter_clip(this: Painter*, arg0: Path, arg1: WindingRule):
+    ((const PainterVTable*)this.vtable).clip(this, arg0, arg1)
+
+## Virtual: Gfx::Painter::reset.
+pub func painter_reset(this: Painter*):
+    ((const PainterVTable*)this.vtable).reset(this)
+
+## The vtable of Gfx::Painter.
+pub let painter_vtable: PainterVTable = PainterVTable(class_info = &painter_class)
+
+## Class information of Gfx::Painter: name, class-id range (pre-order), size, vtable.
+pub let painter_class: ak.ClassInfo = ak.ClassInfo(name = "Painter", first_id = 0, last_id = 0, size = sizeof(Painter), vtable = (const void*)&painter_vtable)
+
+## is<Gfx::Painter>: the class-id range test.
+pub func is_painter[P: IsPainter](p: P*) -> bool:
+    let id = p.painter().class_id
+    return id >= painter_class.first_id and id <= painter_class.last_id
+
+## as_if<Gfx::Painter>.
+pub func as_if_painter[P: IsPainter](p: P*) -> Painter*?:
+    if is_painter(p): return (Painter*)p
+    return none
+
+## as<Gfx::Painter> (verify_cast).
+pub func as_painter[P: IsPainter](p: P*) -> Painter*:
+    return as_if_painter(p) else trap("as<Gfx::Painter> failed")

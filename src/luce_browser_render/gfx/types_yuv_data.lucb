@@ -1,0 +1,15 @@
+#==============================================================================================
+#
+#   types_yuv_data - declarations of Libraries/LibGfx/YUVData.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/YUVData.h (Ladybird 47c82b38d0) by the skeleton generator (DESIGN.md
+#       §4.4). Regenerate rather than edit, except to fill a field the generator could not
+#       map.
+#
+#==============================================================================================
+
+## Gfx::YUVData (Libraries/LibGfx/YUVData.h:31): opaque in this phase (not in the phase-1 closure).
+pub struct YuvData:
+    pub var opaque_: u8

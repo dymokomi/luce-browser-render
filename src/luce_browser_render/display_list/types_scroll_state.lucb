@@ -1,0 +1,23 @@
+#==============================================================================================
+#
+#   types_scroll_state - declarations of Libraries/LibWeb/Painting/ScrollState.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibWeb/Painting/ScrollState.h (Ladybird 47c82b38d0) by the skeleton
+#       generator (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the
+#       generator could not map.
+#
+#==============================================================================================
+
+# mark: ScrollStateSnapshot =====================================================================
+
+## Web::Painting::ScrollStateSnapshot (Libraries/LibWeb/Painting/ScrollState.h:14).
+pub struct ScrollStateSnapshot:
+    pub var m_device_offsets: ak.Vector[gfx.FloatPoint]
+
+# mark: ScrollState =============================================================================
+
+## Web::Painting::ScrollState (Libraries/LibWeb/Painting/ScrollState.h:29).
+pub struct ScrollState:
+    pub var m_scroll_frames: ak.Vector[ScrollFrame]

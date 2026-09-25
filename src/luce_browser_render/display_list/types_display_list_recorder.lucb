@@ -1,0 +1,44 @@
+#==============================================================================================
+#
+#   types_display_list_recorder - declarations of Libraries/LibWeb/Painting/DisplayListRecorder.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibWeb/Painting/DisplayListRecorder.h (Ladybird 47c82b38d0) by the skeleton
+#       generator (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the
+#       generator could not map.
+#
+#==============================================================================================
+
+# mark: DisplayListRecorder =====================================================================
+
+## Web::Painting::DisplayListRecorder (Libraries/LibWeb/Painting/DisplayListRecorder.h:33).
+pub struct DisplayListRecorder:
+    pub var m_save_nesting_level: i32  # C++ default: { 0 }
+    pub var m_accumulated_visual_context_index: u64  # C++ default: { }
+    pub var m_push_sc_index_stack: ak.Vector[u64]
+    pub var m_display_list: DisplayList*
+    pub var m_is_capturing: bool  # C++ default: { false }
+    pub var m_captured_commands: ak.Vector[DisplayListCommand]
+
+## Web::Painting::DisplayListRecorder::FillPathParams (Libraries/LibWeb/Painting/DisplayListRecorder.h:41): opaque in this phase (not in the phase-1 closure).
+pub struct DisplayListRecorderFillPathParams:
+    pub var opaque_: u8
+
+## Web::Painting::DisplayListRecorder::StrokePathParams (Libraries/LibWeb/Painting/DisplayListRecorder.h:50): opaque in this phase (not in the phase-1 closure).
+pub struct DisplayListRecorderStrokePathParams:
+    pub var opaque_: u8
+
+## Web::Painting::DisplayListRecorder::CommandCapture (Libraries/LibWeb/Painting/DisplayListRecorder.h:95): opaque in this phase (not in the phase-1 closure).
+pub struct DisplayListRecorderCommandCapture:
+    pub var opaque_: u8
+
+## Web::Painting::DisplayListRecorder::MaskInfo (Libraries/LibWeb/Painting/DisplayListRecorder.h:122): opaque in this phase (not in the phase-1 closure).
+pub struct DisplayListRecorderMaskInfo:
+    pub var opaque_: u8
+
+# mark: DisplayListRecorderStateSaver ===========================================================
+
+## Web::Painting::DisplayListRecorderStateSaver (Libraries/LibWeb/Painting/DisplayListRecorder.h:159).
+pub struct DisplayListRecorderStateSaver:
+    pub var m_recorder: DisplayListRecorder*

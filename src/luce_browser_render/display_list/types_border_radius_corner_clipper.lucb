@@ -1,0 +1,16 @@
+#==============================================================================================
+#
+#   types_border_radius_corner_clipper - declarations of Libraries/LibWeb/Painting/BorderRadiusCornerClipper.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibWeb/Painting/BorderRadiusCornerClipper.h (Ladybird 47c82b38d0) by the
+#       skeleton generator (DESIGN.md §4.4). Regenerate rather than edit, except to fill a
+#       field the generator could not map.
+#
+#==============================================================================================
+
+## Web::Painting::CornerClip (Libraries/LibWeb/Painting/BorderRadiusCornerClipper.h:14).
+pub enum CornerClip as i32:
+    outside = 0
+    inside = 1

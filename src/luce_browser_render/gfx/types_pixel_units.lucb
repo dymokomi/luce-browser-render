@@ -1,0 +1,53 @@
+#==============================================================================================
+#
+#   types_pixel_units - declarations of Libraries/LibWeb/PixelUnits.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibWeb/PixelUnits.h (Ladybird 47c82b38d0) by the skeleton generator
+#       (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the generator
+#       could not map.
+#
+#==============================================================================================
+
+# mark: DevicePixelsDecl ========================================================================
+
+## Web::DevicePixels_decl (Libraries/LibWeb/PixelUnits.h:26).
+pub struct DevicePixelsDecl:
+    pub var empty_: u8
+
+# mark: CssPixels ===============================================================================
+
+## Web::CSSPixels (Libraries/LibWeb/PixelUnits.h:61).
+pub struct CssPixels:
+    pub var m_value: i32  # C++ default: { 0 }
+
+## Web::CSSPixels::fractional_bits (Libraries/LibWeb/PixelUnits.h:63).
+pub let css_pixels_fractional_bits: i32 = 6
+
+## Web::CSSPixels::fixed_point_denominator (Libraries/LibWeb/PixelUnits.h:64).
+# C++ initializer: 1 << fractional_bits
+pub var css_pixels_fixed_point_denominator: i32
+
+## Web::CSSPixels::radix_mask (Libraries/LibWeb/PixelUnits.h:66).
+# C++ initializer: fixed_point_denominator - 1
+pub var css_pixels_radix_mask: i32
+
+## Web::CSSPixels::max_integer_value (Libraries/LibWeb/PixelUnits.h:68).
+# C++ initializer: NumericLimits < int > :: max ( ) >> fractional_bits
+pub var css_pixels_max_integer_value: i32
+
+## Web::CSSPixels::min_integer_value (Libraries/LibWeb/PixelUnits.h:69).
+# C++ initializer: NumericLimits < int > :: min ( ) >> fractional_bits
+pub var css_pixels_min_integer_value: i32
+
+## Web::CSSPixels::max_dimension_value (Libraries/LibWeb/PixelUnits.h:72).
+# C++ initializer: 17895700
+pub var css_pixels_max_dimension_value: f32
+
+# mark: CssPixelFraction ========================================================================
+
+## Web::CSSPixelFraction (Libraries/LibWeb/PixelUnits.h:305).
+pub struct CssPixelFraction:
+    pub var m_numerator: CssPixels
+    pub var m_denominator: CssPixels

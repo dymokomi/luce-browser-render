@@ -1,0 +1,18 @@
+#==============================================================================================
+#
+#   types_unicode_range - declarations of Libraries/LibGfx/Font/UnicodeRange.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/Font/UnicodeRange.h (Ladybird 47c82b38d0) by the skeleton generator
+#       (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the generator
+#       could not map.
+#
+#==============================================================================================
+
+# mark: UnicodeRange ============================================================================
+
+## Gfx::UnicodeRange (Libraries/LibGfx/Font/UnicodeRange.h:14).
+pub struct UnicodeRange:
+    pub var m_min_code_point: u32
+    pub var m_max_code_point: u32

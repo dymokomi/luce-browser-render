@@ -1,0 +1,43 @@
+#prisma 4.0
+def package "luce-browser-render" {
+    str owner = "dymokomi"
+    str version = "0.1.0"
+    str kind = "package"
+    str language = "luce-base"
+    str description = "Geometry, color, fonts, the CPU rasterizer and the display list of the luce-browser port of Ladybird, in luce-base."
+    str readme = "README.md"
+
+    def export "gfx" {
+        str module = "luce_browser_render.gfx"
+    }
+
+    def export "web_fonts" {
+        str module = "luce_browser_render.web_fonts"
+    }
+
+    def export "raster" {
+        str module = "luce_browser_render.raster"
+    }
+
+    def export "display_list" {
+        str module = "luce_browser_render.display_list"
+    }
+
+    def dependency "luce-std" {
+        str owner = "dymokomi"
+        str version = "^0.1.0"
+        str path = "../luce-std"
+    }
+
+    def dependency "luce-browser-foundation" {
+        str owner = "dymokomi"
+        str version = "^0.1.0"
+        str path = "../luce-browser-foundation"
+    }
+
+    def dependency "luce-browser-css" {
+        str owner = "dymokomi"
+        str version = "^0.1.0"
+        str path = "../luce-browser-css"
+    }
+}

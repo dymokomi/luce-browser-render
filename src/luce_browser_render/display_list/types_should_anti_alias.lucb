@@ -1,0 +1,16 @@
+#==============================================================================================
+#
+#   types_should_anti_alias - declarations of Libraries/LibWeb/Painting/ShouldAntiAlias.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibWeb/Painting/ShouldAntiAlias.h (Ladybird 47c82b38d0) by the skeleton
+#       generator (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the
+#       generator could not map.
+#
+#==============================================================================================
+
+## Web::Painting::ShouldAntiAlias (Libraries/LibWeb/Painting/ShouldAntiAlias.h:11).
+pub enum ShouldAntiAlias as i64:
+    yes = 0
+    no = -1

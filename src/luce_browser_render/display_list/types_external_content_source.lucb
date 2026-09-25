@@ -1,0 +1,18 @@
+#==============================================================================================
+#
+#   types_external_content_source - declarations of Libraries/LibWeb/Painting/ExternalContentSource.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibWeb/Painting/ExternalContentSource.h (Ladybird 47c82b38d0) by the
+#       skeleton generator (DESIGN.md §4.4). Regenerate rather than edit, except to fill a
+#       field the generator could not map.
+#
+#==============================================================================================
+
+# mark: ExternalContentSource ===================================================================
+
+## Web::Painting::ExternalContentSource (Libraries/LibWeb/Painting/ExternalContentSource.h:16).
+pub struct ExternalContentSource:
+    pub var m_mutex: ThreadingMutex
+    pub var m_bitmap: gfx.ImmutableBitmap*?

@@ -1,0 +1,18 @@
+#==============================================================================================
+#
+#   types_scaling_mode - declarations of Libraries/LibGfx/ScalingMode.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/ScalingMode.h (Ladybird 47c82b38d0) by the skeleton generator
+#       (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the generator
+#       could not map.
+#
+#==============================================================================================
+
+## Gfx::ScalingMode (Libraries/LibGfx/ScalingMode.h:12).
+pub enum ScalingMode as i32:
+    none_ = 0
+    bilinear = 1
+    bilinear_mipmap = 2
+    nearest_neighbor = 3

@@ -1,0 +1,67 @@
+#==============================================================================================
+#
+#   types_typeface_skia - declarations of Libraries/LibGfx/Font/TypefaceSkia.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/Font/TypefaceSkia.h (Ladybird 47c82b38d0) by the skeleton generator
+#       (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the generator
+#       could not map.
+#
+#==============================================================================================
+
+## Gfx::TypefaceSkia::Impl (Libraries/LibGfx/Font/TypefaceSkia.h:0): opaque in this phase (not in the phase-1 closure).
+pub struct Impl:
+    pub var opaque_: u8
+
+# mark: TypefaceSkia ============================================================================
+
+## Gfx::TypefaceSkia (Libraries/LibGfx/Font/TypefaceSkia.h:14).
+pub struct TypefaceSkia: IsTypefaceSkia, IsTypeface:
+    pub var typeface_base: Typeface  # primary base
+    pub var m_impl: Impl*
+    pub var m_font_data: FontData*?
+    pub var m_buffer: const u8[]
+    pub var m_ttc_index: u32  # C++ default: { 0 }
+    pub var m_family: ak.FlyString?
+    pub var m_glyph_page_zero: TypefaceSkiaGlyphPage*?
+    pub var m_glyph_pages: ak.HashMap[u64, TypefaceSkiaGlyphPage*, ak.U64Traits]
+
+    func typeface_skia() -> TypefaceSkia*: return (TypefaceSkia*)&self
+
+    func typeface() -> Typeface*: return (Typeface*)&self
+
+## Upcast to Gfx::TypefaceSkia (implemented by every struct in its hierarchy).
+pub interface IsTypefaceSkia:
+    func typeface_skia() -> TypefaceSkia*
+
+## Virtual functions introduced by Gfx::TypefaceSkia.
+pub struct TypefaceSkiaVTable:
+    pub let typeface_vtable: TypefaceVTable
+
+## The vtable of Gfx::TypefaceSkia.
+pub let typeface_skia_vtable: TypefaceSkiaVTable = TypefaceSkiaVTable(typeface_vtable = TypefaceVTable(class_info = &typeface_skia_class, glyph_count = typeface_skia_glyph_count_impl, units_per_em = typeface_skia_units_per_em_impl, glyph_id_for_code_point = typeface_skia_glyph_id_for_code_point_impl, family = typeface_skia_family_impl, weight = typeface_skia_weight_impl, width = typeface_skia_width_impl, slope = typeface_skia_slope_impl, is_skia = typeface_skia_is_skia_impl, buffer = typeface_skia_buffer_impl, ttc_index = typeface_skia_ttc_index_impl))
+
+## Class information of Gfx::TypefaceSkia: name, class-id range (pre-order), size, vtable.
+pub let typeface_skia_class: ak.ClassInfo = ak.ClassInfo(name = "TypefaceSkia", first_id = 1, last_id = 1, size = sizeof(TypefaceSkia), vtable = (const void*)&typeface_skia_vtable)
+
+## is<Gfx::TypefaceSkia>: the class-id range test.
+pub func is_typeface_skia[P: IsTypeface](p: P*) -> bool:
+    let id = p.typeface().class_id
+    return id >= typeface_skia_class.first_id and id <= typeface_skia_class.last_id
+
+## as_if<Gfx::TypefaceSkia>.
+pub func as_if_typeface_skia[P: IsTypeface](p: P*) -> TypefaceSkia*?:
+    if is_typeface_skia(p): return (TypefaceSkia*)p
+    return none
+
+## as<Gfx::TypefaceSkia> (verify_cast).
+pub func as_typeface_skia[P: IsTypeface](p: P*) -> TypefaceSkia*:
+    return as_if_typeface_skia(p) else trap("as<Gfx::TypefaceSkia> failed")
+
+## Gfx::TypefaceSkia::GlyphPage (Libraries/LibGfx/Font/TypefaceSkia.h:54): opaque in this phase (not in the phase-1 closure).
+pub struct TypefaceSkiaGlyphPage:
+    pub var opaque_: u8
+
+## Gfx::TypefaceSkia::GlyphPage::glyphs_per_page (Libraries/LibGfx/Font/TypefaceSkia.h:55).
+pub let typeface_skia_glyph_page_glyphs_per_page: usize = 256

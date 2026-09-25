@@ -1,0 +1,21 @@
+#==============================================================================================
+#
+#   types_shareable_bitmap - declarations of Libraries/LibGfx/ShareableBitmap.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/ShareableBitmap.h (Ladybird 47c82b38d0) by the skeleton generator
+#       (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the generator
+#       could not map.
+#
+#==============================================================================================
+
+# mark: ShareableBitmap =========================================================================
+
+## Gfx::ShareableBitmap (Libraries/LibGfx/ShareableBitmap.h:15).
+pub struct ShareableBitmap:
+    pub var m_bitmap: Bitmap*?
+
+## Gfx::ShareableBitmap::Tag (Libraries/LibGfx/ShareableBitmap.h:19).
+pub enum ShareableBitmapTag as u32:
+    construct_with_known_good_bitmap = 0

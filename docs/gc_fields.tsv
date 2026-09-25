@@ -1,0 +1,1 @@
+# C++ class	Luce struct	field holding GC pointers (must be visited in visit_edges)

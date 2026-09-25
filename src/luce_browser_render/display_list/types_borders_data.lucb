@@ -1,0 +1,44 @@
+#==============================================================================================
+#
+#   types_borders_data - declarations of Libraries/LibWeb/Painting/BordersData.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibWeb/Painting/BordersData.h (Ladybird 47c82b38d0) by the skeleton
+#       generator (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the
+#       generator could not map.
+#
+#==============================================================================================
+
+## Web::Painting::BorderEdge (Libraries/LibWeb/Painting/BordersData.h:17).
+pub enum BorderEdge as u8:
+    top = 0
+    right = 1
+    bottom = 2
+    left = 3
+
+# mark: BorderDataDevicePixels ==================================================================
+
+## Web::Painting::BorderDataDevicePixels (Libraries/LibWeb/Painting/BordersData.h:24).
+pub struct BorderDataDevicePixels:
+    pub var color: gfx.Color  # C++ default: { Color :: Transparent }
+    pub var line_style: css_data.LineStyle  # C++ default: { CSS :: LineStyle :: None }
+    pub var width: i32  # C++ default: { 0 }
+
+# mark: BordersDataDevicePixels =================================================================
+
+## Web::Painting::BordersDataDevicePixels (Libraries/LibWeb/Painting/BordersData.h:31).
+pub struct BordersDataDevicePixels:
+    pub var top: BorderDataDevicePixels
+    pub var right: BorderDataDevicePixels
+    pub var bottom: BorderDataDevicePixels
+    pub var left: BorderDataDevicePixels
+
+# mark: BordersData =============================================================================
+
+## Web::Painting::BordersData (Libraries/LibWeb/Painting/BordersData.h:57).
+pub struct BordersData:
+    pub var top: BorderData
+    pub var right: BorderData
+    pub var bottom: BorderData
+    pub var left: BorderData

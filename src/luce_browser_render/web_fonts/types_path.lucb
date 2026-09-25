@@ -1,0 +1,168 @@
+#==============================================================================================
+#
+#   types_path - declarations of Libraries/LibGfx/Path.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/Path.h (Ladybird 47c82b38d0) by the skeleton generator (DESIGN.md
+#       §4.4). Regenerate rather than edit, except to fill a field the generator could not
+#       map.
+#
+#==============================================================================================
+
+# mark: PathImpl ================================================================================
+
+## Gfx::PathImpl (Libraries/LibGfx/Path.h:20).
+pub struct PathImpl: IsPathImpl:
+    pub var vtable: const PathImplVTable*
+    pub var class_id: u16
+
+    func path_impl() -> PathImpl*: return (PathImpl*)&self
+
+## Upcast to Gfx::PathImpl (implemented by every struct in its hierarchy).
+pub interface IsPathImpl:
+    func path_impl() -> PathImpl*
+
+## Virtual functions introduced by Gfx::PathImpl.
+pub struct PathImplVTable:
+    pub let class_info: const ak.ClassInfo*
+    pub let clear: func(PathImpl*) -> unit = path_impl_clear_impl
+    pub let move_to: func(PathImpl*, gfx.FloatPoint) -> unit = path_impl_move_to_impl
+    pub let line_to: func(PathImpl*, gfx.FloatPoint) -> unit = path_impl_line_to_impl
+    pub let close: func(PathImpl*) -> unit = path_impl_close_impl
+    pub let elliptical_arc_to: func(PathImpl*, gfx.FloatPoint, gfx.FloatSize, f32, bool, bool) -> unit = path_impl_elliptical_arc_to_impl
+    pub let arc_to: func(PathImpl*, gfx.FloatPoint, f32, bool, bool) -> unit = path_impl_arc_to_impl
+    pub let quadratic_bezier_curve_to: func(PathImpl*, gfx.FloatPoint, gfx.FloatPoint) -> unit = path_impl_quadratic_bezier_curve_to_impl
+    pub let cubic_bezier_curve_to: func(PathImpl*, gfx.FloatPoint, gfx.FloatPoint, gfx.FloatPoint) -> unit = path_impl_cubic_bezier_curve_to_impl
+    pub let text_utf8_view: func(PathImpl*, ak.Utf8View, Font) -> unit = path_impl_text_utf8_view_impl
+    pub let text_utf16_view: func(PathImpl*, ak.Utf16View, Font) -> unit = path_impl_text_utf16_view_impl
+    pub let glyph_run: func(PathImpl*, GlyphRun) -> unit = path_impl_glyph_run_impl
+    pub let offset: func(PathImpl*, gfx.FloatPoint) -> unit = path_impl_offset_impl
+    pub let append_path: func(PathImpl*, gfx.Path) -> unit = path_impl_append_path_impl
+    pub let intersect: func(PathImpl*, gfx.Path) -> unit = path_impl_intersect_impl
+    pub let is_empty: func(PathImpl*) -> bool = path_impl_is_empty_impl
+    pub let last_point: func(PathImpl*) -> gfx.FloatPoint = path_impl_last_point_impl
+    pub let bounding_box: func(PathImpl*) -> gfx.FloatRect = path_impl_bounding_box_impl
+    pub let set_fill_type: func(PathImpl*, gfx.WindingRule) -> unit = path_impl_set_fill_type_impl
+    pub let contains: func(PathImpl*, gfx.FloatPoint, gfx.WindingRule) -> bool = path_impl_contains_impl
+    pub let clone: func(PathImpl*) -> PathImpl* = path_impl_clone_impl
+    pub let copy_transformed: func(PathImpl*, gfx.AffineTransform) -> PathImpl* = path_impl_copy_transformed_impl
+    pub let place_text_along_utf8_view: func(PathImpl*, ak.Utf8View, Font) -> PathImpl* = path_impl_place_text_along_utf8_view_impl
+    pub let place_text_along_utf16_view: func(PathImpl*, ak.Utf16View, Font) -> PathImpl* = path_impl_place_text_along_utf16_view_impl
+    pub let to_svg_string: func(PathImpl*) -> ak.String = path_impl_to_svg_string_impl
+
+## Virtual: Gfx::PathImpl::clear.
+pub func path_impl_clear(this: PathImpl*):
+    ((const PathImplVTable*)this.vtable).clear(this)
+
+## Virtual: Gfx::PathImpl::move_to.
+pub func path_impl_move_to(this: PathImpl*, arg0: gfx.FloatPoint):
+    ((const PathImplVTable*)this.vtable).move_to(this, arg0)
+
+## Virtual: Gfx::PathImpl::line_to.
+pub func path_impl_line_to(this: PathImpl*, arg0: gfx.FloatPoint):
+    ((const PathImplVTable*)this.vtable).line_to(this, arg0)
+
+## Virtual: Gfx::PathImpl::close.
+pub func path_impl_close(this: PathImpl*):
+    ((const PathImplVTable*)this.vtable).close(this)
+
+## Virtual: Gfx::PathImpl::elliptical_arc_to.
+pub func path_impl_elliptical_arc_to(this: PathImpl*, point: gfx.FloatPoint, radii: gfx.FloatSize, x_axis_rotation: f32, large_arc: bool, sweep: bool):
+    ((const PathImplVTable*)this.vtable).elliptical_arc_to(this, point, radii, x_axis_rotation, large_arc, sweep)
+
+## Virtual: Gfx::PathImpl::arc_to.
+pub func path_impl_arc_to(this: PathImpl*, point: gfx.FloatPoint, radius: f32, large_arc: bool, sweep: bool):
+    ((const PathImplVTable*)this.vtable).arc_to(this, point, radius, large_arc, sweep)
+
+## Virtual: Gfx::PathImpl::quadratic_bezier_curve_to.
+pub func path_impl_quadratic_bezier_curve_to(this: PathImpl*, through: gfx.FloatPoint, point: gfx.FloatPoint):
+    ((const PathImplVTable*)this.vtable).quadratic_bezier_curve_to(this, through, point)
+
+## Virtual: Gfx::PathImpl::cubic_bezier_curve_to.
+pub func path_impl_cubic_bezier_curve_to(this: PathImpl*, c1: gfx.FloatPoint, c2: gfx.FloatPoint, p2: gfx.FloatPoint):
+    ((const PathImplVTable*)this.vtable).cubic_bezier_curve_to(this, c1, c2, p2)
+
+## Virtual: Gfx::PathImpl::text.
+pub func path_impl_text_utf8_view(this: PathImpl*, arg0: ak.Utf8View, arg1: Font):
+    ((const PathImplVTable*)this.vtable).text_utf8_view(this, arg0, arg1)
+
+## Virtual: Gfx::PathImpl::text.
+pub func path_impl_text_utf16_view(this: PathImpl*, arg0: ak.Utf16View, arg1: Font):
+    ((const PathImplVTable*)this.vtable).text_utf16_view(this, arg0, arg1)
+
+## Virtual: Gfx::PathImpl::glyph_run.
+pub func path_impl_glyph_run(this: PathImpl*, arg0: GlyphRun):
+    ((const PathImplVTable*)this.vtable).glyph_run(this, arg0)
+
+## Virtual: Gfx::PathImpl::offset.
+pub func path_impl_offset(this: PathImpl*, arg0: gfx.FloatPoint):
+    ((const PathImplVTable*)this.vtable).offset(this, arg0)
+
+## Virtual: Gfx::PathImpl::append_path.
+pub func path_impl_append_path(this: PathImpl*, arg0: gfx.Path):
+    ((const PathImplVTable*)this.vtable).append_path(this, arg0)
+
+## Virtual: Gfx::PathImpl::intersect.
+pub func path_impl_intersect(this: PathImpl*, arg0: gfx.Path):
+    ((const PathImplVTable*)this.vtable).intersect(this, arg0)
+
+## Virtual: Gfx::PathImpl::is_empty.
+pub func path_impl_is_empty(this: PathImpl*) -> bool:
+    return ((const PathImplVTable*)this.vtable).is_empty(this)
+
+## Virtual: Gfx::PathImpl::last_point.
+pub func path_impl_last_point(this: PathImpl*) -> gfx.FloatPoint:
+    return ((const PathImplVTable*)this.vtable).last_point(this)
+
+## Virtual: Gfx::PathImpl::bounding_box.
+pub func path_impl_bounding_box(this: PathImpl*) -> gfx.FloatRect:
+    return ((const PathImplVTable*)this.vtable).bounding_box(this)
+
+## Virtual: Gfx::PathImpl::set_fill_type.
+pub func path_impl_set_fill_type(this: PathImpl*, winding_rule: gfx.WindingRule):
+    ((const PathImplVTable*)this.vtable).set_fill_type(this, winding_rule)
+
+## Virtual: Gfx::PathImpl::contains.
+pub func path_impl_contains(this: PathImpl*, point: gfx.FloatPoint, arg1: gfx.WindingRule) -> bool:
+    return ((const PathImplVTable*)this.vtable).contains(this, point, arg1)
+
+## Virtual: Gfx::PathImpl::clone.
+pub func path_impl_clone(this: PathImpl*) -> PathImpl*:
+    return ((const PathImplVTable*)this.vtable).clone(this)
+
+## Virtual: Gfx::PathImpl::copy_transformed.
+pub func path_impl_copy_transformed(this: PathImpl*, arg0: gfx.AffineTransform) -> PathImpl*:
+    return ((const PathImplVTable*)this.vtable).copy_transformed(this, arg0)
+
+## Virtual: Gfx::PathImpl::place_text_along.
+pub func path_impl_place_text_along_utf8_view(this: PathImpl*, text: ak.Utf8View, arg1: Font) -> PathImpl*:
+    return ((const PathImplVTable*)this.vtable).place_text_along_utf8_view(this, text, arg1)
+
+## Virtual: Gfx::PathImpl::place_text_along.
+pub func path_impl_place_text_along_utf16_view(this: PathImpl*, text: ak.Utf16View, arg1: Font) -> PathImpl*:
+    return ((const PathImplVTable*)this.vtable).place_text_along_utf16_view(this, text, arg1)
+
+## Virtual: Gfx::PathImpl::to_svg_string.
+pub func path_impl_to_svg_string(this: PathImpl*) -> ak.String:
+    return ((const PathImplVTable*)this.vtable).to_svg_string(this)
+
+## The vtable of Gfx::PathImpl.
+pub let path_impl_vtable: PathImplVTable = PathImplVTable(class_info = &path_impl_class)
+
+## Class information of Gfx::PathImpl: name, class-id range (pre-order), size, vtable.
+pub let path_impl_class: ak.ClassInfo = ak.ClassInfo(name = "PathImpl", first_id = 0, last_id = 0, size = sizeof(PathImpl), vtable = (const void*)&path_impl_vtable)
+
+## is<Gfx::PathImpl>: the class-id range test.
+pub func is_path_impl[P: IsPathImpl](p: P*) -> bool:
+    let id = p.path_impl().class_id
+    return id >= path_impl_class.first_id and id <= path_impl_class.last_id
+
+## as_if<Gfx::PathImpl>.
+pub func as_if_path_impl[P: IsPathImpl](p: P*) -> PathImpl*?:
+    if is_path_impl(p): return (PathImpl*)p
+    return none
+
+## as<Gfx::PathImpl> (verify_cast).
+pub func as_path_impl[P: IsPathImpl](p: P*) -> PathImpl*:
+    return as_if_path_impl(p) else trap("as<Gfx::PathImpl> failed")

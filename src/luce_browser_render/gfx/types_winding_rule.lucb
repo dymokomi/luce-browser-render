@@ -1,0 +1,16 @@
+#==============================================================================================
+#
+#   types_winding_rule - declarations of Libraries/LibGfx/WindingRule.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/WindingRule.h (Ladybird 47c82b38d0) by the skeleton generator
+#       (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the generator
+#       could not map.
+#
+#==============================================================================================
+
+## Gfx::WindingRule (Libraries/LibGfx/WindingRule.h:11).
+pub enum WindingRule as i32:
+    nonzero = 0
+    even_odd = 1

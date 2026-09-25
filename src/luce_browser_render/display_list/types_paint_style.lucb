@@ -1,0 +1,232 @@
+#==============================================================================================
+#
+#   types_paint_style - declarations of Libraries/LibWeb/Painting/PaintStyle.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibWeb/Painting/PaintStyle.h (Ladybird 47c82b38d0) by the skeleton generator
+#       (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the generator
+#       could not map.
+#
+#==============================================================================================
+
+# mark: SvgPaintServerPaintStyle ================================================================
+
+## Web::Painting::SVGPaintServerPaintStyle (Libraries/LibWeb/Painting/PaintStyle.h:20).
+pub struct SvgPaintServerPaintStyle: IsSvgPaintServerPaintStyle:
+    pub var vtable: const SvgPaintServerPaintStyleVTable*
+    pub var class_id: u16
+
+    func svg_paint_server_paint_style() -> SvgPaintServerPaintStyle*: return (SvgPaintServerPaintStyle*)&self
+
+## Upcast to Web::Painting::SVGPaintServerPaintStyle (implemented by every struct in its hierarchy).
+pub interface IsSvgPaintServerPaintStyle:
+    func svg_paint_server_paint_style() -> SvgPaintServerPaintStyle*
+
+## Virtual functions introduced by Web::Painting::SVGPaintServerPaintStyle.
+pub struct SvgPaintServerPaintStyleVTable:
+    pub let class_info: const ak.ClassInfo*
+
+## The vtable of Web::Painting::SVGPaintServerPaintStyle.
+pub let svg_paint_server_paint_style_vtable: SvgPaintServerPaintStyleVTable = SvgPaintServerPaintStyleVTable(class_info = &svg_paint_server_paint_style_class)
+
+## Class information of Web::Painting::SVGPaintServerPaintStyle: name, class-id range (pre-order), size, vtable.
+pub let svg_paint_server_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "SVGPaintServerPaintStyle", first_id = 0, last_id = 4, size = sizeof(SvgPaintServerPaintStyle), vtable = (const void*)&svg_paint_server_paint_style_vtable)
+
+## is<Web::Painting::SVGPaintServerPaintStyle>: the class-id range test.
+pub func is_svg_paint_server_paint_style[P: IsSvgPaintServerPaintStyle](p: P*) -> bool:
+    let id = p.svg_paint_server_paint_style().class_id
+    return id >= svg_paint_server_paint_style_class.first_id and id <= svg_paint_server_paint_style_class.last_id
+
+## as_if<Web::Painting::SVGPaintServerPaintStyle>.
+pub func as_if_svg_paint_server_paint_style[P: IsSvgPaintServerPaintStyle](p: P*) -> SvgPaintServerPaintStyle*?:
+    if is_svg_paint_server_paint_style(p): return (SvgPaintServerPaintStyle*)p
+    return none
+
+## as<Web::Painting::SVGPaintServerPaintStyle> (verify_cast).
+pub func as_svg_paint_server_paint_style[P: IsSvgPaintServerPaintStyle](p: P*) -> SvgPaintServerPaintStyle*:
+    return as_if_svg_paint_server_paint_style(p) else trap("as<Web::Painting::SVGPaintServerPaintStyle> failed")
+
+# mark: ColorStop ===============================================================================
+
+## Web::Painting::ColorStop (Libraries/LibWeb/Painting/PaintStyle.h:25).
+pub struct ColorStop:
+    pub var color: gfx.Color
+    pub var position: f32  # C++ default: AK :: NaN < float >
+    pub var transition_hint: f32?  # C++ default: { }
+
+# mark: SvgGradientPaintStyle ===================================================================
+
+## Web::Painting::SVGGradientPaintStyle (Libraries/LibWeb/Painting/PaintStyle.h:31).
+pub struct SvgGradientPaintStyle: IsSvgGradientPaintStyle, IsSvgPaintServerPaintStyle:
+    pub var svg_paint_server_paint_style_base: SvgPaintServerPaintStyle  # primary base
+    pub var m_color_stops: ak.Vector[ColorStop]
+    pub var m_repeat_length: f32?
+    pub var m_gradient_transform: gfx.AffineTransform?  # C++ default: { }
+    pub var m_spread_method: SvgGradientPaintStyleSpreadMethod  # C++ default: { SpreadMethod :: Pad }
+    pub var m_color_space: gfx.InterpolationColorSpace  # C++ default: { Gfx :: InterpolationColorSpace :: SRGB }
+
+    func svg_gradient_paint_style() -> SvgGradientPaintStyle*: return (SvgGradientPaintStyle*)&self
+
+    func svg_paint_server_paint_style() -> SvgPaintServerPaintStyle*: return (SvgPaintServerPaintStyle*)&self
+
+## Upcast to Web::Painting::SVGGradientPaintStyle (implemented by every struct in its hierarchy).
+pub interface IsSvgGradientPaintStyle:
+    func svg_gradient_paint_style() -> SvgGradientPaintStyle*
+
+## Virtual functions introduced by Web::Painting::SVGGradientPaintStyle.
+pub struct SvgGradientPaintStyleVTable:
+    pub let svg_paint_server_paint_style_vtable: SvgPaintServerPaintStyleVTable
+
+## The vtable of Web::Painting::SVGGradientPaintStyle.
+pub let svg_gradient_paint_style_vtable: SvgGradientPaintStyleVTable = SvgGradientPaintStyleVTable(svg_paint_server_paint_style_vtable = SvgPaintServerPaintStyleVTable(class_info = &svg_gradient_paint_style_class))
+
+## Class information of Web::Painting::SVGGradientPaintStyle: name, class-id range (pre-order), size, vtable.
+pub let svg_gradient_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "SVGGradientPaintStyle", first_id = 1, last_id = 3, size = sizeof(SvgGradientPaintStyle), vtable = (const void*)&svg_gradient_paint_style_vtable)
+
+## is<Web::Painting::SVGGradientPaintStyle>: the class-id range test.
+pub func is_svg_gradient_paint_style[P: IsSvgPaintServerPaintStyle](p: P*) -> bool:
+    let id = p.svg_paint_server_paint_style().class_id
+    return id >= svg_gradient_paint_style_class.first_id and id <= svg_gradient_paint_style_class.last_id
+
+## as_if<Web::Painting::SVGGradientPaintStyle>.
+pub func as_if_svg_gradient_paint_style[P: IsSvgPaintServerPaintStyle](p: P*) -> SvgGradientPaintStyle*?:
+    if is_svg_gradient_paint_style(p): return (SvgGradientPaintStyle*)p
+    return none
+
+## as<Web::Painting::SVGGradientPaintStyle> (verify_cast).
+pub func as_svg_gradient_paint_style[P: IsSvgPaintServerPaintStyle](p: P*) -> SvgGradientPaintStyle*:
+    return as_if_svg_gradient_paint_style(p) else trap("as<Web::Painting::SVGGradientPaintStyle> failed")
+
+## Web::Painting::SVGGradientPaintStyle::SpreadMethod (Libraries/LibWeb/Painting/PaintStyle.h:33).
+pub enum SvgGradientPaintStyleSpreadMethod as i32:
+    pad_ = 0
+    repeat = 1
+    reflect = 2
+
+# mark: SvgLinearGradientPaintStyle =============================================================
+
+## Web::Painting::SVGLinearGradientPaintStyle (Libraries/LibWeb/Painting/PaintStyle.h:74).
+pub struct SvgLinearGradientPaintStyle: IsSvgLinearGradientPaintStyle, IsSvgGradientPaintStyle, IsSvgPaintServerPaintStyle:
+    pub var svg_gradient_paint_style_base: SvgGradientPaintStyle  # primary base
+    pub var m_start_point: gfx.FloatPoint
+    pub var m_end_point: gfx.FloatPoint
+
+    func svg_linear_gradient_paint_style() -> SvgLinearGradientPaintStyle*: return (SvgLinearGradientPaintStyle*)&self
+
+    func svg_gradient_paint_style() -> SvgGradientPaintStyle*: return (SvgGradientPaintStyle*)&self
+
+    func svg_paint_server_paint_style() -> SvgPaintServerPaintStyle*: return (SvgPaintServerPaintStyle*)&self
+
+## Upcast to Web::Painting::SVGLinearGradientPaintStyle (implemented by every struct in its hierarchy).
+pub interface IsSvgLinearGradientPaintStyle:
+    func svg_linear_gradient_paint_style() -> SvgLinearGradientPaintStyle*
+
+## Virtual functions introduced by Web::Painting::SVGLinearGradientPaintStyle.
+pub struct SvgLinearGradientPaintStyleVTable:
+    pub let svg_gradient_paint_style_vtable: SvgGradientPaintStyleVTable
+
+## The vtable of Web::Painting::SVGLinearGradientPaintStyle.
+pub let svg_linear_gradient_paint_style_vtable: SvgLinearGradientPaintStyleVTable = SvgLinearGradientPaintStyleVTable(svg_gradient_paint_style_vtable = SvgGradientPaintStyleVTable(svg_paint_server_paint_style_vtable = SvgPaintServerPaintStyleVTable(class_info = &svg_linear_gradient_paint_style_class)))
+
+## Class information of Web::Painting::SVGLinearGradientPaintStyle: name, class-id range (pre-order), size, vtable.
+pub let svg_linear_gradient_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "SVGLinearGradientPaintStyle", first_id = 2, last_id = 2, size = sizeof(SvgLinearGradientPaintStyle), vtable = (const void*)&svg_linear_gradient_paint_style_vtable)
+
+## is<Web::Painting::SVGLinearGradientPaintStyle>: the class-id range test.
+pub func is_svg_linear_gradient_paint_style[P: IsSvgPaintServerPaintStyle](p: P*) -> bool:
+    let id = p.svg_paint_server_paint_style().class_id
+    return id >= svg_linear_gradient_paint_style_class.first_id and id <= svg_linear_gradient_paint_style_class.last_id
+
+## as_if<Web::Painting::SVGLinearGradientPaintStyle>.
+pub func as_if_svg_linear_gradient_paint_style[P: IsSvgPaintServerPaintStyle](p: P*) -> SvgLinearGradientPaintStyle*?:
+    if is_svg_linear_gradient_paint_style(p): return (SvgLinearGradientPaintStyle*)p
+    return none
+
+## as<Web::Painting::SVGLinearGradientPaintStyle> (verify_cast).
+pub func as_svg_linear_gradient_paint_style[P: IsSvgPaintServerPaintStyle](p: P*) -> SvgLinearGradientPaintStyle*:
+    return as_if_svg_linear_gradient_paint_style(p) else trap("as<Web::Painting::SVGLinearGradientPaintStyle> failed")
+
+# mark: SvgRadialGradientPaintStyle =============================================================
+
+## Web::Painting::SVGRadialGradientPaintStyle (Libraries/LibWeb/Painting/PaintStyle.h:98).
+pub struct SvgRadialGradientPaintStyle: IsSvgRadialGradientPaintStyle, IsSvgGradientPaintStyle, IsSvgPaintServerPaintStyle:
+    pub var svg_gradient_paint_style_base: SvgGradientPaintStyle  # primary base
+    pub var m_start_center: gfx.FloatPoint
+    pub var m_start_radius: f32  # C++ default: { 0.0f }
+    pub var m_end_center: gfx.FloatPoint
+    pub var m_end_radius: f32  # C++ default: { 0.0f }
+
+    func svg_radial_gradient_paint_style() -> SvgRadialGradientPaintStyle*: return (SvgRadialGradientPaintStyle*)&self
+
+    func svg_gradient_paint_style() -> SvgGradientPaintStyle*: return (SvgGradientPaintStyle*)&self
+
+    func svg_paint_server_paint_style() -> SvgPaintServerPaintStyle*: return (SvgPaintServerPaintStyle*)&self
+
+## Upcast to Web::Painting::SVGRadialGradientPaintStyle (implemented by every struct in its hierarchy).
+pub interface IsSvgRadialGradientPaintStyle:
+    func svg_radial_gradient_paint_style() -> SvgRadialGradientPaintStyle*
+
+## Virtual functions introduced by Web::Painting::SVGRadialGradientPaintStyle.
+pub struct SvgRadialGradientPaintStyleVTable:
+    pub let svg_gradient_paint_style_vtable: SvgGradientPaintStyleVTable
+
+## The vtable of Web::Painting::SVGRadialGradientPaintStyle.
+pub let svg_radial_gradient_paint_style_vtable: SvgRadialGradientPaintStyleVTable = SvgRadialGradientPaintStyleVTable(svg_gradient_paint_style_vtable = SvgGradientPaintStyleVTable(svg_paint_server_paint_style_vtable = SvgPaintServerPaintStyleVTable(class_info = &svg_radial_gradient_paint_style_class)))
+
+## Class information of Web::Painting::SVGRadialGradientPaintStyle: name, class-id range (pre-order), size, vtable.
+pub let svg_radial_gradient_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "SVGRadialGradientPaintStyle", first_id = 3, last_id = 3, size = sizeof(SvgRadialGradientPaintStyle), vtable = (const void*)&svg_radial_gradient_paint_style_vtable)
+
+## is<Web::Painting::SVGRadialGradientPaintStyle>: the class-id range test.
+pub func is_svg_radial_gradient_paint_style[P: IsSvgPaintServerPaintStyle](p: P*) -> bool:
+    let id = p.svg_paint_server_paint_style().class_id
+    return id >= svg_radial_gradient_paint_style_class.first_id and id <= svg_radial_gradient_paint_style_class.last_id
+
+## as_if<Web::Painting::SVGRadialGradientPaintStyle>.
+pub func as_if_svg_radial_gradient_paint_style[P: IsSvgPaintServerPaintStyle](p: P*) -> SvgRadialGradientPaintStyle*?:
+    if is_svg_radial_gradient_paint_style(p): return (SvgRadialGradientPaintStyle*)p
+    return none
+
+## as<Web::Painting::SVGRadialGradientPaintStyle> (verify_cast).
+pub func as_svg_radial_gradient_paint_style[P: IsSvgPaintServerPaintStyle](p: P*) -> SvgRadialGradientPaintStyle*:
+    return as_if_svg_radial_gradient_paint_style(p) else trap("as<Web::Painting::SVGRadialGradientPaintStyle> failed")
+
+# mark: SvgPatternPaintStyle ====================================================================
+
+## Web::Painting::SVGPatternPaintStyle (Libraries/LibWeb/Painting/PaintStyle.h:130).
+pub struct SvgPatternPaintStyle: IsSvgPatternPaintStyle, IsSvgPaintServerPaintStyle:
+    pub var svg_paint_server_paint_style_base: SvgPaintServerPaintStyle  # primary base
+    pub var m_tile_display_list: DisplayList*
+    pub var m_tile_rect: gfx.FloatRect
+    pub var m_pattern_transform: gfx.AffineTransform?
+
+    func svg_pattern_paint_style() -> SvgPatternPaintStyle*: return (SvgPatternPaintStyle*)&self
+
+    func svg_paint_server_paint_style() -> SvgPaintServerPaintStyle*: return (SvgPaintServerPaintStyle*)&self
+
+## Upcast to Web::Painting::SVGPatternPaintStyle (implemented by every struct in its hierarchy).
+pub interface IsSvgPatternPaintStyle:
+    func svg_pattern_paint_style() -> SvgPatternPaintStyle*
+
+## Virtual functions introduced by Web::Painting::SVGPatternPaintStyle.
+pub struct SvgPatternPaintStyleVTable:
+    pub let svg_paint_server_paint_style_vtable: SvgPaintServerPaintStyleVTable
+
+## The vtable of Web::Painting::SVGPatternPaintStyle.
+pub let svg_pattern_paint_style_vtable: SvgPatternPaintStyleVTable = SvgPatternPaintStyleVTable(svg_paint_server_paint_style_vtable = SvgPaintServerPaintStyleVTable(class_info = &svg_pattern_paint_style_class))
+
+## Class information of Web::Painting::SVGPatternPaintStyle: name, class-id range (pre-order), size, vtable.
+pub let svg_pattern_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "SVGPatternPaintStyle", first_id = 4, last_id = 4, size = sizeof(SvgPatternPaintStyle), vtable = (const void*)&svg_pattern_paint_style_vtable)
+
+## is<Web::Painting::SVGPatternPaintStyle>: the class-id range test.
+pub func is_svg_pattern_paint_style[P: IsSvgPaintServerPaintStyle](p: P*) -> bool:
+    let id = p.svg_paint_server_paint_style().class_id
+    return id >= svg_pattern_paint_style_class.first_id and id <= svg_pattern_paint_style_class.last_id
+
+## as_if<Web::Painting::SVGPatternPaintStyle>.
+pub func as_if_svg_pattern_paint_style[P: IsSvgPaintServerPaintStyle](p: P*) -> SvgPatternPaintStyle*?:
+    if is_svg_pattern_paint_style(p): return (SvgPatternPaintStyle*)p
+    return none
+
+## as<Web::Painting::SVGPatternPaintStyle> (verify_cast).
+pub func as_svg_pattern_paint_style[P: IsSvgPaintServerPaintStyle](p: P*) -> SvgPatternPaintStyle*:
+    return as_if_svg_pattern_paint_style(p) else trap("as<Web::Painting::SVGPatternPaintStyle> failed")

@@ -1,0 +1,36 @@
+#==============================================================================================
+#
+#   types_rect - declarations of Libraries/LibGfx/Rect.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/Rect.h (Ladybird 47c82b38d0) by the skeleton generator (DESIGN.md
+#       §4.4). Regenerate rather than edit, except to fill a field the generator could not
+#       map.
+#
+#==============================================================================================
+
+# mark: FloatRect ===============================================================================
+
+## Gfx::Rect<f32> (Libraries/LibGfx/Rect.h:20), instantiated (DESIGN.md §2.8).
+pub struct FloatRect:
+    pub var m_location: FloatPoint
+    pub var m_size: FloatSize
+
+## Gfx::Rect (Libraries/LibGfx/Rect.h:20): opaque in this phase (not in the phase-1 closure).
+pub struct Rect:
+    pub var opaque_: u8
+
+# mark: DevicePixelRect =========================================================================
+
+## Gfx::Rect<i32> (Libraries/LibGfx/Rect.h:20), instantiated (DESIGN.md §2.8).
+pub struct DevicePixelRect:
+    pub var m_location: IntPoint
+    pub var m_size: IntSize
+
+# mark: CssPixelRect ============================================================================
+
+## Gfx::Rect<CssPixels> (Libraries/LibGfx/Rect.h:20), instantiated (DESIGN.md §2.8).
+pub struct CssPixelRect:
+    pub var m_location: CssPixelPoint
+    pub var m_size: CssPixelSize

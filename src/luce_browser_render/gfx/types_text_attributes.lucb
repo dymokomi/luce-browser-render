@@ -1,0 +1,26 @@
+#==============================================================================================
+#
+#   types_text_attributes - declarations of Libraries/LibGfx/TextAttributes.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/TextAttributes.h (Ladybird 47c82b38d0) by the skeleton generator
+#       (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the generator
+#       could not map.
+#
+#==============================================================================================
+
+# mark: TextAttributes ==========================================================================
+
+## Gfx::TextAttributes (Libraries/LibGfx/TextAttributes.h:15).
+pub struct TextAttributes:
+    pub var color: Color
+    pub var background_color: Color?  # C++ default: { }
+    pub var bold: bool  # C++ default: { false }
+    pub var underline_style: TextAttributesUnderlineStyle?  # C++ default: { }
+    pub var underline_color: Color?  # C++ default: { }
+
+## Gfx::TextAttributes::UnderlineStyle (Libraries/LibGfx/TextAttributes.h:16).
+pub enum TextAttributesUnderlineStyle as i32:
+    solid = 0
+    wavy = 1

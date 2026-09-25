@@ -1,0 +1,23 @@
+#==============================================================================================
+#
+#   types_text_alignment - declarations of Libraries/LibGfx/TextAlignment.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/TextAlignment.h (Ladybird 47c82b38d0) by the skeleton generator
+#       (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the generator
+#       could not map.
+#
+#==============================================================================================
+
+## Gfx::TextAlignment (Libraries/LibGfx/TextAlignment.h:25).
+pub enum TextAlignment as i32:
+    center = 0
+    center_left = 1
+    center_right = 2
+    top_center = 3
+    top_left = 4
+    top_right = 5
+    bottom_center = 6
+    bottom_left = 7
+    bottom_right = 8

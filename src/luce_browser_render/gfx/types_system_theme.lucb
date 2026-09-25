@@ -1,0 +1,159 @@
+#==============================================================================================
+#
+#   types_system_theme - declarations of Libraries/LibGfx/SystemTheme.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/SystemTheme.h (Ladybird 47c82b38d0) by the skeleton generator
+#       (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the generator
+#       could not map.
+#
+#==============================================================================================
+
+## Gfx::ColorRole (Libraries/LibGfx/SystemTheme.h:145).
+pub enum ColorRole as i32:
+    no_role = 0
+    accent = 1
+    active_link = 2
+    active_window_border1 = 3
+    active_window_border2 = 4
+    active_window_title = 5
+    active_window_title_shadow = 6
+    active_window_title_stripes = 7
+    base = 8
+    base_text = 9
+    black = 10
+    blue = 11
+    bright_black = 12
+    bright_blue = 13
+    bright_cyan = 14
+    bright_green = 15
+    bright_magenta = 16
+    bright_red = 17
+    bright_white = 18
+    bright_yellow = 19
+    button = 20
+    button_text = 21
+    color_scheme_background = 22
+    color_scheme_foreground = 23
+    cyan = 24
+    disabled_text_front = 25
+    disabled_text_back = 26
+    desktop_background = 27
+    focus_outline = 28
+    green = 29
+    gutter = 30
+    gutter_border = 31
+    highlight_window_border1 = 32
+    highlight_window_border2 = 33
+    highlight_window_title = 34
+    highlight_window_title_shadow = 35
+    highlight_window_title_stripes = 36
+    highlight_searching = 37
+    highlight_searching_text = 38
+    hover_highlight = 39
+    inactive_selection = 40
+    inactive_selection_text = 41
+    inactive_window_border1 = 42
+    inactive_window_border2 = 43
+    inactive_window_title = 44
+    inactive_window_title_shadow = 45
+    inactive_window_title_stripes = 46
+    link = 47
+    magenta = 48
+    menu_base = 49
+    menu_base_text = 50
+    menu_selection = 51
+    menu_selection_text = 52
+    menu_stripe = 53
+    moving_window_border1 = 54
+    moving_window_border2 = 55
+    moving_window_title = 56
+    moving_window_title_shadow = 57
+    moving_window_title_stripes = 58
+    placeholder_text = 59
+    red = 60
+    rubber_band_border = 61
+    rubber_band_fill = 62
+    ruler = 63
+    ruler_active_text = 64
+    ruler_border = 65
+    ruler_inactive_text = 66
+    selection = 67
+    selection_text = 68
+    syntax_comment = 69
+    syntax_control_keyword = 70
+    syntax_identifier = 71
+    syntax_keyword = 72
+    syntax_number = 73
+    syntax_operator = 74
+    syntax_preprocessor_statement = 75
+    syntax_preprocessor_value = 76
+    syntax_punctuation = 77
+    syntax_string = 78
+    syntax_type = 79
+    syntax_function = 80
+    syntax_variable = 81
+    syntax_custom_type = 82
+    syntax_namespace = 83
+    syntax_member = 84
+    syntax_parameter = 85
+    text_cursor = 86
+    threed_highlight = 87
+    threed_shadow1 = 88
+    threed_shadow2 = 89
+    tooltip = 90
+    tooltip_text = 91
+    tray = 92
+    tray_text = 93
+    visited_link = 94
+    white = 95
+    window = 96
+    window_text = 97
+    yellow = 98
+    count = 99
+
+## Gfx::ColorRole::Background (a second name for window).
+pub let color_role_background: ColorRole = ColorRole.window
+## Gfx::ColorRole::DisabledText (a second name for threed_shadow1).
+pub let color_role_disabled_text: ColorRole = ColorRole.threed_shadow1
+
+## Gfx::AlignmentRole (Libraries/LibGfx/SystemTheme.h:175).
+pub enum AlignmentRole as i32:
+    no_role = 0
+    title_alignment = 1
+    count = 2
+
+## Gfx::FlagRole (Libraries/LibGfx/SystemTheme.h:202).
+pub enum FlagRole as i32:
+    no_role = 0
+    bold_text_as_bright = 1
+    is_dark = 2
+    title_buttons_icon_only = 3
+    count = 4
+
+## Gfx::MetricRole (Libraries/LibGfx/SystemTheme.h:229).
+pub enum MetricRole as i32:
+    no_role = 0
+    border_thickness = 1
+    border_radius = 2
+    title_height = 3
+    title_button_width = 4
+    title_button_height = 5
+    count = 6
+
+## Gfx::PathRole (Libraries/LibGfx/SystemTheme.h:256).
+pub enum PathRole as i32:
+    no_role = 0
+    title_button_icons = 1
+    inactive_window_shadow = 2
+    active_window_shadow = 3
+    taskbar_shadow = 4
+    menu_shadow = 5
+    tooltip_shadow = 6
+    color_scheme = 7
+    count = 8
+
+## Gfx::SystemTheme (Libraries/LibGfx/SystemTheme.h:283): opaque in this phase (not in the phase-1 closure).
+pub struct SystemTheme:
+    pub var opaque_: u8

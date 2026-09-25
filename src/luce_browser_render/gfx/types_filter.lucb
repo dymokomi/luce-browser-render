@@ -1,0 +1,39 @@
+#==============================================================================================
+#
+#   types_filter - declarations of Libraries/LibGfx/Filter.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/Filter.h (Ladybird 47c82b38d0) by the skeleton generator (DESIGN.md
+#       §4.4). Regenerate rather than edit, except to fill a field the generator could not
+#       map.
+#
+#==============================================================================================
+
+## Gfx::ChannelSelector (Libraries/LibGfx/Filter.h:18).
+pub enum ChannelSelector as i32:
+    red = 0
+    green = 1
+    blue = 2
+    alpha = 3
+
+## Gfx::ColorFilterType (Libraries/LibGfx/Filter.h:25).
+pub enum ColorFilterType as i32:
+    brightness = 0
+    contrast = 1
+    grayscale = 2
+    invert = 3
+    opacity = 4
+    saturate = 5
+    sepia = 6
+
+## Gfx::TurbulenceType (Libraries/LibGfx/Filter.h:35).
+pub enum TurbulenceType as i32:
+    fractal_noise = 0
+    turbulence = 1
+
+# mark: Filter ==================================================================================
+
+## Gfx::Filter (Libraries/LibGfx/Filter.h:42).
+pub struct Filter:
+    pub var m_impl: FilterImpl*

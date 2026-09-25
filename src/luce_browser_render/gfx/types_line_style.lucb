@@ -1,0 +1,17 @@
+#==============================================================================================
+#
+#   types_line_style - declarations of Libraries/LibGfx/LineStyle.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/LineStyle.h (Ladybird 47c82b38d0) by the skeleton generator
+#       (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the generator
+#       could not map.
+#
+#==============================================================================================
+
+## Gfx::LineStyle (Libraries/LibGfx/LineStyle.h:11).
+pub enum LineStyle as i32:
+    solid = 0
+    dotted = 1
+    dashed = 2

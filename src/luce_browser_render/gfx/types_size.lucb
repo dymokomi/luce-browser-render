@@ -1,0 +1,43 @@
+#==============================================================================================
+#
+#   types_size - declarations of Libraries/LibGfx/Size.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/Size.h (Ladybird 47c82b38d0) by the skeleton generator (DESIGN.md
+#       §4.4). Regenerate rather than edit, except to fill a field the generator could not
+#       map.
+#
+#==============================================================================================
+
+# mark: FloatSize ===============================================================================
+
+## Gfx::Size<f32> (Libraries/LibGfx/Size.h:17), instantiated (DESIGN.md §2.8).
+pub struct FloatSize:
+    pub var m_width: f32  # C++ default: { 0 }
+    pub var m_height: f32  # C++ default: { 0 }
+
+# mark: IntSize =================================================================================
+
+## Gfx::Size<i32> (Libraries/LibGfx/Size.h:17), instantiated (DESIGN.md §2.8).
+pub struct IntSize:
+    pub var m_width: i32  # C++ default: { 0 }
+    pub var m_height: i32  # C++ default: { 0 }
+
+# mark: SizeOfU32 ===============================================================================
+
+## Gfx::Size<u32> (Libraries/LibGfx/Size.h:17), instantiated (DESIGN.md §2.8).
+pub struct SizeOfU32:
+    pub var m_width: u32  # C++ default: { 0 }
+    pub var m_height: u32  # C++ default: { 0 }
+
+# mark: CssPixelSize ============================================================================
+
+## Gfx::Size<CssPixels> (Libraries/LibGfx/Size.h:17), instantiated (DESIGN.md §2.8).
+pub struct CssPixelSize:
+    pub var m_width: CssPixels  # C++ default: { 0 }
+    pub var m_height: CssPixels  # C++ default: { 0 }
+
+## Gfx::Size (Libraries/LibGfx/Size.h:17): opaque in this phase (not in the phase-1 closure).
+pub struct Size:
+    pub var opaque_: u8

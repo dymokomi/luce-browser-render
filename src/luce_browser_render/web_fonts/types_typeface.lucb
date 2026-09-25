@@ -1,0 +1,131 @@
+#==============================================================================================
+#
+#   types_typeface - declarations of Libraries/LibGfx/Font/Typeface.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/Font/Typeface.h (Ladybird 47c82b38d0) by the skeleton generator
+#       (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the generator
+#       could not map.
+#
+#==============================================================================================
+
+## SkTypeface (Libraries/LibGfx/Font/Typeface.h:21): opaque in this phase (not in the phase-1 closure).
+pub struct SkTypeface:
+    pub var opaque_: u8
+
+## hb_blob_t (Libraries/LibGfx/Font/Typeface.h:22): opaque in this phase (not in the phase-1 closure).
+pub struct HbBlobT:
+    pub var opaque_: u8
+
+## hb_face_t (Libraries/LibGfx/Font/Typeface.h:23): opaque in this phase (not in the phase-1 closure).
+pub struct HbFaceT:
+    pub var opaque_: u8
+
+# mark: ScaledFontMetrics =======================================================================
+
+## Gfx::ScaledFontMetrics (Libraries/LibGfx/Font/Typeface.h:29).
+pub struct ScaledFontMetrics:
+    pub var ascender: f32  # C++ default: { 0 }
+    pub var descender: f32  # C++ default: { 0 }
+    pub var line_gap: f32  # C++ default: { 0 }
+    pub var x_height: f32  # C++ default: { 0 }
+
+# mark: FontCacheKey ============================================================================
+
+## Gfx::FontCacheKey (Libraries/LibGfx/Font/Typeface.h:41).
+pub struct FontCacheKey:
+    pub var point_size: f32
+    pub var axes: ak.Vector[FontVariationAxis]
+    pub var shape_features: ak.Vector[ShapeFeature]
+
+# mark: Typeface ================================================================================
+
+## Gfx::Typeface (Libraries/LibGfx/Font/Typeface.h:61).
+pub struct Typeface: IsTypeface:
+    pub var vtable: const TypefaceVTable*
+    pub var class_id: u16
+    pub var m_font_data: FontData*?
+    pub var m_fonts: ak.HashMap[FontCacheKey, Font*, FontCacheKeyTraits]
+    pub var m_harfbuzz_blob: HbBlobT*?  # C++ default: { nullptr }
+    pub var m_harfbuzz_face: HbFaceT*?  # C++ default: { nullptr }
+
+    func typeface() -> Typeface*: return (Typeface*)&self
+
+## Upcast to Gfx::Typeface (implemented by every struct in its hierarchy).
+pub interface IsTypeface:
+    func typeface() -> Typeface*
+
+## Virtual functions introduced by Gfx::Typeface.
+pub struct TypefaceVTable:
+    pub let class_info: const ak.ClassInfo*
+    pub let glyph_count: func(Typeface*) -> u32 = typeface_glyph_count_impl
+    pub let units_per_em: func(Typeface*) -> u16 = typeface_units_per_em_impl
+    pub let glyph_id_for_code_point: func(Typeface*, u32) -> u32 = typeface_glyph_id_for_code_point_impl
+    pub let family: func(Typeface*) -> ak.FlyString = typeface_family_impl
+    pub let weight: func(Typeface*) -> u16 = typeface_weight_impl
+    pub let width: func(Typeface*) -> u16 = typeface_width_impl
+    pub let slope: func(Typeface*) -> u8 = typeface_slope_impl
+    pub let is_skia: func(Typeface*) -> bool = typeface_is_skia_impl
+    pub let buffer: func(Typeface*) -> const u8[] = typeface_buffer_impl
+    pub let ttc_index: func(Typeface*) -> u32 = typeface_ttc_index_impl
+
+## Virtual: Gfx::Typeface::glyph_count.
+pub func typeface_glyph_count(this: Typeface*) -> u32:
+    return ((const TypefaceVTable*)this.vtable).glyph_count(this)
+
+## Virtual: Gfx::Typeface::units_per_em.
+pub func typeface_units_per_em(this: Typeface*) -> u16:
+    return ((const TypefaceVTable*)this.vtable).units_per_em(this)
+
+## Virtual: Gfx::Typeface::glyph_id_for_code_point.
+pub func typeface_glyph_id_for_code_point(this: Typeface*, code_point: u32) -> u32:
+    return ((const TypefaceVTable*)this.vtable).glyph_id_for_code_point(this, code_point)
+
+## Virtual: Gfx::Typeface::family.
+pub func typeface_family(this: Typeface*) -> ak.FlyString:
+    return ((const TypefaceVTable*)this.vtable).family(this)
+
+## Virtual: Gfx::Typeface::weight.
+pub func typeface_weight(this: Typeface*) -> u16:
+    return ((const TypefaceVTable*)this.vtable).weight(this)
+
+## Virtual: Gfx::Typeface::width.
+pub func typeface_width(this: Typeface*) -> u16:
+    return ((const TypefaceVTable*)this.vtable).width(this)
+
+## Virtual: Gfx::Typeface::slope.
+pub func typeface_slope(this: Typeface*) -> u8:
+    return ((const TypefaceVTable*)this.vtable).slope(this)
+
+## Virtual: Gfx::Typeface::is_skia.
+pub func typeface_is_skia(this: Typeface*) -> bool:
+    return ((const TypefaceVTable*)this.vtable).is_skia(this)
+
+## Virtual: Gfx::Typeface::buffer.
+pub func typeface_buffer(this: Typeface*) -> const u8[]:
+    return ((const TypefaceVTable*)this.vtable).buffer(this)
+
+## Virtual: Gfx::Typeface::ttc_index.
+pub func typeface_ttc_index(this: Typeface*) -> u32:
+    return ((const TypefaceVTable*)this.vtable).ttc_index(this)
+
+## The vtable of Gfx::Typeface.
+pub let typeface_vtable: TypefaceVTable = TypefaceVTable(class_info = &typeface_class)
+
+## Class information of Gfx::Typeface: name, class-id range (pre-order), size, vtable.
+pub let typeface_class: ak.ClassInfo = ak.ClassInfo(name = "Typeface", first_id = 0, last_id = 1, size = sizeof(Typeface), vtable = (const void*)&typeface_vtable)
+
+## is<Gfx::Typeface>: the class-id range test.
+pub func is_typeface[P: IsTypeface](p: P*) -> bool:
+    let id = p.typeface().class_id
+    return id >= typeface_class.first_id and id <= typeface_class.last_id
+
+## as_if<Gfx::Typeface>.
+pub func as_if_typeface[P: IsTypeface](p: P*) -> Typeface*?:
+    if is_typeface(p): return (Typeface*)p
+    return none
+
+## as<Gfx::Typeface> (verify_cast).
+pub func as_typeface[P: IsTypeface](p: P*) -> Typeface*:
+    return as_if_typeface(p) else trap("as<Gfx::Typeface> failed")

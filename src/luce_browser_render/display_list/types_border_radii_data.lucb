@@ -1,0 +1,43 @@
+#==============================================================================================
+#
+#   types_border_radii_data - declarations of Libraries/LibWeb/Painting/BorderRadiiData.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibWeb/Painting/BorderRadiiData.h (Ladybird 47c82b38d0) by the skeleton
+#       generator (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the
+#       generator could not map.
+#
+#==============================================================================================
+
+# mark: CornerRadius ============================================================================
+
+## Web::Painting::CornerRadius (Libraries/LibWeb/Painting/BorderRadiiData.h:17).
+pub struct CornerRadius:
+    pub var horizontal_radius: i32  # C++ default: { 0 }
+    pub var vertical_radius: i32  # C++ default: { 0 }
+
+# mark: BorderRadiusData ========================================================================
+
+## Web::Painting::BorderRadiusData (Libraries/LibWeb/Painting/BorderRadiiData.h:27).
+pub struct BorderRadiusData:
+    pub var horizontal_radius: gfx.CssPixels  # C++ default: { 0 }
+    pub var vertical_radius: gfx.CssPixels  # C++ default: { 0 }
+
+# mark: CornerRadii =============================================================================
+
+## Web::Painting::CornerRadii (Libraries/LibWeb/Painting/BorderRadiiData.h:47).
+pub struct CornerRadii:
+    pub var top_left: CornerRadius
+    pub var top_right: CornerRadius
+    pub var bottom_right: CornerRadius
+    pub var bottom_left: CornerRadius
+
+# mark: BorderRadiiData =========================================================================
+
+## Web::Painting::BorderRadiiData (Libraries/LibWeb/Painting/BorderRadiiData.h:109).
+pub struct BorderRadiiData:
+    pub var top_left: BorderRadiusData
+    pub var top_right: BorderRadiusData
+    pub var bottom_right: BorderRadiusData
+    pub var bottom_left: BorderRadiusData

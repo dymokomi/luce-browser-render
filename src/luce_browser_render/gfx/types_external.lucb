@@ -1,0 +1,22 @@
+#==============================================================================================
+#
+#   types_external - declarations of external declarations
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from (Ladybird
+#       47c82b38d0) by the skeleton generator (DESIGN.md §4.4). Regenerate rather than edit,
+#       except to fill a field the generator could not map.
+#
+#==============================================================================================
+
+## c:@E@GrSurfaceOrigin (generated): opaque in this phase (not in the phase-1 closure).
+pub struct CEGrSurfaceOrigin:
+    pub var opaque_: u8
+
+## c:@E@SkAlphaType (generated): opaque in this phase (not in the phase-1 closure).
+pub struct CESkAlphaType:
+    pub var opaque_: u8
+
+## c:@E@SkColorType (generated): opaque in this phase (not in the phase-1 closure).
+pub struct CESkColorType:
+    pub var opaque_: u8

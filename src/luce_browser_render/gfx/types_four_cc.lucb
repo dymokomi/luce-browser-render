@@ -1,0 +1,17 @@
+#==============================================================================================
+#
+#   types_four_cc - declarations of Libraries/LibGfx/FourCC.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/FourCC.h (Ladybird 47c82b38d0) by the skeleton generator (DESIGN.md
+#       §4.4). Regenerate rather than edit, except to fill a field the generator could not
+#       map.
+#
+#==============================================================================================
+
+# mark: FourCc ==================================================================================
+
+## Gfx::FourCC (Libraries/LibGfx/FourCC.h:13).
+pub struct FourCc:
+    pub var cc: u8[4]

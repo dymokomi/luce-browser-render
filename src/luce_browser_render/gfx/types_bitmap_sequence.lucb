@@ -1,0 +1,26 @@
+#==============================================================================================
+#
+#   types_bitmap_sequence - declarations of Libraries/LibGfx/BitmapSequence.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/BitmapSequence.h (Ladybird 47c82b38d0) by the skeleton generator
+#       (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the generator
+#       could not map.
+#
+#==============================================================================================
+
+# mark: BitmapSequence ==========================================================================
+
+## Gfx::BitmapSequence (Libraries/LibGfx/BitmapSequence.h:17).
+pub struct BitmapSequence:
+    pub var bitmaps: ak.Vector[Bitmap*?]
+
+# mark: BitmapMetadata ==========================================================================
+
+## Gfx::BitmapMetadata (Libraries/LibGfx/BitmapSequence.h:22).
+pub struct BitmapMetadata:
+    pub var format: BitmapFormat
+    pub var alpha_type: AlphaType
+    pub var size: IntSize
+    pub var size_in_bytes: usize

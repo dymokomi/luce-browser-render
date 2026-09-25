@@ -1,0 +1,18 @@
+#==============================================================================================
+#
+#   types_color_conversion - declarations of Libraries/LibGfx/ColorConversion.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/ColorConversion.h (Ladybird 47c82b38d0) by the skeleton generator
+#       (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the generator
+#       could not map.
+#
+#==============================================================================================
+
+# mark: ColorComponents =========================================================================
+
+## Gfx::ColorComponents (Libraries/LibGfx/ColorConversion.h:17).
+pub struct ColorComponents:
+    pub var m_components: f32[3]  # C++ default: { 0 , 0 , 0 }
+    pub var m_alpha: f32  # C++ default: { 1 }

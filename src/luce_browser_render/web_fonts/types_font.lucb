@@ -1,0 +1,75 @@
+#==============================================================================================
+#
+#   types_font - declarations of Libraries/LibGfx/Font/Font.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/Font/Font.h (Ladybird 47c82b38d0) by the skeleton generator
+#       (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the generator
+#       could not map.
+#
+#==============================================================================================
+
+## SkFont (Libraries/LibGfx/Font/Font.h:20): opaque in this phase (not in the phase-1 closure).
+pub struct SkFont:
+    pub var opaque_: u8
+
+## hb_font_t (Libraries/LibGfx/Font/Font.h:21): opaque in this phase (not in the phase-1 closure).
+pub struct HbFontT:
+    pub var opaque_: u8
+
+## hb_buffer_t (Libraries/LibGfx/Font/Font.h:22): opaque in this phase (not in the phase-1 closure).
+pub struct HbBufferT:
+    pub var opaque_: u8
+
+# mark: FontPixelMetrics ========================================================================
+
+## Gfx::FontPixelMetrics (Libraries/LibGfx/Font/Font.h:26).
+pub struct FontPixelMetrics:
+    pub var size: f32  # C++ default: { 0 }
+    pub var x_height: f32  # C++ default: { 0 }
+    pub var advance_of_ascii_zero: f32  # C++ default: { 0 }
+    pub var ascent: f32  # C++ default: { 0 }
+    pub var descent: f32  # C++ default: { 0 }
+    pub var line_gap: f32  # C++ default: { 0 }
+
+## Gfx::FontWidth (Libraries/LibGfx/Font/Font.h:44).
+pub enum FontWidth as u32:
+    ultra_condensed = 1
+    extra_condensed = 2
+    condensed = 3
+    semi_condensed = 4
+    normal = 5
+    semi_expanded = 6
+    expanded = 7
+    extra_expanded = 8
+    ultra_expanded = 9
+
+## Gfx::text_shaping_resolution (Libraries/LibGfx/Font/Font.h:56).
+# C++ initializer: 64
+pub var text_shaping_resolution: f32
+
+# mark: Font ====================================================================================
+
+## Gfx::Font (Libraries/LibGfx/Font/Font.h:58).
+pub struct Font:
+    pub var m_bold_variant: const Font*?
+    pub var m_harfbuzz_font: HbFontT*?  # C++ default: { nullptr }
+    pub var m_shaping_cache: FontShapingCache
+    pub var m_is_emoji_font: ak.TriState  # C++ default: { TriState :: Unknown }
+    pub var m_typeface: Typeface*
+    pub var m_x_scale: f32  # C++ default: { 0.0f }
+    pub var m_y_scale: f32  # C++ default: { 0.0f }
+    pub var m_point_width: f32  # C++ default: { 0.0f }
+    pub var m_point_height: f32  # C++ default: { 0.0f }
+    pub var m_font_variation_settings: FontVariationSettings
+    pub var m_shape_features: ak.Vector[ShapeFeature]
+    pub var m_pixel_metrics: FontPixelMetrics
+    pub var m_pixel_size: f32  # C++ default: { 0.0f }
+
+# mark: FontShapingCache ========================================================================
+
+## Gfx::Font::ShapingCache (Libraries/LibGfx/Font/Font.h:89).
+pub struct FontShapingCache:
+    pub var map: ak.HashMap[ak.Utf16String, HbBufferT*?, ak.Utf16StringTraits]
+    pub var single_ascii_character_map: (HbBufferT*?)[128]

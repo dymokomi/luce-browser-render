@@ -1,0 +1,220 @@
+#==============================================================================================
+#
+#   types_display_list - declarations of Libraries/LibWeb/Painting/DisplayList.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibWeb/Painting/DisplayList.h (Ladybird 47c82b38d0) by the skeleton
+#       generator (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the
+#       generator could not map.
+#
+#==============================================================================================
+
+# mark: DisplayListPlayer =======================================================================
+
+## Web::Painting::DisplayListPlayer (Libraries/LibWeb/Painting/DisplayList.h:23).
+pub struct DisplayListPlayer: IsDisplayListPlayer:
+    pub var vtable: const DisplayListPlayerVTable*
+    pub var class_id: u16
+    pub var m_surface: gfx.PaintingSurface*?
+
+    func display_list_player() -> DisplayListPlayer*: return (DisplayListPlayer*)&self
+
+## Upcast to Web::Painting::DisplayListPlayer (implemented by every struct in its hierarchy).
+pub interface IsDisplayListPlayer:
+    func display_list_player() -> DisplayListPlayer*
+
+## Virtual functions introduced by Web::Painting::DisplayListPlayer.
+pub struct DisplayListPlayerVTable:
+    pub let class_info: const ak.ClassInfo*
+    pub let flush: func(DisplayListPlayer*) -> unit = display_list_player_flush_impl
+    pub let draw_glyph_run: func(DisplayListPlayer*, DrawGlyphRun) -> unit = display_list_player_draw_glyph_run_impl
+    pub let fill_rect: func(DisplayListPlayer*, FillRect) -> unit = display_list_player_fill_rect_impl
+    pub let draw_scaled_immutable_bitmap: func(DisplayListPlayer*, DrawScaledImmutableBitmap) -> unit = display_list_player_draw_scaled_immutable_bitmap_impl
+    pub let draw_repeated_immutable_bitmap: func(DisplayListPlayer*, DrawRepeatedImmutableBitmap) -> unit = display_list_player_draw_repeated_immutable_bitmap_impl
+    pub let draw_external_content: func(DisplayListPlayer*, DrawExternalContent) -> unit = display_list_player_draw_external_content_impl
+    pub let save: func(DisplayListPlayer*, Save) -> unit = display_list_player_save_impl
+    pub let save_layer: func(DisplayListPlayer*, SaveLayer) -> unit = display_list_player_save_layer_impl
+    pub let restore: func(DisplayListPlayer*, Restore) -> unit = display_list_player_restore_impl
+    pub let translate: func(DisplayListPlayer*, Translate) -> unit = display_list_player_translate_impl
+    pub let add_clip_rect: func(DisplayListPlayer*, AddClipRect) -> unit = display_list_player_add_clip_rect_impl
+    pub let paint_linear_gradient: func(DisplayListPlayer*, PaintLinearGradient) -> unit = display_list_player_paint_linear_gradient_impl
+    pub let paint_radial_gradient: func(DisplayListPlayer*, PaintRadialGradient) -> unit = display_list_player_paint_radial_gradient_impl
+    pub let paint_conic_gradient: func(DisplayListPlayer*, PaintConicGradient) -> unit = display_list_player_paint_conic_gradient_impl
+    pub let paint_outer_box_shadow: func(DisplayListPlayer*, PaintOuterBoxShadow) -> unit = display_list_player_paint_outer_box_shadow_impl
+    pub let paint_inner_box_shadow: func(DisplayListPlayer*, PaintInnerBoxShadow) -> unit = display_list_player_paint_inner_box_shadow_impl
+    pub let paint_text_shadow: func(DisplayListPlayer*, PaintTextShadow) -> unit = display_list_player_paint_text_shadow_impl
+    pub let fill_rect_with_rounded_corners: func(DisplayListPlayer*, FillRectWithRoundedCorners) -> unit = display_list_player_fill_rect_with_rounded_corners_impl
+    pub let fill_path: func(DisplayListPlayer*, FillPath) -> unit = display_list_player_fill_path_impl
+    pub let stroke_path: func(DisplayListPlayer*, StrokePath) -> unit = display_list_player_stroke_path_impl
+    pub let draw_ellipse: func(DisplayListPlayer*, DrawEllipse) -> unit = display_list_player_draw_ellipse_impl
+    pub let fill_ellipse: func(DisplayListPlayer*, FillEllipse) -> unit = display_list_player_fill_ellipse_impl
+    pub let draw_line: func(DisplayListPlayer*, DrawLine) -> unit = display_list_player_draw_line_impl
+    pub let apply_backdrop_filter: func(DisplayListPlayer*, ApplyBackdropFilter) -> unit = display_list_player_apply_backdrop_filter_impl
+    pub let draw_rect: func(DisplayListPlayer*, DrawRect) -> unit = display_list_player_draw_rect_impl
+    pub let add_rounded_rect_clip: func(DisplayListPlayer*, AddRoundedRectClip) -> unit = display_list_player_add_rounded_rect_clip_impl
+    pub let paint_nested_display_list: func(DisplayListPlayer*, PaintNestedDisplayList) -> unit = display_list_player_paint_nested_display_list_impl
+    pub let paint_scrollbar: func(DisplayListPlayer*, PaintScrollBar) -> unit = display_list_player_paint_scrollbar_impl
+    pub let apply_effects: func(DisplayListPlayer*, ApplyEffects) -> unit = display_list_player_apply_effects_impl
+    pub let apply_transform: func(DisplayListPlayer*, gfx.FloatPoint, gfx.FloatMatrix4X4) -> unit = display_list_player_apply_transform_impl
+    pub let would_be_fully_clipped_by_painter: func(DisplayListPlayer*, gfx.DevicePixelRect) -> bool = display_list_player_would_be_fully_clipped_by_painter_impl
+    pub let add_clip_path: func(DisplayListPlayer*, gfx.Path) -> unit = display_list_player_add_clip_path_impl
+
+## Virtual: Web::Painting::DisplayListPlayer::flush.
+pub func display_list_player_flush(this: DisplayListPlayer*):
+    ((const DisplayListPlayerVTable*)this.vtable).flush(this)
+
+## Virtual: Web::Painting::DisplayListPlayer::draw_glyph_run.
+pub func display_list_player_draw_glyph_run(this: DisplayListPlayer*, arg0: DrawGlyphRun):
+    ((const DisplayListPlayerVTable*)this.vtable).draw_glyph_run(this, arg0)
+
+## Virtual: Web::Painting::DisplayListPlayer::fill_rect.
+pub func display_list_player_fill_rect(this: DisplayListPlayer*, arg0: FillRect):
+    ((const DisplayListPlayerVTable*)this.vtable).fill_rect(this, arg0)
+
+## Virtual: Web::Painting::DisplayListPlayer::draw_scaled_immutable_bitmap.
+pub func display_list_player_draw_scaled_immutable_bitmap(this: DisplayListPlayer*, arg0: DrawScaledImmutableBitmap):
+    ((const DisplayListPlayerVTable*)this.vtable).draw_scaled_immutable_bitmap(this, arg0)
+
+## Virtual: Web::Painting::DisplayListPlayer::draw_repeated_immutable_bitmap.
+pub func display_list_player_draw_repeated_immutable_bitmap(this: DisplayListPlayer*, arg0: DrawRepeatedImmutableBitmap):
+    ((const DisplayListPlayerVTable*)this.vtable).draw_repeated_immutable_bitmap(this, arg0)
+
+## Virtual: Web::Painting::DisplayListPlayer::draw_external_content.
+pub func display_list_player_draw_external_content(this: DisplayListPlayer*, arg0: DrawExternalContent):
+    ((const DisplayListPlayerVTable*)this.vtable).draw_external_content(this, arg0)
+
+## Virtual: Web::Painting::DisplayListPlayer::save.
+pub func display_list_player_save(this: DisplayListPlayer*, arg0: Save):
+    ((const DisplayListPlayerVTable*)this.vtable).save(this, arg0)
+
+## Virtual: Web::Painting::DisplayListPlayer::save_layer.
+pub func display_list_player_save_layer(this: DisplayListPlayer*, arg0: SaveLayer):
+    ((const DisplayListPlayerVTable*)this.vtable).save_layer(this, arg0)
+
+## Virtual: Web::Painting::DisplayListPlayer::restore.
+pub func display_list_player_restore(this: DisplayListPlayer*, arg0: Restore):
+    ((const DisplayListPlayerVTable*)this.vtable).restore(this, arg0)
+
+## Virtual: Web::Painting::DisplayListPlayer::translate.
+pub func display_list_player_translate(this: DisplayListPlayer*, arg0: Translate):
+    ((const DisplayListPlayerVTable*)this.vtable).translate(this, arg0)
+
+## Virtual: Web::Painting::DisplayListPlayer::add_clip_rect.
+pub func display_list_player_add_clip_rect(this: DisplayListPlayer*, arg0: AddClipRect):
+    ((const DisplayListPlayerVTable*)this.vtable).add_clip_rect(this, arg0)
+
+## Virtual: Web::Painting::DisplayListPlayer::paint_linear_gradient.
+pub func display_list_player_paint_linear_gradient(this: DisplayListPlayer*, arg0: PaintLinearGradient):
+    ((const DisplayListPlayerVTable*)this.vtable).paint_linear_gradient(this, arg0)
+
+## Virtual: Web::Painting::DisplayListPlayer::paint_radial_gradient.
+pub func display_list_player_paint_radial_gradient(this: DisplayListPlayer*, arg0: PaintRadialGradient):
+    ((const DisplayListPlayerVTable*)this.vtable).paint_radial_gradient(this, arg0)
+
+## Virtual: Web::Painting::DisplayListPlayer::paint_conic_gradient.
+pub func display_list_player_paint_conic_gradient(this: DisplayListPlayer*, arg0: PaintConicGradient):
+    ((const DisplayListPlayerVTable*)this.vtable).paint_conic_gradient(this, arg0)
+
+## Virtual: Web::Painting::DisplayListPlayer::paint_outer_box_shadow.
+pub func display_list_player_paint_outer_box_shadow(this: DisplayListPlayer*, arg0: PaintOuterBoxShadow):
+    ((const DisplayListPlayerVTable*)this.vtable).paint_outer_box_shadow(this, arg0)
+
+## Virtual: Web::Painting::DisplayListPlayer::paint_inner_box_shadow.
+pub func display_list_player_paint_inner_box_shadow(this: DisplayListPlayer*, arg0: PaintInnerBoxShadow):
+    ((const DisplayListPlayerVTable*)this.vtable).paint_inner_box_shadow(this, arg0)
+
+## Virtual: Web::Painting::DisplayListPlayer::paint_text_shadow.
+pub func display_list_player_paint_text_shadow(this: DisplayListPlayer*, arg0: PaintTextShadow):
+    ((const DisplayListPlayerVTable*)this.vtable).paint_text_shadow(this, arg0)
+
+## Virtual: Web::Painting::DisplayListPlayer::fill_rect_with_rounded_corners.
+pub func display_list_player_fill_rect_with_rounded_corners(this: DisplayListPlayer*, arg0: FillRectWithRoundedCorners):
+    ((const DisplayListPlayerVTable*)this.vtable).fill_rect_with_rounded_corners(this, arg0)
+
+## Virtual: Web::Painting::DisplayListPlayer::fill_path.
+pub func display_list_player_fill_path(this: DisplayListPlayer*, arg0: FillPath):
+    ((const DisplayListPlayerVTable*)this.vtable).fill_path(this, arg0)
+
+## Virtual: Web::Painting::DisplayListPlayer::stroke_path.
+pub func display_list_player_stroke_path(this: DisplayListPlayer*, arg0: StrokePath):
+    ((const DisplayListPlayerVTable*)this.vtable).stroke_path(this, arg0)
+
+## Virtual: Web::Painting::DisplayListPlayer::draw_ellipse.
+pub func display_list_player_draw_ellipse(this: DisplayListPlayer*, arg0: DrawEllipse):
+    ((const DisplayListPlayerVTable*)this.vtable).draw_ellipse(this, arg0)
+
+## Virtual: Web::Painting::DisplayListPlayer::fill_ellipse.
+pub func display_list_player_fill_ellipse(this: DisplayListPlayer*, arg0: FillEllipse):
+    ((const DisplayListPlayerVTable*)this.vtable).fill_ellipse(this, arg0)
+
+## Virtual: Web::Painting::DisplayListPlayer::draw_line.
+pub func display_list_player_draw_line(this: DisplayListPlayer*, arg0: DrawLine):
+    ((const DisplayListPlayerVTable*)this.vtable).draw_line(this, arg0)
+
+## Virtual: Web::Painting::DisplayListPlayer::apply_backdrop_filter.
+pub func display_list_player_apply_backdrop_filter(this: DisplayListPlayer*, arg0: ApplyBackdropFilter):
+    ((const DisplayListPlayerVTable*)this.vtable).apply_backdrop_filter(this, arg0)
+
+## Virtual: Web::Painting::DisplayListPlayer::draw_rect.
+pub func display_list_player_draw_rect(this: DisplayListPlayer*, arg0: DrawRect):
+    ((const DisplayListPlayerVTable*)this.vtable).draw_rect(this, arg0)
+
+## Virtual: Web::Painting::DisplayListPlayer::add_rounded_rect_clip.
+pub func display_list_player_add_rounded_rect_clip(this: DisplayListPlayer*, arg0: AddRoundedRectClip):
+    ((const DisplayListPlayerVTable*)this.vtable).add_rounded_rect_clip(this, arg0)
+
+## Virtual: Web::Painting::DisplayListPlayer::paint_nested_display_list.
+pub func display_list_player_paint_nested_display_list(this: DisplayListPlayer*, arg0: PaintNestedDisplayList):
+    ((const DisplayListPlayerVTable*)this.vtable).paint_nested_display_list(this, arg0)
+
+## Virtual: Web::Painting::DisplayListPlayer::paint_scrollbar.
+pub func display_list_player_paint_scrollbar(this: DisplayListPlayer*, arg0: PaintScrollBar):
+    ((const DisplayListPlayerVTable*)this.vtable).paint_scrollbar(this, arg0)
+
+## Virtual: Web::Painting::DisplayListPlayer::apply_effects.
+pub func display_list_player_apply_effects(this: DisplayListPlayer*, arg0: ApplyEffects):
+    ((const DisplayListPlayerVTable*)this.vtable).apply_effects(this, arg0)
+
+## Virtual: Web::Painting::DisplayListPlayer::apply_transform.
+pub func display_list_player_apply_transform(this: DisplayListPlayer*, origin: gfx.FloatPoint, arg1: gfx.FloatMatrix4X4):
+    ((const DisplayListPlayerVTable*)this.vtable).apply_transform(this, origin, arg1)
+
+## Virtual: Web::Painting::DisplayListPlayer::would_be_fully_clipped_by_painter.
+pub func display_list_player_would_be_fully_clipped_by_painter(this: DisplayListPlayer*, arg0: gfx.DevicePixelRect) -> bool:
+    return ((const DisplayListPlayerVTable*)this.vtable).would_be_fully_clipped_by_painter(this, arg0)
+
+## Virtual: Web::Painting::DisplayListPlayer::add_clip_path.
+pub func display_list_player_add_clip_path(this: DisplayListPlayer*, arg0: gfx.Path):
+    ((const DisplayListPlayerVTable*)this.vtable).add_clip_path(this, arg0)
+
+## The vtable of Web::Painting::DisplayListPlayer.
+pub let display_list_player_vtable: DisplayListPlayerVTable = DisplayListPlayerVTable(class_info = &display_list_player_class)
+
+## Class information of Web::Painting::DisplayListPlayer: name, class-id range (pre-order), size, vtable.
+pub let display_list_player_class: ak.ClassInfo = ak.ClassInfo(name = "DisplayListPlayer", first_id = 0, last_id = 1, size = sizeof(DisplayListPlayer), vtable = (const void*)&display_list_player_vtable)
+
+## is<Web::Painting::DisplayListPlayer>: the class-id range test.
+pub func is_display_list_player[P: IsDisplayListPlayer](p: P*) -> bool:
+    let id = p.display_list_player().class_id
+    return id >= display_list_player_class.first_id and id <= display_list_player_class.last_id
+
+## as_if<Web::Painting::DisplayListPlayer>.
+pub func as_if_display_list_player[P: IsDisplayListPlayer](p: P*) -> DisplayListPlayer*?:
+    if is_display_list_player(p): return (DisplayListPlayer*)p
+    return none
+
+## as<Web::Painting::DisplayListPlayer> (verify_cast).
+pub func as_display_list_player[P: IsDisplayListPlayer](p: P*) -> DisplayListPlayer*:
+    return as_if_display_list_player(p) else trap("as<Web::Painting::DisplayListPlayer> failed")
+
+# mark: DisplayList =============================================================================
+
+## Web::Painting::DisplayList (Libraries/LibWeb/Painting/DisplayList.h:72).
+pub struct DisplayList:
+    pub var m_visual_context_tree: const AccumulatedVisualContextTree*
+    pub var m_commands: ak.Vector[DisplayListCommandListItem]
+
+## Web::Painting::DisplayList::CommandListItem (Libraries/LibWeb/Painting/DisplayList.h:81): opaque in this phase (not in the phase-1 closure).
+pub struct DisplayListCommandListItem:
+    pub var opaque_: u8

@@ -1,0 +1,48 @@
+#==============================================================================================
+#
+#   types_bitmap - declarations of Libraries/LibGfx/Bitmap.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/Bitmap.cpp, Libraries/LibGfx/Bitmap.h (Ladybird 47c82b38d0) by the
+#       skeleton generator (DESIGN.md §4.4). Regenerate rather than edit, except to fill a
+#       field the generator could not map.
+#
+#==============================================================================================
+
+# mark: BackingStore ============================================================================
+
+## Gfx::BackingStore (Libraries/LibGfx/Bitmap.cpp:28).
+pub struct BackingStore:
+    pub var data: void*?  # C++ default: { nullptr }
+    pub var pitch: usize  # C++ default: { 0 }
+    pub var size_in_bytes: usize  # C++ default: { 0 }
+
+## Gfx::BitmapFormat (Libraries/LibGfx/Bitmap.h:30).
+pub enum BitmapFormat as i32:
+    invalid = 0
+    bg_rx8888 = 1
+    bgra8888 = 2
+    rg_bx8888 = 3
+    rgba8888 = 4
+
+# mark: Bitmap ==================================================================================
+
+## Gfx::Bitmap (Libraries/LibGfx/Bitmap.h:54).
+pub struct Bitmap:
+    pub var m_size: IntSize
+    pub var m_data: void*?  # C++ default: { nullptr }
+    pub var m_pitch: usize  # C++ default: { 0 }
+    pub var m_format: BitmapFormat  # C++ default: { BitmapFormat :: Invalid }
+    pub var m_alpha_type: AlphaType  # C++ default: { AlphaType :: Premultiplied }
+    pub var m_buffer: CoreAnonymousBuffer
+    pub var m_destruction_callback: ak.Function0[unit]
+
+## Gfx::Bitmap::DiffResult (Libraries/LibGfx/Bitmap.h:114): opaque in this phase (not in the phase-1 closure).
+pub struct BitmapDiffResult:
+    pub var opaque_: u8
+
+## Gfx::Bitmap::InitializeBackingStore (Libraries/LibGfx/Bitmap.h:145).
+pub enum BitmapInitializeBackingStore as i32:
+    no = 0
+    yes = 1

@@ -1,0 +1,83 @@
+#==============================================================================================
+#
+#   types_font_database - declarations of Libraries/LibGfx/Font/FontDatabase.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/Font/FontDatabase.h (Ladybird 47c82b38d0) by the skeleton generator
+#       (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the generator
+#       could not map.
+#
+#==============================================================================================
+
+# mark: CodePointFallbackKey ====================================================================
+
+## Gfx::CodePointFallbackKey (Libraries/LibGfx/Font/FontDatabase.h:19).
+pub struct CodePointFallbackKey:
+    pub var code_point: u32  # C++ default: { 0 }
+    pub var weight: u16  # C++ default: { 0 }
+    pub var width: u16  # C++ default: { 0 }
+    pub var slope: u8  # C++ default: { 0 }
+
+# mark: SystemFontProvider ======================================================================
+
+## Gfx::SystemFontProvider (Libraries/LibGfx/Font/FontDatabase.h:35).
+pub struct SystemFontProvider: IsSystemFontProvider:
+    pub var vtable: const SystemFontProviderVTable*
+    pub var class_id: u16
+
+    func system_font_provider() -> SystemFontProvider*: return (SystemFontProvider*)&self
+
+## Upcast to Gfx::SystemFontProvider (implemented by every struct in its hierarchy).
+pub interface IsSystemFontProvider:
+    func system_font_provider() -> SystemFontProvider*
+
+## Virtual functions introduced by Gfx::SystemFontProvider.
+pub struct SystemFontProviderVTable:
+    pub let class_info: const ak.ClassInfo*
+    pub let name: func(SystemFontProvider*) -> ak.StringView = system_font_provider_name_impl
+    pub let get_font: func(SystemFontProvider*, ak.FlyString, f32, u32, u32, u32, FontVariationSettings?, ak.Vector[ShapeFeature]?) -> Font*? = system_font_provider_get_font_impl
+    pub let for_each_typeface_with_family_name: func(SystemFontProvider*, ak.FlyString, ak.Function1[Typeface*, unit]) -> unit = system_font_provider_for_each_typeface_with_family_name_impl
+
+## Virtual: Gfx::SystemFontProvider::name.
+pub func system_font_provider_name(this: SystemFontProvider*) -> ak.StringView:
+    return ((const SystemFontProviderVTable*)this.vtable).name(this)
+
+## Virtual: Gfx::SystemFontProvider::get_font.
+pub func system_font_provider_get_font(this: SystemFontProvider*, family: ak.FlyString, point_size: f32, weight: u32, width: u32, slope: u32, font_variation_settings: FontVariationSettings?, shape_features: ak.Vector[ShapeFeature]?) -> Font*?:
+    return ((const SystemFontProviderVTable*)this.vtable).get_font(this, family, point_size, weight, width, slope, font_variation_settings, shape_features)
+
+## Virtual: Gfx::SystemFontProvider::for_each_typeface_with_family_name.
+pub func system_font_provider_for_each_typeface_with_family_name(this: SystemFontProvider*, family_name: ak.FlyString, arg1: ak.Function1[Typeface*, unit]):
+    ((const SystemFontProviderVTable*)this.vtable).for_each_typeface_with_family_name(this, family_name, arg1)
+
+## The vtable of Gfx::SystemFontProvider.
+pub let system_font_provider_vtable: SystemFontProviderVTable = SystemFontProviderVTable(class_info = &system_font_provider_class)
+
+## Class information of Gfx::SystemFontProvider: name, class-id range (pre-order), size, vtable.
+pub let system_font_provider_class: ak.ClassInfo = ak.ClassInfo(name = "SystemFontProvider", first_id = 0, last_id = 1, size = sizeof(SystemFontProvider), vtable = (const void*)&system_font_provider_vtable)
+
+## is<Gfx::SystemFontProvider>: the class-id range test.
+pub func is_system_font_provider[P: IsSystemFontProvider](p: P*) -> bool:
+    let id = p.system_font_provider().class_id
+    return id >= system_font_provider_class.first_id and id <= system_font_provider_class.last_id
+
+## as_if<Gfx::SystemFontProvider>.
+pub func as_if_system_font_provider[P: IsSystemFontProvider](p: P*) -> SystemFontProvider*?:
+    if is_system_font_provider(p): return (SystemFontProvider*)p
+    return none
+
+## as<Gfx::SystemFontProvider> (verify_cast).
+pub func as_system_font_provider[P: IsSystemFontProvider](p: P*) -> SystemFontProvider*:
+    return as_if_system_font_provider(p) else trap("as<Gfx::SystemFontProvider> failed")
+
+# mark: FontDatabase ============================================================================
+
+## Gfx::FontDatabase (Libraries/LibGfx/Font/FontDatabase.h:44).
+pub struct FontDatabase:
+    pub var m_system_font_provider: SystemFontProvider*?
+    pub var m_code_point_fallback_cache: ak.HashMap[CodePointFallbackKey, FontDatabaseCodePointFallbackEntry, CodePointFallbackKeyTraits]
+
+## Gfx::FontDatabase::CodePointFallbackEntry (Libraries/LibGfx/Font/FontDatabase.h:62): opaque in this phase (not in the phase-1 closure).
+pub struct FontDatabaseCodePointFallbackEntry:
+    pub var opaque_: u8

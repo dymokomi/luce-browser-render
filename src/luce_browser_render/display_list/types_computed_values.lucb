@@ -1,0 +1,19 @@
+#==============================================================================================
+#
+#   types_computed_values - declarations of Libraries/LibWeb/CSS/ComputedValues.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibWeb/CSS/ComputedValues.h (Ladybird 47c82b38d0) by the skeleton generator
+#       (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the generator
+#       could not map.
+#
+#==============================================================================================
+
+# mark: BorderData ==============================================================================
+
+## Web::CSS::BorderData (Libraries/LibWeb/CSS/ComputedValues.h:390).
+pub struct BorderData:
+    pub var color: gfx.Color  # C++ default: { Color :: Transparent }
+    pub var line_style: css_data.LineStyle  # C++ default: { LineStyle :: None }
+    pub var width: gfx.CssPixels  # C++ default: { 0 }

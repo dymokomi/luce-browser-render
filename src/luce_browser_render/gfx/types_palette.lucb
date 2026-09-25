@@ -1,0 +1,23 @@
+#==============================================================================================
+#
+#   types_palette - declarations of Libraries/LibGfx/Palette.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/Palette.h (Ladybird 47c82b38d0) by the skeleton generator (DESIGN.md
+#       §4.4). Regenerate rather than edit, except to fill a field the generator could not
+#       map.
+#
+#==============================================================================================
+
+# mark: PaletteImpl =============================================================================
+
+## Gfx::PaletteImpl (Libraries/LibGfx/Palette.h:19).
+pub struct PaletteImpl:
+    pub var m_theme_buffer: CoreAnonymousBuffer
+
+# mark: Palette =================================================================================
+
+## Gfx::Palette (Libraries/LibGfx/Palette.h:58).
+pub struct Palette:
+    pub var m_impl: PaletteImpl*

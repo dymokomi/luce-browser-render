@@ -1,0 +1,114 @@
+#==============================================================================================
+#
+#   types_loader - declarations of Libraries/LibGfx/Font/WOFF/Loader.cpp
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/Font/WOFF/Loader.cpp, Libraries/LibGfx/Font/WOFF2/Loader.cpp
+#       (Ladybird 47c82b38d0) by the skeleton generator (DESIGN.md §4.4). Regenerate rather
+#       than edit, except to fill a field the generator could not map.
+#
+#==============================================================================================
+
+# mark: Woff2ByteBufferOut ======================================================================
+
+## WOFF2::WOFF2ByteBufferOut (Libraries/LibGfx/Font/WOFF2/Loader.cpp:13).
+pub struct Woff2ByteBufferOut: IsWoff2ByteBufferOut:
+    pub var vtable: const Woff2ByteBufferOutVTable*
+    pub var class_id: u16
+    pub var m_buffer: ak.ByteBuffer*
+
+    func woff2_byte_buffer_out() -> Woff2ByteBufferOut*: return (Woff2ByteBufferOut*)&self
+
+## Upcast to WOFF2::WOFF2ByteBufferOut (implemented by every struct in its hierarchy).
+pub interface IsWoff2ByteBufferOut:
+    func woff2_byte_buffer_out() -> Woff2ByteBufferOut*
+
+## Virtual functions introduced by WOFF2::WOFF2ByteBufferOut.
+pub struct Woff2ByteBufferOutVTable:
+    pub let class_info: const ak.ClassInfo*
+    pub let write: func(Woff2ByteBufferOut*, const void*?, usize) -> bool = woff2_byte_buffer_out_write_impl
+    pub let write_usize: func(Woff2ByteBufferOut*, const void*?, usize, usize) -> bool = woff2_byte_buffer_out_write_usize_impl
+    pub let size: func(Woff2ByteBufferOut*) -> usize = woff2_byte_buffer_out_size_impl
+
+## Virtual: WOFF2::WOFF2ByteBufferOut::Write.
+pub func woff2_byte_buffer_out_write(this: Woff2ByteBufferOut*, data: const void*?, size: usize) -> bool:
+    return ((const Woff2ByteBufferOutVTable*)this.vtable).write(this, data, size)
+
+## Virtual: WOFF2::WOFF2ByteBufferOut::Write.
+pub func woff2_byte_buffer_out_write_usize(this: Woff2ByteBufferOut*, data: const void*?, offset: usize, n: usize) -> bool:
+    return ((const Woff2ByteBufferOutVTable*)this.vtable).write_usize(this, data, offset, n)
+
+## Virtual: WOFF2::WOFF2ByteBufferOut::Size.
+pub func woff2_byte_buffer_out_size(this: Woff2ByteBufferOut*) -> usize:
+    return ((const Woff2ByteBufferOutVTable*)this.vtable).size(this)
+
+## The vtable of WOFF2::WOFF2ByteBufferOut.
+pub let woff2_byte_buffer_out_vtable: Woff2ByteBufferOutVTable = Woff2ByteBufferOutVTable(class_info = &woff2_byte_buffer_out_class)
+
+## Class information of WOFF2::WOFF2ByteBufferOut: name, class-id range (pre-order), size, vtable.
+pub let woff2_byte_buffer_out_class: ak.ClassInfo = ak.ClassInfo(name = "WOFF2ByteBufferOut", first_id = 0, last_id = 0, size = sizeof(Woff2ByteBufferOut), vtable = (const void*)&woff2_byte_buffer_out_vtable)
+
+## is<WOFF2::WOFF2ByteBufferOut>: the class-id range test.
+pub func is_woff2_byte_buffer_out[P: IsWoff2ByteBufferOut](p: P*) -> bool:
+    let id = p.woff2_byte_buffer_out().class_id
+    return id >= woff2_byte_buffer_out_class.first_id and id <= woff2_byte_buffer_out_class.last_id
+
+## as_if<WOFF2::WOFF2ByteBufferOut>.
+pub func as_if_woff2_byte_buffer_out[P: IsWoff2ByteBufferOut](p: P*) -> Woff2ByteBufferOut*?:
+    if is_woff2_byte_buffer_out(p): return (Woff2ByteBufferOut*)p
+    return none
+
+## as<WOFF2::WOFF2ByteBufferOut> (verify_cast).
+pub func as_woff2_byte_buffer_out[P: IsWoff2ByteBufferOut](p: P*) -> Woff2ByteBufferOut*:
+    return as_if_woff2_byte_buffer_out(p) else trap("as<WOFF2::WOFF2ByteBufferOut> failed")
+
+# mark: Header ==================================================================================
+
+## WOFF::Header (Libraries/LibGfx/Font/WOFF/Loader.cpp:18).
+pub struct Header:
+    pub var signature: ak.BigEndian[u32]
+    pub var flavor: ak.BigEndian[u32]
+    pub var length: ak.BigEndian[u32]
+    pub var num_tables: ak.BigEndian[u16]
+    pub var reserved: ak.BigEndian[u16]
+    pub var total_sfnt_size: ak.BigEndian[u32]
+    pub var major_version: ak.BigEndian[u16]
+    pub var minor_version: ak.BigEndian[u16]
+    pub var meta_offset: ak.BigEndian[u32]
+    pub var meta_length: ak.BigEndian[u32]
+    pub var meta_orig_length: ak.BigEndian[u32]
+    pub var priv_offset: ak.BigEndian[u32]
+    pub var priv_length: ak.BigEndian[u32]
+
+# mark: TableDirectoryEntry =====================================================================
+
+## WOFF::TableDirectoryEntry (Libraries/LibGfx/Font/WOFF/Loader.cpp:37).
+pub struct TableDirectoryEntry:
+    pub var tag: gfx.FourCc
+    pub var offset: ak.BigEndian[u32]
+    pub var comp_length: ak.BigEndian[u32]
+    pub var orig_length: ak.BigEndian[u32]
+    pub var orig_checksum: ak.BigEndian[u32]
+
+## WOFF::WOFF_SIGNATURE (Libraries/LibGfx/Font/WOFF/Loader.cpp:62).
+pub let woff_woff_signature: u32 = 0x774f4646
+
+# mark: TableDirectory ==========================================================================
+
+## WOFF::TableDirectory (Libraries/LibGfx/Font/WOFF/Loader.cpp:84).
+pub struct TableDirectory:
+    pub var sfnt_version: ak.BigEndian[u32]
+    pub var num_tables: ak.BigEndian[u16]
+    pub var search_range: ak.BigEndian[u16]
+    pub var entry_selector: ak.BigEndian[u16]
+    pub var range_shift: ak.BigEndian[u16]
+
+# mark: TableRecord =============================================================================
+
+## WOFF::TableRecord (Libraries/LibGfx/Font/WOFF/Loader.cpp:97).
+pub struct TableRecord:
+    pub var table_tag: gfx.FourCc
+    pub var checksum: ak.BigEndian[u32]
+    pub var offset: ak.BigEndian[u32]
+    pub var length: ak.BigEndian[u32]

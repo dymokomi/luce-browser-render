@@ -1,0 +1,29 @@
+#==============================================================================================
+#
+#   types_path - declarations of Libraries/LibGfx/Path.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/Path.h (Ladybird 47c82b38d0) by the skeleton generator (DESIGN.md
+#       §4.4). Regenerate rather than edit, except to fill a field the generator could not
+#       map.
+#
+#==============================================================================================
+
+# mark: Path ====================================================================================
+
+## Gfx::Path (Libraries/LibGfx/Path.h:56).
+pub struct Path:
+    pub var m_impl: void*?  # cut (upward reference, DESIGN.md §4.1.3): AK::NonnullOwnPtr<Gfx::PathImpl>
+
+## Gfx::Path::CapStyle (Libraries/LibGfx/Path.h:80).
+pub enum PathCapStyle as i32:
+    butt = 0
+    round = 1
+    square = 2
+
+## Gfx::Path::JoinStyle (Libraries/LibGfx/Path.h:86).
+pub enum PathJoinStyle as i32:
+    miter = 0
+    round = 1
+    bevel = 2

@@ -1,0 +1,16 @@
+#==============================================================================================
+#
+#   types_interpolation_color_space - declarations of Libraries/LibGfx/InterpolationColorSpace.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/InterpolationColorSpace.h (Ladybird 47c82b38d0) by the skeleton
+#       generator (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the
+#       generator could not map.
+#
+#==============================================================================================
+
+## Gfx::InterpolationColorSpace (Libraries/LibGfx/InterpolationColorSpace.h:11).
+pub enum InterpolationColorSpace as i32:
+    linear_rgb = 0
+    srgb = 1

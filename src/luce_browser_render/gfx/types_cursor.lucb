@@ -1,0 +1,42 @@
+#==============================================================================================
+#
+#   types_cursor - declarations of Libraries/LibGfx/Cursor.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/Cursor.h (Ladybird 47c82b38d0) by the skeleton generator (DESIGN.md
+#       §4.4). Regenerate rather than edit, except to fill a field the generator could not
+#       map.
+#
+#==============================================================================================
+
+## Gfx::StandardCursor (Libraries/LibGfx/Cursor.h:17).
+pub enum StandardCursor as i32:
+    none_ = 0
+    hidden = 1
+    arrow = 2
+    crosshair = 3
+    i_beam = 4
+    resize_horizontal = 5
+    resize_vertical = 6
+    resize_diagonal_tlbr = 7
+    resize_diagonal_bltr = 8
+    resize_column = 9
+    resize_row = 10
+    hand = 11
+    help = 12
+    open_hand = 13
+    drag = 14
+    drag_copy = 15
+    move = 16
+    wait = 17
+    disallowed = 18
+    eyedropper = 19
+    zoom = 20
+
+# mark: ImageCursor =============================================================================
+
+## Gfx::ImageCursor (Libraries/LibGfx/Cursor.h:41).
+pub struct ImageCursor:
+    pub var bitmap: ShareableBitmap
+    pub var hotspot: IntPoint

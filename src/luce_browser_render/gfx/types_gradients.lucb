@@ -1,0 +1,19 @@
+#==============================================================================================
+#
+#   types_gradients - declarations of Libraries/LibGfx/Gradients.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/Gradients.h (Ladybird 47c82b38d0) by the skeleton generator
+#       (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the generator
+#       could not map.
+#
+#==============================================================================================
+
+# mark: ColorStop ===============================================================================
+
+## Gfx::ColorStop (Libraries/LibGfx/Gradients.h:15).
+pub struct ColorStop:
+    pub var color: Color
+    pub var position: f32  # C++ default: AK :: NaN < float >
+    pub var transition_hint: f32?  # C++ default: { }

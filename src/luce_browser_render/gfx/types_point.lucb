@@ -1,0 +1,36 @@
+#==============================================================================================
+#
+#   types_point - declarations of Libraries/LibGfx/Point.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/Point.h (Ladybird 47c82b38d0) by the skeleton generator (DESIGN.md
+#       §4.4). Regenerate rather than edit, except to fill a field the generator could not
+#       map.
+#
+#==============================================================================================
+
+# mark: FloatPoint ==============================================================================
+
+## Gfx::Point<f32> (Libraries/LibGfx/Point.h:20), instantiated (DESIGN.md §2.8).
+pub struct FloatPoint:
+    pub var m_x: f32  # C++ default: { 0 }
+    pub var m_y: f32  # C++ default: { 0 }
+
+# mark: IntPoint ================================================================================
+
+## Gfx::Point<i32> (Libraries/LibGfx/Point.h:20), instantiated (DESIGN.md §2.8).
+pub struct IntPoint:
+    pub var m_x: i32  # C++ default: { 0 }
+    pub var m_y: i32  # C++ default: { 0 }
+
+## Gfx::Point (Libraries/LibGfx/Point.h:20): opaque in this phase (not in the phase-1 closure).
+pub struct Point:
+    pub var opaque_: u8
+
+# mark: CssPixelPoint ===========================================================================
+
+## Gfx::Point<CssPixels> (Libraries/LibGfx/Point.h:20), instantiated (DESIGN.md §2.8).
+pub struct CssPixelPoint:
+    pub var m_x: CssPixels  # C++ default: { 0 }
+    pub var m_y: CssPixels  # C++ default: { 0 }

@@ -1,0 +1,19 @@
+#==============================================================================================
+#
+#   types_bitmap_export_result - declarations of Libraries/LibGfx/BitmapExportResult.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/BitmapExportResult.h (Ladybird 47c82b38d0) by the skeleton generator
+#       (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the generator
+#       could not map.
+#
+#==============================================================================================
+
+# mark: BitmapExportResult ======================================================================
+
+## Gfx::BitmapExportResult (Libraries/LibGfx/BitmapExportResult.h:13).
+pub struct BitmapExportResult:
+    pub var buffer: ak.ByteBuffer
+    pub var width: i32  # C++ default: { 0 }
+    pub var height: i32  # C++ default: { 0 }

@@ -1,0 +1,21 @@
+#==============================================================================================
+#
+#   types_matrix - declarations of Libraries/LibGfx/Matrix.h
+#
+#   DESCRIPTION:
+#       Structs, enums, vtables, class information and cast helpers generated from
+#       Libraries/LibGfx/Matrix.h (Ladybird 47c82b38d0) by the skeleton generator (DESIGN.md
+#       §4.4). Regenerate rather than edit, except to fill a field the generator could not
+#       map.
+#
+#==============================================================================================
+
+# mark: FloatMatrix4X4 ==========================================================================
+
+## Gfx::Matrix<f32> (Libraries/LibGfx/Matrix.h:17), instantiated (DESIGN.md §2.8).
+pub struct FloatMatrix4X4:
+    pub var m_elements: (f32*?)*?
+
+## Gfx::Matrix (Libraries/LibGfx/Matrix.h:17): opaque in this phase (not in the phase-1 closure).
+pub struct Matrix:
+    pub var opaque_: u8
