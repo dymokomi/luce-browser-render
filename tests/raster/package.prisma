@@ -1,0 +1,16 @@
+#prisma 4.0
+def package "luce_browser_render_raster_tests" {
+    str source = "."
+
+    def dependency "luce-browser-render" {
+        str path = "../.."
+    }
+
+    def dependency "luce-compress" {
+        str path = "../../../luce-compress"
+    }
+
+    def dependency "luce-std" {
+        str path = "../../../luce-std"
+    }
+}

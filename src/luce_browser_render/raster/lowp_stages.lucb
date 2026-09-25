@@ -1,0 +1,278 @@
+#==============================================================================================
+#
+#   lowp_stages - the blend and shader stages of the low precision pipeline
+#
+#   DESCRIPTION:
+#       Port of tiny-skia pipeline/lowp.rs, part 2: the blend_fn! / blend_fn2! stages in
+#       u16 math (div255), transform, the x1 tiling stages, the gradient stages
+#       (gradient lookup, evenly spaced two-stop gradient, radius) and round_f32_to_u16.
+#
+#==============================================================================================
+
+type LowpBlendKernel = func(U16x16, U16x16, U16x16, U16x16) -> U16x16
+
+func lowp_blend_fn(p: LowpPipeline*, f: LowpBlendKernel):
+    p.r = f(p.r, p.dr, p.a, p.da)
+    p.g = f(p.g, p.dg, p.a, p.da)
+    p.b = f(p.b, p.db, p.a, p.da)
+    p.a = f(p.a, p.da, p.a, p.da)
+
+    lowp_next_stage(p)
+
+# The same logic applied to color, and source_over for alpha.
+func lowp_blend_fn2(p: LowpPipeline*, f: LowpBlendKernel):
+    p.r = f(p.r, p.dr, p.a, p.da)
+    p.g = f(p.g, p.dg, p.a, p.da)
+    p.b = f(p.b, p.db, p.a, p.da)
+    p.a = u16_add(p.a, div255(u16_mul(p.da, lowp_inv(p.a))))
+
+    lowp_next_stage(p)
+
+# mark: blend_fn! =============================================================================
+
+func lowp_clear_k(_s: U16x16, _d: U16x16, _sa: U16x16, _da: U16x16) -> U16x16:
+    return u16_splat(0)
+
+func lowp_source_atop_k(s: U16x16, d: U16x16, sa: U16x16, da: U16x16) -> U16x16:
+    return div255(u16_add(u16_mul(s, da), u16_mul(d, lowp_inv(sa))))
+
+func lowp_destination_atop_k(s: U16x16, d: U16x16, sa: U16x16, da: U16x16) -> U16x16:
+    return div255(u16_add(u16_mul(d, sa), u16_mul(s, lowp_inv(da))))
+
+func lowp_source_in_k(s: U16x16, _d: U16x16, _sa: U16x16, da: U16x16) -> U16x16:
+    return div255(u16_mul(s, da))
+
+func lowp_destination_in_k(_s: U16x16, d: U16x16, sa: U16x16, _da: U16x16) -> U16x16:
+    return div255(u16_mul(d, sa))
+
+func lowp_source_out_k(s: U16x16, _d: U16x16, _sa: U16x16, da: U16x16) -> U16x16:
+    return div255(u16_mul(s, lowp_inv(da)))
+
+func lowp_destination_out_k(_s: U16x16, d: U16x16, sa: U16x16, _da: U16x16) -> U16x16:
+    return div255(u16_mul(d, lowp_inv(sa)))
+
+func lowp_source_over_k(s: U16x16, d: U16x16, sa: U16x16, _da: U16x16) -> U16x16:
+    return u16_add(s, div255(u16_mul(d, lowp_inv(sa))))
+
+func lowp_destination_over_k(s: U16x16, d: U16x16, _sa: U16x16, da: U16x16) -> U16x16:
+    return u16_add(d, div255(u16_mul(s, lowp_inv(da))))
+
+func lowp_modulate_k(s: U16x16, d: U16x16, _sa: U16x16, _da: U16x16) -> U16x16:
+    return div255(u16_mul(s, d))
+
+func lowp_multiply_k(s: U16x16, d: U16x16, sa: U16x16, da: U16x16) -> U16x16:
+    return div255(u16_add(u16_add(u16_mul(s, lowp_inv(da)), u16_mul(d, lowp_inv(sa))), u16_mul(s, d)))
+
+func lowp_screen_k(s: U16x16, d: U16x16, _sa: U16x16, _da: U16x16) -> U16x16:
+    return u16_sub(u16_add(s, d), div255(u16_mul(s, d)))
+
+func lowp_xor_k(s: U16x16, d: U16x16, sa: U16x16, da: U16x16) -> U16x16:
+    return div255(u16_add(u16_mul(s, lowp_inv(da)), u16_mul(d, lowp_inv(sa))))
+
+func lowp_plus_k(s: U16x16, d: U16x16, _sa: U16x16, _da: U16x16) -> U16x16:
+    return u16_min(u16_add(s, d), u16_splat(255))
+
+func lowp_clear(p: LowpPipeline*):
+    lowp_blend_fn(p, lowp_clear_k)
+
+func lowp_source_atop(p: LowpPipeline*):
+    lowp_blend_fn(p, lowp_source_atop_k)
+
+func lowp_destination_atop(p: LowpPipeline*):
+    lowp_blend_fn(p, lowp_destination_atop_k)
+
+func lowp_source_in(p: LowpPipeline*):
+    lowp_blend_fn(p, lowp_source_in_k)
+
+func lowp_destination_in(p: LowpPipeline*):
+    lowp_blend_fn(p, lowp_destination_in_k)
+
+func lowp_source_out(p: LowpPipeline*):
+    lowp_blend_fn(p, lowp_source_out_k)
+
+func lowp_destination_out(p: LowpPipeline*):
+    lowp_blend_fn(p, lowp_destination_out_k)
+
+func lowp_source_over(p: LowpPipeline*):
+    lowp_blend_fn(p, lowp_source_over_k)
+
+func lowp_destination_over(p: LowpPipeline*):
+    lowp_blend_fn(p, lowp_destination_over_k)
+
+func lowp_modulate(p: LowpPipeline*):
+    lowp_blend_fn(p, lowp_modulate_k)
+
+func lowp_multiply(p: LowpPipeline*):
+    lowp_blend_fn(p, lowp_multiply_k)
+
+func lowp_screen(p: LowpPipeline*):
+    lowp_blend_fn(p, lowp_screen_k)
+
+func lowp_xor(p: LowpPipeline*):
+    lowp_blend_fn(p, lowp_xor_k)
+
+func lowp_plus(p: LowpPipeline*):
+    lowp_blend_fn(p, lowp_plus_k)
+
+# mark: blend_fn2! ============================================================================
+
+func lowp_darken_k(s: U16x16, d: U16x16, sa: U16x16, da: U16x16) -> U16x16:
+    return u16_sub(u16_add(s, d), div255(u16_max(u16_mul(s, da), u16_mul(d, sa))))
+
+func lowp_lighten_k(s: U16x16, d: U16x16, sa: U16x16, da: U16x16) -> U16x16:
+    return u16_sub(u16_add(s, d), div255(u16_min(u16_mul(s, da), u16_mul(d, sa))))
+
+func lowp_exclusion_k(s: U16x16, d: U16x16, _sa: U16x16, _da: U16x16) -> U16x16:
+    return u16_sub(u16_add(s, d), u16_mul(u16_splat(2), div255(u16_mul(s, d))))
+
+func lowp_difference_k(s: U16x16, d: U16x16, sa: U16x16, da: U16x16) -> U16x16:
+    return u16_sub(u16_add(s, d), u16_mul(u16_splat(2), div255(u16_min(u16_mul(s, da), u16_mul(d, sa)))))
+
+func lowp_hard_light_k(s: U16x16, d: U16x16, sa: U16x16, da: U16x16) -> U16x16:
+    let two = u16_splat(2)
+    return div255(u16_add(u16_add(u16_mul(s, lowp_inv(da)), u16_mul(d, lowp_inv(sa))), u16_blend(u16_cmp_le(u16_add(s, s), sa), u16_mul(u16_mul(two, s), d), u16_sub(u16_mul(sa, da), u16_mul(u16_mul(two, u16_sub(sa, s)), u16_sub(da, d))))))
+
+func lowp_overlay_k(s: U16x16, d: U16x16, sa: U16x16, da: U16x16) -> U16x16:
+    let two = u16_splat(2)
+    return div255(u16_add(u16_add(u16_mul(s, lowp_inv(da)), u16_mul(d, lowp_inv(sa))), u16_blend(u16_cmp_le(u16_add(d, d), da), u16_mul(u16_mul(two, s), d), u16_sub(u16_mul(sa, da), u16_mul(u16_mul(two, u16_sub(sa, s)), u16_sub(da, d))))))
+
+func lowp_darken(p: LowpPipeline*):
+    lowp_blend_fn2(p, lowp_darken_k)
+
+func lowp_lighten(p: LowpPipeline*):
+    lowp_blend_fn2(p, lowp_lighten_k)
+
+func lowp_exclusion(p: LowpPipeline*):
+    lowp_blend_fn2(p, lowp_exclusion_k)
+
+func lowp_difference(p: LowpPipeline*):
+    lowp_blend_fn2(p, lowp_difference_k)
+
+func lowp_hard_light(p: LowpPipeline*):
+    lowp_blend_fn2(p, lowp_hard_light_k)
+
+func lowp_overlay(p: LowpPipeline*):
+    lowp_blend_fn2(p, lowp_overlay_k)
+
+# mark: Shaders ===============================================================================
+
+func lowp_transform(p: LowpPipeline*):
+    let ts = p.ctx.transform
+
+    let x = lowp_join(p.r, p.g)
+    let y = lowp_join(p.b, p.a)
+
+    let nx = lowp_mad(x, f16_splat(ts.sx), lowp_mad(y, f16_splat(ts.kx), f16_splat(ts.tx)))
+    let ny = lowp_mad(x, f16_splat(ts.ky), lowp_mad(y, f16_splat(ts.sy), f16_splat(ts.ty)))
+
+    lowp_split(nx, &p.r, &p.g)
+    lowp_split(ny, &p.b, &p.a)
+
+    lowp_next_stage(p)
+
+func lowp_pad_x1(p: LowpPipeline*):
+    let x = f16_normalize(lowp_join(p.r, p.g))
+    lowp_split(x, &p.r, &p.g)
+
+    lowp_next_stage(p)
+
+func lowp_reflect_x1(p: LowpPipeline*):
+    let x = lowp_join(p.r, p.g)
+    let one = f16_splat(1.0)
+    let fl = f16_floor(f16_mul(f16_sub(x, one), f16_splat(0.5)))
+    let x2 = f16_normalize(f16_abs(f16_sub(f16_sub(f16_sub(x, one), f16_add(fl, fl)), one)))
+    lowp_split(x2, &p.r, &p.g)
+
+    lowp_next_stage(p)
+
+func lowp_repeat_x1(p: LowpPipeline*):
+    let x = lowp_join(p.r, p.g)
+    let x2 = f16_normalize(f16_sub(x, f16_floor(x)))
+    lowp_split(x2, &p.r, &p.g)
+
+    lowp_next_stage(p)
+
+func lowp_gradient(p: LowpPipeline*):
+    let ctx = &p.ctx.gradient
+
+    # N.B. The loop starts at 1 because idx 0 is the color to use before the first stop.
+    let t = lowp_join(p.r, p.g)
+    var idx = u16_splat(0)
+    for i in 1..<ctx.len:
+        let tt = ctx.t_values.data[i]
+        for l: usize in 0..<16:
+            idx[l >> 3][l & 7] +%= (u16)(t[l >> 2][l & 3] >= tt)
+    lowp_gradient_lookup(ctx, idx, t, &p.r, &p.g, &p.b, &p.a)
+
+    lowp_next_stage(p)
+
+func lowp_evenly_spaced_2_stop_gradient(p: LowpPipeline*):
+    let ctx = p.ctx.evenly_spaced_2_stop_gradient
+
+    let t = lowp_join(p.r, p.g)
+    round_f32_to_u16(
+        lowp_mad(t, f16_splat(ctx.factor.r), f16_splat(ctx.bias.r)),
+        lowp_mad(t, f16_splat(ctx.factor.g), f16_splat(ctx.bias.g)),
+        lowp_mad(t, f16_splat(ctx.factor.b), f16_splat(ctx.bias.b)),
+        lowp_mad(t, f16_splat(ctx.factor.a), f16_splat(ctx.bias.a)),
+        &p.r, &p.g, &p.b, &p.a,
+    )
+
+    lowp_next_stage(p)
+
+func lowp_xy_to_radius(p: LowpPipeline*):
+    let x = lowp_join(p.r, p.g)
+    let y = lowp_join(p.b, p.a)
+    let x2 = f16_sqrt(f16_add(f16_mul(x, x), f16_mul(y, y)))
+    lowp_split(x2, &p.r, &p.g)
+    lowp_split(y, &p.b, &p.a)
+
+    lowp_next_stage(p)
+
+# We are using u16 for index, not u32 as Skia, to simplify the code a bit. The gradient
+# creation code will not allow that many stops anyway.
+func lowp_gradient_lookup(ctx: const GradientCtx*, idx: U16x16, t: F16, r: U16x16*, g: U16x16*, b: U16x16*, a: U16x16*):
+    # Surprisingly, but bound checking doesn't affect the performance. And since `idx` can
+    # contain any number, we should leave it in place.
+    let factors = ctx.factors.view()
+    let biases = ctx.biases.view()
+    var fr: F16 = ---
+    var fg: F16 = ---
+    var fb: F16 = ---
+    var fa: F16 = ---
+    var br: F16 = ---
+    var bg: F16 = ---
+    var bb: F16 = ---
+    var ba: F16 = ---
+    for l: usize in 0..<16:
+        let i = (usize)idx[l >> 3][l & 7]
+        let f = factors[i]
+        let bias = biases[i]
+        let h = l >> 2
+        let k = l & 3
+        fr[h][k] = f.r
+        fg[h][k] = f.g
+        fb[h][k] = f.b
+        fa[h][k] = f.a
+        br[h][k] = bias.r
+        bg[h][k] = bias.g
+        bb[h][k] = bias.b
+        ba[h][k] = bias.a
+
+    round_f32_to_u16(lowp_mad(t, fr, br), lowp_mad(t, fg, bg), lowp_mad(t, fb, bb), lowp_mad(t, fa, ba), r, g, b, a)
+
+func round_f32_to_u16(rf0: F16, gf0: F16, bf0: F16, af0: F16, r: U16x16*, g: U16x16*, b: U16x16*, a: U16x16*):
+    # TODO: may produce a slightly different result to Skia
+    #       affects the two_stops_linear_mirror test
+
+    let scale = f16_splat(255.0)
+    let half_ = f16_splat(0.5)
+    let rf = f16_add(f16_mul(f16_normalize(rf0), scale), half_)
+    let gf = f16_add(f16_mul(f16_normalize(gf0), scale), half_)
+    let bf = f16_add(f16_mul(f16_normalize(bf0), scale), half_)
+    let af = f16_add(f16_mul(af0, scale), half_)
+
+    f16_save_to_u16x16(rf, r)
+    f16_save_to_u16x16(gf, g)
+    f16_save_to_u16x16(bf, b)
+    f16_save_to_u16x16(af, a)

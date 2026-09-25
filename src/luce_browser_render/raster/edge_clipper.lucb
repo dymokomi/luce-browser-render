@@ -1,0 +1,446 @@
+#==============================================================================================
+#
+#   edge_clipper - clipping path edges against the clip rectangle
+#
+#   DESCRIPTION:
+#       Port of tiny-skia edge_clipper.rs: EdgeClipper (clip_line, clip_quad and
+#       clip_mono_quad, clip_cubic and clip_mono_cubic, with vertical lines along the clip's
+#       left/right edges), EdgeClipperIter, and the monotonic chopping helpers. Rust's
+#       ArrayVec<PathEdge, 18> is ClippedEdges: a fixed array and a length.
+#
+#==============================================================================================
+
+let max_verbs: usize = 18
+
+struct ClippedEdges:
+    var edges: PathEdge[18]
+    var len: usize
+
+    static func empty() -> ClippedEdges:
+        var c: ClippedEdges = ---
+        c.len = 0
+        return c
+
+    mutating func push(edge: PathEdge):
+        if self.len == max_verbs:
+            trap("raster: too many clipped edges")
+        self.edges[self.len] = edge
+        self.len += 1
+
+struct EdgeClipper:
+    var clip: Rect
+    var can_cull_to_the_right: bool
+    var edges: ClippedEdges
+
+    static func new_(clip: Rect, can_cull_to_the_right: bool) -> EdgeClipper:
+        return EdgeClipper(clip = clip, can_cull_to_the_right = can_cull_to_the_right, edges = ClippedEdges.empty())
+
+    mutating func clip_line(p0: Point, p1: Point) -> ClippedEdges?:
+        var points: Point[4]
+        let count = line_clipper_clip([p0, p1], self.clip, self.can_cull_to_the_right, points)
+        if count != 0:
+            for i in 0..<count - 1:
+                self.push_line(points[i], points[i + 1])
+
+        if self.edges.len == 0:
+            return none
+        return self.edges
+
+    mutating func push_line(p0: Point, p1: Point):
+        self.edges.push(.line_to(p0 = p0, p1 = p1))
+
+    mutating func push_vline(x: f32, y00: f32, y10: f32, reverse: bool):
+        var y0 = y00
+        var y1 = y10
+        if reverse:
+            let t = y0
+            y0 = y1
+            y1 = t
+        self.edges.push(.line_to(p0 = Point.from_xy(x, y0), p1 = Point.from_xy(x, y1)))
+
+    mutating func clip_quad(p0: Point, p1: Point, p2: Point) -> ClippedEdges?:
+        let pts: Point[3] = [p0, p1, p2]
+        let bounds = Rect.from_points(pts) else return none
+
+        if not quick_reject(bounds, self.clip):
+            var mono_y: Point[5]
+            let count_y = chop_quad_at_y_extrema(pts, mono_y)
+            for y in 0..=count_y:
+                var mono_x: Point[5]
+                let y_points: Point[3] = [mono_y[y * 2], mono_y[y * 2 + 1], mono_y[y * 2 + 2]]
+                let count_x = chop_quad_at_x_extrema(y_points, mono_x)
+                for x in 0..=count_x:
+                    let x_points: Point[3] = [mono_x[x * 2], mono_x[x * 2 + 1], mono_x[x * 2 + 2]]
+                    self.clip_mono_quad(x_points)
+
+        if self.edges.len == 0:
+            return none
+        return self.edges
+
+    # src[] must be monotonic in X and Y
+    mutating func clip_mono_quad(src: const Point[]):
+        var pts: Point[3]
+        var reverse = sort_increasing_y(src, pts)
+
+        # are we completely above or below
+        if pts[2].y <= self.clip.top() or pts[0].y >= self.clip.bottom():
+            return
+
+        # Now chop so that pts is contained within clip in Y
+        chop_quad_in_y(self.clip, pts)
+
+        if pts[0].x > pts[2].x:
+            let t = pts[0]
+            pts[0] = pts[2]
+            pts[2] = t
+            reverse = not reverse
+
+        # Now chop in X has needed, and record the segments
+
+        if pts[2].x <= self.clip.left():
+            # wholly to the left
+            self.push_vline(self.clip.left(), pts[0].y, pts[2].y, reverse)
+            return
+
+        if pts[0].x >= self.clip.right():
+            # wholly to the right
+            if not self.can_cull_to_the_right:
+                self.push_vline(self.clip.right(), pts[0].y, pts[2].y, reverse)
+            return
+
+        var t: f32 = normalized_exclusive_half
+        var tmp: Point[5]
+
+        # are we partially to the left
+        if pts[0].x < self.clip.left():
+            if chop_mono_quad_at_x(pts, self.clip.left(), &t):
+                chop_quad_at(pts, t, tmp)
+                self.push_vline(self.clip.left(), tmp[0].y, tmp[2].y, reverse)
+                # clamp to clean up imprecise numerics in the chop
+                tmp[2].x = self.clip.left()
+                tmp[3].x = fmax(tmp[3].x, self.clip.left())
+
+                pts[0] = tmp[2]
+                pts[1] = tmp[3]
+            else:
+                # if chopMonoQuadAtY failed, then we may have hit inexact numerics so we just
+                # clamp against the left
+                self.push_vline(self.clip.left(), pts[0].y, pts[2].y, reverse)
+                return
+
+        # are we partially to the right
+        if pts[2].x > self.clip.right():
+            if chop_mono_quad_at_x(pts, self.clip.right(), &t):
+                chop_quad_at(pts, t, tmp)
+                # clamp to clean up imprecise numerics in the chop
+                tmp[1].x = fmin(tmp[1].x, self.clip.right())
+                tmp[2].x = self.clip.right()
+
+                self.push_quad([tmp[0], tmp[1], tmp[2]], reverse)
+                self.push_vline(self.clip.right(), tmp[2].y, tmp[4].y, reverse)
+            else:
+                # if chopMonoQuadAtY failed, then we may have hit inexact numerics so we just
+                # clamp against the right
+                pts[1].x = fmin(pts[1].x, self.clip.right())
+                pts[2].x = fmin(pts[2].x, self.clip.right())
+                self.push_quad(pts, reverse)
+        else:
+            # wholly inside the clip
+            self.push_quad(pts, reverse)
+
+    mutating func push_quad(pts: const Point[], reverse: bool):
+        if reverse:
+            self.edges.push(.quad_to(p0 = pts[2], p1 = pts[1], p2 = pts[0]))
+        else:
+            self.edges.push(.quad_to(p0 = pts[0], p1 = pts[1], p2 = pts[2]))
+
+    mutating func clip_cubic(p0: Point, p1: Point, p2: Point, p3: Point) -> ClippedEdges?:
+        let pts: Point[4] = [p0, p1, p2, p3]
+        let bounds = Rect.from_points(pts) else return none
+
+        # check if we're clipped out vertically
+        if bounds.bottom() > self.clip.top() and bounds.top() < self.clip.bottom():
+            if too_big_for_reliable_float_math(bounds):
+                # can't safely clip the cubic, so we give up and draw a line (which we can
+                # safely clip)
+                #
+                # If we rewrote chopcubicat*extrema and chopmonocubic using doubles, we could
+                # very likely always handle the cubic safely, but (it seems) at a big loss in
+                # speed, so we'd only want to take that alternate impl if needed.
+                return self.clip_line(p0, p3)
+            var mono_y: Point[10]
+            let count_y = chop_cubic_at_y_extrema(pts, mono_y)
+            for y in 0..=count_y:
+                var mono_x: Point[10]
+                let y_points: Point[4] = [mono_y[y * 3], mono_y[y * 3 + 1], mono_y[y * 3 + 2], mono_y[y * 3 + 3]]
+                let count_x = chop_cubic_at_x_extrema(y_points, mono_x)
+                for x in 0..=count_x:
+                    let x_points: Point[4] = [mono_x[x * 3], mono_x[x * 3 + 1], mono_x[x * 3 + 2], mono_x[x * 3 + 3]]
+                    self.clip_mono_cubic(x_points)
+
+        if self.edges.len == 0:
+            return none
+        return self.edges
+
+    # src[] must be monotonic in X and Y
+    mutating func clip_mono_cubic(src: const Point[]):
+        var pts: Point[4]
+        var reverse = sort_increasing_y(src, pts)
+
+        # are we completely above or below
+        if pts[3].y <= self.clip.top() or pts[0].y >= self.clip.bottom():
+            return
+
+        # Now chop so that pts is contained within clip in Y
+        chop_cubic_in_y(self.clip, pts)
+
+        if pts[0].x > pts[3].x:
+            var t = pts[0]
+            pts[0] = pts[3]
+            pts[3] = t
+            t = pts[1]
+            pts[1] = pts[2]
+            pts[2] = t
+            reverse = not reverse
+
+        # Now chop in X has needed, and record the segments
+
+        if pts[3].x <= self.clip.left():
+            # wholly to the left
+            self.push_vline(self.clip.left(), pts[0].y, pts[3].y, reverse)
+            return
+
+        if pts[0].x >= self.clip.right():
+            # wholly to the right
+            if not self.can_cull_to_the_right:
+                self.push_vline(self.clip.right(), pts[0].y, pts[3].y, reverse)
+            return
+
+        # are we partially to the left
+        if pts[0].x < self.clip.left():
+            var tmp: Point[7]
+            chop_mono_cubic_at_x_clamped(pts, self.clip.left(), tmp)
+            self.push_vline(self.clip.left(), tmp[0].y, tmp[3].y, reverse)
+
+            # tmp[3, 4].fX should all be to the right of clip.left(). Since we can't trust
+            # the numerics of the chopper, we force those conditions now
+            tmp[3].x = self.clip.left()
+            tmp[4].x = fmax(tmp[4].x, self.clip.left())
+
+            pts[0] = tmp[3]
+            pts[1] = tmp[4]
+            pts[2] = tmp[5]
+
+        # are we partially to the right
+        if pts[3].x > self.clip.right():
+            var tmp: Point[7]
+            chop_mono_cubic_at_x_clamped(pts, self.clip.right(), tmp)
+            tmp[3].x = self.clip.right()
+            tmp[2].x = fmin(tmp[2].x, self.clip.right())
+
+            self.push_cubic([tmp[0], tmp[1], tmp[2], tmp[3]], reverse)
+            self.push_vline(self.clip.right(), tmp[3].y, tmp[6].y, reverse)
+        else:
+            # wholly inside the clip
+            self.push_cubic(pts, reverse)
+
+    mutating func push_cubic(pts: const Point[], reverse: bool):
+        if reverse:
+            self.edges.push(.cubic_to(p0 = pts[3], p1 = pts[2], p2 = pts[1], p3 = pts[0]))
+        else:
+            self.edges.push(.cubic_to(p0 = pts[0], p1 = pts[1], p2 = pts[2], p3 = pts[3]))
+
+struct EdgeClipperIter:
+    var edge_iter: PathEdgeIter
+    var clip: Rect
+    var can_cull_to_the_right: bool
+
+    static func new_(path: const Path*, clip: Rect, can_cull_to_the_right: bool) -> EdgeClipperIter:
+        return EdgeClipperIter(edge_iter = edge_iter(path), clip = clip, can_cull_to_the_right = can_cull_to_the_right)
+
+    mutating func next() -> ClippedEdges?:
+        while let edge = self.edge_iter.next():
+            var clipper = EdgeClipper.new_(self.clip, self.can_cull_to_the_right)
+
+            match edge:
+                .line_to(p0, p1):
+                    if let edges = clipper.clip_line(p0, p1):
+                        return edges
+                .quad_to(p0, p1, p2):
+                    if let edges = clipper.clip_quad(p0, p1, p2):
+                        return edges
+                .cubic_to(p0, p1, p2, p3):
+                    if let edges = clipper.clip_cubic(p0, p1, p2, p3):
+                        return edges
+
+        return none
+
+func quick_reject(bounds: Rect, clip: Rect) -> bool:
+    return bounds.top() >= clip.bottom() or bounds.bottom() <= clip.top()
+
+# src[] must be monotonic in Y. This routine copies src into dst, and sorts it to be
+# increasing in Y. If it had to reverse the order of the points, it returns true, otherwise
+# it returns false
+func sort_increasing_y(src: const Point[], dst: Point[]) -> bool:
+    # We need the data to be monotonically increasing in Y.
+    # Never fails, because src is always non-empty.
+    if src[0].y > src[src.length - 1].y:
+        for i in 0..<src.length:
+            dst[i] = src[src.length - 1 - i]
+        return true
+    for i in 0..<src.length:
+        dst[i] = src[i]
+    return false
+
+func chop_quad_in_y(clip: Rect, pts: Point[]):
+    var t: f32 = normalized_exclusive_half
+    var tmp: Point[5]
+
+    # are we partially above
+    if pts[0].y < clip.top():
+        if chop_mono_quad_at_y(pts, clip.top(), &t):
+            # take the 2nd chopped quad
+            chop_quad_at(pts, t, tmp)
+            # clamp to clean up imprecise numerics in the chop
+            tmp[2].y = clip.top()
+            tmp[3].y = fmax(tmp[3].y, clip.top())
+
+            pts[0] = tmp[2]
+            pts[1] = tmp[3]
+        else:
+            # if chop_mono_quad_at_y failed, then we may have hit inexact numerics so we just
+            # clamp against the top
+            for p in &pts:
+                if p.y < clip.top():
+                    p.y = clip.top()
+
+    # are we partially below
+    if pts[2].y > clip.bottom():
+        if chop_mono_quad_at_y(pts, clip.bottom(), &t):
+            chop_quad_at(pts, t, tmp)
+            # clamp to clean up imprecise numerics in the chop
+            tmp[1].y = fmin(tmp[1].y, clip.bottom())
+            tmp[2].y = clip.bottom()
+
+            pts[1] = tmp[1]
+            pts[2] = tmp[2]
+        else:
+            # if chop_mono_quad_at_y failed, then we may have hit inexact numerics so we just
+            # clamp against the bottom
+            for p in &pts:
+                if p.y > clip.bottom():
+                    p.y = clip.bottom()
+
+func chop_mono_quad_at_x(pts: const Point[], x: f32, t: f32*) -> bool:
+    return chop_mono_quad_at(pts[0].x, pts[1].x, pts[2].x, x, t)
+
+func chop_mono_quad_at_y(pts: const Point[], y: f32, t: f32*) -> bool:
+    return chop_mono_quad_at(pts[0].y, pts[1].y, pts[2].y, y, t)
+
+func chop_mono_quad_at(c0: f32, c1: f32, c2: f32, target: f32, t: f32*) -> bool:
+    # Solve F(t) = y where F(t) := [0](1-t)^2 + 2[1]t(1-t) + [2]t^2
+    # We solve for t, using quadratic equation, hence we have to rearrange
+    # our coefficients to look like At^2 + Bt + C
+    let a = c0 - c1 - c1 + c2
+    let b = 2.0 * (c1 - c0)
+    let c = c0 - target
+
+    var roots = new_t_values()
+    let count = find_unit_quad_roots(a, b, c, roots)
+    if count != 0:
+        *t = roots[0]
+        return true
+    return false
+
+func too_big_for_reliable_float_math(r: Rect) -> bool:
+    # limit set as the largest float value for which we can still reliably compute things
+    # like
+    # - chopping at XY extrema
+    # - chopping at Y or X values for clipping
+    #
+    # Current value chosen just by experiment. Larger (and still succeeds) is always better.
+
+    let limit: f32 = 4194304.0
+    return r.left() < -limit or r.top() < -limit or r.right() > limit or r.bottom() > limit
+
+func chop_cubic_in_y(clip: Rect, pts: Point[]):
+    # are we partially above
+    if pts[0].y < clip.top():
+        var tmp: Point[7]
+        chop_mono_cubic_at_y_clamped(pts, clip.top(), tmp)
+
+        # For a large range in the points, we can do a poor job of chopping, such that the t
+        # we computed resulted in the lower cubic still being partly above the clip.
+        #
+        # If just the first or first 2 Y values are above the fTop, we can just smash them
+        # down. If the first 3 Ys are above fTop, we can't smash all 3, as that can really
+        # distort the cubic. In this case, we take the first output (tmp[3..6] and treat it
+        # as a guess, and re-chop against fTop. Then we fall through to checking if we need
+        # to smash the first 1 or 2 Y values.
+        if tmp[3].y < clip.top() and tmp[4].y < clip.top() and tmp[5].y < clip.top():
+            let tmp2: Point[4] = [tmp[3], tmp[4], tmp[5], tmp[6]]
+            chop_mono_cubic_at_y_clamped(tmp2, clip.top(), tmp)
+
+        # tmp[3, 4].y should all be to the below clip.fTop. Since we can't trust the numerics
+        # of the chopper, we force those conditions now
+        tmp[3].y = clip.top()
+        tmp[4].y = fmax(tmp[4].y, clip.top())
+
+        pts[0] = tmp[3]
+        pts[1] = tmp[4]
+        pts[2] = tmp[5]
+
+    # are we partially below
+    if pts[3].y > clip.bottom():
+        var tmp: Point[7]
+        chop_mono_cubic_at_y_clamped(pts, clip.bottom(), tmp)
+        tmp[3].y = clip.bottom()
+        tmp[2].y = fmin(tmp[2].y, clip.bottom())
+
+        pts[1] = tmp[1]
+        pts[2] = tmp[2]
+        pts[3] = tmp[3]
+
+# edge_clipper.rs chop_mono_cubic_at_x: path64 first, then the closest-t fallback.
+func chop_mono_cubic_at_x_clamped(src: const Point[], x: f32, dst: Point[]):
+    if chop_mono_cubic_at_x(src, x, dst):
+        return
+
+    let src_values: f32[4] = [src[0].x, src[1].x, src[2].x, src[3].x]
+    chop_cubic_at2(src, mono_cubic_closest_t(src_values, x), dst)
+
+# edge_clipper.rs chop_mono_cubic_at_y: path64 first, then the closest-t fallback.
+func chop_mono_cubic_at_y_clamped(src: const Point[], y: f32, dst: Point[]):
+    if chop_mono_cubic_at_y(src, y, dst):
+        return
+
+    let src_values: f32[4] = [src[0].y, src[1].y, src[2].y, src[3].y]
+    chop_cubic_at2(src, mono_cubic_closest_t(src_values, y), dst)
+
+func mono_cubic_closest_t(src: f32[4], x0: f32) -> f32:
+    var x = x0
+    var t: f32 = 0.5
+    var last_t: f32
+    var best_t = t
+    var step: f32 = 0.25
+    let d = src[0]
+    let a = src[3] + 3.0 * (src[1] - src[2]) - d
+    let b = 3.0 * (src[2] - src[1] - src[1] + d)
+    let c = 3.0 * (src[1] - d)
+    x -= d
+    var closest = scalar_max
+    while true:
+        let loc = ((a * t + b) * t + c) * t
+        let dist = math32.abs(loc - x)
+        if closest > dist:
+            closest = dist
+            best_t = t
+
+        last_t = t
+        t += step if loc < x else -step
+        step *= 0.5
+
+        if not (closest > 0.25 and last_t != t):
+            break
+
+    return normalized_exclusive_new(best_t) else trap("unreachable")

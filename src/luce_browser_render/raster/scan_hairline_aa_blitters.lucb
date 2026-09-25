@@ -1,0 +1,272 @@
+#==============================================================================================
+#
+#   scan_hairline_aa_blitters - the anti-hair blitters and the rectangle clip blitter
+#
+#   DESCRIPTION:
+#       Port of tiny-skia scan/hairline_aa.rs, part 2: the AntiHairBlitter trait and its
+#       four implementations (HLine, Horish, VLine, Vertish), i32_to_alpha, RectClipBlitter
+#       and compute_anti_width. Rust's trait objects for the four anti-hair blitters are one
+#       struct dispatching on BlitterKind to the four implementations' methods.
+#
+#==============================================================================================
+
+struct AntiHairBlitter:
+    var kind: BlitterKind
+    var blitter: Blitter
+
+    mutating func draw_cap(x: u32, fy: FDot16, slope: FDot16, mod64: i32) -> FDot16:
+        match self.kind:
+            .hline: return hline_draw_cap(self.blitter, x, fy, slope, mod64)
+            .horish: return horish_draw_cap(self.blitter, x, fy, slope, mod64)
+            .vline: return vline_draw_cap(self.blitter, x, fy, slope, mod64)
+            .vertish: return vertish_draw_cap(self.blitter, x, fy, slope, mod64)
+            _: trap("unreachable")
+
+    mutating func draw_line(x: u32, stop_x: u32, fy: FDot16, slope: FDot16) -> FDot16:
+        match self.kind:
+            .hline: return hline_draw_line(self.blitter, x, stop_x, fy, slope)
+            .horish: return horish_draw_line(self.blitter, x, stop_x, fy, slope)
+            .vline: return vline_draw_line(self.blitter, x, stop_x, fy, slope)
+            .vertish: return vertish_draw_line(self.blitter, x, stop_x, fy, slope)
+            _: trap("unreachable")
+
+# mark: HLineAntiHairBlitter ==================================================================
+
+func hline_draw_cap(blitter: Blitter, x: u32, fy0: FDot16, _slope: FDot16, mod64: i32) -> FDot16:
+    var fy = fy0 + fdot16_one // 2
+    fy = fy if fy > 0 else 0
+
+    let y = (u32)(fy >> 16)
+    let a = i32_to_alpha(fy >> 8)
+
+    # lower line
+    var ma = fdot6_small_scale(a, mod64)
+    if ma != 0:
+        call_hline_blitter(x, y, 1, ma, blitter)
+
+    # upper line
+    ma = fdot6_small_scale(255 - a, mod64)
+    if ma != 0:
+        let upper: u32? = y - 1 if y > 0 else none
+        call_hline_blitter(x, upper, 1, ma, blitter)
+
+    return fy - fdot16_one // 2
+
+func hline_draw_line(blitter: Blitter, x: u32, stop_x: u32, fy0: FDot16, _slope: FDot16) -> FDot16:
+    let count = stop_x - x
+    if count == 0:
+        return fy0
+
+    var fy = fy0 + fdot16_one // 2
+    fy = fy if fy > 0 else 0
+
+    let y = (u32)(fy >> 16)
+    var a = i32_to_alpha(fy >> 8)
+
+    # lower line
+    if a != 0:
+        call_hline_blitter(x, y, count, a, blitter)
+
+    # upper line
+    a = 255 - a
+    if a != 0:
+        let upper: u32? = y - 1 if y > 0 else none
+        call_hline_blitter(x, upper, count, a, blitter)
+
+    return fy - fdot16_one // 2
+
+# mark: HorishAntiHairBlitter =================================================================
+
+func horish_draw_cap(blitter0: Blitter, x: u32, fy0: FDot16, dy: FDot16, mod64: i32) -> FDot16:
+    var blitter = blitter0
+    var fy = fy0 + fdot16_one // 2
+    fy = fy if fy > 0 else 0
+
+    let lower_y = (u32)(fy >> 16)
+    let a = i32_to_alpha(fy >> 8)
+    let a0 = fdot6_small_scale(255 - a, mod64)
+    let a1 = fdot6_small_scale(a, mod64)
+    blitter.blit_anti_v2(x, (lower_y if lower_y > 1 else 1) - 1, a0, a1)
+
+    return fy + dy - fdot16_one // 2
+
+func horish_draw_line(blitter0: Blitter, x0: u32, stop_x: u32, fy0: FDot16, dy: FDot16) -> FDot16:
+    var blitter = blitter0
+    var x = x0
+    var fy = fy0 + fdot16_one // 2
+    while true:
+        fy = fy if fy > 0 else 0
+        let lower_y = (u32)(fy >> 16)
+        let a = i32_to_alpha(fy >> 8)
+        blitter.blit_anti_v2(x, (lower_y if lower_y > 1 else 1) - 1, 255 - a, a)
+        fy += dy
+
+        x += 1
+        if x >= stop_x:
+            break
+
+    return fy - fdot16_one // 2
+
+# mark: VLineAntiHairBlitter ==================================================================
+
+func vline_draw_cap(blitter0: Blitter, y: u32, fx0: FDot16, _dx: FDot16, mod64: i32) -> FDot16:
+    var blitter = blitter0
+    var fx = fx0 + fdot16_one // 2
+    fx = fx if fx > 0 else 0
+
+    let x = (u32)(fx >> 16)
+    let a = i32_to_alpha(fx >> 8)
+
+    var ma = fdot6_small_scale(a, mod64)
+    if ma != 0:
+        blitter.blit_v(x, y, 1, ma)
+
+    ma = fdot6_small_scale(255 - a, mod64)
+    if ma != 0:
+        blitter.blit_v((x if x > 1 else 1) - 1, y, 1, ma)
+
+    return fx - fdot16_one // 2
+
+func vline_draw_line(blitter0: Blitter, y: u32, stop_y: u32, fx0: FDot16, _dx: FDot16) -> FDot16:
+    var blitter = blitter0
+    let height = stop_y - y
+    if height == 0:
+        return fx0
+
+    var fx = fx0 + fdot16_one // 2
+    fx = fx if fx > 0 else 0
+
+    let x = (u32)(fx >> 16)
+    var a = i32_to_alpha(fx >> 8)
+
+    if a != 0:
+        blitter.blit_v(x, y, height, a)
+
+    a = 255 - a
+    if a != 0:
+        blitter.blit_v((x if x > 1 else 1) - 1, y, height, a)
+
+    return fx - fdot16_one // 2
+
+# mark: VertishAntiHairBlitter ================================================================
+
+func vertish_draw_cap(blitter0: Blitter, y: u32, fx0: FDot16, dx: FDot16, mod64: i32) -> FDot16:
+    var blitter = blitter0
+    var fx = fx0 + fdot16_one // 2
+    fx = fx if fx > 0 else 0
+
+    let x = (u32)(fx >> 16)
+    let a = i32_to_alpha(fx >> 8)
+    blitter.blit_anti_h2((x if x > 1 else 1) - 1, y, fdot6_small_scale(255 - a, mod64), fdot6_small_scale(a, mod64))
+
+    return fx + dx - fdot16_one // 2
+
+func vertish_draw_line(blitter0: Blitter, y0: u32, stop_y: u32, fx0: FDot16, dx: FDot16) -> FDot16:
+    var blitter = blitter0
+    var y = y0
+    var fx = fx0 + fdot16_one // 2
+    while true:
+        fx = fx if fx > 0 else 0
+        let x = (u32)(fx >> 16)
+        let a = i32_to_alpha(fx >> 8)
+        blitter.blit_anti_h2((x if x > 1 else 1) - 1, y, 255 - a, a)
+        fx += dx
+
+        y += 1
+        if y >= stop_y:
+            break
+
+    return fx - fdot16_one // 2
+
+func i32_to_alpha(a: i32) -> u8:
+    return (u8)(a & 0xFF)
+
+# mark: RectClipBlitter =======================================================================
+
+struct RectClipBlitter: Blitter:
+    var blitter: Blitter
+    var clip: ScreenIntRect
+
+    pub mutating func blit_h(x: u32, y: u32, width: u32):
+        trap("unreachable")
+
+    pub mutating func blit_anti_h(x: u32, y: u32, antialias0: AlphaU8[], runs0: AlphaRun[]):
+        var antialias = antialias0
+        var runs = runs0
+
+        if not y_in_rect(y, self.clip) or x >= self.clip.right():
+            return
+
+        var x0 = x
+        var x1 = x + compute_anti_width(runs)
+
+        if x1 <= self.clip.left():
+            return
+
+        if x0 < self.clip.left():
+            let dx = self.clip.left() - x0
+            AlphaRuns.break_at(antialias, runs, (i32)dx)
+            antialias = antialias[(usize)dx..]
+            runs = runs[(usize)dx..]
+            x0 = self.clip.left()
+
+        if x1 > self.clip.right():
+            x1 = self.clip.right()
+            AlphaRuns.break_at(antialias, runs, (i32)(x1 - x0))
+            runs[(usize)(x1 - x0)] = 0
+
+        self.blitter.blit_anti_h(x0, y, antialias, runs)
+
+    pub mutating func blit_v(x: u32, y: u32, height: u32, alpha: AlphaU8):
+        if not x_in_rect(x, self.clip):
+            return
+
+        var y0 = y
+        var y1 = y + height
+
+        if y0 < self.clip.top():
+            y0 = self.clip.top()
+
+        if y1 > self.clip.bottom():
+            y1 = self.clip.bottom()
+
+        if y0 < y1:
+            let h = y1 - y0
+            if h != 0:
+                self.blitter.blit_v(x, y0, h, alpha)
+
+    pub mutating func blit_anti_h2(x: u32, y: u32, alpha0: AlphaU8, alpha1: AlphaU8):
+        var aa: u8[2] = [alpha0, alpha1]
+        var runs: AlphaRun[3] = [1, 1, 0]
+        self.blit_anti_h(x, y, aa, runs)
+
+    pub mutating func blit_anti_v2(x: u32, y: u32, alpha0: AlphaU8, alpha1: AlphaU8):
+        var aa0: u8[1] = [alpha0]
+        var runs0: AlphaRun[2] = [1, 0]
+        self.blit_anti_h(x, y, aa0, runs0)
+
+        var aa1: u8[1] = [alpha1]
+        var runs1: AlphaRun[2] = [1, 0]
+        self.blit_anti_h(x, y + 1, aa1, runs1)
+
+    pub mutating func blit_rect(rect: ScreenIntRect):
+        trap("unreachable")
+
+    pub mutating func blit_mask(mask: const BlitMask*, clip: ScreenIntRect):
+        trap("unreachable")
+
+func y_in_rect(y: u32, rect: ScreenIntRect) -> bool:
+    return (y -% rect.top()) < rect.height()
+
+func x_in_rect(x: u32, rect: ScreenIntRect) -> bool:
+    return (x -% rect.left()) < rect.width()
+
+func compute_anti_width(runs: const AlphaRun[]) -> u32:
+    var i: usize = 0
+    var width: u32 = 0
+    while runs[i] != 0:
+        let count = runs[i]
+        width += (u32)count
+        i += (usize)count
+
+    return width

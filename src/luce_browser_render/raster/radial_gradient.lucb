@@ -1,0 +1,247 @@
+#==============================================================================================
+#
+#   radial_gradient - two-point conical (radial) gradients
+#
+#   DESCRIPTION:
+#       Port of tiny-skia shaders/radial_gradient.rs (SkTwoPointConicalGradient): FocalData,
+#       GradientType (radial, strip, focal), RadialGradient.new_ with its degenerate cases,
+#       create, and push_stages choosing among the two-point conical stages.
+#
+#==============================================================================================
+
+struct FocalData:
+    var r1: f32      # r1 after mapping focal point to (0, 0)
+    var focal_x: f32 # f
+    var is_swapped: bool
+
+    mutating func set(r00: f32, r10: f32, matrix: Transform*) -> bool:
+        var r0 = r00
+        var r1 = r10
+        self.is_swapped = false
+        self.focal_x = r0 / (r0 - r1)
+
+        if is_nearly_zero(self.focal_x - 1.0):
+            # swap r0, r1
+            *matrix = matrix.post_translate(-1.0, 0.0).post_scale(-1.0, 1.0)
+            let t = r0
+            r0 = r1
+            r1 = t
+
+            self.focal_x = 0.0 # because r0 is now 0
+            self.is_swapped = true
+
+        # Map {focal point, (1, 0)} to {(0, 0), (1, 0)}
+        let from0 = Point.from_xy(self.focal_x, 0.0)
+        let from1 = Point.from_xy(1.0, 0.0)
+        let to0 = Point.from_xy(0.0, 0.0)
+        let to1 = Point.from_xy(1.0, 0.0)
+
+        let focal_matrix = ts_from_poly_to_poly(from0, from1, to0, to1) else return false
+
+        *matrix = matrix.post_concat(focal_matrix)
+        self.r1 = r1 / math32.abs(1.0 - self.focal_x) # focalMatrix has a scale of 1/(1-f).
+
+        # The following transformations are just to accelerate the shader computation by
+        # saving some arithmetic operations.
+        if self.is_focal_on_circle():
+            *matrix = matrix.post_scale(0.5, 0.5)
+        else:
+            *matrix = matrix.post_scale(self.r1 / (self.r1 * self.r1 - 1.0), 1.0 / math32.sqrt(math32.abs(self.r1 * self.r1 - 1.0)))
+
+        *matrix = matrix.post_scale(math32.abs(1.0 - self.focal_x), math32.abs(1.0 - self.focal_x)) # scale |1 - f|
+
+        return true
+
+    func is_focal_on_circle() -> bool:
+        return is_nearly_zero(1.0 - self.r1)
+
+    func is_well_behaved() -> bool:
+        return not self.is_focal_on_circle() and self.r1 > 1.0
+
+    func is_natively_focal() -> bool:
+        return is_nearly_zero(self.focal_x)
+
+enum GradientType:
+    radial(radius1: f32, radius2: f32)
+    strip(scaled_r0: f32)
+    focal(fd: FocalData)
+
+## A radial gradient shader. This is not `SkRadialGradient` like in Skia, but rather
+## `SkTwoPointConicalGradient` without the start radius.
+pub struct RadialGradient:
+    var base: Gradient
+    var gradient_type: GradientType
+
+    ## Creates a new two-point conical gradient shader. Returns `Shader.solid_color` when
+    ## `stops` has a single stop, and none when there are no stops, a radius is negative,
+    ## the transform is not invertible or the gradient is degenerate. The stops are copied.
+    pub static func new_(start_point: Point, start_radius: f32, end_point: Point, end_radius: f32, stops: const GradientStop[], mode: SpreadMode, transform: Transform) -> Shader?:
+        if start_radius < 0.0 or end_radius < 0.0:
+            return none
+
+        if stops.length == 0:
+            return none
+        if stops.length == 1:
+            return .solid_color(color = stops[0].color)
+
+        if transform.invert() == none:
+            return none
+
+        let length = start_point.sub(end_point).length()
+        if not math32.is_finite(length):
+            return none
+        if is_nearly_zero_within_tolerance(length, degenerate_threshold):
+            if is_nearly_equal_within_tolerance(start_radius, end_radius, degenerate_threshold):
+                # Degenerate case, where the interpolation region area approaches zero. The
+                # proper behavior depends on the tile mode, which is consistent with the
+                # default degenerate gradient behavior, except when mode = clamp and the
+                # radii > 0.
+                if mode == .pad_ and end_radius > degenerate_threshold:
+                    # The interpolation region becomes an infinitely thin ring at the radius,
+                    # so the final gradient will be the first color repeated from p=0 to 1,
+                    # and then a hard stop switching to the last color at p=1.
+                    let start_color = stops[0].color
+                    let end_color = stops[stops.length - 1].color
+                    var new_stops: Vec[GradientStop]
+                    new_stops.push(GradientStop.new_(0.0, start_color))
+                    new_stops.push(GradientStop.new_(1.0, start_color))
+                    new_stops.push(GradientStop.new_(1.0, end_color))
+                    # If the center positions are the same, then the gradient is the radial
+                    # variant of a 2 pt conical gradient, an actual radial gradient
+                    # (startRadius == 0), or it is fully degenerate (startRadius ==
+                    # endRadius). We can treat this gradient as a simple radial, which is
+                    # faster. If we got here, we know that endRadius is not equal to 0, so
+                    # this produces a meaningful gradient
+                    return RadialGradient.new_radial_unchecked(start_point, end_radius, new_stops, mode, transform)
+                # TODO: Consider making a degenerate gradient
+                return none
+
+            if is_nearly_zero_within_tolerance(start_radius, degenerate_threshold):
+                # If the center positions are the same, then the gradient is the radial
+                # variant of a 2 pt conical gradient, an actual radial gradient
+                # (startRadius == 0), or it is fully degenerate (startRadius == endRadius).
+                # We can treat this gradient as a simple radial, which is faster. If we got
+                # here, we know that endRadius is not equal to 0, so this produces a
+                # meaningful gradient.
+                return RadialGradient.new_radial_unchecked(start_point, end_radius, copy_stops(stops), mode, transform)
+
+        return create_radial(start_point, start_radius, end_point, end_radius, stops, mode, transform)
+
+    static func new_radial_unchecked(center: Point, radius: f32, stops: Vec[GradientStop], mode: SpreadMode, transform: Transform) -> Shader?:
+        let inv = invert(radius)
+        let points_to_unit = Transform.from_translate(-center.x, -center.y).post_scale(inv, inv)
+
+        return .radial_gradient(g = RadialGradient(base = Gradient.new_(stops, mode, transform, points_to_unit), gradient_type = .radial(radius1 = 0.0, radius2 = radius)))
+
+    func push_stages(cs: ColorSpace, p: RasterPipelineBuilder*) -> bool:
+        var p0: f32 = 0.0
+        var p1: f32 = 0.0
+        match self.gradient_type:
+            .radial(radius1, radius2):
+                if radius1 == 0.0:
+                    p0 = 1.0
+                    p1 = 0.0
+                else:
+                    let d_radius = radius2 - radius1
+                    # For concentric gradients: t = t * scale + bias
+                    p0 = fmax(radius1, radius2) / d_radius
+                    p1 = -radius1 / d_radius
+            .strip(scaled_r0):
+                p0 = scaled_r0 * scaled_r0
+                p1 = 0.0 # unused
+            .focal(fd):
+                p0 = 1.0 / fd.r1
+                p1 = fd.focal_x
+
+        p.ctx.two_point_conical_gradient = TwoPointConicalGradientCtx(mask = [u32[4](0), u32[4](0)], p0 = p0, p1 = p1)
+
+        if not self.base.push_stages_pre(p):
+            return false
+
+        # push_stages_pre
+        match self.gradient_type:
+            .radial(_, _):
+                p.push(.xy_to_radius)
+                # Apply scale/bias to map t from [0, 1] based on r_max to proper t where t=0
+                # at r0 and t=1 at r1
+                if p0 != 1.0 or p1 != 0.0:
+                    p.push(.apply_concentric_scale_bias)
+            .strip(_):
+                p.push(.xy_to_2pt_conical_strip)
+                p.push(.mask_2pt_conical_nan)
+            .focal(fd):
+                if fd.is_focal_on_circle():
+                    p.push(.xy_to_2pt_conical_focal_on_circle)
+                elif fd.is_well_behaved():
+                    p.push(.xy_to_2pt_conical_well_behaved)
+                elif fd.is_swapped or (1.0 - fd.focal_x) < 0.0:
+                    p.push(.xy_to_2pt_conical_smaller)
+                else:
+                    p.push(.xy_to_2pt_conical_greater)
+
+                if not fd.is_well_behaved():
+                    p.push(.mask_2pt_conical_degenerates)
+
+                if (1.0 - fd.focal_x) < 0.0:
+                    p.push(.negate_x)
+
+                if not fd.is_natively_focal():
+                    p.push(.alter_2pt_conical_compensate_focal)
+
+                if fd.is_swapped:
+                    p.push(.alter_2pt_conical_unswap)
+
+        self.base.push_stages_body(p, cs)
+
+        # push_stages_post
+        match self.gradient_type:
+            .strip(_):
+                p.push(.apply_vector_mask)
+            .focal(fd):
+                if not fd.is_well_behaved():
+                    p.push(.apply_vector_mask)
+            _:
+                return true
+
+        return true
+
+func create_radial(c0: Point, r0: f32, c1: Point, r1: f32, stops: const GradientStop[], mode: SpreadMode, transform: Transform) -> Shader?:
+    var gradient_type: GradientType = ---
+    var gradient_matrix = Transform()
+
+    if is_nearly_zero(c0.sub(c1).length()):
+        if is_nearly_zero(fmax(r0, r1)) or is_nearly_equal(r0, r1):
+            # Degenerate case; avoid dividing by zero. Should have been caught by caller but
+            # just in case, recheck here.
+            return none
+
+        # Concentric case: we can pretend we're radial (with a tiny twist).
+        let scale = 1.0 / fmax(r0, r1)
+        gradient_matrix = Transform.from_translate(-c1.x, -c1.y).post_scale(scale, scale)
+        gradient_type = .radial(radius1 = r0, radius2 = r1)
+    else:
+        gradient_matrix = map_to_unit_x(c0, c1) else return none
+        let d_center = c0.sub(c1).length()
+        if is_nearly_zero(r0 - r1):
+            let scaled_r0 = r0 / d_center
+            gradient_type = .strip(scaled_r0 = scaled_r0)
+        else:
+            var fd: FocalData
+            let d_center2 = c0.sub(c1).length()
+            if not fd.set(r0 / d_center2, r1 / d_center2, &gradient_matrix):
+                return none
+            gradient_type = .focal(fd = fd)
+
+    return .radial_gradient(g = RadialGradient(base = Gradient.new_(copy_stops(stops), mode, transform, gradient_matrix), gradient_type = gradient_type))
+
+func map_to_unit_x(origin: Point, x_is_one: Point) -> Transform?:
+    return ts_from_poly_to_poly(origin, x_is_one, Point.from_xy(0.0, 0.0), Point.from_xy(1.0, 0.0))
+
+func ts_from_poly_to_poly(src1: Point, src2: Point, dst1: Point, dst2: Point) -> Transform?:
+    let tmp = from_poly2(src1, src2)
+    let res = tmp.invert() else return none
+    let tmp2 = from_poly2(dst1, dst2)
+    return tmp2.pre_concat(res)
+
+func from_poly2(p0: Point, p1: Point) -> Transform:
+    return Transform.from_row(p1.y - p0.y, p0.x - p1.x, p1.x - p0.x, p1.y - p0.y, p0.x, p0.y)

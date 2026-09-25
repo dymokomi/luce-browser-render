@@ -1,0 +1,115 @@
+#==============================================================================================
+#
+#   harness - the integration test harness of the rasterizer
+#
+#   DESCRIPTION:
+#       What tiny-skia's integration tests get from the test framework and the png-format
+#       feature: Pixmap::load_png (decode, then premultiply as tiny-skia does), the
+#       `assert_eq!(pixmap, expected)` comparison against a reference image, and a record
+#       of failures. A failed comparison writes the actual image to
+#       build/raster-failures/<test>.png.
+#
+#       Copyright (c) 2020 Yevhenii Reizner (tiny-skia's tests)
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-tiny-skia)
+#
+#==============================================================================================
+
+import c
+import memory
+import files
+import raster_png
+import raster
+
+## One test: a name and a function that records failures in the Test.
+pub struct TestCase:
+    pub let name: str
+    pub let run: func(Test*) -> unit
+
+## The state of the running test.
+pub struct Test:
+    pub var name: str
+    pub var failures: u32
+
+    ## Record a failure.
+    pub mutating func fail(message: fmt):
+        print(f"  FAIL {self.name}: {message}")
+        self.failures += 1
+
+    ## Record a failure unless `condition`.
+    pub mutating func check(condition: bool, message: str):
+        if not condition:
+            self.fail(message)
+
+func path_buffer(buffer: u8[], text: fmt) -> c.str:
+    let s = format(buffer, text) else trap("path too long")
+    return (c.str)s
+
+## Pixmap::load_png: `image` is relative to tests/raster/images.
+pub func load_png(image: str) -> raster.Pixmap:
+    var buffer: u8[512]
+    let path = path_buffer(buffer, f"tests/raster/images/{image}")
+    var bytes: u8[]
+    with memory.heap:
+        bytes = files.read(path) else trap("cannot read the image")
+    defer free(bytes) in memory.heap
+    let decoded = raster_png.decode_rgba8(bytes) else trap("cannot decode the image")
+    let data = decoded.rgba
+    # Premultiply alpha.
+    #
+    # We cannon use RasterPipeline here, which is faster, because it produces slightly
+    # different results. Seems like Skia does the same.
+    var i: usize = 0
+    while i < data.length:
+        let a = data[i + 3]
+        data[i + 0] = raster.premultiply_u8(data[i + 0], a)
+        data[i + 1] = raster.premultiply_u8(data[i + 1], a)
+        data[i + 2] = raster.premultiply_u8(data[i + 2], a)
+        i += 4
+    let size = raster.IntSize.from_wh(decoded.width, decoded.height) else trap("invalid image size")
+    return raster.Pixmap.from_vec(data, size) else trap("failed to create a pixmap")
+
+## Pixmap::encode_png + save: writes the pixmap (demultiplied) as a PNG.
+pub func save_png(pixmap: const raster.Pixmap*, path: c.str):
+    var copy = pixmap.clone()
+    let data = copy.take_demultiplied()
+    defer free(data) in memory.heap
+    let encoded = raster_png.encode_rgba8(pixmap.width(), pixmap.height(), data) else trap("cannot encode")
+    defer free(encoded) in memory.heap
+    with memory.heap:
+        files.write(path, encoded) catch failure:
+            print(f"  cannot write the failure image: {failure.message}")
+
+## `assert_eq!(pixmap, Pixmap::load_png(image))`.
+pub func expect_png(t: Test*, pixmap: const raster.Pixmap*, image: str):
+    var expected = load_png(image)
+    defer expected.release()
+    if pixmap.equals(&expected):
+        return
+    if pixmap.width() != expected.width() or pixmap.height() != expected.height():
+        t.fail(f"size {pixmap.width()}x{pixmap.height()} differs from {image} ({expected.width()}x{expected.height()})")
+        return
+    let a = pixmap.pixels()
+    let b = expected.pixels()
+    var differ: u32 = 0
+    var first: usize = 0
+    var max_delta: i32 = 0
+    for i in 0..<a.length:
+        if not a[i].equals(b[i]):
+            if differ == 0:
+                first = i
+            differ += 1
+            let deltas: i32[4] = [(i32)a[i].red() - (i32)b[i].red(), (i32)a[i].green() - (i32)b[i].green(), (i32)a[i].blue() - (i32)b[i].blue(), (i32)a[i].alpha() - (i32)b[i].alpha()]
+            for d in deltas:
+                let ad = d if d >= 0 else -d
+                if ad > max_delta:
+                    max_delta = ad
+    let w = (usize)pixmap.width()
+    t.fail(f"{differ} pixels differ from {image} (max channel delta {max_delta}; first at {first % w},{first // w})")
+    with memory.heap:
+        files.create_directory("build") catch:
+            recover ()
+        files.create_directory("build/raster-failures") catch:
+            recover ()
+    var buffer: u8[512]
+    save_png(pixmap, path_buffer(buffer, f"build/raster-failures/{t.name}.png"))

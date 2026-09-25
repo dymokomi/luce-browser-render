@@ -142,13 +142,6 @@ struct Vec[T]:
         self.data = self.data[..<0]
         self.len = 0
 
-## An owned copy of `values` in `memory.heap`; free it with `free(...) in memory.heap`.
-func copy_span[T](values: const T[]) -> T[]:
-    let copy = (alloc T[values.length] in memory.heap) else trap("raster: out of memory")
-    for i in 0..<values.length:
-        copy[i] = values[i]
-    return copy
-
 ## A stable sort (Rust's `slice::sort_by`): `less(a, b)` answers whether `a` orders before
 ## `b`. Equal elements keep their order. A merge sort over a scratch buffer.
 func stable_sort[T](items: T[], less: func(const T*, const T*) -> bool):

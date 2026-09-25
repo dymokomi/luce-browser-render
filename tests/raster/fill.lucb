@@ -1,0 +1,46 @@
+import harness
+import raster
+from harness import Test, TestCase
+from raster import Paint, PathBuilder, Pixmap, Transform, Rect
+
+func horizontal_line(t: Test*):
+    var paint = Paint()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = false
+
+    var pb = PathBuilder.new_()
+    pb.move_to(10.0, 10.0)
+    pb.line_to(90.0, 10.0)
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+
+    var pixmap = Pixmap.new_(100, 100) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, .winding, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "fill/empty.png")
+
+func fill_aa(t: Test*):
+    var paint = Paint()
+    paint.set_color_rgba8(50, 127, 150, 200)
+    paint.anti_alias = true
+
+    var pb = PathBuilder.new_()
+    pb.move_to(50.0, 7.5)
+    pb.line_to(75.0, 87.5)
+    pb.line_to(10.0, 37.5)
+    pb.line_to(90.0, 37.5)
+    pb.line_to(25.0, 87.5)
+    var path = pb.finish() else trap("finish")
+    defer path.release()
+
+    var pixmap = Pixmap.new_(100, 100) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, .even_odd, Transform.identity(), none)
+
+    harness.expect_png(t, &pixmap, "fill/star-aa.png")
+
+pub let tests: TestCase[2] = [
+    TestCase(name = "fill::horizontal_line", run = horizontal_line),
+    TestCase(name = "fill::fill_aa", run = fill_aa),
+]

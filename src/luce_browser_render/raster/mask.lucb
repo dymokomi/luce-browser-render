@@ -1,0 +1,230 @@
+#==============================================================================================
+#
+#   mask - 8-bit clip masks
+#
+#   DESCRIPTION:
+#       Port of tiny-skia mask.rs: MaskType, Mask (owns its bytes; `release()` frees them),
+#       Mask.fill_path (almost a direct copy of PixmapMut::fill_path, rendering coverage
+#       into the mask), intersect_path, invert, clear, and SubMaskRef.
+#
+#==============================================================================================
+
+## A mask type.
+pub enum MaskType as u8:
+    ## Transfers only the Alpha channel from `Pixmap` to `Mask`.
+    alpha = 0
+    ## Transfers RGB channels as luminance from `Pixmap` to `Mask`. Formula:
+    ## `Y = 0.2125 * R + 0.7154 * G + 0.0721 * B`
+    luminance = 1
+
+## A mask. During drawing over `Pixmap`, mask's black (0) "pixels" would block rendering and
+## white (255) will allow it. Anything in between is used for anti-aliasing and to represent
+## partially transparent drawing. Unlike Skia, we're using just a simple 8bit alpha mask.
+## It's way slower, but easier to implement.
+pub struct Mask:
+    var data_: u8[]
+    var size_: IntSize
+
+    ## Creates a new mask by taking ownership over a mask buffer. The size needs to match
+    ## the data provided.
+    pub static func new_(width: u32, height: u32) -> Mask?:
+        let size = IntSize.from_wh(width, height) else return none
+        let data = (new u8[(usize)width * (usize)height] in memory.heap) else trap("raster: out of memory")
+        return Mask(data_ = data, size_ = size)
+
+    ## Creates a new mask from a `PixmapRef`.
+    pub static func from_pixmap(pixmap: PixmapRef, mask_type: MaskType) -> Mask:
+        let data_len = (usize)pixmap.width() * (usize)pixmap.height()
+        let data = (new u8[data_len] in memory.heap) else trap("raster: out of memory")
+        let mask = Mask(data_ = data, size_ = pixmap.size())
+
+        # TODO: optimize
+        let pixels = pixmap.pixels()
+        match mask_type:
+            .alpha:
+                for i in 0..<data_len:
+                    data[i] = pixels[i].alpha()
+            .luminance:
+                for i in 0..<data_len:
+                    let p = pixels[i]
+                    # Normalize.
+                    var r = (f32)p.red() / 255.0
+                    var g = (f32)p.green() / 255.0
+                    var b = (f32)p.blue() / 255.0
+                    let a = (f32)p.alpha() / 255.0
+
+                    # Demultiply.
+                    if p.alpha() != 0:
+                        r /= a
+                        g /= a
+                        b /= a
+
+                    let luma = r * 0.2126 + g * 0.7152 + b * 0.0722
+                    data[i] = (u8)math32.ceil(clamp_f32((luma * a) * 255.0, 0.0, 255.0))
+            _:
+                return mask
+
+        return mask
+
+    ## Creates a new mask by taking ownership over a mask buffer allocated in `memory.heap`.
+    ## The size needs to match the data provided.
+    pub static func from_vec(data: u8[], size: IntSize) -> Mask?:
+        let data_len = (usize)size.width() * (usize)size.height()
+        if data.length != data_len:
+            return none
+        return Mask(data_ = data, size_ = size)
+
+    ## Returns mask's width.
+    pub func width() -> u32:
+        return self.size_.width()
+
+    ## Returns mask's height.
+    pub func height() -> u32:
+        return self.size_.height()
+
+    func size() -> IntSize:
+        return self.size_
+
+    ## Returns the internal data.
+    pub func data() -> const u8[]:
+        return self.data_
+
+    ## Returns the mutable internal data.
+    pub mutating func data_mut() -> u8[]:
+        return self.data_
+
+    ## Consumes the internal data. The caller owns the bytes (free them in `memory.heap`).
+    pub mutating func take() -> u8[]:
+        let data = self.data_
+        self.data_ = self.data_[..<0]
+        return data
+
+    ## Frees the mask.
+    pub mutating func release():
+        if self.data_.length > 0:
+            free(self.data_) in memory.heap
+        self.data_ = self.data_[..<0]
+
+    func as_submask() -> SubMaskRef:
+        return SubMaskRef(data = self.data_, size = self.size_, real_width = self.size_.width())
+
+    func submask(rect0: IntRect) -> SubMaskRef?:
+        let rect = self.size_.to_int_rect(0, 0).intersect(rect0) else return none
+        let row_bytes = (usize)self.width()
+        let offset = (usize)rect.top() * row_bytes + (usize)rect.left()
+        return SubMaskRef(data = self.data_[offset..], size = rect.size(), real_width = self.size_.width())
+
+    mutating func as_subpixmap() -> SubPixmapMut:
+        return SubPixmapMut(data = self.data_, size = self.size_, real_width = (usize)self.size_.width())
+
+    mutating func subpixmap(rect0: IntRect) -> SubPixmapMut?:
+        let rect = self.size_.to_int_rect(0, 0).intersect(rect0) else return none
+        let row_bytes = (usize)self.width()
+        let offset = (usize)rect.top() * row_bytes + (usize)rect.left()
+        return SubPixmapMut(data = self.data_[offset..], size = rect.size(), real_width = (usize)self.size_.width())
+
+    ## Draws a filled path onto the mask. In terms of RGB (no alpha) image, draws a white
+    ## path on top of black mask. Doesn't reset the existing mask content and draws the path
+    ## on top of existing data. If the above behavior is undesired, `Mask.clear()` should
+    ## be called first. This method is intended to be used for simple cases. For more
+    ## complex masks prefer `Mask.from_pixmap`.
+    pub mutating func fill_path(path: const Path*, fill_rule: FillRule, anti_alias: bool, transform: Transform):
+        # Almost a direct copy of PixmapMut::fill_path
+        if transform.is_identity():
+            # This is sort of similar to SkDraw::drawPath
+
+            # Skip empty paths and horizontal/vertical lines.
+            let path_bounds = path.bounds()
+            if is_nearly_zero(path_bounds.width()) or is_nearly_zero(path_bounds.height()):
+                # log::warn!("empty paths and horizontal/vertical lines cannot be filled")
+                return
+
+            if is_too_big_for_math(path):
+                # log::warn!("path coordinates are too big")
+                return
+
+            # TODO: ignore paths outside the pixmap
+
+            if let tiler0 = DrawTiler.new_(self.width(), self.height()):
+                var tiler = tiler0
+                var tiled = path.clone() # TODO: avoid cloning
+                defer tiled.release()
+
+                while let tile = tiler.next():
+                    let ts = Transform.from_translate(-(f32)tile.x(), -(f32)tile.y())
+                    if not tiled.transform(ts):
+                        # log::warn!("path transformation failed")
+                        return
+
+                    let clip_rect = tile.size().to_screen_int_rect(0, 0)
+                    if let subpix0 = self.subpixmap(tile.to_int_rect()):
+                        var subpix = subpix0
+                        if let blitter0 = RasterPipelineBlitter.new_mask(&subpix):
+                            var blitter = blitter0
+                            # We're ignoring "errors" here, because `fill_path` will return
+                            # `None` when rendering a tile that doesn't have a path on it.
+                            # Which is not an error in this case.
+                            if anti_alias:
+                                scan_aa_fill_path(&tiled, fill_rule, clip_rect, &blitter)
+                            else:
+                                scan_fill_path(&tiled, fill_rule, clip_rect, &blitter)
+                            blitter.release()
+
+                    let ts2 = Transform.from_translate((f32)tile.x(), (f32)tile.y())
+                    if not tiled.transform(ts2):
+                        return # technically unreachable
+            else:
+                let clip_rect = self.size_.to_screen_int_rect(0, 0)
+                var subpix = self.as_subpixmap()
+                var blitter = RasterPipelineBlitter.new_mask(&subpix) else return # nothing to do, all good
+                defer blitter.release()
+
+                if anti_alias:
+                    scan_aa_fill_path(path, fill_rule, clip_rect, &blitter)
+                else:
+                    scan_fill_path(path, fill_rule, clip_rect, &blitter)
+        else:
+            var transformed = path.clone()
+            defer transformed.release()
+            if not transformed.transform(transform):
+                # log::warn!("path transformation failed")
+                return
+
+            self.fill_path(&transformed, fill_rule, anti_alias, Transform.identity())
+
+    ## Intersects the provided path with the current clipping path. A temporary mask with
+    ## the same size as the current one will be created.
+    pub mutating func intersect_path(path: const Path*, fill_rule: FillRule, anti_alias: bool, transform: Transform):
+        var submask = Mask.new_(self.width(), self.height()) else trap("unreachable")
+        defer submask.release()
+        submask.fill_path(path, fill_rule, anti_alias, transform)
+
+        for i in 0..<self.data_.length:
+            self.data_[i] = premultiply_u8(self.data_[i], submask.data_[i])
+
+    ## Inverts the mask.
+    pub mutating func invert():
+        for a in &self.data_:
+            *a = 255 - *a
+
+    ## Clears the mask. Zero-fills the internal data buffer.
+    pub mutating func clear():
+        for a in &self.data_:
+            *a = 0
+
+## Rust's `f32::clamp`: NaN stays NaN.
+func clamp_f32(x: f32, min: f32, max: f32) -> f32:
+    var v = x
+    if v < min:
+        v = min
+    if v > max:
+        v = max
+    return v
+
+struct SubMaskRef:
+    var data: const u8[]
+    var size: IntSize
+    var real_width: u32
+
+    func mask_ctx() -> MaskCtx:
+        return MaskCtx(data = self.data, real_width = self.real_width)

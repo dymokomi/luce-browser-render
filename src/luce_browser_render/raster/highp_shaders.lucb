@@ -1,0 +1,439 @@
+#==============================================================================================
+#
+#   highp_shaders - the shader stages of the high precision pipeline
+#
+#   DESCRIPTION:
+#       Port of tiny-skia pipeline/highp.rs, part 3: transform, the tiling stages (reflect,
+#       repeat and their x1 variants), bilinear and bicubic sampling, the gradient stages
+#       (gradient lookup, the evenly spaced two-stop gradient, sweep angle, radius and the
+#       two-point conical gradient family with their masks) and the gamma stages.
+#
+#==============================================================================================
+
+func highp_transform(p: HighpPipeline*):
+    let ts = p.ctx.transform
+
+    let tr = highp_mad(p.r, f8_splat(ts.sx), highp_mad(p.g, f8_splat(ts.kx), f8_splat(ts.tx)))
+    let tg = highp_mad(p.r, f8_splat(ts.ky), highp_mad(p.g, f8_splat(ts.sy), f8_splat(ts.ty)))
+    p.r = tr
+    p.g = tg
+
+    highp_next_stage(p)
+
+# Tile x or y to [0,limit) == [0,limit - 1 ulp] (think, sampling from images). The gather
+# stages will hard clamp the output of these stages to [0,limit)... we just need to do the
+# basic repeat or mirroring.
+
+func highp_reflect(p: HighpPipeline*):
+    let ctx_x = p.ctx.limit_x
+    p.r = exclusive_reflect(p.r, ctx_x.scale, ctx_x.inv_scale)
+
+    let ctx_y = p.ctx.limit_y
+    p.g = exclusive_reflect(p.g, ctx_y.scale, ctx_y.inv_scale)
+
+    highp_next_stage(p)
+
+func exclusive_reflect(v: F8, limit0: f32, inv_limit0: f32) -> F8:
+    let limit = f8_splat(limit0)
+    let inv_limit = f8_splat(inv_limit0)
+    return f8_abs(f8_sub(f8_sub(f8_sub(v, limit), f8_mul(f8_add(limit, limit), f8_floor(f8_mul(f8_sub(v, limit), f8_mul(inv_limit, f8_splat(0.5)))))), limit))
+
+func highp_repeat(p: HighpPipeline*):
+    let ctx_x = p.ctx.limit_x
+    p.r = exclusive_repeat(p.r, ctx_x.scale, ctx_x.inv_scale)
+
+    let ctx_y = p.ctx.limit_y
+    p.g = exclusive_repeat(p.g, ctx_y.scale, ctx_y.inv_scale)
+
+    highp_next_stage(p)
+
+func exclusive_repeat(v: F8, limit: f32, inv_limit: f32) -> F8:
+    return f8_sub(v, f8_mul(f8_floor(f8_mul(v, f8_splat(inv_limit))), f8_splat(limit)))
+
+func highp_bilinear(p: HighpPipeline*):
+    let x = p.r
+    let fx = f8_fract(f8_add(x, f8_splat(0.5)))
+    let y = p.g
+    let fy = f8_fract(f8_add(y, f8_splat(0.5)))
+    let one = f8_splat(1.0)
+    let wx: F8[2] = [f8_sub(one, fx), fx]
+    let wy: F8[2] = [f8_sub(one, fy), fy]
+
+    sampler_2x2(p.pixmap_src, p.ctx.sampler, x, y, wx, wy, &p.r, &p.g, &p.b, &p.a)
+
+    highp_next_stage(p)
+
+func highp_bicubic(p: HighpPipeline*):
+    let x = p.r
+    let fx = f8_fract(f8_add(x, f8_splat(0.5)))
+    let y = p.g
+    let fy = f8_fract(f8_add(y, f8_splat(0.5)))
+    let one = f8_splat(1.0)
+    let wx: F8[4] = [bicubic_far(f8_sub(one, fx)), bicubic_near(f8_sub(one, fx)), bicubic_near(fx), bicubic_far(fx)]
+    let wy: F8[4] = [bicubic_far(f8_sub(one, fy)), bicubic_near(f8_sub(one, fy)), bicubic_near(fy), bicubic_far(fy)]
+
+    sampler_4x4(p.pixmap_src, p.ctx.sampler, x, y, wx, wy, &p.r, &p.g, &p.b, &p.a)
+
+    highp_next_stage(p)
+
+# In bicubic interpolation, the 16 pixels and +/- 0.5 and +/- 1.5 offsets from the sample
+# pixel center are combined with a non-uniform cubic filter, with higher values near the
+# center.
+#
+# We break this function into two parts, one for near 0.5 offsets and one for far 1.5
+# offsets.
+
+func bicubic_near(t: F8) -> F8:
+    # 1/18 + 9/18t + 27/18t^2 - 21/18t^3 == t ( t ( -21/18t + 27/18) + 9/18) + 1/18
+    return highp_mad(t, highp_mad(t, highp_mad(f8_splat(-21.0 / 18.0), t, f8_splat(27.0 / 18.0)), f8_splat(9.0 / 18.0)), f8_splat(1.0 / 18.0))
+
+func bicubic_far(t: F8) -> F8:
+    # 0/18 + 0/18*t - 6/18t^2 + 7/18t^3 == t^2 (7/18t - 6/18)
+    return f8_mul(f8_mul(t, t), highp_mad(f8_splat(7.0 / 18.0), t, f8_splat(-6.0 / 18.0)))
+
+func sampler_2x2(pixmap: PixmapRef, ctx: SamplerCtx, cx: F8, cy: F8, wx: const F8[], wy: const F8[], r: F8*, g: F8*, b: F8*, a: F8*):
+    *r = f8_splat(0.0)
+    *g = f8_splat(0.0)
+    *b = f8_splat(0.0)
+    *a = f8_splat(0.0)
+
+    let one = f8_splat(1.0)
+    let start: f32 = -0.5
+    var y = f8_add(cy, f8_splat(start))
+    for j: usize in 0..<2:
+        var x = f8_add(cx, f8_splat(start))
+        for i: usize in 0..<2:
+            var rr = f8_splat(0.0)
+            var gg = f8_splat(0.0)
+            var bb = f8_splat(0.0)
+            var aa = f8_splat(0.0)
+            sample(pixmap, ctx, x, y, &rr, &gg, &bb, &aa)
+
+            let w = f8_mul(wx[i], wy[j])
+            *r = highp_mad(w, rr, *r)
+            *g = highp_mad(w, gg, *g)
+            *b = highp_mad(w, bb, *b)
+            *a = highp_mad(w, aa, *a)
+
+            x = f8_add(x, one)
+
+        y = f8_add(y, one)
+
+func sampler_4x4(pixmap: PixmapRef, ctx: SamplerCtx, cx: F8, cy: F8, wx: const F8[], wy: const F8[], r: F8*, g: F8*, b: F8*, a: F8*):
+    *r = f8_splat(0.0)
+    *g = f8_splat(0.0)
+    *b = f8_splat(0.0)
+    *a = f8_splat(0.0)
+
+    let one = f8_splat(1.0)
+    let start: f32 = -1.5
+    var y = f8_add(cy, f8_splat(start))
+    for j: usize in 0..<4:
+        var x = f8_add(cx, f8_splat(start))
+        for i: usize in 0..<4:
+            var rr = f8_splat(0.0)
+            var gg = f8_splat(0.0)
+            var bb = f8_splat(0.0)
+            var aa = f8_splat(0.0)
+            sample(pixmap, ctx, x, y, &rr, &gg, &bb, &aa)
+
+            let w = f8_mul(wx[i], wy[j])
+            *r = highp_mad(w, rr, *r)
+            *g = highp_mad(w, gg, *g)
+            *b = highp_mad(w, bb, *b)
+            *a = highp_mad(w, aa, *a)
+
+            x = f8_add(x, one)
+
+        y = f8_add(y, one)
+
+func sample(pixmap: PixmapRef, ctx: SamplerCtx, x0: F8, y0: F8, r: F8*, g: F8*, b: F8*, a: F8*):
+    let x = highp_tile(x0, ctx.spread_mode, (f32)pixmap.width(), ctx.inv_width)
+    let y = highp_tile(y0, ctx.spread_mode, (f32)pixmap.height(), ctx.inv_height)
+
+    let ix = gather_ix(pixmap, x, y)
+    let pixels = gather_pixels(pixmap, ix)
+    highp_load_8888(pixels, r, g, b, a)
+
+func highp_tile(v: F8, mode: SpreadMode, limit: f32, inv_limit: f32) -> F8:
+    match mode:
+        .pad_: return v
+        .repeat: return exclusive_repeat(v, limit, inv_limit)
+        .reflect: return exclusive_reflect(v, limit, inv_limit)
+        _: return v
+
+func highp_pad_x1(p: HighpPipeline*):
+    p.r = f8_normalize(p.r)
+
+    highp_next_stage(p)
+
+func highp_reflect_x1(p: HighpPipeline*):
+    let one = f8_splat(1.0)
+    p.r = f8_normalize(f8_abs(f8_sub(f8_sub(f8_sub(p.r, one), highp_two(f8_floor(f8_mul(f8_sub(p.r, one), f8_splat(0.5))))), one)))
+
+    highp_next_stage(p)
+
+func highp_repeat_x1(p: HighpPipeline*):
+    p.r = f8_normalize(f8_sub(p.r, f8_floor(p.r)))
+
+    highp_next_stage(p)
+
+func highp_gradient(p: HighpPipeline*):
+    let ctx = &p.ctx.gradient
+
+    # N.B. The loop starts at 1 because idx 0 is the color to use before the first stop.
+    var idx: M8 = [u32[4](0), u32[4](0)]
+    for i in 1..<ctx.len:
+        let tt = ctx.t_values.data[i]
+        for h: usize in 0..<2:
+            for l: usize in 0..<4:
+                idx[h][l] +%= (u32)(p.r[h][l] >= tt)
+    gradient_lookup(ctx, idx, p.r, &p.r, &p.g, &p.b, &p.a)
+
+    highp_next_stage(p)
+
+func gradient_lookup(ctx: const GradientCtx*, idx: M8, t: F8, r: F8*, g: F8*, b: F8*, a: F8*):
+    # Surprisingly, but bound checking doesn't affect the performance. And since `idx` can
+    # contain any number, we should leave it in place.
+    let factors = ctx.factors.view()
+    let biases = ctx.biases.view()
+    var fr: F8 = ---
+    var fg: F8 = ---
+    var fb: F8 = ---
+    var fa: F8 = ---
+    var br: F8 = ---
+    var bg: F8 = ---
+    var bb: F8 = ---
+    var ba: F8 = ---
+    for h: usize in 0..<2:
+        for l: usize in 0..<4:
+            let i = (usize)idx[h][l]
+            let f = factors[i]
+            let bias = biases[i]
+            fr[h][l] = f.r
+            fg[h][l] = f.g
+            fb[h][l] = f.b
+            fa[h][l] = f.a
+            br[h][l] = bias.r
+            bg[h][l] = bias.g
+            bb[h][l] = bias.b
+            ba[h][l] = bias.a
+
+    *r = highp_mad(t, fr, br)
+    *g = highp_mad(t, fg, bg)
+    *b = highp_mad(t, fb, bb)
+    *a = highp_mad(t, fa, ba)
+
+func highp_evenly_spaced_2_stop_gradient(p: HighpPipeline*):
+    let ctx = p.ctx.evenly_spaced_2_stop_gradient
+
+    let t = p.r
+    p.r = highp_mad(t, f8_splat(ctx.factor.r), f8_splat(ctx.bias.r))
+    p.g = highp_mad(t, f8_splat(ctx.factor.g), f8_splat(ctx.bias.g))
+    p.b = highp_mad(t, f8_splat(ctx.factor.b), f8_splat(ctx.bias.b))
+    p.a = highp_mad(t, f8_splat(ctx.factor.a), f8_splat(ctx.bias.a))
+
+    highp_next_stage(p)
+
+func highp_xy_to_unit_angle(p: HighpPipeline*):
+    let x = p.r
+    let y = p.g
+    let x_abs = f8_abs(x)
+    let y_abs = f8_abs(y)
+    let slope = f8_div(f8_min(x_abs, y_abs), f8_max(x_abs, y_abs))
+    let s = f8_mul(slope, slope)
+    # Use a 7th degree polynomial to approximate atan.
+    # This was generated using sollya.gforge.inria.fr.
+    # A float optimized polynomial was generated using the following command.
+    # P1 = fpminimax((1/(2*Pi))*atan(x),[|1,3,5,7|],[|24...|],[2^(-40),1],relative);
+    var phi = f8_mul(slope, f8_add(f8_splat(0.15912117063999176025390625), f8_mul(s, f8_add(f8_splat(-5.185396969318389892578125e-2), f8_mul(s, f8_add(f8_splat(2.476101927459239959716796875e-2), f8_mul(s, f8_splat(-7.0547382347285747528076171875e-3))))))))
+    phi = f8_blend(f8_cmp_lt(x_abs, y_abs), f8_sub(f8_splat(0.25), phi), phi)
+    phi = f8_blend(f8_cmp_lt(x, f8_splat(0.0)), f8_sub(f8_splat(0.5), phi), phi)
+    phi = f8_blend(f8_cmp_lt(y, f8_splat(0.0)), f8_sub(f8_splat(1.0), phi), phi)
+    phi = f8_blend(f8_cmp_ne(phi, phi), f8_splat(0.0), phi)
+    p.r = phi
+    highp_next_stage(p)
+
+func highp_xy_to_radius(p: HighpPipeline*):
+    let x2 = f8_mul(p.r, p.r)
+    let y2 = f8_mul(p.g, p.g)
+    p.r = f8_sqrt(f8_add(x2, y2))
+
+    highp_next_stage(p)
+
+func highp_xy_to_2pt_conical_focal_on_circle(p: HighpPipeline*):
+    let x = p.r
+    let y = p.g
+    p.r = f8_add(x, f8_div(f8_mul(y, y), x))
+
+    highp_next_stage(p)
+
+func highp_xy_to_2pt_conical_well_behaved(p: HighpPipeline*):
+    let ctx = p.ctx.two_point_conical_gradient
+
+    let x = p.r
+    let y = p.g
+    p.r = f8_sub(f8_sqrt(f8_add(f8_mul(x, x), f8_mul(y, y))), f8_mul(x, f8_splat(ctx.p0)))
+
+    highp_next_stage(p)
+
+func highp_xy_to_2pt_conical_greater(p: HighpPipeline*):
+    let ctx = p.ctx.two_point_conical_gradient
+
+    let x = p.r
+    let y = p.g
+    p.r = f8_sub(f8_sqrt(f8_sub(f8_mul(x, x), f8_mul(y, y))), f8_mul(x, f8_splat(ctx.p0)))
+
+    highp_next_stage(p)
+
+func highp_xy_to_2pt_conical_smaller(p: HighpPipeline*):
+    let ctx = p.ctx.two_point_conical_gradient
+
+    let x = p.r
+    let y = p.g
+    p.r = f8_sub(f8_neg(f8_sqrt(f8_sub(f8_mul(x, x), f8_mul(y, y)))), f8_mul(x, f8_splat(ctx.p0)))
+
+    highp_next_stage(p)
+
+func highp_xy_to_2pt_conical_strip(p: HighpPipeline*):
+    let ctx = p.ctx.two_point_conical_gradient
+
+    let x = p.r
+    let y = p.g
+    p.r = f8_add(x, f8_sqrt(f8_sub(f8_splat(ctx.p0), f8_mul(y, y))))
+
+    highp_next_stage(p)
+
+func highp_mask_2pt_conical_nan(p: HighpPipeline*):
+    let t = p.r
+    let is_degenerate = f8_cmp_ne(t, t)
+    p.r = f8_blend(is_degenerate, f8_splat(0.0), t)
+    p.ctx.two_point_conical_gradient.mask = cond_to_mask(m8_not(is_degenerate))
+
+    highp_next_stage(p)
+
+func highp_mask_2pt_conical_degenerates(p: HighpPipeline*):
+    let t = p.r
+    let is_degenerate = m8_or(f8_cmp_le(t, f8_splat(0.0)), f8_cmp_ne(t, t))
+    p.r = f8_blend(is_degenerate, f8_splat(0.0), t)
+    p.ctx.two_point_conical_gradient.mask = cond_to_mask(m8_not(is_degenerate))
+
+    highp_next_stage(p)
+
+func highp_apply_vector_mask(p: HighpPipeline*):
+    let mask = p.ctx.two_point_conical_gradient.mask
+
+    p.r = f8_from_bits(m8_and(f8_to_bits(p.r), mask))
+    p.g = f8_from_bits(m8_and(f8_to_bits(p.g), mask))
+    p.b = f8_from_bits(m8_and(f8_to_bits(p.b), mask))
+    p.a = f8_from_bits(m8_and(f8_to_bits(p.a), mask))
+
+    highp_next_stage(p)
+
+func highp_alter_2pt_conical_compensate_focal(p: HighpPipeline*):
+    let ctx = p.ctx.two_point_conical_gradient
+
+    p.r = f8_add(p.r, f8_splat(ctx.p1))
+
+    highp_next_stage(p)
+
+func highp_alter_2pt_conical_unswap(p: HighpPipeline*):
+    p.r = f8_sub(f8_splat(1.0), p.r)
+
+    highp_next_stage(p)
+
+func highp_negate_x(p: HighpPipeline*):
+    p.r = f8_neg(p.r)
+
+    highp_next_stage(p)
+
+func highp_apply_concentric_scale_bias(p: HighpPipeline*):
+    let ctx = p.ctx.two_point_conical_gradient
+
+    # Apply t = t * scale + bias for concentric gradients
+    let x = p.r
+    p.r = f8_add(f8_mul(x, f8_splat(ctx.p0)), f8_splat(ctx.p1))
+
+    highp_next_stage(p)
+
+func highp_gamma_expand_2(p: HighpPipeline*):
+    p.r = f8_mul(p.r, p.r)
+    p.g = f8_mul(p.g, p.g)
+    p.b = f8_mul(p.b, p.b)
+
+    highp_next_stage(p)
+
+func highp_gamma_expand_dst_2(p: HighpPipeline*):
+    p.dr = f8_mul(p.dr, p.dr)
+    p.dg = f8_mul(p.dg, p.dg)
+    p.db = f8_mul(p.db, p.db)
+
+    highp_next_stage(p)
+
+func highp_gamma_compress_2(p: HighpPipeline*):
+    p.r = f8_sqrt(p.r)
+    p.g = f8_sqrt(p.g)
+    p.b = f8_sqrt(p.b)
+
+    highp_next_stage(p)
+
+func highp_gamma_expand_22(p: HighpPipeline*):
+    p.r = f8_powf(p.r, 2.2)
+    p.g = f8_powf(p.g, 2.2)
+    p.b = f8_powf(p.b, 2.2)
+
+    highp_next_stage(p)
+
+func highp_gamma_expand_dst_22(p: HighpPipeline*):
+    p.dr = f8_powf(p.dr, 2.2)
+    p.dg = f8_powf(p.dg, 2.2)
+    p.db = f8_powf(p.db, 2.2)
+
+    highp_next_stage(p)
+
+func highp_gamma_compress_22(p: HighpPipeline*):
+    p.r = f8_powf(p.r, 0.45454545)
+    p.g = f8_powf(p.g, 0.45454545)
+    p.b = f8_powf(p.b, 0.45454545)
+
+    highp_next_stage(p)
+
+func srgb_expand(x: F8) -> F8:
+    let small = f8_cmp_le(x, f8_splat(0.04045))
+    let linear = f8_div(x, f8_splat(12.92))
+    let exp = f8_powf(f8_div(f8_add(x, f8_splat(0.055)), f8_splat(1.055)), 2.4)
+    return f8_blend(small, linear, exp)
+
+func srgb_compress(x: F8) -> F8:
+    let small = f8_cmp_le(x, f8_splat(0.0031308))
+    let linear = f8_mul(x, f8_splat(12.92))
+    let exp = f8_sub(f8_mul(f8_powf(x, 0.416666666), f8_splat(1.055)), f8_splat(0.055))
+    return f8_blend(small, linear, exp)
+
+func highp_gamma_expand_srgb(p: HighpPipeline*):
+    p.r = srgb_expand(p.r)
+    p.g = srgb_expand(p.g)
+    p.b = srgb_expand(p.b)
+
+    highp_next_stage(p)
+
+func highp_gamma_expand_dst_srgb(p: HighpPipeline*):
+    p.dr = srgb_expand(p.dr)
+    p.dg = srgb_expand(p.dg)
+    p.db = srgb_expand(p.db)
+
+    highp_next_stage(p)
+
+func highp_gamma_compress_srgb(p: HighpPipeline*):
+    p.r = srgb_compress(p.r)
+    p.g = srgb_compress(p.g)
+    p.b = srgb_compress(p.b)
+
+    highp_next_stage(p)
+
+func cond_to_mask(cond: M8) -> M8:
+    var m: M8 = ---
+    for h: usize in 0..<2:
+        for l: usize in 0..<4:
+            m[h][l] = all_ones if cond[h][l] != 0 else 0
+    return m

@@ -1,0 +1,227 @@
+#==============================================================================================
+#
+#   edge_builder - turning a path into scan converter edges
+#
+#   DESCRIPTION:
+#       Port of tiny-skia edge_builder.rs: ShiftedIntRect, BasicEdgeBuilder (build_edges,
+#       push_line with the vertical-edge combining, push_quad, push_cubic), PathEdge and
+#       PathEdgeIter (a path as a sequence of line, quad and cubic edges with implicit
+#       closing lines). Skia returns a linked list here; tiny-skia mimics it with a Vec.
+#
+#==============================================================================================
+
+enum Combine as u8:
+    no = 0
+    partial = 1
+    total = 2
+
+struct ShiftedIntRect:
+    var shifted_: ScreenIntRect
+    var shift: i32
+
+    static func new_(rect: ScreenIntRect, shift: i32) -> ShiftedIntRect?:
+        let s = (u32)shift
+        let shifted = ScreenIntRect.from_xywh(rect.x() << s, rect.y() << s, rect.width() << s, rect.height() << s) else return none
+        return ShiftedIntRect(shifted_ = shifted, shift = shift)
+
+    func shifted() -> ScreenIntRect:
+        return self.shifted_
+
+    func recover_() -> ScreenIntRect:
+        let s = (u32)self.shift
+        # cannot fail, because the original rect was valid
+        return ScreenIntRect.from_xywh(self.shifted_.x() >> s, self.shifted_.y() >> s, self.shifted_.width() >> s, self.shifted_.height() >> s) else trap("unreachable")
+
+struct BasicEdgeBuilder:
+    var edges: Vec[Edge]
+    var clip_shift: i32
+
+    static func new_(clip_shift: i32) -> BasicEdgeBuilder:
+        var b = BasicEdgeBuilder(clip_shift = clip_shift)
+        b.edges.reserve(64) # TODO: stack array + fallback
+        return b
+
+    # Skia returns a linked list here, but it's a nightmare to use in Rust, so we're
+    # mimicking it with Vec. The caller owns (and releases) the returned edges.
+    static func build_edges(path: const Path*, clip: const ShiftedIntRect*?, clip_shift: i32) -> Vec[Edge]?:
+        # If we're convex, then we need both edges, even if the right edge is past the clip.
+        # let can_cull_to_the_right = !path.isConvex();
+        let can_cull_to_the_right = false # TODO: this
+
+        var builder = BasicEdgeBuilder.new_(clip_shift)
+        if not builder.build(path, clip, can_cull_to_the_right):
+            # log::warn!("infinite or NaN segments detected during edges building")
+            builder.edges.release()
+            return none
+
+        if builder.edges.len < 2:
+            builder.edges.release()
+            return none
+
+        return builder.edges
+
+    # TODO: build_poly
+    mutating func build(path: const Path*, clip: const ShiftedIntRect*?, can_cull_to_the_right: bool) -> bool:
+        if let c = clip:
+            let clip_rect = c.recover_().to_rect()
+            var clipper_iter = EdgeClipperIter.new_(path, clip_rect, can_cull_to_the_right)
+            while let clipped = clipper_iter.next():
+                for edge in clipped.edges[..<clipped.len]:
+                    match edge:
+                        .line_to(p0, p1):
+                            if not p0.is_finite() or not p1.is_finite():
+                                return false
+                            self.push_line([p0, p1])
+                        .quad_to(p0, p1, p2):
+                            if not p0.is_finite() or not p1.is_finite() or not p2.is_finite():
+                                return false
+                            self.push_quad([p0, p1, p2])
+                        .cubic_to(p0, p1, p2, p3):
+                            if not p0.is_finite() or not p1.is_finite() or not p2.is_finite() or not p3.is_finite():
+                                return false
+                            self.push_cubic([p0, p1, p2, p3])
+        else:
+            var iter = edge_iter(path)
+            while let edge = iter.next():
+                match edge:
+                    .line_to(p0, p1):
+                        self.push_line([p0, p1])
+                    .quad_to(p0, p1, p2):
+                        let points: Point[3] = [p0, p1, p2]
+                        var mono_x: Point[5]
+                        let n = chop_quad_at_y_extrema(points, mono_x)
+                        for i in 0..=n:
+                            self.push_quad(mono_x[i * 2..])
+                    .cubic_to(p0, p1, p2, p3):
+                        let points: Point[4] = [p0, p1, p2, p3]
+                        var mono_y: Point[10]
+                        let n = chop_cubic_at_y_extrema(points, mono_y)
+                        for i in 0..=n:
+                            self.push_cubic(mono_y[i * 3..])
+
+        return true
+
+    mutating func push_line(points: const Point[]):
+        if let edge = LineEdge.new_(points[0], points[1], self.clip_shift):
+            var combine = Combine.no
+            if edge.is_vertical() and not self.edges.is_empty():
+                let last_index = self.edges.len - 1
+                if self.edges.data[last_index].kind == .line:
+                    combine = combine_vertical(&edge, &self.edges.data[last_index].data.line)
+
+            match combine:
+                .total:
+                    discard(self.edges.pop())
+                .partial:
+                    return
+                .no:
+                    self.edges.push(Edge.from_line(edge))
+                _:
+                    return
+
+    mutating func push_quad(points: const Point[]):
+        if let edge = QuadraticEdge.new_(points, self.clip_shift):
+            self.edges.push(Edge.from_quad(edge))
+
+    mutating func push_cubic(points: const Point[]):
+        if let edge = CubicEdge.new_(points, self.clip_shift):
+            self.edges.push(Edge.from_cubic(edge))
+
+func combine_vertical(edge: const LineEdge*, last: LineEdge*) -> Combine:
+    if last.dx != 0 or edge.x != last.x:
+        return .no
+
+    if edge.winding == last.winding:
+        if edge.last_y + 1 == last.first_y:
+            last.first_y = edge.first_y
+            return .partial
+        elif edge.first_y == last.last_y + 1:
+            last.last_y = edge.last_y
+            return .partial
+        return .no
+
+    if edge.first_y == last.first_y:
+        if edge.last_y == last.last_y:
+            return .total
+        elif edge.last_y < last.last_y:
+            last.first_y = edge.last_y + 1
+            return .partial
+        last.first_y = last.last_y + 1
+        last.last_y = edge.last_y
+        last.winding = edge.winding
+        return .partial
+
+    if edge.last_y == last.last_y:
+        if edge.first_y > last.first_y:
+            last.last_y = edge.first_y - 1
+        else:
+            last.last_y = last.first_y - 1
+            last.first_y = edge.first_y
+            last.winding = edge.winding
+
+        return .partial
+
+    return .no
+
+func edge_iter(path: const Path*) -> PathEdgeIter:
+    return PathEdgeIter(path = path, verb_index = 0, points_index = 0, move_to = Point.zero(), needs_close_line = false)
+
+enum PathEdge:
+    line_to(p0: Point, p1: Point)
+    quad_to(p0: Point, p1: Point, p2: Point)
+    cubic_to(p0: Point, p1: Point, p2: Point, p3: Point)
+
+struct PathEdgeIter:
+    let path: const Path*
+    var verb_index: usize
+    var points_index: usize
+    var move_to: Point
+    var needs_close_line: bool
+
+    mutating func close_line() -> PathEdge?:
+        self.needs_close_line = false
+        return .line_to(p0 = self.path.points.data[self.points_index - 1], p1 = self.move_to)
+
+    mutating func next() -> PathEdge?:
+        while self.verb_index < self.path.verbs.len:
+            let verb = self.path.verbs.data[self.verb_index]
+            self.verb_index += 1
+            let points = self.path.points.data
+
+            match verb:
+                .move:
+                    if self.needs_close_line:
+                        let res = self.close_line()
+                        self.move_to = points[self.points_index]
+                        self.points_index += 1
+                        return res
+
+                    self.move_to = points[self.points_index]
+                    self.points_index += 1
+                    continue
+                .close:
+                    if self.needs_close_line:
+                        return self.close_line()
+                    continue
+                .line:
+                    # Actual edge.
+                    self.needs_close_line = true
+                    let edge = PathEdge.line_to(p0 = points[self.points_index - 1], p1 = points[self.points_index + 0])
+                    self.points_index += 1
+                    return edge
+                .quad:
+                    self.needs_close_line = true
+                    let edge = PathEdge.quad_to(p0 = points[self.points_index - 1], p1 = points[self.points_index + 0], p2 = points[self.points_index + 1])
+                    self.points_index += 2
+                    return edge
+                .cubic:
+                    self.needs_close_line = true
+                    let edge = PathEdge.cubic_to(p0 = points[self.points_index - 1], p1 = points[self.points_index + 0], p2 = points[self.points_index + 1], p3 = points[self.points_index + 2])
+                    self.points_index += 3
+                    return edge
+                _:
+                    trap("unreachable")
+
+        if self.needs_close_line:
+            return self.close_line()
+        return none

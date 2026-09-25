@@ -1,0 +1,586 @@
+#==============================================================================================
+#
+#   shaders - shaders, gradients, patterns
+#
+#   DESCRIPTION:
+#       Port of tiny-skia shaders/mod.rs (SpreadMode, Shader), shaders/gradient.rs
+#       (GradientStop, Gradient), shaders/linear_gradient.rs, shaders/sweep_gradient.rs
+#       and shaders/pattern.rs (FilterQuality, PixmapPaint, Pattern). Gradient shaders own
+#       their stops: `Shader.release()` frees them and `Shader.clone()` copies them. Rust's
+#       Gradient::push_stages takes pre/post closures; here it is split into
+#       `push_stages_pre` (seed and transform) and `push_stages_body` (tiling, the
+#       gradient and premultiply), with the caller's pre and post stages in between and
+#       after, in the same order.
+#
+#==============================================================================================
+
+## A shader spreading mode.
+pub enum SpreadMode as u8:
+    ## Replicate the edge color if the shader draws outside of its original bounds.
+    pad_ = 0
+    ## Repeat the shader's image horizontally and vertically, alternating mirror images so
+    ## that adjacent images always seam.
+    reflect = 1
+    ## Repeat the shader's image horizontally and vertically.
+    repeat = 2
+
+## A shader specifies the source color(s) for what is being drawn. If a paint has no
+## shader, then the paint's color is used. If the paint has a shader, then the shader's
+## color(s) are use instead, but they are modulated by the paint's alpha.
+pub enum Shader:
+    ## A solid color shader.
+    solid_color(color: Color)
+    ## A linear gradient shader.
+    linear_gradient(g: LinearGradient)
+    ## A radial gradient shader.
+    radial_gradient(g: RadialGradient)
+    ## A sweep gradient shader.
+    sweep_gradient(g: SweepGradient)
+    ## A pattern shader.
+    pattern(p: Pattern)
+
+## Checks if the shader is guaranteed to produce only opaque colors.
+pub func shader_is_opaque(shader: const Shader*) -> bool:
+    match *shader:
+        .solid_color(c): return c.is_opaque()
+        .linear_gradient(g): return g.base.colors_are_opaque
+        # A radial gradient may have points that are "undefined" so we just assume that it
+        # is not opaque.
+        .radial_gradient(_): return false
+        .sweep_gradient(g): return g.base.colors_are_opaque
+        .pattern(_): return false
+
+# Unlike Skia, we do not have is_constant, because we don't have Color shaders.
+
+func shader_push_stages(shader: const Shader*, cs: ColorSpace, p: RasterPipelineBuilder*) -> bool:
+    match *shader:
+        .solid_color(color):
+            let c = colorspace_expand_color(cs, color).premultiply()
+            p.push_uniform_color(c)
+            return true
+        .linear_gradient(g): return g.push_stages(cs, p)
+        .radial_gradient(g): return g.push_stages(cs, p)
+        .sweep_gradient(g): return g.push_stages(cs, p)
+        .pattern(patt): return patt.push_stages(cs, p)
+
+## Transforms the shader.
+pub func shader_transform(shader: Shader*, ts: Transform):
+    match *shader:
+        .solid_color(_):
+            return
+        .linear_gradient(g):
+            var ng = g
+            ng.base.transform = ng.base.transform.post_concat(ts)
+            *shader = .linear_gradient(g = ng)
+        .radial_gradient(g):
+            var ng = g
+            ng.base.transform = ng.base.transform.post_concat(ts)
+            *shader = .radial_gradient(g = ng)
+        .sweep_gradient(g):
+            var ng = g
+            ng.base.transform = ng.base.transform.post_concat(ts)
+            *shader = .sweep_gradient(g = ng)
+        .pattern(p):
+            var np = p
+            np.transform = np.transform.post_concat(ts)
+            *shader = .pattern(p = np)
+
+## Shifts shader's opacity. `opacity` will be clamped to the 0..=1 range. This is roughly
+## the same as Skia's `SkPaint::setAlpha`. Unlike Skia, we do not support global alpha/opacity,
+## which is in Skia is set via the alpha channel of the `SkPaint::fColor4f`. Instead, you can
+## shift the opacity of the shader to whatever value you need.
+pub func shader_apply_opacity(shader: Shader*, opacity: f32):
+    match *shader:
+        .solid_color(c):
+            var nc = c
+            nc.apply_opacity(opacity)
+            *shader = .solid_color(color = nc)
+        .linear_gradient(g):
+            var ng = g
+            ng.base.apply_opacity(opacity)
+            *shader = .linear_gradient(g = ng)
+        .radial_gradient(g):
+            var ng = g
+            ng.base.apply_opacity(opacity)
+            *shader = .radial_gradient(g = ng)
+        .sweep_gradient(g):
+            var ng = g
+            ng.base.apply_opacity(opacity)
+            *shader = .sweep_gradient(g = ng)
+        .pattern(p):
+            var np = p
+            np.opacity = normalized_new(np.opacity * bound(opacity, 0.0, 1.0)) else trap("unreachable")
+            *shader = .pattern(p = np)
+
+## A copy of the shader; a gradient's stops are copied (Rust's `Shader::clone`).
+pub func shader_clone(shader: const Shader*) -> Shader:
+    match *shader:
+        .linear_gradient(g):
+            var ng = g
+            ng.base.stops = g.base.stops.clone()
+            return .linear_gradient(g = ng)
+        .radial_gradient(g):
+            var ng = g
+            ng.base.stops = g.base.stops.clone()
+            return .radial_gradient(g = ng)
+        .sweep_gradient(g):
+            var ng = g
+            ng.base.stops = g.base.stops.clone()
+            return .sweep_gradient(g = ng)
+        _:
+            return *shader
+
+## Frees a gradient shader's stops (Rust's `Drop`).
+pub func shader_release(shader: Shader*):
+    match *shader:
+        .linear_gradient(g):
+            var ng = g
+            ng.base.stops.release()
+        .radial_gradient(g):
+            var ng = g
+            ng.base.stops.release()
+        .sweep_gradient(g):
+            var ng = g
+            ng.base.stops.release()
+        _:
+            return
+    *shader = .solid_color(color = Color.black())
+
+# mark: Gradient ==============================================================================
+
+# The default SCALAR_NEARLY_ZERO threshold of .0024 is too big and causes regressions for svg
+# gradients defined in the wild.
+let degenerate_threshold: f32 = 1.0 / 32768.0
+
+## A gradient point.
+pub struct GradientStop:
+    var position: f32
+    var color: Color
+
+    ## Creates a new gradient point. `position` will be clamped to a 0..=1 range.
+    pub static func new_(position: f32, color: Color) -> GradientStop:
+        return GradientStop(position = normalized_clamped(position), color = color)
+
+struct Gradient:
+    var stops: Vec[GradientStop]
+    var tile_mode: SpreadMode
+    var transform: Transform
+    var points_to_unit: Transform
+    var colors_are_opaque: bool
+    var has_uniform_stops: bool
+
+    ## Takes ownership of `stops0` (a Vec in `memory.heap`).
+    static func new_(stops0: Vec[GradientStop], tile_mode: SpreadMode, transform: Transform, points_to_unit: Transform) -> Gradient:
+        var stops = stops0
+
+        # Note: we let the caller skip the first and/or last position.
+        # i.e. pos[0] = 0.3, pos[1] = 0.7
+        # In these cases, we insert dummy entries to ensure that the final data will be
+        # bracketed by [0, 1].
+        # i.e. our_pos[0] = 0, our_pos[1] = 0.3, our_pos[2] = 0.7, our_pos[3] = 1
+        let dummy_first = stops.data[0].position != 0.0
+        let dummy_last = stops.data[stops.len - 1].position != 1.0
+
+        # Now copy over the colors, adding the dummies as needed.
+        if dummy_first:
+            stops.insert(0, GradientStop.new_(0.0, stops.data[0].color))
+
+        if dummy_last:
+            stops.push(GradientStop.new_(1.0, stops.data[stops.len - 1].color))
+
+        var colors_are_opaque = true
+        for stop in stops.view():
+            if not stop.color.is_opaque():
+                colors_are_opaque = false
+
+        # Pin the last value to 1.0, and make sure positions are monotonic.
+        let start_index: usize = 0 if dummy_first else 1
+        var prev: f32 = 0.0
+        var has_uniform_stops = true
+        let uniform_step = stops.data[start_index].position - prev
+        for i in start_index..<stops.len:
+            var curr: f32
+            if i + 1 == stops.len:
+                # The last one must be zero.
+                curr = 1.0
+            else:
+                curr = bound(stops.data[i].position, prev, 1.0)
+
+            has_uniform_stops = has_uniform_stops and is_nearly_equal(uniform_step, curr - prev)
+            stops.data[i].position = normalized_clamped(curr)
+            prev = curr
+
+        return Gradient(stops = stops, tile_mode = tile_mode, transform = transform, points_to_unit = points_to_unit, colors_are_opaque = colors_are_opaque, has_uniform_stops = has_uniform_stops)
+
+    ## The first half of Rust's push_stages, before `push_stages_pre`.
+    func push_stages_pre(p: RasterPipelineBuilder*) -> bool:
+        p.push(.seed_shader)
+
+        let inv = self.transform.invert() else return false # failed to invert a gradient transform. Nothing will be rendered
+        let ts = inv.post_concat(self.points_to_unit)
+        p.push_transform(ts)
+        return true
+
+    ## The second half of Rust's push_stages, between `push_stages_pre` and
+    ## `push_stages_post`.
+    func push_stages_body(p: RasterPipelineBuilder*, cs: ColorSpace):
+        if self.tile_mode == .reflect:
+            p.push(.reflect_x1)
+        elif self.tile_mode == .repeat:
+            p.push(.repeat_x1)
+        elif self.has_uniform_stops:
+            # SpreadMode::Pad: We clamp only when the stops are evenly spaced. If not, there
+            # may be hard stops, and clamping ruins hard stops at 0 and/or 1. In that case,
+            # we must make sure we're using the general "gradient" stage, which is the only
+            # stage that will correctly handle unclamped t.
+            p.push(.pad_x1)
+
+        let stops = self.stops.view()
+
+        # The two-stop case with stops at 0 and 1.
+        if stops.length == 2:
+            let c0 = colorspace_expand_color(cs, stops[0].color)
+            let c1 = colorspace_expand_color(cs, stops[1].color)
+
+            p.ctx.evenly_spaced_2_stop_gradient = EvenlySpaced2StopGradientCtx(factor = GradientColor.new_(c1.red() - c0.red(), c1.green() - c0.green(), c1.blue() - c0.blue(), c1.alpha() - c0.alpha()), bias = GradientColor.from_color(c0))
+
+            p.push(.evenly_spaced_2_stop_gradient)
+        else:
+            # Unlike Skia, we do not support the `evenly_spaced_gradient` stage. In our case,
+            # there is no performance difference.
+
+            var ctx: GradientCtx
+
+            # Note: In order to handle clamps in search, the search assumes a stop
+            # conceptually placed at -inf. Therefore, the max number of stops is
+            # `self.points.len()+1`.
+            #
+            # We also need at least 16 values for lowp pipeline.
+            let reserve = stops.length + 1 if stops.length + 1 > 16 else 16
+            ctx.factors.reserve(reserve)
+            ctx.biases.reserve(reserve)
+
+            ctx.t_values.reserve(stops.length + 1)
+
+            # Remove the dummy stops inserted by Gradient::new because they are naturally
+            # handled by the search method.
+            var first_stop: usize = 0
+            var last_stop: usize = 1
+            if stops.length > 2:
+                first_stop = 0 if not stops[0].color.equals(stops[1].color) else 1
+                let len = stops.length
+                last_stop = len - 1 if not stops[len - 2].color.equals(stops[len - 1].color) else len - 2
+
+            var t_l = stops[first_stop].position
+            var c_l = GradientColor.from_color(colorspace_expand_color(cs, stops[first_stop].color))
+            ctx.push_const_color(c_l)
+            ctx.t_values.push(0.0)
+            # N.B. lastStop is the index of the last stop, not one after.
+            for i in first_stop..<last_stop:
+                let t_r = stops[i + 1].position
+                let c_r = GradientColor.from_color(colorspace_expand_color(cs, stops[i + 1].color))
+                if t_l < t_r:
+                    # For each stop we calculate a bias B and a scale factor F, such that for
+                    # any t between stops n and n+1, the color we want is B[n] + F[n]*t.
+                    let f = GradientColor.new_((c_r.r - c_l.r) / (t_r - t_l), (c_r.g - c_l.g) / (t_r - t_l), (c_r.b - c_l.b) / (t_r - t_l), (c_r.a - c_l.a) / (t_r - t_l))
+                    ctx.factors.push(f)
+
+                    ctx.biases.push(GradientColor.new_(c_l.r - f.r * t_l, c_l.g - f.g * t_l, c_l.b - f.b * t_l, c_l.a - f.a * t_l))
+
+                    ctx.t_values.push(normalized_clamped(t_l))
+
+                t_l = t_r
+                c_l = c_r
+
+            ctx.push_const_color(c_l)
+            ctx.t_values.push(normalized_clamped(t_l))
+
+            ctx.len = ctx.factors.len
+
+            # Will with zeros until we have enough data to fit into F32x16.
+            while ctx.factors.len < 16:
+                ctx.factors.push(GradientColor.new_(0.0, 0.0, 0.0, 0.0))
+                ctx.biases.push(GradientColor.new_(0.0, 0.0, 0.0, 0.0))
+
+            p.push(.gradient)
+            p.ctx.gradient.release()
+            p.ctx.gradient = ctx
+
+        if not self.colors_are_opaque:
+            p.push(.premultiply)
+
+    mutating func apply_opacity(opacity: f32):
+        for stop in &self.stops.view():
+            stop.color.apply_opacity(opacity)
+
+        self.colors_are_opaque = true
+        for stop in self.stops.view():
+            if not stop.color.is_opaque():
+                self.colors_are_opaque = false
+
+func copy_stops(stops: const GradientStop[]) -> Vec[GradientStop]:
+    var v: Vec[GradientStop]
+    v.extend(stops)
+    return v
+
+# mark: LinearGradient ========================================================================
+
+## A linear gradient shader.
+pub struct LinearGradient:
+    var base: Gradient
+
+    ## Creates a new linear gradient shader. Returns `Shader.solid_color` when `stops`
+    ## has a single stop, `start` and `end` are the same (degenerate), and none when there
+    ## are no stops or the transform is not invertible. The stops are copied.
+    pub static func new_(start: Point, end: Point, stops: const GradientStop[], mode: SpreadMode, transform: Transform) -> Shader?:
+        if stops.length == 0:
+            return none
+
+        if stops.length == 1:
+            return .solid_color(color = stops[0].color)
+
+        let length = end.sub(start).length()
+        if not math32.is_finite(length):
+            return none
+
+        if is_nearly_zero_within_tolerance(length, degenerate_threshold):
+            # Degenerate gradient, the only tricky complication is when in clamp mode, the
+            # limit of the gradient approaches two half planes of solid color (first and
+            # last). However, they are divided by the line perpendicular to the start and end
+            # point, which becomes undefined once start and end are exactly the same, so just
+            # use the end color for a stable solution.
+
+            # Except for special circumstances of clamped gradients, every gradient shape
+            # (when degenerate) can be mapped to the same fallbacks. The specific shape
+            # factories must account for special clamped conditions separately, this will
+            # always return the last color for clamped gradients.
+            match mode:
+                .pad_:
+                    # Depending on how the gradient shape degenerates, there may be a more
+                    # specialized fallback representation for the factories to use, but this
+                    # is a reasonable default.
+                    return .solid_color(color = stops[stops.length - 1].color)
+                _:
+                    # repeat and mirror are treated the same: the border colors are never
+                    # visible, but approximate the final color as infinite repetitions of the
+                    # colors, so it can be represented as the average color of the gradient.
+                    return .solid_color(color = average_gradient_color(stops))
+
+        if transform.invert() == none:
+            return none
+
+        let unit_ts = points_to_unit_ts(start, end) else return none
+        return .linear_gradient(g = LinearGradient(base = Gradient.new_(copy_stops(stops), mode, transform, unit_ts)))
+
+    func push_stages(cs: ColorSpace, p: RasterPipelineBuilder*) -> bool:
+        if not self.base.push_stages_pre(p):
+            return false
+        self.base.push_stages_body(p, cs)
+        return true
+
+func points_to_unit_ts(start: Point, end: Point) -> Transform?:
+    var vec = end.sub(start)
+    let mag = vec.length()
+    let inv: f32 = invert(mag) if mag != 0.0 else 0.0
+
+    vec.scale(inv)
+
+    var ts = ts_from_sin_cos_at(-vec.y, vec.x, start.x, start.y)
+    ts = ts.post_translate(-start.x, -start.y)
+    ts = ts.post_scale(inv, inv)
+    return ts
+
+func average_gradient_color(points: const GradientStop[]) -> Color:
+    # The gradient is a piecewise linear interpolation between colors. For a given interval,
+    # the integral between the two endpoints is 0.5 * (ci + cj) * (pj - pi), which provides
+    # that intervals average color. The overall average color is thus the sum of each piece.
+    # The thing to keep in mind is that the provided gradient definition may implicitly use
+    # p=0 and p=1.
+    var blend = f32[4](0.0)
+
+    # Bake 1/(colorCount - 1) uniform stop difference into this scale factor
+    let w_scale = f32[4](0.5)
+
+    for i in 0..<points.length - 1:
+        # Calculate the average color for the interval between pos(i) and pos(i+1)
+        let c0 = load_color(points[i].color)
+        let c1 = load_color(points[i + 1].color)
+        # when pos == null, there are colorCount uniformly distributed stops, going from 0
+        # to 1, so pos[i + 1] - pos[i] = 1/(colorCount-1)
+        let w = points[i + 1].position - points[i].position
+        blend = blend + w_scale * f32[4](w) * (c1 + c0)
+
+    # Now account for any implicit intervals at the start or end of the stop definitions
+    if points[0].position > 0.0:
+        # The first color is fixed between p = 0 to pos[0], so 0.5 * (ci + cj) * (pj - pi)
+        # becomes 0.5 * (c + c) * (pj - 0) = c * pj
+        let c = load_color(points[0].color)
+        blend = blend + f32[4](points[0].position) * c
+
+    let last_idx = points.length - 1
+    if points[last_idx].position < 1.0:
+        # The last color is fixed between pos[n-1] to p = 1, so 0.5 * (ci + cj) * (pj - pi)
+        # becomes 0.5 * (c + c) * (1 - pi) = c * (1 - pi)
+        let c = load_color(points[last_idx].color)
+        blend = blend + (f32[4](1.0) - f32[4](points[last_idx].position)) * c
+
+    return Color.from_rgba(blend[0], blend[1], blend[2], blend[3]) else trap("unreachable")
+
+func load_color(c: Color) -> f32[4]:
+    return [c.red(), c.green(), c.blue(), c.alpha()]
+
+func ts_from_sin_cos_at(sin: f32, cos: f32, px: f32, py: f32) -> Transform:
+    let cos_inv = 1.0 - cos
+    return Transform.from_row(cos, sin, -sin, cos, sdot(sin, py, cos_inv, px), sdot(-sin, px, cos_inv, py))
+
+func sdot(a: f32, b: f32, c: f32, d: f32) -> f32:
+    return a * b + c * d
+
+# mark: SweepGradient =========================================================================
+
+## A sweep (conic) gradient shader, as Skia's SkSweepGradient.
+pub struct SweepGradient:
+    var base: Gradient
+    var t0: f32
+    var t1: f32
+
+    ## Creates a new sweep gradient shader around `center`, from `start_angle` to
+    ## `end_angle` in degrees. The stops are copied.
+    pub static func new_(center: Point, start_angle: f32, end_angle: f32, stops: const GradientStop[], mode0: SpreadMode, transform: Transform) -> Shader?:
+        var mode = mode0
+        if not math32.is_finite(start_angle) or not math32.is_finite(end_angle) or start_angle > end_angle:
+            return none
+
+        if stops.length == 0:
+            return none
+        if stops.length == 1:
+            return .solid_color(color = stops[0].color)
+
+        if transform.invert() == none:
+            return none
+        if is_nearly_equal_within_tolerance(start_angle, end_angle, degenerate_threshold):
+            if mode == .pad_ and end_angle > degenerate_threshold:
+                # In this case, the first color is repeated from 0 to the angle, then a
+                # hardstop switches to the last color (all other colors are compressed to the
+                # infinitely thin interpolation region).
+                let front_color = stops[0].color
+                let back_color = stops[stops.length - 1].color
+                let new_stops: GradientStop[3] = [GradientStop.new_(0.0, front_color), GradientStop.new_(1.0, front_color), GradientStop.new_(1.0, back_color)]
+                return SweepGradient.new_(center, 0.0, end_angle, new_stops, mode, transform)
+            # TODO: Consider making a degenerate fallback shader similar to Skia. Tiny Skia
+            # currently opts to return `None` in some places.
+            return none
+        if start_angle <= 0.0 and end_angle >= 360.0:
+            mode = .pad_
+        let t0 = start_angle / 360.0
+        let t1 = end_angle / 360.0
+        return .sweep_gradient(g = SweepGradient(base = Gradient.new_(copy_stops(stops), mode, transform, Transform.from_translate(-center.x, -center.y)), t0 = t0, t1 = t1))
+
+    func push_stages(cs: ColorSpace, p: RasterPipelineBuilder*) -> bool:
+        let scale = 1.0 / (self.t1 - self.t0)
+        let bias = -scale * self.t0
+        p.ctx.two_point_conical_gradient.p0 = scale
+        p.ctx.two_point_conical_gradient.p1 = bias
+        if not self.base.push_stages_pre(p):
+            return false
+        p.push(.xy_to_unit_angle)
+        if scale != 1.0 and bias != 0.0:
+            p.push(.apply_concentric_scale_bias)
+        self.base.push_stages_body(p, cs)
+        return true
+
+# mark: Pattern ===============================================================================
+
+## Controls how much filtering to be done when transforming images.
+pub enum FilterQuality as u8:
+    ## Nearest-neighbor. Low quality, but fastest.
+    nearest = 0
+    ## Bilinear.
+    bilinear = 1
+    ## Bicubic. High quality, but slow.
+    bicubic = 2
+
+## Controls how a pixmap should be blended. Like `Paint`, but for `Pixmap`.
+pub struct PixmapPaint:
+    ## Pixmap opacity. Must be in 0..=1 range. Default: 1.0
+    pub var opacity: f32 = 1.0
+
+    ## Pixmap blending mode. Default: SourceOver
+    pub var blend_mode: BlendMode = .source_over
+
+    ## Specifies how much filtering to be done when transforming images. Default: Nearest
+    pub var quality: FilterQuality = .nearest
+
+## A pattern shader. Essentially, a `SkImageShader`. Unlike Skia, we do not support
+## FilterQuality::Medium, because it involves mipmap generation, which adds too much
+## complexity.
+pub struct Pattern:
+    var pixmap: PixmapRef
+    var quality: FilterQuality
+    var spread_mode: SpreadMode
+    var opacity: f32
+    var transform: Transform
+
+    ## Creates a new pattern shader. `opacity` will be clamped to the 0..=1 range.
+    pub static func new_(pixmap: PixmapRef, spread_mode: SpreadMode, quality: FilterQuality, opacity: f32, transform: Transform) -> Shader:
+        return .pattern(p = Pattern(pixmap = pixmap, spread_mode = spread_mode, quality = quality, opacity = normalized_clamped(opacity), transform = transform))
+
+    func push_stages(cs: ColorSpace, p: RasterPipelineBuilder*) -> bool:
+        let ts = self.transform.invert() else return false # failed to invert a pattern transform. Nothing will be rendered
+
+        p.push(.seed_shader)
+
+        p.push_transform(ts)
+
+        var quality = self.quality
+
+        if ts.is_identity() or ts.is_translate():
+            quality = .nearest
+
+        if quality == .bilinear:
+            if ts.is_translate():
+                if ts.tx == math32.trunc(ts.tx) and ts.ty == math32.trunc(ts.ty):
+                    # When the matrix is just an integer translate, bilerp == nearest
+                    # neighbor.
+                    quality = .nearest
+
+        # TODO: minimizing scale via mipmap
+
+        match quality:
+            .nearest:
+                p.ctx.limit_x = TileCtx(scale = (f32)self.pixmap.width(), inv_scale = 1.0 / (f32)self.pixmap.width())
+
+                p.ctx.limit_y = TileCtx(scale = (f32)self.pixmap.height(), inv_scale = 1.0 / (f32)self.pixmap.height())
+
+                # SpreadMode::Pad: The gather() stage will clamp for us.
+                if self.spread_mode == .repeat:
+                    p.push(.repeat)
+                elif self.spread_mode == .reflect:
+                    p.push(.reflect)
+
+                p.push(.gather)
+            .bilinear:
+                p.ctx.sampler = SamplerCtx(spread_mode = self.spread_mode, inv_width = 1.0 / (f32)self.pixmap.width(), inv_height = 1.0 / (f32)self.pixmap.height())
+                p.push(.bilinear)
+            .bicubic:
+                p.ctx.sampler = SamplerCtx(spread_mode = self.spread_mode, inv_width = 1.0 / (f32)self.pixmap.width(), inv_height = 1.0 / (f32)self.pixmap.height())
+                p.push(.bicubic)
+
+                # Bicubic filtering naturally produces out of range values on both sides of
+                # [0,1].
+                p.push(.clamp_0)
+                p.push(.clamp_a)
+            _:
+                return false
+
+        # Unlike Skia, we do not support global opacity and only Pattern allows it.
+        if self.opacity != 1.0:
+            p.ctx.current_coverage = self.opacity
+            p.push(.scale_1_float)
+
+        if let stage = colorspace_expand_stage(cs):
+            # TODO: it would be better to gamma-expand prior to sampling, but there isn't
+            # currently an intermediate pipeline stage for that.
+            p.push(stage)
+
+        return true

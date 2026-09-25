@@ -1,0 +1,182 @@
+#==============================================================================================
+#
+#   tests_core - unit tests of the rasterizer crate
+#
+#   DESCRIPTION:
+#       Port of the #[cfg(test)] modules of tiny-skia: color.rs, path_geometry.rs,
+#       painter.rs (DrawTiler) and pipeline/mod.rs (blend_tests: every blend mode through
+#       the lowp and highp pipelines on one pixel).
+#
+#==============================================================================================
+
+func expect_rgba(c: PremultipliedColorU8, r: u8, g: u8, b: u8, a: u8):
+    if c.red() != r or c.green() != g or c.blue() != b or c.alpha() != a:
+        print(f"expected ({r}, {g}, {b}, {a}), got ({c.red()}, {c.green()}, {c.blue()}, {c.alpha()})")
+        trap("color mismatch")
+
+func expect_color_u8(c: ColorU8, r: u8, g: u8, b: u8, a: u8):
+    if c.red() != r or c.green() != g or c.blue() != b or c.alpha() != a:
+        print(f"expected ({r}, {g}, {b}, {a}), got ({c.red()}, {c.green()}, {c.blue()}, {c.alpha()})")
+        trap("color mismatch")
+
+test "premultiply u8":
+    expect_rgba(ColorU8.from_rgba(10, 20, 30, 40).premultiply(), 2, 3, 5, 40)
+
+test "premultiply u8 opaque":
+    expect_rgba(ColorU8.from_rgba(10, 20, 30, 255).premultiply(), 10, 20, 30, 255)
+
+test "demultiply u8 1":
+    expect_color_u8(PremultipliedColorU8.from_rgba_unchecked(2, 3, 5, 40).demultiply(), 13, 19, 32, 40)
+
+test "demultiply u8 2":
+    expect_color_u8(PremultipliedColorU8.from_rgba_unchecked(10, 20, 30, 255).demultiply(), 10, 20, 30, 255)
+
+test "demultiply u8 3":
+    expect_color_u8(PremultipliedColorU8.from_rgba_unchecked(153, 99, 54, 180).demultiply(), 217, 140, 77, 180)
+
+test "pixels as bytes":
+    var bytes: u8[8] = [0, 1, 2, 3, 10, 11, 12, 13]
+    let pixels = pixels_of(bytes)
+    expect_rgba(pixels[0], 0, 1, 2, 3)
+    expect_rgba(pixels[1], 10, 11, 12, 13)
+
+test "chop cubic at y extrema 1":
+    let src: Point[4] = [Point.from_xy(10.0, 20.0), Point.from_xy(67.0, 437.0), Point.from_xy(298.0, 213.0), Point.from_xy(401.0, 214.0)]
+
+    var dst: Point[10]
+    let n = chop_cubic_at_y_extrema(src, dst)
+    assert(n == 2)
+    expect_point(dst[0], 10.0, 20.0)
+    expect_point(dst[1], 37.508274, 221.24475)
+    expect_point(dst[2], 105.541855, 273.19803)
+    expect_point(dst[3], 180.15599, 273.19803)
+    expect_point(dst[4], 259.80502, 273.19803)
+    expect_point(dst[5], 346.9527, 213.99666)
+    expect_point(dst[6], 400.30844, 213.99666)
+    expect_point(dst[7], 400.53958, 213.99666)
+    expect_point(dst[8], 400.7701, 213.99777)
+    expect_point(dst[9], 401.0, 214.0)
+
+func expect_tile(r: ScreenIntRect?, x: u32, y: u32, w: u32, h: u32):
+    let rect = r else trap("expected a tile")
+    assert(rect.x() == x and rect.y() == y and rect.width() == w and rect.height() == h)
+
+test "draw tiler skip":
+    assert(DrawTiler.new_(100, 500) == none)
+
+test "draw tiler horizontal":
+    let max_dim = DrawTiler.max_dimensions()
+    var iter = DrawTiler.new_(10000, 500) else trap("tiler")
+    expect_tile(iter.next(), 0, 0, max_dim, 500)
+    expect_tile(iter.next(), max_dim, 0, 10000 - max_dim, 500)
+    assert(iter.next() == none)
+
+test "draw tiler vertical":
+    let max_dim = DrawTiler.max_dimensions()
+    var iter = DrawTiler.new_(500, 10000) else trap("tiler")
+    expect_tile(iter.next(), 0, 0, 500, max_dim)
+    expect_tile(iter.next(), 0, max_dim, 500, 10000 - max_dim)
+    assert(iter.next() == none)
+
+test "draw tiler rect":
+    let max_dim = DrawTiler.max_dimensions()
+    var iter = DrawTiler.new_(10000, 10000) else trap("tiler")
+    # Row 1
+    expect_tile(iter.next(), 0, 0, max_dim, max_dim)
+    expect_tile(iter.next(), max_dim, 0, 10000 - max_dim, max_dim)
+    # Row 2
+    expect_tile(iter.next(), 0, max_dim, max_dim, 10000 - max_dim)
+    expect_tile(iter.next(), max_dim, max_dim, 10000 - max_dim, 10000 - max_dim)
+    assert(iter.next() == none)
+
+# mark: Blend tests ===========================================================================
+# Test blending modes.
+#
+# Skia has two kinds of a raster pipeline: high and low precision. "High" uses f32 and "low"
+# uses u16. And for basic operations we don't need f32 and u16 simply faster. But those
+# modes are not identical. They can produce slightly different results due rounding.
+
+func test_blend(mode: BlendMode, is_highp: bool, r: u8, g: u8, b: u8, a: u8):
+    var pixmap = Pixmap.new_(1, 1) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill(Color.from_rgba8(50, 127, 150, 200))
+
+    let pixmap_src = dummy_pixmap_ref()
+
+    var p = RasterPipelineBuilder.new_()
+    p.set_force_hq_pipeline(is_highp)
+    p.push_uniform_color(Color.from_rgba8(220, 140, 75, 180).premultiply())
+    p.push(.load_destination)
+    p.push(blend_mode_to_stage(mode) else trap("stage"))
+    p.push(.store)
+    var rp = p.compile()
+    defer rp.release()
+    let rect = pixmap.size().to_screen_int_rect(0, 0)
+    var m = pixmap.as_mut()
+    var sub = m.as_subpixmap()
+    rp.run(rect, AAMaskCtx(), MaskCtx(), pixmap_src, &sub)
+
+    let c = pixmap.pixel(0, 0) else trap("pixel")
+    expect_rgba(c, r, g, b, a)
+
+test "blend lowp":
+    test_blend(.clear, false, 0, 0, 0, 0)
+    # Source is a no-op
+    test_blend(.destination, false, 39, 100, 118, 200)
+    test_blend(.source_over, false, 167, 129, 88, 239)
+    test_blend(.destination_over, false, 73, 122, 130, 239)
+    test_blend(.source_in, false, 122, 78, 42, 141)
+    test_blend(.destination_in, false, 28, 71, 83, 141)
+    test_blend(.source_out, false, 34, 22, 12, 39)
+    test_blend(.destination_out, false, 12, 30, 35, 59)
+    test_blend(.source_atop, false, 133, 107, 76, 200)
+    test_blend(.destination_atop, false, 61, 92, 95, 180)
+    test_blend(.xor, false, 45, 51, 46, 98)
+    test_blend(.plus, false, 194, 199, 171, 255)
+    test_blend(.modulate, false, 24, 39, 25, 141)
+    test_blend(.screen, false, 170, 160, 146, 239)
+    test_blend(.overlay, false, 92, 128, 106, 239)
+    test_blend(.darken, false, 72, 121, 88, 239)
+    test_blend(.lighten, false, 166, 128, 129, 239)
+    # ColorDodge in not available for lowp.
+    # ColorBurn in not available for lowp.
+    test_blend(.hard_light, false, 154, 128, 95, 239)
+    # SoftLight in not available for lowp.
+    test_blend(.difference, false, 138, 57, 87, 239)
+    test_blend(.exclusion, false, 146, 121, 121, 239)
+    test_blend(.multiply, false, 69, 90, 71, 238)
+    # Hue in not available for lowp.
+    # Saturation in not available for lowp.
+    # Color in not available for lowp.
+    # Luminosity in not available for lowp.
+
+test "blend highp":
+    test_blend(.clear, true, 0, 0, 0, 0)
+    # Source is a no-op
+    test_blend(.destination, true, 39, 100, 118, 200)
+    test_blend(.source_over, true, 167, 128, 88, 239)
+    test_blend(.destination_over, true, 72, 121, 129, 239)
+    test_blend(.source_in, true, 122, 78, 42, 141)
+    test_blend(.destination_in, true, 28, 71, 83, 141)
+    test_blend(.source_out, true, 33, 21, 11, 39)
+    test_blend(.destination_out, true, 11, 29, 35, 59)
+    test_blend(.source_atop, true, 133, 107, 76, 200)
+    test_blend(.destination_atop, true, 61, 92, 95, 180)
+    test_blend(.xor, true, 45, 51, 46, 98)
+    test_blend(.plus, true, 194, 199, 171, 255)
+    test_blend(.modulate, true, 24, 39, 24, 141)
+    test_blend(.screen, true, 171, 160, 146, 239)
+    test_blend(.overlay, true, 92, 128, 106, 239)
+    test_blend(.darken, true, 72, 121, 88, 239)
+    test_blend(.lighten, true, 167, 128, 129, 239)
+    test_blend(.color_dodge, true, 186, 192, 164, 239)
+    test_blend(.color_burn, true, 54, 63, 46, 239)
+    test_blend(.hard_light, true, 155, 128, 95, 239)
+    test_blend(.soft_light, true, 98, 124, 115, 239)
+    test_blend(.difference, true, 139, 58, 88, 239)
+    test_blend(.exclusion, true, 147, 121, 122, 239)
+    test_blend(.multiply, true, 69, 89, 71, 239)
+    test_blend(.hue, true, 128, 103, 74, 239)
+    test_blend(.saturation, true, 59, 126, 140, 239)
+    test_blend(.color, true, 139, 100, 60, 239)
+    test_blend(.luminosity, true, 100, 149, 157, 239)

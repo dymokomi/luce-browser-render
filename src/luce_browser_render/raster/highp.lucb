@@ -1,0 +1,439 @@
+#==============================================================================================
+#
+#   highp - the high precision (f32) raster pipeline: driver, stage table, memory stages
+#
+#   DESCRIPTION:
+#       Port of tiny-skia pipeline/highp.rs, part 1: the Pipeline state, the STAGES table,
+#       `start`, and the stages that move, load, store, gather, mask and scale colors, with
+#       load_8888/store_8888. Unlike lowp, this one implements all stages. Just like Skia,
+#       this pipeline is implemented using f32x8 (`F8`). The blend stages are in
+#       highp_blend.lucb, the shader stages in highp_shaders.lucb.
+#
+#==============================================================================================
+
+let highp_stage_width: usize = 8
+
+type HighpStageFn = func(HighpPipeline*) -> unit
+
+struct HighpPipeline:
+    var index: usize
+    var functions: const HighpStageFn[]
+    var pixmap_src: PixmapRef
+    var pixmap_dst: SubPixmapMut*
+    var ctx: Context* # TODO: remove mut
+    var mask_ctx: MaskCtx
+    var aa_mask_ctx: AAMaskCtx
+    var r: F8
+    var g: F8
+    var b: F8
+    var a: F8
+    var dr: F8
+    var dg: F8
+    var db: F8
+    var da: F8
+    var tail: usize
+    var dx: usize
+    var dy: usize
+
+func highp_next_stage(p: HighpPipeline*):
+    let next = p.functions[p.index]
+    p.index += 1
+    next(p)
+
+# Must be in the same order as Stage
+let highp_stages: HighpStageFn[79] = [
+    highp_move_source_to_destination,
+    highp_move_destination_to_source,
+    highp_clamp_0,
+    highp_clamp_a,
+    highp_premultiply,
+    highp_uniform_color,
+    highp_seed_shader,
+    highp_load_dst,
+    highp_store,
+    highp_load_dst_u8,
+    highp_store_u8,
+    highp_gather,
+    highp_load_mask_u8,
+    highp_mask_u8,
+    highp_scale_u8,
+    highp_lerp_u8,
+    highp_scale_1_float,
+    highp_lerp_1_float,
+    highp_destination_atop,
+    highp_destination_in,
+    highp_destination_out,
+    highp_destination_over,
+    highp_source_atop,
+    highp_source_in,
+    highp_source_out,
+    highp_source_over,
+    highp_clear,
+    highp_modulate,
+    highp_multiply,
+    highp_plus,
+    highp_screen,
+    highp_xor,
+    highp_color_burn,
+    highp_color_dodge,
+    highp_darken,
+    highp_difference,
+    highp_exclusion,
+    highp_hard_light,
+    highp_lighten,
+    highp_overlay,
+    highp_soft_light,
+    highp_hue,
+    highp_saturation,
+    highp_color,
+    highp_luminosity,
+    highp_source_over_rgba,
+    highp_transform,
+    highp_reflect,
+    highp_repeat,
+    highp_bilinear,
+    highp_bicubic,
+    highp_pad_x1,
+    highp_reflect_x1,
+    highp_repeat_x1,
+    highp_gradient,
+    highp_evenly_spaced_2_stop_gradient,
+    highp_xy_to_unit_angle,
+    highp_xy_to_radius,
+    highp_xy_to_2pt_conical_focal_on_circle,
+    highp_xy_to_2pt_conical_well_behaved,
+    highp_xy_to_2pt_conical_smaller,
+    highp_xy_to_2pt_conical_greater,
+    highp_xy_to_2pt_conical_strip,
+    highp_mask_2pt_conical_nan,
+    highp_mask_2pt_conical_degenerates,
+    highp_apply_vector_mask,
+    highp_alter_2pt_conical_compensate_focal,
+    highp_alter_2pt_conical_unswap,
+    highp_negate_x,
+    highp_apply_concentric_scale_bias,
+    highp_gamma_expand_2,
+    highp_gamma_expand_dst_2,
+    highp_gamma_compress_2,
+    highp_gamma_expand_22,
+    highp_gamma_expand_dst_22,
+    highp_gamma_compress_22,
+    highp_gamma_expand_srgb,
+    highp_gamma_expand_dst_srgb,
+    highp_gamma_compress_srgb,
+]
+
+func highp_start(functions: const HighpStageFn[], functions_tail: const HighpStageFn[], rect: ScreenIntRect, aa_mask_ctx: AAMaskCtx, mask_ctx: MaskCtx, ctx: Context*, pixmap_src: PixmapRef, pixmap_dst: SubPixmapMut*):
+    var p = HighpPipeline(
+        index = 0,
+        functions = functions,
+        pixmap_src = pixmap_src,
+        pixmap_dst = pixmap_dst,
+        ctx = ctx,
+        mask_ctx = mask_ctx,
+        aa_mask_ctx = aa_mask_ctx,
+        tail = 0,
+        dx = 0,
+        dy = 0,
+    )
+
+    for y in rect.y()..<rect.bottom():
+        var x = (usize)rect.x()
+        let end = (usize)rect.right()
+
+        p.functions = functions
+        while x + highp_stage_width <= end:
+            p.index = 0
+            p.dx = x
+            p.dy = (usize)y
+            p.tail = highp_stage_width
+            highp_next_stage(&p)
+            x += highp_stage_width
+
+        if x != end:
+            p.index = 0
+            p.functions = functions_tail
+            p.dx = x
+            p.dy = (usize)y
+            p.tail = end - x
+            highp_next_stage(&p)
+
+func highp_move_source_to_destination(p: HighpPipeline*):
+    p.dr = p.r
+    p.dg = p.g
+    p.db = p.b
+    p.da = p.a
+
+    highp_next_stage(p)
+
+func highp_premultiply(p: HighpPipeline*):
+    p.r = f8_mul(p.r, p.a)
+    p.g = f8_mul(p.g, p.a)
+    p.b = f8_mul(p.b, p.a)
+
+    highp_next_stage(p)
+
+func highp_move_destination_to_source(p: HighpPipeline*):
+    p.r = p.dr
+    p.g = p.dg
+    p.b = p.db
+    p.a = p.da
+
+    highp_next_stage(p)
+
+func highp_clamp_0(p: HighpPipeline*):
+    let zero = f8_splat(0.0)
+    p.r = f8_max(p.r, zero)
+    p.g = f8_max(p.g, zero)
+    p.b = f8_max(p.b, zero)
+    p.a = f8_max(p.a, zero)
+
+    highp_next_stage(p)
+
+func highp_clamp_a(p: HighpPipeline*):
+    let one = f8_splat(1.0)
+    p.r = f8_min(p.r, one)
+    p.g = f8_min(p.g, one)
+    p.b = f8_min(p.b, one)
+    p.a = f8_min(p.a, one)
+
+    highp_next_stage(p)
+
+func highp_uniform_color(p: HighpPipeline*):
+    let ctx = p.ctx.uniform_color
+    p.r = f8_splat(ctx.r)
+    p.g = f8_splat(ctx.g)
+    p.b = f8_splat(ctx.b)
+    p.a = f8_splat(ctx.a)
+
+    highp_next_stage(p)
+
+func highp_seed_shader(p: HighpPipeline*):
+    let iota: F8 = [[0.5, 1.5, 2.5, 3.5], [4.5, 5.5, 6.5, 7.5]]
+
+    p.r = f8_add(f8_splat((f32)p.dx), iota)
+    p.g = f8_splat((f32)p.dy + 0.5)
+    p.b = f8_splat(1.0)
+    p.a = f8_splat(0.0)
+
+    p.dr = f8_splat(0.0)
+    p.dg = f8_splat(0.0)
+    p.db = f8_splat(0.0)
+    p.da = f8_splat(0.0)
+
+    highp_next_stage(p)
+
+func highp_dst_pixels(p: HighpPipeline*) -> PremultipliedColorU8[]:
+    let offset = p.pixmap_dst.offset(p.dx, p.dy)
+    return pixels_of(p.pixmap_dst.data)[offset..]
+
+func highp_load_dst(p: HighpPipeline*):
+    highp_load_8888(highp_dst_pixels(p), &p.dr, &p.dg, &p.db, &p.da)
+    highp_next_stage(p)
+
+func highp_load_dst_tail(p: HighpPipeline*):
+    highp_load_8888_tail(p.tail, highp_dst_pixels(p), &p.dr, &p.dg, &p.db, &p.da)
+    highp_next_stage(p)
+
+func highp_store(p: HighpPipeline*):
+    highp_store_8888(p.r, p.g, p.b, p.a, highp_dst_pixels(p))
+    highp_next_stage(p)
+
+func highp_store_tail(p: HighpPipeline*):
+    highp_store_8888_tail(p.r, p.g, p.b, p.a, p.tail, highp_dst_pixels(p))
+    highp_next_stage(p)
+
+# Currently, all mask/A8 pixmaps are handled by lowp.
+func highp_load_dst_u8(_p: HighpPipeline*):
+    return # unreachable
+
+func highp_load_dst_u8_tail(_p: HighpPipeline*):
+    return # unreachable
+
+func highp_store_u8(_p: HighpPipeline*):
+    return # unreachable
+
+func highp_store_u8_tail(_p: HighpPipeline*):
+    return # unreachable
+
+func highp_gather(p: HighpPipeline*):
+    let ix = gather_ix(p.pixmap_src, p.r, p.g)
+    let pixels = gather_pixels(p.pixmap_src, ix)
+    highp_load_8888(pixels, &p.r, &p.g, &p.b, &p.a)
+
+    highp_next_stage(p)
+
+## PixmapRef::gather: the 8 pixels at the indices.
+func gather_pixels(pixmap: PixmapRef, index: M8) -> PremultipliedColorU8[8]:
+    let pixels = pixmap.pixels()
+    var result: PremultipliedColorU8[8] = ---
+    for i: usize in 0..<8:
+        result[i] = pixels[(usize)index[i >> 2][i & 3]]
+    return result
+
+func gather_ix(pixmap: PixmapRef, x0: F8, y0: F8) -> M8:
+    # Exclusive -> inclusive.
+    let w = ulp_sub((f32)pixmap.width())
+    let h = ulp_sub((f32)pixmap.height())
+    let x = f8_min(f8_max(x0, f8_splat(0.0)), f8_splat(w))
+    let y = f8_min(f8_max(y0, f8_splat(0.0)), f8_splat(h))
+
+    let width = (i32)pixmap.width()
+    let ix = i8_add(i8_mul(f8_trunc_int(y), [i32[4](width), i32[4](width)]), f8_trunc_int(x))
+    var result: M8 = ---
+    for h2: usize in 0..<2:
+        for i: usize in 0..<4:
+            result[h2][i] = (u32)ix[h2][i]
+    return result
+
+func ulp_sub(v: f32) -> f32:
+    # Somewhat similar to v - f32::EPSILON
+    return f32.bits(v.bits() - 1)
+
+func highp_load_mask_u8(_p: HighpPipeline*):
+    return # unreachable
+
+func highp_mask_u8(p: HighpPipeline*):
+    let offset = p.mask_ctx.offset(p.dx, p.dy)
+    var c: f32[8] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    for i in 0..<p.tail:
+        c[i] = (f32)p.mask_ctx.data[offset + i]
+    let cc = f8_div(f8_from(c), f8_splat(255.0))
+
+    var all_zero = true
+    for i: usize in 0..<8:
+        if f8_lane(cc, i) != 0.0:
+            all_zero = false
+    if all_zero:
+        return
+
+    p.r = f8_mul(p.r, cc)
+    p.g = f8_mul(p.g, cc)
+    p.b = f8_mul(p.b, cc)
+    p.a = f8_mul(p.a, cc)
+
+    highp_next_stage(p)
+
+func highp_scale_u8(p: HighpPipeline*):
+    # Load u8xTail and cast it to f32x8.
+    let data = p.aa_mask_ctx.copy_at_xy(p.dx, p.dy, p.tail)
+    let c0 = f8_from([(f32)data[0], (f32)data[1], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    let c = f8_div(c0, f8_splat(255.0))
+
+    p.r = f8_mul(p.r, c)
+    p.g = f8_mul(p.g, c)
+    p.b = f8_mul(p.b, c)
+    p.a = f8_mul(p.a, c)
+
+    highp_next_stage(p)
+
+func highp_lerp_u8(p: HighpPipeline*):
+    # Load u8xTail and cast it to f32x8.
+    let data = p.aa_mask_ctx.copy_at_xy(p.dx, p.dy, p.tail)
+    let c0 = f8_from([(f32)data[0], (f32)data[1], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    let c = f8_div(c0, f8_splat(255.0))
+
+    p.r = highp_lerp(p.dr, p.r, c)
+    p.g = highp_lerp(p.dg, p.g, c)
+    p.b = highp_lerp(p.db, p.b, c)
+    p.a = highp_lerp(p.da, p.a, c)
+
+    highp_next_stage(p)
+
+func highp_scale_1_float(p: HighpPipeline*):
+    let c = f8_splat(p.ctx.current_coverage)
+    p.r = f8_mul(p.r, c)
+    p.g = f8_mul(p.g, c)
+    p.b = f8_mul(p.b, c)
+    p.a = f8_mul(p.a, c)
+
+    highp_next_stage(p)
+
+func highp_lerp_1_float(p: HighpPipeline*):
+    let c = f8_splat(p.ctx.current_coverage)
+    p.r = highp_lerp(p.dr, p.r, c)
+    p.g = highp_lerp(p.dg, p.g, c)
+    p.b = highp_lerp(p.db, p.b, c)
+    p.a = highp_lerp(p.da, p.a, c)
+
+    highp_next_stage(p)
+
+func highp_source_over_rgba(p: HighpPipeline*):
+    let pixels = highp_dst_pixels(p)
+    highp_load_8888(pixels, &p.dr, &p.dg, &p.db, &p.da)
+    p.r = highp_mad(p.dr, highp_inv(p.a), p.r)
+    p.g = highp_mad(p.dg, highp_inv(p.a), p.g)
+    p.b = highp_mad(p.db, highp_inv(p.a), p.b)
+    p.a = highp_mad(p.da, highp_inv(p.a), p.a)
+    highp_store_8888(p.r, p.g, p.b, p.a, pixels)
+
+    highp_next_stage(p)
+
+func highp_source_over_rgba_tail(p: HighpPipeline*):
+    let pixels = highp_dst_pixels(p)
+    highp_load_8888_tail(p.tail, pixels, &p.dr, &p.dg, &p.db, &p.da)
+    p.r = highp_mad(p.dr, highp_inv(p.a), p.r)
+    p.g = highp_mad(p.dg, highp_inv(p.a), p.g)
+    p.b = highp_mad(p.db, highp_inv(p.a), p.b)
+    p.a = highp_mad(p.da, highp_inv(p.a), p.a)
+    highp_store_8888_tail(p.r, p.g, p.b, p.a, p.tail, pixels)
+
+    highp_next_stage(p)
+
+func highp_just_return(_p: HighpPipeline*):
+    return # Ends the loop.
+
+# mark: Load and store ========================================================================
+
+func highp_load_8888(data: const PremultipliedColorU8[], r: F8*, g: F8*, b: F8*, a: F8*):
+    # Surprisingly, `f32 * FACTOR` is way faster than `f32x8 * f32x8::splat(FACTOR)`.
+    let factor: f32 = 1.0 / 255.0
+    for i: usize in 0..<8:
+        let c = data[i]
+        (*r)[i >> 2][i & 3] = (f32)c.rgba[0] * factor
+        (*g)[i >> 2][i & 3] = (f32)c.rgba[1] * factor
+        (*b)[i >> 2][i & 3] = (f32)c.rgba[2] * factor
+        (*a)[i >> 2][i & 3] = (f32)c.rgba[3] * factor
+
+func highp_load_8888_tail(tail: usize, data: const PremultipliedColorU8[], r: F8*, g: F8*, b: F8*, a: F8*):
+    # Fill a dummy array with `tail` values. `tail` is always in a 1..STAGE_WIDTH-1 range.
+    # This way we can reuse the `load_8888_` method and remove any branches.
+    var tmp: PremultipliedColorU8[8]
+    for i in 0..<tail:
+        tmp[i] = data[i]
+    highp_load_8888(tmp, r, g, b, a)
+
+func highp_store_8888(r: F8, g: F8, b: F8, a: F8, data: PremultipliedColorU8[]):
+    let rr = highp_unnorm(r)
+    let gg = highp_unnorm(g)
+    let bb = highp_unnorm(b)
+    let aa = highp_unnorm(a)
+    for i: usize in 0..<8:
+        let h = i >> 2
+        let l = i & 3
+        data[i] = PremultipliedColorU8(rgba = [(u8)rr[h][l], (u8)gg[h][l], (u8)bb[h][l], (u8)aa[h][l]])
+
+func highp_store_8888_tail(r: F8, g: F8, b: F8, a: F8, tail: usize, data: PremultipliedColorU8[]):
+    let rr = highp_unnorm(r)
+    let gg = highp_unnorm(g)
+    let bb = highp_unnorm(b)
+    let aa = highp_unnorm(a)
+    for i in 0..<tail:
+        let h = i >> 2
+        let l = i & 3
+        data[i] = PremultipliedColorU8(rgba = [(u8)rr[h][l], (u8)gg[h][l], (u8)bb[h][l], (u8)aa[h][l]])
+
+func highp_unnorm(v: F8) -> I8:
+    return f8_round_int(f8_mul(f8_min(f8_max(v, f8_splat(0.0)), f8_splat(1.0)), f8_splat(255.0)))
+
+func highp_inv(v: F8) -> F8:
+    return f8_sub(f8_splat(1.0), v)
+
+func highp_two(v: F8) -> F8:
+    return f8_add(v, v)
+
+func highp_mad(f: F8, m: F8, a: F8) -> F8:
+    return f8_add(f8_mul(f, m), a)
+
+func highp_lerp(from_: F8, to: F8, t: F8) -> F8:
+    return highp_mad(f8_sub(to, from_), t, from_)

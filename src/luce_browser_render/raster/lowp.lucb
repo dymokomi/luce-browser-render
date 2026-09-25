@@ -1,0 +1,434 @@
+#==============================================================================================
+#
+#   lowp - the low precision (u16) raster pipeline: driver, stage table, memory stages
+#
+#   DESCRIPTION:
+#       Port of tiny-skia pipeline/lowp.rs, part 1. A lowp pipeline uses u16 instead of f32
+#       for math. Because of that, it doesn't implement stages that require high precision.
+#       The pipeline compiler will automatically decide which one to use. Skia uses u16x8
+#       (128bit) types for a generic CPU and u16x16 (256bit) for modern x86 CPUs; tiny-skia
+#       uses u16x16 (`U16x16`, 16 lanes), as here. Coordinates travel through the u16 lanes
+#       as the bits of f32x16 (`lowp_join` / `lowp_split`). The blend and shader stages are
+#       in lowp_stages.lucb.
+#
+#==============================================================================================
+
+let lowp_stage_width: usize = 16
+
+type LowpStageFn = func(LowpPipeline*) -> unit
+
+struct LowpPipeline:
+    var index: usize
+    var functions: const LowpStageFn[]
+    var pixmap: SubPixmapMut*
+    var mask_ctx: MaskCtx
+    var aa_mask_ctx: AAMaskCtx
+    var ctx: Context*
+    var r: U16x16
+    var g: U16x16
+    var b: U16x16
+    var a: U16x16
+    var dr: U16x16
+    var dg: U16x16
+    var db: U16x16
+    var da: U16x16
+    var tail: usize
+    var dx: usize
+    var dy: usize
+
+func lowp_next_stage(p: LowpPipeline*):
+    let next = p.functions[p.index]
+    p.index += 1
+    next(p)
+
+# Must be in the same order as Stage
+let lowp_stages: LowpStageFn[79] = [
+    lowp_move_source_to_destination,
+    lowp_move_destination_to_source,
+    lowp_null_fn, # Clamp0
+    lowp_null_fn, # ClampA
+    lowp_premultiply,
+    lowp_uniform_color,
+    lowp_seed_shader,
+    lowp_load_dst,
+    lowp_store,
+    lowp_load_dst_u8,
+    lowp_store_u8,
+    lowp_null_fn, # Gather
+    lowp_load_mask_u8,
+    lowp_mask_u8,
+    lowp_scale_u8,
+    lowp_lerp_u8,
+    lowp_scale_1_float,
+    lowp_lerp_1_float,
+    lowp_destination_atop,
+    lowp_destination_in,
+    lowp_destination_out,
+    lowp_destination_over,
+    lowp_source_atop,
+    lowp_source_in,
+    lowp_source_out,
+    lowp_source_over,
+    lowp_clear,
+    lowp_modulate,
+    lowp_multiply,
+    lowp_plus,
+    lowp_screen,
+    lowp_xor,
+    lowp_null_fn, # ColorBurn
+    lowp_null_fn, # ColorDodge
+    lowp_darken,
+    lowp_difference,
+    lowp_exclusion,
+    lowp_hard_light,
+    lowp_lighten,
+    lowp_overlay,
+    lowp_null_fn, # SoftLight
+    lowp_null_fn, # Hue
+    lowp_null_fn, # Saturation
+    lowp_null_fn, # Color
+    lowp_null_fn, # Luminosity
+    lowp_source_over_rgba,
+    lowp_transform,
+    lowp_null_fn, # Reflect
+    lowp_null_fn, # Repeat
+    lowp_null_fn, # Bilinear
+    lowp_null_fn, # Bicubic
+    lowp_pad_x1,
+    lowp_reflect_x1,
+    lowp_repeat_x1,
+    lowp_gradient,
+    lowp_evenly_spaced_2_stop_gradient,
+    # TODO: Can be implemented for lowp as well. The implementation is very similar to its
+    # highp variant.
+    lowp_null_fn, # XYToUnitAngle
+    lowp_xy_to_radius,
+    lowp_null_fn, # XYTo2PtConicalFocalOnCircle
+    lowp_null_fn, # XYTo2PtConicalWellBehaved
+    lowp_null_fn, # XYTo2PtConicalSmaller
+    lowp_null_fn, # XYTo2PtConicalGreater
+    lowp_null_fn, # XYTo2PtConicalStrip
+    lowp_null_fn, # Mask2PtConicalNan
+    lowp_null_fn, # Mask2PtConicalDegenerates
+    lowp_null_fn, # ApplyVectorMask
+    lowp_null_fn, # Alter2PtConicalCompensateFocal
+    lowp_null_fn, # Alter2PtConicalUnswap
+    lowp_null_fn, # NegateX
+    lowp_null_fn, # ApplyConcentricScaleBias
+    lowp_null_fn, # GammaExpand2
+    lowp_null_fn, # GammaExpandDestination2
+    lowp_null_fn, # GammaCompress2
+    lowp_null_fn, # GammaExpand22
+    lowp_null_fn, # GammaExpandDestination22
+    lowp_null_fn, # GammaCompress22
+    lowp_null_fn, # GammaExpandSrgb
+    lowp_null_fn, # GammaExpandDestinationSrgb
+    lowp_null_fn, # GammaCompressSrgb
+]
+
+func lowp_start(functions: const LowpStageFn[], functions_tail: const LowpStageFn[], rect: ScreenIntRect, aa_mask_ctx: AAMaskCtx, mask_ctx: MaskCtx, ctx: Context*, pixmap: SubPixmapMut*):
+    var p = LowpPipeline(
+        index = 0,
+        functions = functions,
+        pixmap = pixmap,
+        mask_ctx = mask_ctx,
+        aa_mask_ctx = aa_mask_ctx,
+        ctx = ctx,
+        tail = 0,
+        dx = 0,
+        dy = 0,
+    )
+
+    for y in rect.y()..<rect.bottom():
+        var x = (usize)rect.x()
+        let end = (usize)rect.right()
+
+        p.functions = functions
+        while x + lowp_stage_width <= end:
+            p.index = 0
+            p.dx = x
+            p.dy = (usize)y
+            p.tail = lowp_stage_width
+            lowp_next_stage(&p)
+            x += lowp_stage_width
+
+        if x != end:
+            p.index = 0
+            p.functions = functions_tail
+            p.dx = x
+            p.dy = (usize)y
+            p.tail = end - x
+            lowp_next_stage(&p)
+
+func lowp_move_source_to_destination(p: LowpPipeline*):
+    p.dr = p.r
+    p.dg = p.g
+    p.db = p.b
+    p.da = p.a
+
+    lowp_next_stage(p)
+
+func lowp_move_destination_to_source(p: LowpPipeline*):
+    p.r = p.dr
+    p.g = p.dg
+    p.b = p.db
+    p.a = p.da
+
+    lowp_next_stage(p)
+
+func lowp_premultiply(p: LowpPipeline*):
+    p.r = div255(u16_mul(p.r, p.a))
+    p.g = div255(u16_mul(p.g, p.a))
+    p.b = div255(u16_mul(p.b, p.a))
+
+    lowp_next_stage(p)
+
+func lowp_uniform_color(p: LowpPipeline*):
+    let ctx = p.ctx.uniform_color
+    p.r = u16_splat(ctx.rgba[0])
+    p.g = u16_splat(ctx.rgba[1])
+    p.b = u16_splat(ctx.rgba[2])
+    p.a = u16_splat(ctx.rgba[3])
+
+    lowp_next_stage(p)
+
+func lowp_seed_shader(p: LowpPipeline*):
+    let iota: F16 = [[0.5, 1.5, 2.5, 3.5], [4.5, 5.5, 6.5, 7.5], [8.5, 9.5, 10.5, 11.5], [12.5, 13.5, 14.5, 15.5]]
+
+    let x = f16_add(f16_splat((f32)p.dx), iota)
+    let y = f16_splat((f32)p.dy + 0.5)
+    lowp_split(x, &p.r, &p.g)
+    lowp_split(y, &p.b, &p.a)
+
+    lowp_next_stage(p)
+
+func lowp_dst_pixels(p: LowpPipeline*) -> PremultipliedColorU8[]:
+    let offset = p.pixmap.offset(p.dx, p.dy)
+    return pixels_of(p.pixmap.data)[offset..]
+
+func lowp_dst_mask(p: LowpPipeline*) -> u8[]:
+    let offset = p.pixmap.offset(p.dx, p.dy)
+    return p.pixmap.data[offset..]
+
+func lowp_load_dst(p: LowpPipeline*):
+    lowp_load_8888(lowp_dst_pixels(p), &p.dr, &p.dg, &p.db, &p.da)
+    lowp_next_stage(p)
+
+func lowp_load_dst_tail(p: LowpPipeline*):
+    lowp_load_8888_tail(p.tail, lowp_dst_pixels(p), &p.dr, &p.dg, &p.db, &p.da)
+    lowp_next_stage(p)
+
+func lowp_store(p: LowpPipeline*):
+    lowp_store_8888(p.r, p.g, p.b, p.a, lowp_dst_pixels(p))
+    lowp_next_stage(p)
+
+func lowp_store_tail(p: LowpPipeline*):
+    lowp_store_8888_tail(p.r, p.g, p.b, p.a, p.tail, lowp_dst_pixels(p))
+    lowp_next_stage(p)
+
+func lowp_load_dst_u8(p: LowpPipeline*):
+    lowp_load_8(lowp_dst_mask(p), &p.da)
+    lowp_next_stage(p)
+
+func lowp_load_dst_u8_tail(p: LowpPipeline*):
+    # Fill a dummy array with `tail` values. `tail` is always in a 1..STAGE_WIDTH-1 range.
+    # This way we can reuse the `load_8888__` method and remove any branches.
+    let data = lowp_dst_mask(p)
+    var tmp: u8[16]
+    for i in 0..<p.tail:
+        tmp[i] = data[i]
+    lowp_load_8(tmp, &p.da)
+
+    lowp_next_stage(p)
+
+func lowp_store_u8(p: LowpPipeline*):
+    let data = lowp_dst_mask(p)
+    for i: usize in 0..<16:
+        data[i] = (u8)p.a[i >> 3][i & 7]
+
+    lowp_next_stage(p)
+
+func lowp_store_u8_tail(p: LowpPipeline*):
+    let data = lowp_dst_mask(p)
+    for i in 0..<p.tail:
+        data[i] = (u8)p.a[i >> 3][i & 7]
+
+    lowp_next_stage(p)
+
+# Similar to mask_u8, but only loads the mask values without actually masking the pipeline.
+func lowp_load_mask_u8(p: LowpPipeline*):
+    let offset = p.mask_ctx.offset(p.dx, p.dy)
+
+    var c = u16_splat(0)
+    for i in 0..<p.tail:
+        c[i >> 3][i & 7] = (u16)p.mask_ctx.data[offset + i]
+
+    p.r = u16_splat(0)
+    p.g = u16_splat(0)
+    p.b = u16_splat(0)
+    p.a = c
+
+    lowp_next_stage(p)
+
+func lowp_mask_u8(p: LowpPipeline*):
+    let offset = p.mask_ctx.offset(p.dx, p.dy)
+
+    var c = u16_splat(0)
+    for i in 0..<p.tail:
+        c[i >> 3][i & 7] = (u16)p.mask_ctx.data[offset + i]
+
+    if u16_is_zero(c):
+        return
+
+    p.r = div255(u16_mul(p.r, c))
+    p.g = div255(u16_mul(p.g, c))
+    p.b = div255(u16_mul(p.b, c))
+    p.a = div255(u16_mul(p.a, c))
+
+    lowp_next_stage(p)
+
+func lowp_scale_u8(p: LowpPipeline*):
+    # Load u8xTail and cast it to u16x16.
+    let data = p.aa_mask_ctx.copy_at_xy(p.dx, p.dy, p.tail)
+    var c = u16_splat(0)
+    c[0][0] = (u16)data[0]
+    c[0][1] = (u16)data[1]
+
+    p.r = div255(u16_mul(p.r, c))
+    p.g = div255(u16_mul(p.g, c))
+    p.b = div255(u16_mul(p.b, c))
+    p.a = div255(u16_mul(p.a, c))
+
+    lowp_next_stage(p)
+
+func lowp_lerp_u8(p: LowpPipeline*):
+    # Load u8xTail and cast it to u16x16.
+    let data = p.aa_mask_ctx.copy_at_xy(p.dx, p.dy, p.tail)
+    var c = u16_splat(0)
+    c[0][0] = (u16)data[0]
+    c[0][1] = (u16)data[1]
+
+    p.r = lowp_lerp(p.dr, p.r, c)
+    p.g = lowp_lerp(p.dg, p.g, c)
+    p.b = lowp_lerp(p.db, p.b, c)
+    p.a = lowp_lerp(p.da, p.a, c)
+
+    lowp_next_stage(p)
+
+func lowp_scale_1_float(p: LowpPipeline*):
+    let c = lowp_from_float(p.ctx.current_coverage)
+    p.r = div255(u16_mul(p.r, c))
+    p.g = div255(u16_mul(p.g, c))
+    p.b = div255(u16_mul(p.b, c))
+    p.a = div255(u16_mul(p.a, c))
+
+    lowp_next_stage(p)
+
+func lowp_lerp_1_float(p: LowpPipeline*):
+    let c = lowp_from_float(p.ctx.current_coverage)
+    p.r = lowp_lerp(p.dr, p.r, c)
+    p.g = lowp_lerp(p.dg, p.g, c)
+    p.b = lowp_lerp(p.db, p.b, c)
+    p.a = lowp_lerp(p.da, p.a, c)
+
+    lowp_next_stage(p)
+
+func lowp_source_over_rgba(p: LowpPipeline*):
+    let pixels = lowp_dst_pixels(p)
+    lowp_load_8888(pixels, &p.dr, &p.dg, &p.db, &p.da)
+    p.r = u16_add(p.r, div255(u16_mul(p.dr, lowp_inv(p.a))))
+    p.g = u16_add(p.g, div255(u16_mul(p.dg, lowp_inv(p.a))))
+    p.b = u16_add(p.b, div255(u16_mul(p.db, lowp_inv(p.a))))
+    p.a = u16_add(p.a, div255(u16_mul(p.da, lowp_inv(p.a))))
+    lowp_store_8888(p.r, p.g, p.b, p.a, pixels)
+
+    lowp_next_stage(p)
+
+func lowp_source_over_rgba_tail(p: LowpPipeline*):
+    let pixels = lowp_dst_pixels(p)
+    lowp_load_8888_tail(p.tail, pixels, &p.dr, &p.dg, &p.db, &p.da)
+    p.r = u16_add(p.r, div255(u16_mul(p.dr, lowp_inv(p.a))))
+    p.g = u16_add(p.g, div255(u16_mul(p.dg, lowp_inv(p.a))))
+    p.b = u16_add(p.b, div255(u16_mul(p.db, lowp_inv(p.a))))
+    p.a = u16_add(p.a, div255(u16_mul(p.da, lowp_inv(p.a))))
+    lowp_store_8888_tail(p.r, p.g, p.b, p.a, p.tail, pixels)
+
+    lowp_next_stage(p)
+
+func lowp_just_return(_p: LowpPipeline*):
+    return # Ends the loop.
+
+func lowp_null_fn(_p: LowpPipeline*):
+    return # Just for unsupported functions in STAGES.
+
+# mark: Load and store ========================================================================
+
+func lowp_load_8888(data: const PremultipliedColorU8[], r: U16x16*, g: U16x16*, b: U16x16*, a: U16x16*):
+    for i: usize in 0..<16:
+        let c = data[i]
+        (*r)[i >> 3][i & 7] = (u16)c.rgba[0]
+        (*g)[i >> 3][i & 7] = (u16)c.rgba[1]
+        (*b)[i >> 3][i & 7] = (u16)c.rgba[2]
+        (*a)[i >> 3][i & 7] = (u16)c.rgba[3]
+
+func lowp_load_8888_tail(tail: usize, data: const PremultipliedColorU8[], r: U16x16*, g: U16x16*, b: U16x16*, a: U16x16*):
+    # Fill a dummy array with `tail` values. `tail` is always in a 1..STAGE_WIDTH-1 range.
+    # This way we can reuse the `load_8888__` method and remove any branches.
+    var tmp: PremultipliedColorU8[16]
+    for i in 0..<tail:
+        tmp[i] = data[i]
+    lowp_load_8888(tmp, r, g, b, a)
+
+func lowp_store_8888(r: U16x16, g: U16x16, b: U16x16, a: U16x16, data: PremultipliedColorU8[]):
+    for i: usize in 0..<16:
+        let h = i >> 3
+        let l = i & 7
+        data[i] = PremultipliedColorU8(rgba = [(u8)r[h][l], (u8)g[h][l], (u8)b[h][l], (u8)a[h][l]])
+
+func lowp_store_8888_tail(r: U16x16, g: U16x16, b: U16x16, a: U16x16, tail: usize, data: PremultipliedColorU8[]):
+    for i in 0..<tail:
+        let h = i >> 3
+        let l = i & 7
+        data[i] = PremultipliedColorU8(rgba = [(u8)r[h][l], (u8)g[h][l], (u8)b[h][l], (u8)a[h][l]])
+
+func lowp_load_8(data: const u8[], a: U16x16*):
+    for i: usize in 0..<16:
+        (*a)[i >> 3][i & 7] = (u16)data[i]
+
+func div255(v: U16x16) -> U16x16:
+    # Skia uses `vrshrq_n_u16(vrsraq_n_u16(v, v, 8), 8)` here when NEON is available, but it
+    # doesn't affect performance much and breaks reproducible result. Ignore it.
+    return [(v[0] +% u16[8](255)) >> 8, (v[1] +% u16[8](255)) >> 8]
+
+func lowp_inv(v: U16x16) -> U16x16:
+    return [u16[8](255) -% v[0], u16[8](255) -% v[1]]
+
+func lowp_from_float(f: f32) -> U16x16:
+    return u16_splat((u16)(f * 255.0 + 0.5))
+
+func lowp_lerp(from_: U16x16, to: U16x16, t: U16x16) -> U16x16:
+    return div255(u16_add(u16_mul(from_, lowp_inv(t)), u16_mul(to, t)))
+
+union LaneBits:
+    u: U16x16
+    f: F8
+
+# We're splitting f32x16 (512bit) into two u16x16 (256 bit).
+func lowp_split(v: F16, lo: U16x16*, hi: U16x16*):
+    var bits: LaneBits
+    bits.f = [v[0], v[1]]
+    *lo = bits.u
+    bits.f = [v[2], v[3]]
+    *hi = bits.u
+
+# We're joining two u16x16 (256 bit) into f32x16 (512bit).
+func lowp_join(lo: U16x16, hi: U16x16) -> F16:
+    var a: LaneBits
+    a.u = lo
+    var b: LaneBits
+    b.u = hi
+    return [a.f[0], a.f[1], b.f[0], b.f[1]]
+
+func lowp_mad(f: F16, m: F16, a: F16) -> F16:
+    # NEON vmlaq_f32 doesn't seem to affect performance in any way. Ignore it.
+    return f16_add(f16_mul(f, m), a)

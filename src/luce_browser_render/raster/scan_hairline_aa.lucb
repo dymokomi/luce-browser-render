@@ -1,0 +1,426 @@
+#==============================================================================================
+#
+#   scan_hairline_aa - anti-aliased rectangles and hairlines
+#
+#   DESCRIPTION:
+#       Port of tiny-skia scan/hairline_aa.rs (SkScan_Antihair.cpp), part 1: FixedRect,
+#       fill_rect (anti-aliased rectangles in 24.8 fixed point: fill_dot8, do_scanline,
+#       call_hline_blitter), stroke_path, anti_hair_line_rgn and do_anti_hairline. The
+#       per-direction anti-hair blitters and RectClipBlitter are in
+#       scan_hairline_aa_blitters.lucb.
+#
+#==============================================================================================
+
+struct FixedRect:
+    var left: FDot16
+    var top: FDot16
+    var right: FDot16
+    var bottom: FDot16
+
+    static func from_rect(src: Rect) -> FixedRect:
+        return FixedRect(left = fdot16_from_f32(src.left()), top = fdot16_from_f32(src.top()), right = fdot16_from_f32(src.right()), bottom = fdot16_from_f32(src.bottom()))
+
+func alpha_mul(value: AlphaU8, alpha256: i32) -> u8:
+    let a = ((i32)value * alpha256) >> 8
+    return (u8)a
+
+func hairline_aa_fill_rect(rect0: Rect, clip: ScreenIntRect, blitter: Blitter):
+    let rect = rect0.intersect(clip.to_rect()) else return # everything was clipped out
+
+    let fr = FixedRect.from_rect(rect)
+    fill_fixed_rect(fr, blitter)
+
+func fill_fixed_rect(rect: FixedRect, blitter: Blitter):
+    fill_dot8(fdot8_from_fdot16(rect.left), fdot8_from_fdot16(rect.top), fdot8_from_fdot16(rect.right), fdot8_from_fdot16(rect.bottom), true, blitter)
+
+func to_alpha(a: i32) -> u8:
+    return (u8)a
+
+func fill_dot8(l: FDot8, t: FDot8, r: FDot8, b: FDot8, fill_inner: bool, blitter0: Blitter):
+    var blitter = blitter0
+    # check for empty now that we're in our reduced precision space
+    if l >= r or t >= b:
+        return
+
+    var top = t >> 8
+    if top == ((b - 1) >> 8):
+        # just one scanline high
+        do_scanline(l, top, r, to_alpha(b - t - 1), blitter)
+        return
+
+    if t & 0xFF != 0:
+        do_scanline(l, top, r, to_alpha(256 - (t & 0xFF)), blitter)
+        top += 1
+
+    let bottom = b >> 8
+    let height = bottom - top
+    if height > 0:
+        var left = l >> 8
+        if left == ((r - 1) >> 8):
+            # just 1-pixel wide
+            if left >= 0 and top >= 0:
+                blitter.blit_v((u32)left, (u32)top, (u32)height, to_alpha(r - l - 1))
+        else:
+            if l & 0xFF != 0:
+                if left >= 0 and top >= 0:
+                    blitter.blit_v((u32)left, (u32)top, (u32)height, to_alpha(256 - (l & 0xFF)))
+
+                left += 1
+
+            let right = r >> 8
+            let width = right - left
+            if fill_inner:
+                if width > 0:
+                    if left >= 0 and top >= 0:
+                        let rect = ScreenIntRect.from_xywh_safe((u32)left, (u32)top, (u32)width, (u32)height)
+                        blitter.blit_rect(rect)
+
+            if r & 0xFF != 0:
+                if right >= 0 and top >= 0:
+                    blitter.blit_v((u32)right, (u32)top, (u32)height, to_alpha(r & 0xFF))
+
+    if b & 0xFF != 0:
+        do_scanline(l, bottom, r, to_alpha(b & 0xFF), blitter)
+
+func do_scanline(l: FDot8, top0: i32, r: FDot8, alpha: AlphaU8, blitter0: Blitter):
+    var blitter = blitter0
+    let one_len: u32 = 1
+    if top0 < 0:
+        return
+    let top = (u32)top0
+
+    if (l >> 8) == ((r - 1) >> 8):
+        # 1x1 pixel
+        if (l >> 8) >= 0:
+            blitter.blit_v((u32)(l >> 8), top, one_len, alpha_mul(alpha, r - l))
+        return
+
+    var left = l >> 8
+
+    if l & 0xFF != 0:
+        if (l >> 8) >= 0:
+            blitter.blit_v((u32)(l >> 8), top, one_len, alpha_mul(alpha, 256 - (l & 0xFF)))
+
+        left += 1
+
+    let right = r >> 8
+    let width = right - left
+    if width > 0:
+        if left >= 0:
+            call_hline_blitter((u32)left, top, (u32)width, alpha, blitter)
+
+    if r & 0xFF != 0:
+        if right >= 0:
+            blitter.blit_v((u32)right, top, one_len, alpha_mul(alpha, r & 0xFF))
+
+## `y` is Rust's `Option<u32>`: the blit is skipped for none.
+func call_hline_blitter(x0: u32, y: u32?, count0: u32, alpha: AlphaU8, blitter0: Blitter):
+    var blitter = blitter0
+    let hline_stack_buffer: usize = 100
+
+    var runs: AlphaRun[101]
+    var aa: u8[100]
+
+    var x = x0
+    var count = count0
+    while true:
+        # In theory, we should be able to just do this once (outside of the loop), since
+        # aa[] and runs[] are supposed" to be const when we call the blitter. In reality,
+        # some wrapper-blitters (e.g. RgnClipBlitter) cast away that constness, and modify
+        # the buffers in-place. Hence the need to be defensive here and reseed the aa value.
+        aa[0] = alpha
+
+        var n = count
+        if n > (u32)hline_stack_buffer:
+            n = (u32)hline_stack_buffer
+
+        runs[0] = (u16)n
+        runs[(usize)n] = 0
+        if let yy = y:
+            blitter.blit_anti_h(x, yy, aa, runs)
+        x += n
+
+        if n >= count or count == 0:
+            break
+
+        count -= n
+
+func hairline_aa_stroke_path(path: const Path*, line_cap: LineCap, clip: ScreenIntRect, blitter: Blitter):
+    stroke_path_impl(path, line_cap, clip, anti_hair_line_rgn, blitter)
+
+func anti_hair_line_rgn(points: const Point[], clip: const ScreenIntRect*?, blitter: Blitter):
+    let max: f32 = 32767.0
+    let fixed_bounds = Rect.from_ltrb(-max, -max, max, max) else trap("unreachable")
+
+    var clip_bounds: Rect? = none
+    if let c = clip:
+        # We perform integral clipping later on, but we do a scalar clip first to ensure that
+        # our coordinates are expressible in fixed/integers.
+        #
+        # antialiased hairlines can draw up to 1/2 of a pixel outside of their bounds, so we
+        # need to outset the clip before calling the clipper. To make the numerics safer, we
+        # outset by a whole pixel, since the 1/2 pixel boundary is important to the antihair
+        # blitter, we don't want to risk numerical fate by chopping on that edge.
+        clip_bounds = c.to_rect().outset(1.0, 1.0)
+
+    for i in 0..<points.length - 1:
+        var pts: Point[2]
+
+        # We have to pre-clip the line to fit in a Fixed, so we just chop the line.
+        if not line_clipper_intersect([points[i], points[i + 1]], fixed_bounds, pts):
+            continue
+
+        if let cb = clip_bounds:
+            let tmp = pts
+            if not line_clipper_intersect(tmp, cb, pts):
+                continue
+
+        let x0 = fdot6_from_f32(pts[0].x)
+        let y0 = fdot6_from_f32(pts[0].y)
+        let x1 = fdot6_from_f32(pts[1].x)
+        let y1 = fdot6_from_f32(pts[1].y)
+
+        if let c = clip:
+            let left = x0 if x0 < x1 else x1
+            let top = y0 if y0 < y1 else y1
+            let right = x0 if x0 > x1 else x1
+            let bottom = y0 if y0 > y1 else y1
+
+            let ir = IntRect.from_ltrb(fdot6_floor(left) - 1, fdot6_floor(top) - 1, fdot6_ceil(right) + 1, fdot6_ceil(bottom) + 1) else return
+
+            if c.to_int_rect().intersect(ir) == none:
+                continue
+
+            if not c.to_int_rect().contains(ir):
+                if let sub = ir.intersect(c.to_int_rect()):
+                    if let subclip = sub.to_screen_int_rect():
+                        do_anti_hairline(x0, y0, x1, y1, subclip, blitter)
+
+                continue
+
+            # fall through to no-clip case
+
+        do_anti_hairline(x0, y0, x1, y1, none, blitter)
+
+enum BlitterKind as u8:
+    hline = 0
+    horish = 1
+    vline = 2
+    vertish = 3
+
+func do_anti_hairline(x00: FDot6, y00: FDot6, x10: FDot6, y10: FDot6, clip_opt0: ScreenIntRect?, blitter: Blitter):
+    var x0 = x00
+    var y0 = y00
+    var x1 = x10
+    var y1 = y10
+    var clip_opt = clip_opt0
+    # check for integer NaN (0x80000000) which we can't handle (can't negate it). It appears
+    # typically from a huge float (inf or nan) being converted to int. If we see it, just
+    # don't draw.
+    if any_bad_ints(x0, y0, x1, y1) != 0:
+        return
+
+    # The caller must clip the line to [-32767.0 ... 32767.0] ahead of time (in dot6 format)
+
+    if math.iabs((i64)(x1 - x0)) > (i64)fdot6_from_i32(511) or math.iabs((i64)(y1 - y0)) > (i64)fdot6_from_i32(511):
+        # instead of (x0 + x1) >> 1, we shift each separately. This is less precise, but
+        # avoids overflowing the intermediate result if the values are huge. A better fix
+        # might be to clip the original pts directly (i.e. do the divide), so we don't spend
+        # time subdividing huge lines at all.
+        let hx = (x0 >> 1) + (x1 >> 1)
+        let hy = (y0 >> 1) + (y1 >> 1)
+        do_anti_hairline(x0, y0, hx, hy, clip_opt, blitter)
+        do_anti_hairline(hx, hy, x1, y1, clip_opt, blitter)
+        return # we're done
+
+    var scale_start: i32
+    var scale_stop: i32
+    var istart: i32
+    var istop: i32
+    var fstart: FDot16
+    var slope: FDot16
+    var blitter_kind: BlitterKind
+
+    if math.iabs((i64)(x1 - x0)) > math.iabs((i64)(y1 - y0)):
+        # mostly horizontal
+
+        if x0 > x1:
+            # we want to go left-to-right
+            var t = x0
+            x0 = x1
+            x1 = t
+            t = y0
+            y0 = y1
+            y1 = t
+
+        istart = fdot6_floor(x0)
+        istop = fdot6_ceil(x1)
+        fstart = fdot6_to_fdot16(y0)
+        if y0 == y1:
+            # completely horizontal, take fast case
+            slope = 0
+            blitter_kind = .hline
+        else:
+            slope = fdot16_fast_div(y1 - y0, x1 - x0)
+            fstart += (slope * (32 - (x0 & 63)) + 32) >> 6
+            blitter_kind = .horish
+
+        if istop - istart == 1:
+            # we are within a single pixel
+            scale_start = x1 - x0
+            scale_stop = 0
+        else:
+            scale_start = 64 - (x0 & 63)
+            scale_stop = x1 & 63
+
+        if let clip_rect = clip_opt:
+            let clip = clip_rect.to_int_rect()
+
+            if istart >= clip.right() or istop <= clip.left():
+                return # we're done
+
+            if istart < clip.left():
+                fstart += slope * (clip.left() - istart)
+                istart = clip.left()
+                scale_start = 64
+                if istop - istart == 1:
+                    # we are within a single pixel
+                    scale_start = contribution_64(x1)
+                    scale_stop = 0
+
+            if istop > clip.right():
+                istop = clip.right()
+                scale_stop = 0 # so we don't draw this last column
+
+            if istart == istop:
+                return # we're done
+
+            # now test if our Y values are completely inside the clip
+            var top: i32
+            var bottom: i32
+            if slope >= 0:
+                # T2B
+                top = fdot16_floor_to_i32(fstart - fdot16_half)
+                bottom = fdot16_ceil_to_i32(fstart + (istop - istart - 1) * slope + fdot16_half)
+            else:
+                # B2T
+                bottom = fdot16_ceil_to_i32(fstart + fdot16_half)
+                top = fdot16_floor_to_i32(fstart + (istop - istart - 1) * slope - fdot16_half)
+
+            top -= 1
+            bottom += 1
+
+            if top >= clip.bottom() or bottom <= clip.top():
+                return # we're done
+
+            if clip.top() <= top and clip.bottom() >= bottom:
+                clip_opt = none
+    else:
+        # mostly vertical
+
+        if y0 > y1:
+            # we want to go top-to-bottom
+            var t = x0
+            x0 = x1
+            x1 = t
+            t = y0
+            y0 = y1
+            y1 = t
+
+        istart = fdot6_floor(y0)
+        istop = fdot6_ceil(y1)
+        fstart = fdot6_to_fdot16(x0)
+        if x0 == x1:
+            if y0 == y1:
+                # are we zero length? nothing to do
+                return # we're done
+
+            slope = 0
+            blitter_kind = .vline
+        else:
+            slope = fdot16_fast_div(x1 - x0, y1 - y0)
+            fstart += (slope * (32 - (y0 & 63)) + 32) >> 6
+            blitter_kind = .vertish
+
+        if istop - istart == 1:
+            # we are within a single pixel
+            scale_start = y1 - y0
+            scale_stop = 0
+        else:
+            scale_start = 64 - (y0 & 63)
+            scale_stop = y1 & 63
+
+        if let clip_rect = clip_opt:
+            let clip = clip_rect.to_int_rect()
+
+            if istart >= clip.bottom() or istop <= clip.top():
+                return # we're done
+
+            if istart < clip.top():
+                fstart += slope * (clip.top() - istart)
+                istart = clip.top()
+                scale_start = 64
+                if istop - istart == 1:
+                    # we are within a single pixel
+                    scale_start = contribution_64(y1)
+                    scale_stop = 0
+            if istop > clip.bottom():
+                istop = clip.bottom()
+                scale_stop = 0 # so we don't draw this last row
+
+            if istart == istop:
+                return # we're done
+
+            # now test if our X values are completely inside the clip
+            var left: i32
+            var right: i32
+            if slope >= 0:
+                # L2R
+                left = fdot16_floor_to_i32(fstart - fdot16_half)
+                right = fdot16_ceil_to_i32(fstart + (istop - istart - 1) * slope + fdot16_half)
+            else:
+                # R2L
+                right = fdot16_ceil_to_i32(fstart + fdot16_half)
+                left = fdot16_floor_to_i32(fstart + (istop - istart - 1) * slope - fdot16_half)
+
+            left -= 1
+            right += 1
+
+            if left >= clip.right() or right <= clip.left():
+                return # we're done
+
+            if clip.left() <= left and clip.right() >= right:
+                clip_opt = none
+
+    var clip_blitter: RectClipBlitter = ---
+    var target = blitter
+    if let clip = clip_opt:
+        clip_blitter = RectClipBlitter(blitter = blitter, clip = clip)
+        target = &clip_blitter
+
+    var hair_blitter = AntiHairBlitter(kind = blitter_kind, blitter = target)
+
+    var ustart = (u32)istart
+    let ustop = (u32)istop
+
+    fstart = hair_blitter.draw_cap(ustart, fstart, slope, scale_start)
+    ustart += 1
+    let full_spans = ustop - ustart - (u32)(scale_stop > 0)
+    if full_spans > 0:
+        fstart = hair_blitter.draw_line(ustart, ustart + full_spans, fstart, slope)
+
+    if scale_stop > 0:
+        discard(hair_blitter.draw_cap(ustop - 1, fstart, slope, scale_stop))
+
+# returns high-bit set if x == 0x8000
+func bad_int(x: i32) -> i32:
+    return x & -%x
+
+func any_bad_ints(a: i32, b: i32, c: i32, d: i32) -> i32:
+    return (bad_int(a) | bad_int(b) | bad_int(c) | bad_int(d)) >> 31
+
+# We want the fractional part of ordinate, but we want multiples of 64 to return 64, not 0,
+# so we can't just say (ordinate & 63). We basically want to compute those bits, and if
+# they're 0, return 64. We can do that w/o a branch with an extra sub and add.
+func contribution_64(ordinate: FDot6) -> i32:
+    return ((ordinate - 1) & 63) + 1

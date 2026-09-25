@@ -1,0 +1,195 @@
+#==============================================================================================
+#
+#   raster_png - a minimal PNG codec for the raster tests
+#
+#   DESCRIPTION:
+#       Decodes and encodes PNGs the way tiny-skia's png-format feature uses the png crate:
+#       `normalize_to_color8` (palettes and low bit depths expanded, tRNS as alpha, 16-bit
+#       samples stripped to their high byte), then gray, gray+alpha, RGB and RGBA as
+#       straight RGBA8. Non-interlaced images only (every reference image of the suite).
+#       zlib and CRC-32 come from luce-compress. (luce-png cannot be linked beside the
+#       rasterizer: its pixel model, luce-raster, exports a module also named `raster`.)
+#
+#==============================================================================================
+
+import memory
+import compress
+
+## A decoded PNG: straight (not premultiplied) RGBA8 in `memory.heap`.
+pub struct DecodedPng:
+    pub var width: u32
+    pub var height: u32
+    pub var rgba: u8[]
+
+let png_signature: u8[8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
+
+func read_u32(data: const u8[], offset: usize) -> u32:
+    return ((u32)data[offset] << 24) | ((u32)data[offset + 1] << 16) | ((u32)data[offset + 2] << 8) | (u32)data[offset + 3]
+
+func paeth(a: i32, b: i32, c: i32) -> u8:
+    let p = a + b - c
+    let pa = p - a if p >= a else a - p
+    let pb = p - b if p >= b else b - p
+    let pc = p - c if p >= c else c - p
+    if pa <= pb and pa <= pc:
+        return (u8)a
+    if pb <= pc:
+        return (u8)b
+    return (u8)c
+
+## Decode `data` into straight RGBA8; none for PNGs this codec does not read.
+pub func decode_rgba8(data: const u8[]) -> DecodedPng?:
+    if data.length < 8:
+        return none
+    for i: usize in 0..<8:
+        if data[i] != png_signature[i]:
+            return none
+
+    var width: u32 = 0
+    var height: u32 = 0
+    var bits: u32 = 0
+    var color: u32 = 0
+    var palette: const u8[] = data[..<0]
+    var trns: const u8[] = data[..<0]
+    var idat_len: usize = 0
+    var offset: usize = 8
+    while offset + 8 <= data.length:
+        let size = (usize)read_u32(data, offset)
+        let name = data[offset + 4..<offset + 8]
+        let body = data[offset + 8..<offset + 8 + size]
+        if name[0] == 'I' and name[1] == 'H' and name[2] == 'D' and name[3] == 'R':
+            width = read_u32(body, 0)
+            height = read_u32(body, 4)
+            bits = (u32)body[8]
+            color = (u32)body[9]
+            if body[12] != 0:
+                return none # interlaced
+        elif name[0] == 'P' and name[1] == 'L' and name[2] == 'T' and name[3] == 'E':
+            palette = body
+        elif name[0] == 't' and name[1] == 'R' and name[2] == 'N' and name[3] == 'S':
+            trns = body
+        elif name[0] == 'I' and name[1] == 'D' and name[2] == 'A' and name[3] == 'T':
+            idat_len += size
+        offset += 12 + size
+
+    # Concatenate the IDAT chunks.
+    let packed = (new u8[idat_len] in memory.heap) else return none
+    defer free(packed) in memory.heap
+    var at: usize = 0
+    offset = 8
+    while offset + 8 <= data.length:
+        let size = (usize)read_u32(data, offset)
+        let name = data[offset + 4..<offset + 8]
+        if name[0] == 'I' and name[1] == 'D' and name[2] == 'A' and name[3] == 'T':
+            for i in 0..<size:
+                packed[at + i] = data[offset + 8 + i]
+            at += size
+        offset += 12 + size
+
+    let channels: u32 = 1 if color == 0 or color == 3 else 2 if color == 4 else 3 if color == 2 else 4
+    let bits_per_pixel = channels * bits
+    let row_bytes = ((usize)width * (usize)bits_per_pixel + 7) // 8
+    let bpp: usize = ((usize)bits_per_pixel + 7) // 8
+    let raw = (new u8[(row_bytes + 1) * (usize)height] in memory.heap) else return none
+    defer free(raw) in memory.heap
+    compress.inflate(packed, raw) else return none
+
+    # Unfilter in place.
+    for y in 0..<(usize)height:
+        let start = y * (row_bytes + 1)
+        let filter = raw[start]
+        for i in 0..<row_bytes:
+            let pos = start + 1 + i
+            let a: u8 = raw[pos - bpp] if i >= bpp else 0
+            let b: u8 = raw[pos - row_bytes - 1] if y > 0 else 0
+            let c: u8 = raw[pos - row_bytes - 1 - bpp] if y > 0 and i >= bpp else 0
+            var predictor: u8 = 0
+            if filter == 1:
+                predictor = a
+            elif filter == 2:
+                predictor = b
+            elif filter == 3:
+                predictor = (u8)(((u32)a + (u32)b) // 2)
+            elif filter == 4:
+                predictor = paeth((i32)a, (i32)b, (i32)c)
+            raw[pos] +%= predictor
+
+    let count = (usize)width * (usize)height
+    let rgba = (new u8[count * 4] in memory.heap) else return none
+    for y in 0..<(usize)height:
+        let row = raw[y * (row_bytes + 1) + 1..]
+        for x in 0..<(usize)width:
+            var v: u8[4] = [0, 0, 0, 255]
+            if color == 3:
+                # palette, 1/2/4/8 bits
+                let bit = x * (usize)bits
+                let index = (usize)(((u32)row[bit // 8] >> (8 - bits - (u32)(bit % 8))) & ((1 << bits) - 1))
+                v[0] = palette[index * 3]
+                v[1] = palette[index * 3 + 1]
+                v[2] = palette[index * 3 + 2]
+                if index < trns.length:
+                    v[3] = trns[index]
+            else:
+                var samples: u8[4] = [0, 0, 0, 255]
+                for ch in 0..<(usize)channels:
+                    if bits == 16:
+                        samples[ch] = row[(x * (usize)channels + ch) * 2]
+                    elif bits == 8:
+                        samples[ch] = row[x * (usize)channels + ch]
+                    else:
+                        let bit = x * (usize)bits
+                        let s = ((u32)row[bit // 8] >> (8 - bits - (u32)(bit % 8))) & ((1 << bits) - 1)
+                        samples[ch] = (u8)(s * 255 // ((1 << bits) - 1))
+                if channels == 1:
+                    v = [samples[0], samples[0], samples[0], 255]
+                elif channels == 2:
+                    v = [samples[0], samples[0], samples[0], samples[1]]
+                elif channels == 3:
+                    v = [samples[0], samples[1], samples[2], 255]
+                else:
+                    v = samples
+            let o = (y * (usize)width + x) * 4
+            for ch: usize in 0..<4:
+                rgba[o + ch] = v[ch]
+    return DecodedPng(width = width, height = height, rgba = rgba)
+
+func put_u32(out: u8[], offset: usize, value: u32):
+    out[offset] = (u8)(value >> 24)
+    out[offset + 1] = (u8)(value >> 16)
+    out[offset + 2] = (u8)(value >> 8)
+    out[offset + 3] = (u8)value
+
+func put_chunk(out: u8[], offset: usize, name: str, body: const u8[]) -> usize:
+    put_u32(out, offset, (u32)body.length)
+    for i: usize in 0..<4:
+        out[offset + 4 + i] = name.bytes[i]
+    for i in 0..<body.length:
+        out[offset + 8 + i] = body[i]
+    let crc = (u32)compress.crc32(out[offset + 4..<offset + 8 + body.length])
+    put_u32(out, offset + 8 + body.length, crc)
+    return offset + 12 + body.length
+
+## Encode straight RGBA8 as a PNG (8-bit RGBA, no filter); the bytes are in `memory.heap`.
+pub func encode_rgba8(width: u32, height: u32, rgba: const u8[]) -> u8[]?:
+    let row_bytes = (usize)width * 4
+    let raw = (new u8[(row_bytes + 1) * (usize)height] in memory.heap) else return none
+    defer free(raw) in memory.heap
+    for y in 0..<(usize)height:
+        raw[y * (row_bytes + 1)] = 0
+        for i in 0..<row_bytes:
+            raw[y * (row_bytes + 1) + 1 + i] = rgba[y * row_bytes + i]
+    let packed = compress.compress(raw) else return none
+    defer free(packed) in memory.heap
+
+    var header: u8[13] = [0, 0, 0, 0, 0, 0, 0, 0, 8, 6, 0, 0, 0]
+    put_u32(header, 0, width)
+    put_u32(header, 4, height)
+    let total = 8 + (12 + 13) + (12 + packed.length) + 12
+    let out = (new u8[total] in memory.heap) else return none
+    for i: usize in 0..<8:
+        out[i] = png_signature[i]
+    var offset: usize = 8
+    offset = put_chunk(out, offset, "IHDR", header)
+    offset = put_chunk(out, offset, "IDAT", packed)
+    offset = put_chunk(out, offset, "IEND", header[..<0])
+    return out

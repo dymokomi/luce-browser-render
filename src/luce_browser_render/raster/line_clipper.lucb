@@ -1,0 +1,229 @@
+#==============================================================================================
+#
+#   line_clipper - clipping lines against rectangles
+#
+#   DESCRIPTION:
+#       Port of tiny-skia line_clipper.rs: `clip` chops a line into up to 3 segments inside
+#       a clip rectangle (vertical segments on the clip's left/right edges keep the winding),
+#       `intersect` clips a line to a rectangle; with the sect/pin helpers computed in f64.
+#
+#==============================================================================================
+
+let line_clipper_max_points: usize = 4
+
+## Clips `src` against `clip` into `points` (4 slots) and answers the number of points
+## written (0 when clipped out; Rust returns the slice).
+func line_clipper_clip(src: const Point[], clip: Rect, can_cull_to_the_right: bool, points: Point[]) -> usize:
+    var index0: usize = 0
+    var index1: usize = 1
+    if not (src[0].y < src[1].y):
+        index0 = 1
+        index1 = 0
+
+    # Check if we're completely clipped out in Y (above or below)
+
+    if src[index1].y <= clip.top():
+        # we're above the clip
+        return 0
+
+    if src[index0].y >= clip.bottom():
+        # we're below the clip
+        return 0
+
+    # Chop in Y to produce a single segment, stored in tmp[0..1]
+
+    var tmp: Point[2] = [src[0], src[1]]
+
+    # now compute intersections
+    if src[index0].y < clip.top():
+        tmp[index0] = Point.from_xy(sect_with_horizontal(src, clip.top()), clip.top())
+
+    if tmp[index1].y > clip.bottom():
+        tmp[index1] = Point.from_xy(sect_with_horizontal(src, clip.bottom()), clip.bottom())
+
+    # Chop it into 1..3 segments that are wholly within the clip in X.
+
+    # temp storage for up to 3 segments
+    var result_storage: Point[4]
+    var line_count: usize = 1
+    var reverse: bool
+
+    if src[0].x < src[1].x:
+        index0 = 0
+        index1 = 1
+        reverse = false
+    else:
+        index0 = 1
+        index1 = 0
+        reverse = true
+
+    var use_tmp = false
+    if tmp[index1].x <= clip.left():
+        # wholly to the left
+        tmp[0].x = clip.left()
+        tmp[1].x = clip.left()
+        reverse = false
+        use_tmp = true
+    elif tmp[index0].x >= clip.right():
+        # wholly to the right
+        if can_cull_to_the_right:
+            return 0
+
+        tmp[0].x = clip.right()
+        tmp[1].x = clip.right()
+        reverse = false
+        use_tmp = true
+    else:
+        var offset: usize = 0
+
+        if tmp[index0].x < clip.left():
+            result_storage[offset] = Point.from_xy(clip.left(), tmp[index0].y)
+            offset += 1
+            result_storage[offset] = Point.from_xy(clip.left(), sect_clamp_with_vertical(tmp, clip.left()))
+        else:
+            result_storage[offset] = tmp[index0]
+        offset += 1
+
+        if tmp[index1].x > clip.right():
+            result_storage[offset] = Point.from_xy(clip.right(), sect_clamp_with_vertical(tmp, clip.right()))
+            offset += 1
+            result_storage[offset] = Point.from_xy(clip.right(), tmp[index1].y)
+        else:
+            result_storage[offset] = tmp[index1]
+
+        line_count = offset
+
+    # Now copy the results into the caller's lines[] parameter
+    if reverse:
+        # copy the pts in reverse order to maintain winding order
+        for i in 0..=line_count:
+            points[line_count - i] = tmp[i] if use_tmp else result_storage[i]
+    else:
+        for i in 0..<line_count + 1:
+            points[i] = tmp[i] if use_tmp else result_storage[i]
+
+    return line_count + 1
+
+func sect_with_horizontal(src: const Point[], y: f32) -> f32:
+    let dy = src[1].y - src[0].y
+    if is_nearly_zero(dy):
+        return ave(src[0].x, src[1].x)
+    # need the extra precision so we don't compute a value that exceeds our original limits
+    let x0 = (f64)src[0].x
+    let y0 = (f64)src[0].y
+    let x1 = (f64)src[1].x
+    let y1 = (f64)src[1].y
+    let result = x0 + ((f64)y - y0) * (x1 - x0) / (y1 - y0)
+
+    # The computed X value might still exceed [X0..X1] due to quantum flux when the doubles
+    # were added and subtracted, so we have to pin the answer :(
+    return (f32)pin_unsorted_f64(result, x0, x1)
+
+func sect_clamp_with_vertical(src: const Point[], x: f32) -> f32:
+    let y = sect_with_vertical(src, x)
+    # Our caller expects y to be between src[0].y and src[1].y (unsorted), but due to the
+    # numerics of floats/doubles, we might have computed a value slightly outside of that, so
+    # we have to manually clamp afterwards. See skbug.com/7491
+    return pin_unsorted_f32(y, src[0].y, src[1].y)
+
+func sect_with_vertical(src: const Point[], x: f32) -> f32:
+    let dx = src[1].x - src[0].x
+    if is_nearly_zero(dx):
+        return ave(src[0].y, src[1].y)
+    # need the extra precision so we don't compute a value that exceeds our original limits
+    let x0 = (f64)src[0].x
+    let y0 = (f64)src[0].y
+    let x1 = (f64)src[1].x
+    let y1 = (f64)src[1].y
+    let result = y0 + ((f64)x - x0) * (y1 - y0) / (x1 - x0)
+    return (f32)result
+
+func pin_unsorted_f32(value: f32, limit00: f32, limit10: f32) -> f32:
+    var limit0 = limit00
+    var limit1 = limit10
+    if limit1 < limit0:
+        let t = limit0
+        limit0 = limit1
+        limit1 = t
+    # now the limits are sorted
+    if value < limit0:
+        return limit0
+    elif value > limit1:
+        return limit1
+    return value
+
+func pin_unsorted_f64(value: f64, limit00: f64, limit10: f64) -> f64:
+    var limit0 = limit00
+    var limit1 = limit10
+    if limit1 < limit0:
+        let t = limit0
+        limit0 = limit1
+        limit1 = t
+    # now the limits are sorted
+    if value < limit0:
+        return limit0
+    elif value > limit1:
+        return limit1
+    return value
+
+## Intersect the line segment against the rect. If there is a non-empty resulting segment,
+## return true and set dst[] to that segment. If not, return false and ignore dst[].
+func line_clipper_intersect(src: const Point[], clip: Rect, dst: Point[]) -> bool:
+    let bounds = Rect.from_ltrb(fmin(src[0].x, src[1].x), fmin(src[0].y, src[1].y), fmax(src[0].x, src[1].x), fmax(src[0].y, src[1].y))
+
+    if let b = bounds:
+        if contains_no_empty_check(clip, b):
+            dst[0] = src[0]
+            dst[1] = src[1]
+            return true
+
+        # check for no overlap, and only permit coincident edges if the line and the edge are
+        # collinear
+        if nested_lt(b.right(), clip.left(), b.width()) or nested_lt(clip.right(), b.left(), b.width()) or nested_lt(b.bottom(), clip.top(), b.height()) or nested_lt(clip.bottom(), b.top(), b.height()):
+            return false
+
+    var index0: usize = 0
+    var index1: usize = 1
+    if not (src[0].y < src[1].y):
+        index0 = 1
+        index1 = 0
+
+    var tmp: Point[2] = [src[0], src[1]]
+
+    # now compute Y intersections
+    if tmp[index0].y < clip.top():
+        tmp[index0] = Point.from_xy(sect_with_horizontal(src, clip.top()), clip.top())
+
+    if tmp[index1].y > clip.bottom():
+        tmp[index1] = Point.from_xy(sect_with_horizontal(src, clip.bottom()), clip.bottom())
+
+    if tmp[0].x < tmp[1].x:
+        index0 = 0
+        index1 = 1
+    else:
+        index0 = 1
+        index1 = 0
+
+    # check for quick-reject in X again, now that we may have been chopped
+    if tmp[index1].x <= clip.left() or tmp[index0].x >= clip.right():
+        # usually we will return false, but we don't if the line is vertical and coincident
+        # with the clip.
+        if tmp[0].x != tmp[1].x or tmp[0].x < clip.left() or tmp[0].x > clip.right():
+            return false
+
+    if tmp[index0].x < clip.left():
+        tmp[index0] = Point.from_xy(clip.left(), sect_with_vertical(src, clip.left()))
+
+    if tmp[index1].x > clip.right():
+        tmp[index1] = Point.from_xy(clip.right(), sect_with_vertical(src, clip.right()))
+
+    dst[0] = tmp[0]
+    dst[1] = tmp[1]
+    return true
+
+func nested_lt(a: f32, b: f32, dim: f32) -> bool:
+    return a <= b and (a < b or dim > 0.0)
+
+# returns true if outer contains inner, even if inner is empty.
+func contains_no_empty_check(outer: Rect, inner: Rect) -> bool:
+    return outer.left() <= inner.left() and outer.top() <= inner.top() and outer.right() >= inner.right() and outer.bottom() >= inner.bottom()

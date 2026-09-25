@@ -258,9 +258,6 @@ func fdot6_div(a: FDot6, b: FDot6) -> FDot16:
         return left_shift(a, 16) // b
     return fdot16_div(a, b)
 
-func fdot6_can_convert_to_fdot16(n: FDot6) -> bool:
-    let max_dot6 = i32_max >> (16 - 6)
-    return math.iabs((i64)n) <= (i64)max_dot6
 
 func fdot6_small_scale(value: u8, dot6: FDot6) -> u8:
     return (u8)(((i32)value * dot6) >> 6)

@@ -1,0 +1,53 @@
+#==============================================================================================
+#
+#   run - the runner of the rasterizer's integration tests
+#
+#   DESCRIPTION:
+#       Runs tiny-skia's integration suite (tests/integration of tiny-skia 0.12.0, ported in
+#       the modules of this directory) against its reference images. `run` runs every
+#       test; `run NAME...` runs the named ones; `run --list` prints the names. The exit
+#       status is 1 when a test failed. Run it from the repository root (tests/run_raster.py
+#       builds and runs it).
+#
+#==============================================================================================
+
+import harness
+import fill
+
+func run_case(case: harness.TestCase) -> bool:
+    var t = harness.Test(name = case.name, failures = 0)
+    case.run(&t)
+    if t.failures == 0:
+        print(f"ok    {case.name}")
+        return true
+    print(f"FAIL  {case.name}")
+    return false
+
+pub func main(arguments: str[]) -> i32:
+    var cases: harness.TestCase[512] = ---
+    var count: usize = 0
+    for case in fill.tests:
+        cases[count] = case
+        count += 1
+
+    if arguments.length > 1 and arguments[1] == "--list":
+        for case in cases[..<count]:
+            print(case.name)
+        return 0
+
+    var passed: usize = 0
+    var failed: usize = 0
+    for case in cases[..<count]:
+        if arguments.length > 1:
+            var wanted = false
+            for name in arguments[1..]:
+                if name == case.name:
+                    wanted = true
+            if not wanted:
+                continue
+        if run_case(case):
+            passed += 1
+        else:
+            failed += 1
+    print(f"{passed} passed, {failed} failed")
+    return 1 if failed > 0 else 0

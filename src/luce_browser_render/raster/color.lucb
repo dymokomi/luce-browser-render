@@ -1,0 +1,431 @@
+#==============================================================================================
+#
+#   color - colors, premultiplied colors, color spaces and blend modes
+#
+#   DESCRIPTION:
+#       Port of tiny-skia color.rs (ColorU8, PremultipliedColorU8, Color,
+#       PremultipliedColor, premultiply_u8, ColorSpace and its gamma stages) and
+#       blend_mode.rs (BlendMode). Rust's `Color::BLACK` and friends are the static
+#       functions `Color.black()`, `Color.white()`, `Color.transparent()`.
+#
+#==============================================================================================
+
+## 8-bit type for an alpha value. 255 is 100% opaque, zero is 100% transparent.
+pub type AlphaU8 = u8
+
+## Represents fully transparent AlphaU8 value.
+pub let alpha_u8_transparent: AlphaU8 = 0x00
+
+## Represents fully opaque AlphaU8 value.
+pub let alpha_u8_opaque: AlphaU8 = 0xFF
+
+## Represents fully transparent Alpha value.
+pub let alpha_transparent: f32 = 0.0
+
+## Represents fully opaque Alpha value.
+pub let alpha_opaque: f32 = 1.0
+
+# mark: ColorU8 ===============================================================================
+
+## A 32-bit RGBA color value. Byteorder: ABGR
+pub struct ColorU8:
+    var rgba: u8[4]
+
+    ## Creates a new color.
+    pub static func from_rgba(r: u8, g: u8, b: u8, a: u8) -> ColorU8:
+        return ColorU8(rgba = [r, g, b, a])
+
+    ## Returns color's red component.
+    pub func red() -> u8:
+        return self.rgba[0]
+
+    ## Returns color's green component.
+    pub func green() -> u8:
+        return self.rgba[1]
+
+    ## Returns color's blue component.
+    pub func blue() -> u8:
+        return self.rgba[2]
+
+    ## Returns color's alpha component.
+    pub func alpha() -> u8:
+        return self.rgba[3]
+
+    ## Check that color is opaque. Alpha == 255
+    pub func is_opaque() -> bool:
+        return self.alpha() == alpha_u8_opaque
+
+    ## Converts into a premultiplied color.
+    pub func premultiply() -> PremultipliedColorU8:
+        let a = self.alpha()
+        if a != alpha_u8_opaque:
+            return PremultipliedColorU8.from_rgba_unchecked(premultiply_u8(self.red(), a), premultiply_u8(self.green(), a), premultiply_u8(self.blue(), a), a)
+        return PremultipliedColorU8.from_rgba_unchecked(self.red(), self.green(), self.blue(), a)
+
+## A 32-bit premultiplied RGBA color value. Byteorder: ABGR
+pub struct PremultipliedColorU8:
+    var rgba: u8[4]
+
+    ## A transparent color.
+    pub static func transparent() -> PremultipliedColorU8:
+        return PremultipliedColorU8(rgba = [0, 0, 0, 0])
+
+    ## Creates a new premultiplied color. RGB components must be <= alpha.
+    pub static func from_rgba(r: u8, g: u8, b: u8, a: u8) -> PremultipliedColorU8?:
+        if r <= a and g <= a and b <= a:
+            return PremultipliedColorU8(rgba = [r, g, b, a])
+        return none
+
+    ## Creates a new color without checking that components are <= alpha.
+    static func from_rgba_unchecked(r: u8, g: u8, b: u8, a: u8) -> PremultipliedColorU8:
+        return PremultipliedColorU8(rgba = [r, g, b, a])
+
+    ## Returns color's red component. The value is <= alpha.
+    pub func red() -> u8:
+        return self.rgba[0]
+
+    ## Returns color's green component. The value is <= alpha.
+    pub func green() -> u8:
+        return self.rgba[1]
+
+    ## Returns color's blue component. The value is <= alpha.
+    pub func blue() -> u8:
+        return self.rgba[2]
+
+    ## Returns color's alpha component.
+    pub func alpha() -> u8:
+        return self.rgba[3]
+
+    ## Check that color is opaque. Alpha == 255
+    pub func is_opaque() -> bool:
+        return self.alpha() == alpha_u8_opaque
+
+    ## Returns a demultiplied color.
+    pub func demultiply() -> ColorU8:
+        let alpha = self.alpha()
+        if alpha == alpha_u8_opaque:
+            return ColorU8(rgba = self.rgba)
+        let a = (f64)alpha / 255.0
+        return ColorU8.from_rgba((u8)((f64)self.red() / a + 0.5), (u8)((f64)self.green() / a + 0.5), (u8)((f64)self.blue() / a + 0.5), alpha)
+
+    ## Whether two colors are equal.
+    pub func equals(other: PremultipliedColorU8) -> bool:
+        return self.rgba == other.rgba
+
+# mark: Color =================================================================================
+
+## An RGBA color value, holding four floating point components. The container guarantees
+## that all components are in a 0..=1 range.
+pub struct Color:
+    var r: f32
+    var g: f32
+    var b: f32
+    var a: f32
+
+    ## A transparent color.
+    pub static func transparent() -> Color:
+        return Color(r = 0.0, g = 0.0, b = 0.0, a = 0.0)
+
+    ## A black color.
+    pub static func black() -> Color:
+        return Color(r = 0.0, g = 0.0, b = 0.0, a = 1.0)
+
+    ## A white color.
+    pub static func white() -> Color:
+        return Color(r = 1.0, g = 1.0, b = 1.0, a = 1.0)
+
+    ## Creates a new color from 4 components without checking that they are in the 0..=1
+    ## range.
+    pub static func from_rgba_unchecked(r: f32, g: f32, b: f32, a: f32) -> Color:
+        return Color(r = r, g = g, b = b, a = a)
+
+    ## Creates a new color from 4 components. All values must be in 0..=1 range.
+    pub static func from_rgba(r: f32, g: f32, b: f32, a: f32) -> Color?:
+        let nr = normalized_new(r) else return none
+        let ng = normalized_new(g) else return none
+        let nb = normalized_new(b) else return none
+        let na = normalized_new(a) else return none
+        return Color(r = nr, g = ng, b = nb, a = na)
+
+    ## Creates a new color from 4 components. u8 will be divided by 255 to get a float
+    ## component.
+    pub static func from_rgba8(r: u8, g: u8, b: u8, a: u8) -> Color:
+        return Color(r = (f32)r / 255.0, g = (f32)g / 255.0, b = (f32)b / 255.0, a = (f32)a / 255.0)
+
+    ## Returns color's red component. The value is guarantee to be in a 0..=1 range.
+    pub func red() -> f32:
+        return self.r
+
+    ## Returns color's green component. The value is guarantee to be in a 0..=1 range.
+    pub func green() -> f32:
+        return self.g
+
+    ## Returns color's blue component. The value is guarantee to be in a 0..=1 range.
+    pub func blue() -> f32:
+        return self.b
+
+    ## Returns color's alpha component. The value is guarantee to be in a 0..=1 range.
+    pub func alpha() -> f32:
+        return self.a
+
+    ## Sets the red component value. The new value will be clipped to the 0..=1 range.
+    pub mutating func set_red(c: f32):
+        self.r = normalized_clamped(c)
+
+    ## Sets the green component value. The new value will be clipped to the 0..=1 range.
+    pub mutating func set_green(c: f32):
+        self.g = normalized_clamped(c)
+
+    ## Sets the blue component value. The new value will be clipped to the 0..=1 range.
+    pub mutating func set_blue(c: f32):
+        self.b = normalized_clamped(c)
+
+    ## Sets the alpha component value. The new value will be clipped to the 0..=1 range.
+    pub mutating func set_alpha(c: f32):
+        self.a = normalized_clamped(c)
+
+    ## Shifts color's opacity. Essentially, multiplies color's alpha by opacity. `opacity`
+    ## will be clamped to the 0..=1 range first. The final alpha will also be clamped.
+    pub mutating func apply_opacity(opacity: f32):
+        self.a = normalized_clamped(self.a * bound(opacity, 0.0, 1.0))
+
+    ## Check that color is opaque. Alpha == 1.0
+    pub func is_opaque() -> bool:
+        return self.a == alpha_opaque
+
+    ## Whether two colors are equal.
+    pub func equals(other: Color) -> bool:
+        return self.r == other.r and self.g == other.g and self.b == other.b and self.a == other.a
+
+    ## Converts into a premultiplied color.
+    pub func premultiply() -> PremultipliedColor:
+        if self.is_opaque():
+            return PremultipliedColor(r = self.r, g = self.g, b = self.b, a = self.a)
+        return PremultipliedColor(r = normalized_clamped(self.r * self.a), g = normalized_clamped(self.g * self.a), b = normalized_clamped(self.b * self.a), a = self.a)
+
+    ## Converts into `ColorU8`.
+    pub func to_color_u8() -> ColorU8:
+        let c = color_f32_to_u8(self.r, self.g, self.b, self.a)
+        return ColorU8.from_rgba(c[0], c[1], c[2], c[3])
+
+## A premultiplied RGBA color value, holding four floating point components.
+pub struct PremultipliedColor:
+    var r: f32
+    var g: f32
+    var b: f32
+    var a: f32
+
+    ## Returns color's red component. The value is guarantee to be in a 0..=1 range.
+    pub func red() -> f32:
+        return self.r
+
+    ## Returns color's green component. The value is guarantee to be in a 0..=1 range.
+    pub func green() -> f32:
+        return self.g
+
+    ## Returns color's blue component. The value is guarantee to be in a 0..=1 range.
+    pub func blue() -> f32:
+        return self.b
+
+    ## Returns color's alpha component. The value is guarantee to be in a 0..=1 range.
+    pub func alpha() -> f32:
+        return self.a
+
+    ## Returns a demultiplied color.
+    pub func demultiply() -> Color:
+        let a = self.a
+        if a == 0.0:
+            return Color.transparent()
+        return Color(r = normalized_clamped(self.r / a), g = normalized_clamped(self.g / a), b = normalized_clamped(self.b / a), a = self.a)
+
+    ## Converts into `PremultipliedColorU8`.
+    pub func to_color_u8() -> PremultipliedColorU8:
+        let c = color_f32_to_u8(self.r, self.g, self.b, self.a)
+        return PremultipliedColorU8.from_rgba_unchecked(c[0], c[1], c[2], c[3])
+
+## Return a*b/255, rounding any fractional bits.
+pub func premultiply_u8(c: u8, a: u8) -> u8:
+    let prod = (u32)c * (u32)a + 128
+    return (u8)((prod + (prod >> 8)) >> 8)
+
+func color_f32_to_u8(r: f32, g: f32, b: f32, a: f32) -> u8[4]:
+    return [(u8)(r * 255.0 + 0.5), (u8)(g * 255.0 + 0.5), (u8)(b * 255.0 + 0.5), (u8)(a * 255.0 + 0.5)]
+
+# mark: ColorSpace ============================================================================
+
+## The colorspace used to interpret pixel values. This is a very limited subset of Skia's
+## colorspace support; the only non-linear option is sRGB-like gamma curves, which in
+## practice are what most images use.
+pub enum ColorSpace as u8:
+    ## Linear RGB. The default.
+    linear = 0
+    ## Gamma 2.0, which is a common approximation of sRGB that can be decoded with a
+    ## multiply and encoded with a sqrt.
+    gamma2 = 1
+    ## Pure gamma 2.2: the "simple sRGB" colorspace.
+    simple_srgb = 2
+    ## The full sRGB gamma curve, with a linear segment near zero.
+    full_srgb_gamma = 3
+
+func colorspace_expand_channel(cs: ColorSpace, x: f32) -> f32:
+    match cs:
+        .linear: return x
+        .gamma2: return x * x
+        .simple_srgb: return normalized_clamped(approx_powf(x, 2.2))
+        .full_srgb_gamma:
+            let y = x / 12.92 if x <= 0.04045 else approx_powf((x + 0.055) / 1.055, 2.4)
+            return normalized_clamped(y)
+        _: return x
+
+func colorspace_expand_color(cs: ColorSpace, color0: Color) -> Color:
+    var color = color0
+    color.r = colorspace_expand_channel(cs, color.r)
+    color.g = colorspace_expand_channel(cs, color.g)
+    color.b = colorspace_expand_channel(cs, color.b)
+    return color
+
+
+func colorspace_expand_stage(cs: ColorSpace) -> Stage?:
+    match cs:
+        .linear: return none
+        .gamma2: return Stage.gamma_expand_2
+        .simple_srgb: return Stage.gamma_expand_22
+        .full_srgb_gamma: return Stage.gamma_expand_srgb
+        _: return none
+
+func colorspace_expand_dest_stage(cs: ColorSpace) -> Stage?:
+    match cs:
+        .linear: return none
+        .gamma2: return Stage.gamma_expand_destination_2
+        .simple_srgb: return Stage.gamma_expand_destination_22
+        .full_srgb_gamma: return Stage.gamma_expand_destination_srgb
+        _: return none
+
+func colorspace_compress_stage(cs: ColorSpace) -> Stage?:
+    match cs:
+        .linear: return none
+        .gamma2: return Stage.gamma_compress_2
+        .simple_srgb: return Stage.gamma_compress_22
+        .full_srgb_gamma: return Stage.gamma_compress_srgb
+        _: return none
+
+# mark: BlendMode =============================================================================
+
+## A blend mode. All blend modes, except Source, SourceOver and Clear, require a slow path.
+pub enum BlendMode as u8:
+    ## Replaces destination with zero: fully transparent.
+    clear = 0
+    ## Replaces destination.
+    source = 1
+    ## Preserves destination.
+    destination = 2
+    ## Source over destination. The default.
+    source_over = 3
+    ## Destination over source.
+    destination_over = 4
+    ## Source trimmed inside destination.
+    source_in = 5
+    ## Destination trimmed by source.
+    destination_in = 6
+    ## Source trimmed outside destination.
+    source_out = 7
+    ## Destination trimmed outside source.
+    destination_out = 8
+    ## Source inside destination blended with destination.
+    source_atop = 9
+    ## Destination inside source blended with source.
+    destination_atop = 10
+    ## Each of source and destination trimmed outside the other.
+    xor = 11
+    ## Sum of colors.
+    plus = 12
+    ## Product of premultiplied colors; darkens destination.
+    modulate = 13
+    ## Multiply inverse of pixels, inverting result; brightens destination.
+    screen = 14
+    ## Multiply or screen, depending on destination.
+    overlay = 15
+    ## Darker of source and destination.
+    darken = 16
+    ## Lighter of source and destination.
+    lighten = 17
+    ## Brighten destination to reflect source.
+    color_dodge = 18
+    ## Darken destination to reflect source.
+    color_burn = 19
+    ## Multiply or screen, depending on source.
+    hard_light = 20
+    ## Lighten or darken, depending on source.
+    soft_light = 21
+    ## Subtract darker from lighter with higher contrast.
+    difference = 22
+    ## Subtract darker from lighter with lower contrast.
+    exclusion = 23
+    ## Multiply source with destination, darkening image.
+    multiply = 24
+    ## Hue of source with saturation and luminosity of destination.
+    hue = 25
+    ## Saturation of source with hue and luminosity of destination.
+    saturation = 26
+    ## Hue and saturation of source with luminosity of destination.
+    color = 27
+    ## Luminosity of source with hue and saturation of destination.
+    luminosity = 28
+
+func blend_mode_should_pre_scale_coverage(mode: BlendMode) -> bool:
+    # The most important things we do here are:
+    #   1) never pre-scale with rgb coverage if the blend mode involves a source-alpha term;
+    #   2) always pre-scale Plus.
+    #
+    # When we pre-scale with rgb coverage, we scale each of source r,g,b, with a distinct
+    # value, and source alpha with one of those three values. This process destructively
+    # updates the source-alpha term, so we can't evaluate blend modes that need its original
+    # value.
+    #
+    # Plus always requires pre-scaling as a specific quirk of its implementation in
+    # RasterPipeline. This lets us put the clamp inside the blend mode itself rather than as
+    # a separate stage that'd come after the lerp.
+    #
+    # This function is a finer-grained breakdown of SkBlendMode_SupportsCoverageAsAlpha().
+    match mode:
+        .destination: return true      # d              --> no sa term, ok!
+        .destination_over: return true # d + s*inv(da)  --> no sa term, ok!
+        .plus: return true             # clamp(s+d)     --> no sa term, ok!
+        .destination_out: return true  # d * inv(sa)
+        .source_atop: return true      # s*da + d*inv(sa)
+        .source_over: return true      # s + d*inv(sa)
+        .xor: return true              # s*inv(da) + d*inv(sa)
+        _: return false
+
+func blend_mode_to_stage(mode: BlendMode) -> Stage?:
+    match mode:
+        .clear: return Stage.clear
+        .source: return none # This stage is a no-op.
+        .destination: return Stage.move_destination_to_source
+        .source_over: return Stage.source_over
+        .destination_over: return Stage.destination_over
+        .source_in: return Stage.source_in
+        .destination_in: return Stage.destination_in
+        .source_out: return Stage.source_out
+        .destination_out: return Stage.destination_out
+        .source_atop: return Stage.source_atop
+        .destination_atop: return Stage.destination_atop
+        .xor: return Stage.xor
+        .plus: return Stage.plus
+        .modulate: return Stage.modulate
+        .screen: return Stage.screen
+        .overlay: return Stage.overlay
+        .darken: return Stage.darken
+        .lighten: return Stage.lighten
+        .color_dodge: return Stage.color_dodge
+        .color_burn: return Stage.color_burn
+        .hard_light: return Stage.hard_light
+        .soft_light: return Stage.soft_light
+        .difference: return Stage.difference
+        .exclusion: return Stage.exclusion
+        .multiply: return Stage.multiply
+        .hue: return Stage.hue
+        .saturation: return Stage.saturation
+        .color: return Stage.color
+        .luminosity: return Stage.luminosity
+        _: return none

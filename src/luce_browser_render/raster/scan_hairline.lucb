@@ -1,0 +1,445 @@
+#==============================================================================================
+#
+#   scan_hairline - hairline (zero-width) stroking, and its non-AA line rasterizer
+#
+#   DESCRIPTION:
+#       Port of tiny-skia scan/hairline.rs (SkScan_Hairline.cpp): stroke_path, the non-AA
+#       hair_line_rgn, and the shared stroke_path_impl that caps hairlines, subdivides quads
+#       and cubics into lines and hands them to a LineProc (hair_line_rgn here,
+#       anti_hair_line_rgn in scan_hairline_aa.lucb).
+#
+#==============================================================================================
+
+type LineProc = func(const Point[], const ScreenIntRect*?, Blitter) -> unit
+
+let max_cubic_subdivide_level: u8 = 9
+let max_quad_subdivide_level: u8 = 5
+
+func hairline_stroke_path(path: const Path*, line_cap: LineCap, clip: ScreenIntRect, blitter: Blitter):
+    stroke_path_impl(path, line_cap, clip, hair_line_rgn, blitter)
+
+func hair_line_rgn(points: const Point[], clip: const ScreenIntRect*?, blitter0: Blitter):
+    var blitter = blitter0
+    let max: f32 = 32767.0
+    let fixed_bounds = Rect.from_ltrb(-max, -max, max, max) else trap("unreachable")
+
+    var clip_bounds: Rect? = none
+    if let c = clip:
+        clip_bounds = c.to_rect()
+
+    for i in 0..<points.length - 1:
+        var pts: Point[2]
+
+        # We have to pre-clip the line to fit in a Fixed, so we just chop the line.
+        if not line_clipper_intersect([points[i], points[i + 1]], fixed_bounds, pts):
+            continue
+
+        if let cb = clip_bounds:
+            let tmp = pts
+            # Perform a clip in scalar space, so we catch huge values which might be missed
+            # after we convert to FDot6 (overflow).
+            if not line_clipper_intersect(tmp, cb, pts):
+                continue
+
+        var x0 = fdot6_from_f32(pts[0].x)
+        var y0 = fdot6_from_f32(pts[0].y)
+        var x1 = fdot6_from_f32(pts[1].x)
+        var y1 = fdot6_from_f32(pts[1].y)
+
+        let dx = x1 - x0
+        let dy = y1 - y0
+
+        if math.iabs((i64)dx) > math.iabs((i64)dy):
+            # mostly horizontal
+
+            if x0 > x1:
+                # we want to go left-to-right
+                var t = x0
+                x0 = x1
+                x1 = t
+                t = y0
+                y0 = y1
+                y1 = t
+
+            var ix0 = fdot6_round(x0)
+            let ix1 = fdot6_round(x1)
+            if ix0 == ix1:
+                # too short to draw
+                continue
+
+            let slope = fdot16_div(dy, dx)
+            var start_y = fdot6_to_fdot16(y0) + ((slope * ((32 - x0) & 63)) >> 6)
+
+            # In some cases, probably due to precision/rounding issues, `start_y` can become
+            # equal to the image height, which will lead to panic, because we would be
+            # accessing pixels outside the current memory buffer. This is tiny-skia specific
+            # issue. Skia handles this part differently.
+            var max_y = i32_max
+            if let cb = clip_bounds:
+                max_y = fdot16_from_f32(cb.bottom())
+
+            while true:
+                if ix0 >= 0 and start_y >= 0 and start_y < max_y:
+                    blitter.blit_h((u32)ix0, (u32)(start_y >> 16), 1)
+
+                start_y += slope
+                ix0 += 1
+                if ix0 >= ix1:
+                    break
+        else:
+            # mostly vertical
+
+            if y0 > y1:
+                # we want to go top-to-bottom
+                var t = x0
+                x0 = x1
+                x1 = t
+                t = y0
+                y0 = y1
+                y1 = t
+
+            var iy0 = fdot6_round(y0)
+            let iy1 = fdot6_round(y1)
+            if iy0 == iy1:
+                # too short to draw
+                continue
+
+            let slope = fdot16_div(dx, dy)
+            var start_x = fdot6_to_fdot16(x0) + ((slope * ((32 - y0) & 63)) >> 6)
+
+            while true:
+                if start_x >= 0 and iy0 >= 0:
+                    blitter.blit_h((u32)(start_x >> 16), (u32)iy0, 1)
+
+                start_x += slope
+                iy0 += 1
+                if iy0 >= iy1:
+                    break
+
+func stroke_path_impl(path: const Path*, line_cap: LineCap, clip: ScreenIntRect, line_proc: LineProc, blitter: Blitter):
+    var inset_clip: IntRect? = none
+    var outset_clip: IntRect? = none
+
+    let cap_out: f32 = 1.0 if line_cap == .butt else 2.0
+    let outset = path.bounds().outset(cap_out, cap_out) else return
+    let ibounds = outset.round_out() else return
+    if clip.to_int_rect().intersect(ibounds) == none:
+        return
+
+    if not clip.to_int_rect().contains(ibounds):
+        # We now cache two scalar rects, to use for culling per-segment (e.g. cubic). Since
+        # we're hairlining, the "bounds" of the control points isn't necessarily the limit of
+        # where a segment can draw (it might draw up to 1 pixel beyond in aa-hairs).
+        #
+        # Compute the pt-bounds per segment is easy, so we do that, and then inversely adjust
+        # the culling bounds so we can just do a straight compare per segment.
+        #
+        # insetClip is use for quick-accept (i.e. the segment is not clipped), so we inset it
+        # from the clip-bounds (since segment bounds can be off by 1).
+        #
+        # outsetClip is used for quick-reject (i.e. the segment is entirely outside), so we
+        # outset it from the clip-bounds.
+        outset_clip = clip.to_int_rect().make_outset(1, 1)
+        if outset_clip == none:
+            return
+        inset_clip = clip.to_int_rect().inset(1, 1)
+        if inset_clip == none:
+            return
+
+    let clip_ptr: const ScreenIntRect*? = &clip
+    var prev_verb = PathVerb.move
+    var first_pt = Point.zero()
+    var last_pt = Point.zero()
+
+    var iter = path.segments()
+    while let segment = iter.next():
+        let verb = iter.curr_verb()
+        let next_verb = iter.next_verb()
+        var last_pt2: Point
+        match segment:
+            .move_to(p):
+                first_pt = p
+                last_pt = p
+                last_pt2 = p
+            .line_to(p):
+                var points: Point[2] = [last_pt, p]
+                if line_cap != .butt:
+                    extend_pts(line_cap, prev_verb, next_verb, points)
+
+                line_proc(points, clip_ptr, blitter)
+                last_pt = p
+                last_pt2 = points[0]
+            .quad_to(p0, p1):
+                var points: Point[3] = [last_pt, p0, p1]
+                if line_cap != .butt:
+                    extend_pts(line_cap, prev_verb, next_verb, points)
+
+                hair_quad(points, clip_ptr, inset_clip, outset_clip, compute_quad_level(points), line_proc, blitter)
+
+                last_pt = p1
+                last_pt2 = points[0]
+            .cubic_to(p0, p1, p2):
+                var points: Point[4] = [last_pt, p0, p1, p2]
+                if line_cap != .butt:
+                    extend_pts(line_cap, prev_verb, next_verb, points)
+
+                hair_cubic(points, clip_ptr, inset_clip, outset_clip, line_proc, blitter)
+
+                last_pt = p2
+                last_pt2 = points[0]
+            .close:
+                var points: Point[2] = [last_pt, first_pt]
+                if line_cap != .butt and prev_verb == .move:
+                    # cap moveTo/close to match svg expectations for degenerate segments
+                    extend_pts(line_cap, prev_verb, next_verb, points)
+                line_proc(points, clip_ptr, blitter)
+                last_pt2 = points[0]
+
+        if line_cap != .butt:
+            if prev_verb == .move and (verb == .line or verb == .quad or verb == .cubic):
+                first_pt = last_pt2 # the curve moved the initial point, so close to it instead
+
+            prev_verb = verb
+
+func extend_pts(line_cap: LineCap, prev_verb: PathVerb, next_verb: PathVerb?, points: Point[]):
+    # The area of a circle is PI*R*R. For a unit circle, R=1/2, and the cap covers half of
+    # that.
+    let cap_outset: f32 = 0.5 if line_cap == .square else float_pi / 8.0
+    if prev_verb == .move:
+        let first = points[0]
+        var offset: usize = 0
+        var controls = points.length - 1
+        var tangent: Point
+        while true:
+            offset += 1
+            tangent = first.sub(points[offset])
+
+            if not tangent.is_zero():
+                break
+
+            controls -= 1
+            if controls == 0:
+                break
+
+        if tangent.is_zero():
+            tangent = Point.from_xy(1.0, 0.0)
+            controls = points.length - 1 # If all points are equal, move all but one.
+        else:
+            discard(tangent.normalize())
+
+        offset = 0
+        while true:
+            # If the end point and control points are equal, loop to move them in tandem.
+            points[offset].x += tangent.x * cap_outset
+            points[offset].y += tangent.y * cap_outset
+
+            offset += 1
+            controls += 1
+            if controls >= points.length:
+                break
+
+    var at_end = true
+    if let nv = next_verb:
+        at_end = nv == .move or nv == .close
+    if at_end:
+        let last = points[points.length - 1]
+        var offset = points.length - 1
+        var controls = points.length - 1
+        var tangent: Point
+        while true:
+            offset -= 1
+            tangent = last.sub(points[offset])
+
+            if not tangent.is_zero():
+                break
+
+            controls -= 1
+            if controls == 0:
+                break
+
+        if tangent.is_zero():
+            tangent = Point.from_xy(-1.0, 0.0)
+            controls = points.length - 1
+        else:
+            discard(tangent.normalize())
+
+        offset = points.length - 1
+        while true:
+            points[offset].x += tangent.x * cap_outset
+            points[offset].y += tangent.y * cap_outset
+
+            offset -%= 1
+            controls += 1
+            if controls >= points.length:
+                break
+
+func hair_quad(points: const Point[], clip0: const ScreenIntRect*?, inset_clip: IntRect?, outset_clip: IntRect?, level: u8, line_proc: LineProc, blitter: Blitter):
+    var clip = clip0
+    if let inset = inset_clip:
+        let inset_rect = inset.to_rect()
+        let outset = outset_clip else return
+        let outset_rect = outset.to_rect()
+
+        let bounds = compute_nocheck_quad_bounds(points) else return
+        if not geometric_overlap(outset_rect, bounds):
+            return # nothing to do
+        elif geometric_contains(inset_rect, bounds):
+            clip = none
+
+    hair_quad2(points, clip, level, line_proc, blitter)
+
+func compute_nocheck_quad_bounds(points: const Point[]) -> Rect?:
+    var min = points[0].to_f32x2()
+    var max = min
+    for i: usize in 1..<3:
+        let pair = points[i].to_f32x2()
+        min = f32x2_min(min, pair)
+        max = f32x2_max(max, pair)
+
+    return Rect.from_ltrb(min[0], min[1], max[0], max[1])
+
+func geometric_overlap(a: Rect, b: Rect) -> bool:
+    return a.left() < b.right() and b.left() < a.right() and a.top() < b.bottom() and b.top() < a.bottom()
+
+func geometric_contains(outer: Rect, inner: Rect) -> bool:
+    return inner.right() <= outer.right() and inner.left() >= outer.left() and inner.bottom() <= outer.bottom() and inner.top() >= outer.top()
+
+func hair_quad2(points: const Point[], clip: const ScreenIntRect*?, level: u8, line_proc: LineProc, blitter: Blitter):
+    let coeff = QuadCoeff.from_points(points)
+
+    let lines: usize = (usize)1 << (usize)level
+
+    var tmp: Point[33]
+    tmp[0] = points[0]
+
+    var t = f32x2_splat(0.0)
+    let dt = f32x2_splat(1.0 / (f32)lines)
+    for i in 1..<lines:
+        t = t + dt
+        let v = (coeff.a * t + coeff.b) * t + coeff.c
+        tmp[i] = Point.from_xy(v[0], v[1])
+
+    tmp[lines] = points[2]
+    line_proc(tmp[..<lines + 1], clip, blitter)
+
+func compute_quad_level(points: const Point[]) -> u8:
+    let d = compute_int_quad_dist(points)
+    # Quadratics approach the line connecting their start and end points 4x closer with each
+    # subdivision, so we compute the number of subdivisions to be the minimum need to get
+    # that distance to be less than a pixel.
+    var level = (33 - leading_zeros(d)) >> 1
+    # sanity check on level (from the previous version)
+    if level > (u32)max_quad_subdivide_level:
+        level = (u32)max_quad_subdivide_level
+
+    return (u8)level
+
+func compute_int_quad_dist(points: const Point[]) -> u32:
+    # compute the vector between the control point ([1]) and the middle of the line
+    # connecting the start and end ([0] and [2])
+    let dx = math32.abs(half(points[0].x + points[2].x) - points[1].x)
+    let dy = math32.abs(half(points[0].y + points[2].y) - points[1].y)
+
+    # convert to whole pixel values (use ceiling to be conservative). assign to unsigned so
+    # we can safely add 1/2 of the smaller and still fit in u32, since T::saturate_from()
+    # returns 31 bits at most.
+    let idx = (u32)saturate_from(math32.ceil(dx))
+    let idy = (u32)saturate_from(math32.ceil(dy))
+
+    # use the cheap approx for distance
+    if idx > idy:
+        return idx + (idy >> 1)
+    return idy + (idx >> 1)
+
+func hair_cubic(points: const Point[], clip0: const ScreenIntRect*?, inset_clip: IntRect?, outset_clip: IntRect?, line_proc: LineProc, blitter: Blitter):
+    var clip = clip0
+    if let inset = inset_clip:
+        let inset_rect = inset.to_rect()
+        let outset = outset_clip else return
+        let outset_rect = outset.to_rect()
+
+        let bounds = compute_nocheck_cubic_bounds(points) else return
+        if not geometric_overlap(outset_rect, bounds):
+            return # noting to do
+        elif geometric_contains(inset_rect, bounds):
+            clip = none
+
+    if quick_cubic_niceness_check(points):
+        hair_cubic2(points, clip, line_proc, blitter)
+    else:
+        var tmp: Point[13]
+        var t_values = new_t_values()
+
+        let count = chop_cubic_at_max_curvature(points, t_values, tmp)
+        for i in 0..<count:
+            let offset = i * 3
+            let new_points: Point[4] = [tmp[offset], tmp[offset + 1], tmp[offset + 2], tmp[offset + 3]]
+            hair_cubic2(new_points, clip, line_proc, blitter)
+
+func compute_nocheck_cubic_bounds(points: const Point[]) -> Rect?:
+    var min = points[0].to_f32x2()
+    var max = min
+    for i: usize in 1..<4:
+        let pair = points[i].to_f32x2()
+        min = f32x2_min(min, pair)
+        max = f32x2_max(max, pair)
+
+    return Rect.from_ltrb(min[0], min[1], max[0], max[1])
+
+# The off-curve points are "inside" the limits of the on-curve points.
+func quick_cubic_niceness_check(points: const Point[]) -> bool:
+    return lt_90(points[1], points[0], points[3]) and lt_90(points[2], points[0], points[3]) and lt_90(points[1], points[3], points[0]) and lt_90(points[2], points[3], points[0])
+
+func lt_90(p0: Point, pivot: Point, p2: Point) -> bool:
+    return p0.sub(pivot).dot(p2.sub(pivot)) >= 0.0
+
+func hair_cubic2(points: const Point[], clip: const ScreenIntRect*?, line_proc: LineProc, blitter: Blitter):
+    let lines = compute_cubic_segments(points)
+    if lines == 1:
+        line_proc([points[0], points[3]], clip, blitter)
+        return
+
+    let coeff = CubicCoeff.from_points(points)
+
+    var tmp: Point[513]
+
+    let dt = f32x2_splat(1.0 / (f32)lines)
+    var t = f32x2_splat(0.0)
+
+    tmp[0] = points[0]
+    for i in 1..<lines:
+        t = t + dt
+        tmp[i] = Point.from_f32x2(((coeff.a * t + coeff.b) * t + coeff.c) * t + coeff.d)
+
+    var all_finite = true
+    for p in tmp:
+        if not p.is_finite():
+            all_finite = false
+            break
+    if all_finite:
+        tmp[lines] = points[3]
+        line_proc(tmp[..<lines + 1], clip, blitter)
+    # else some point(s) are non-finite, so don't draw
+
+func compute_cubic_segments(points: const Point[]) -> usize:
+    let p0 = points[0].to_f32x2()
+    let p1 = points[1].to_f32x2()
+    let p2 = points[2].to_f32x2()
+    let p3 = points[3].to_f32x2()
+
+    let one_third = f32x2_splat(1.0 / 3.0)
+    let two_third = f32x2_splat(2.0 / 3.0)
+
+    let p13 = one_third * p3 + two_third * p0
+    let p23 = one_third * p0 + two_third * p3
+
+    let diff = f32x2_max_component(f32x2_max(f32x2_abs(p1 - p13), f32x2_abs(p2 - p23)))
+    var tol: f32 = 1.0 / 8.0
+
+    for i in 0..<max_cubic_subdivide_level:
+        if diff < tol:
+            return (usize)1 << (usize)i
+
+        tol *= 4.0
+
+    return (usize)1 << (usize)max_cubic_subdivide_level
