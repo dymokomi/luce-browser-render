@@ -32,7 +32,7 @@
 
 ## Ported from Libraries/LibWeb/Painting/AccumulatedVisualContext.h:39 Web::Painting::ClipData::ClipData.
 pub func clip_data_construct(this: ClipData*, r: gfx.DevicePixelRect, radii: CornerRadii):
-    return
+    trap("unported: Web::Painting::ClipData::ClipData")
 
 ## Ported from Libraries/LibWeb/Painting/AccumulatedVisualContext.cpp:15 Web::Painting::ClipData::contains.
 pub func clip_data_contains(this: const ClipData*, point: gfx.IntPoint) -> bool:
@@ -302,16 +302,16 @@ pub func display_list_visual_context_tree(this: const DisplayList*) -> Accumulat
     trap("unported: Web::Painting::DisplayList::visual_context_tree")
 
 ## Ported from Libraries/LibWeb/Painting/DisplayList.h:88 Web::Painting::DisplayList::commands.
-pub func display_list_commands(this: DisplayList*) -> ak.Vector[DisplayListCommandListItem]*:
+pub func display_list_commands_display_list_recorder(this: DisplayList*) -> ak.Vector[DisplayListCommandListItem]*:
     trap("unported: Web::Painting::DisplayList::commands")
 
 ## Ported from Libraries/LibWeb/Painting/DisplayList.h:89 Web::Painting::DisplayList::commands.
-pub func display_list_commands_const(this: const DisplayList*) -> ak.Vector[DisplayListCommandListItem]:
+pub func display_list_commands(this: const DisplayList*) -> ak.Vector[DisplayListCommandListItem]:
     return this.m_commands
 
 ## Ported from Libraries/LibWeb/Painting/DisplayList.h:92 Web::Painting::DisplayList::DisplayList.
 pub func display_list_construct(this: DisplayList*, visual_context_tree: const AccumulatedVisualContextTree*):
-    return
+    trap("unported: Web::Painting::DisplayList::DisplayList")
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:23 Web::Painting::DrawGlyphRun::bounding_rect.
 pub func draw_glyph_run_bounding_rect(this: const DrawGlyphRun*) -> gfx.DevicePixelRect:
@@ -816,7 +816,7 @@ pub func display_list_recorder_apply_effects(this: DisplayListRecorder*, opacity
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:14 Web::Painting::DisplayListRecorder::DisplayListRecorder.
 pub func display_list_recorder_construct(this: DisplayListRecorder*, command_list: DisplayList*):
-    return
+    trap("unported: Web::Painting::DisplayListRecorder::DisplayListRecorder")
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:49 Web::Painting::DisplayListRecorder::end_capture.
 pub func display_list_recorder_end_capture(this: DisplayListRecorder*):
@@ -904,7 +904,7 @@ pub func svg_linear_gradient_paint_style_set_end_point(this: SvgLinearGradientPa
 
 ## Ported from Libraries/LibWeb/Painting/PaintStyle.h:88 Web::Painting::SVGLinearGradientPaintStyle::SVGLinearGradientPaintStyle.
 pub func svg_linear_gradient_paint_style_construct(this: SvgLinearGradientPaintStyle*, start_point: gfx.FloatPoint, end_point: gfx.FloatPoint):
-    return
+    trap("unported: Web::Painting::SVGLinearGradientPaintStyle::SVGLinearGradientPaintStyle")
 
 ## Ported from Libraries/LibWeb/Painting/PaintStyle.h:100 Web::Painting::SVGRadialGradientPaintStyle::create.
 pub func svg_radial_gradient_paint_style_create(start_center: gfx.FloatPoint, start_radius: f32, end_center: gfx.FloatPoint, end_radius: f32) -> SvgRadialGradientPaintStyle*:
@@ -944,7 +944,7 @@ pub func svg_radial_gradient_paint_style_set_end_radius(this: SvgRadialGradientP
 
 ## Ported from Libraries/LibWeb/Painting/PaintStyle.h:116 Web::Painting::SVGRadialGradientPaintStyle::SVGRadialGradientPaintStyle.
 pub func svg_radial_gradient_paint_style_construct(this: SvgRadialGradientPaintStyle*, start_center: gfx.FloatPoint, start_radius: f32, end_center: gfx.FloatPoint, end_radius: f32):
-    return
+    trap("unported: Web::Painting::SVGRadialGradientPaintStyle::SVGRadialGradientPaintStyle")
 
 ## Ported from Libraries/LibWeb/Painting/PaintStyle.cpp:12 Web::Painting::SVGPatternPaintStyle::create.
 pub func svg_pattern_paint_style_create(tile_display_list: DisplayList*, tile_rect: gfx.FloatRect, pattern_transform: gfx.AffineTransform?) -> SvgPatternPaintStyle*:
@@ -964,7 +964,7 @@ pub func svg_pattern_paint_style_pattern_transform(this: SvgPatternPaintStyle*) 
 
 ## Ported from Libraries/LibWeb/Painting/PaintStyle.cpp:17 Web::Painting::SVGPatternPaintStyle::SVGPatternPaintStyle.
 pub func svg_pattern_paint_style_construct(this: SvgPatternPaintStyle*, tile_display_list: DisplayList*, tile_rect: gfx.FloatRect, pattern_transform: gfx.AffineTransform?):
-    return
+    trap("unported: Web::Painting::SVGPatternPaintStyle::SVGPatternPaintStyle")
 
 ## Ported from Libraries/LibWeb/Painting/ScrollFrame.h:41 Web::Painting::ScrollFrame::is_sticky.
 pub func scroll_frame_is_sticky(this: const ScrollFrame*) -> bool:

@@ -10,8 +10,6 @@ types_color_conversion.lucb
 types_color_space.lucb
 types_compositing_and_blending_operator.lucb
 types_cursor.lucb
-types_decoder.lucb
-types_encoder.lucb
 types_external.lucb
 types_filter.lucb
 types_filter_impl.lucb

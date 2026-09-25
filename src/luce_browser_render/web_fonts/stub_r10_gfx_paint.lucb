@@ -144,4 +144,4 @@ pub func path_impl_const(this: const gfx.Path*) -> PathImpl*:
 
 ## Ported from Libraries/LibGfx/Path.h:126 Gfx::Path::Path.
 pub func path_construct(this: gfx.Path*, impl: PathImpl*):
-    return
+    trap("unported: Gfx::Path::Path")

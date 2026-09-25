@@ -155,11 +155,11 @@ pub func font_data_bytes(this: const FontData*) -> const u8[]:
 
 ## Ported from Libraries/LibGfx/Font/FontData.cpp:30 Gfx::FontData::FontData.
 pub func font_data_construct_byte_buffer(this: FontData*, byte_buffer: ak.ByteBuffer):
-    return
+    trap("unported: Gfx::FontData::FontData")
 
 ## Ported from Libraries/LibGfx/Font/FontData.cpp:35 Gfx::FontData::FontData.
 pub func font_data_construct_core_resource(this: FontData*, resource: const ak.CoreResource*):
-    return
+    trap("unported: Gfx::FontData::FontData")
 
 ## Ported from Libraries/LibGfx/Font/FontDatabase.h:27 Gfx::CodePointFallbackKey::hash.
 pub func code_point_fallback_key_hash(this: const CodePointFallbackKey*) -> u32:
@@ -249,7 +249,7 @@ pub func font_tech_is_supported(font_tech: FontTech) -> bool:
 
 ## Ported from Libraries/LibGfx/Font/FontVariationSettings.h:20 Gfx::FontVariationAxis::FontVariationAxis.
 pub func font_variation_axis_construct(this: FontVariationAxis*, t: gfx.FourCc, v: f32):
-    return
+    trap("unported: Gfx::FontVariationAxis::FontVariationAxis")
 
 ## Ported from Libraries/LibGfx/Font/FontVariationSettings.h:26 Gfx::FontVariationAxis::operator==.
 pub func font_variation_axis_eq(this: const FontVariationAxis*, other: FontVariationAxis) -> bool:
@@ -460,10 +460,6 @@ pub func typeface_skia_glyph_page(this: TypefaceSkia*, page_index: usize) -> Typ
 pub func typeface_skia_populate_glyph_page(this: TypefaceSkia*, arg0: TypefaceSkiaGlyphPage*, page_index: usize):
     trap("unported: Gfx::TypefaceSkia::populate_glyph_page")
 
-## Ported from Libraries/LibGfx/Font/TypefaceSkia.h:69 Gfx::Typeface::fast_is.
-pub func typeface_fast_is(this: Typeface*) -> bool:
-    trap("unported: Gfx::Typeface::fast_is")
-
 ## Ported from Libraries/LibGfx/Font/UnicodeRange.h:16 Gfx::UnicodeRange::UnicodeRange.
 pub func unicode_range_construct(this: UnicodeRange*, min_code_point: u32, max_code_point: u32):
     trap("unported: Gfx::UnicodeRange::UnicodeRange")
@@ -503,7 +499,7 @@ pub func woff_pow_2_less_than_or_equal(x: u16) -> u16:
 
 ## Ported from Libraries/LibGfx/Font/WOFF2/Loader.cpp:15 WOFF2::WOFF2ByteBufferOut::WOFF2ByteBufferOut.
 pub func woff2_byte_buffer_out_construct(this: Woff2ByteBufferOut*, buffer: ak.ByteBuffer*):
-    return
+    trap("unported: WOFF2::WOFF2ByteBufferOut::WOFF2ByteBufferOut")
 
 ## Ported from Libraries/LibGfx/Font/WOFF2/Loader.cpp:56 WOFF2::convert_to_ttf.
 pub func woff2_convert_to_ttf(bytes: const u8[]) -> ak.ByteBuffer!:
@@ -571,7 +567,7 @@ pub func font_cascade_list_equals(this: const FontCascadeList*, other: FontCasca
 
 ## Ported from Libraries/LibGfx/FontCascadeList.h:71 Gfx::FontCascadeList::PendingFace::PendingFace.
 pub func font_cascade_list_pending_face_construct(this: FontCascadeListPendingFace*, enclosing: UnicodeRange, ranges: ak.Vector[UnicodeRange], start_load: ak.Function0[unit]):
-    return
+    trap("unported: Gfx::FontCascadeList::PendingFace::PendingFace")
 
 ## Ported from Libraries/LibGfx/FontCascadeList.h:78 Gfx::FontCascadeList::PendingFace::covers.
 pub func font_cascade_list_pending_face_covers(this: const FontCascadeListPendingFace*, code_point: u32) -> bool:
@@ -595,7 +591,7 @@ pub func font_cascade_list_first_text_face(this: const FontCascadeList*) -> Font
 
 ## Ported from Libraries/LibGfx/TextLayout.cpp:27 Gfx::GlyphRun::GlyphRun.
 pub func glyph_run_construct(this: GlyphRun*, glyphs: ak.Vector[DrawGlyph], font: const Font*, text_type: GlyphRunTextType, width: f32):
-    return
+    trap("unported: Gfx::GlyphRun::GlyphRun")
 
 ## Ported from Libraries/LibGfx/TextLayout.h:46 Gfx::GlyphRun::font.
 pub func glyph_run_font(this: const GlyphRun*) -> Font:

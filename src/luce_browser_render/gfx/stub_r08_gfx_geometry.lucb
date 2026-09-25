@@ -16,7 +16,6 @@
 #           Libraries/LibGfx/ColorConversion.cpp
 #           Libraries/LibGfx/ColorConversion.h
 #           Libraries/LibGfx/ColorSpace.cpp
-#           Libraries/LibGfx/ColorSpace.h
 #           Libraries/LibGfx/Cursor.cpp
 #           Libraries/LibGfx/Cursor.h
 #           Libraries/LibGfx/Matrix.h
@@ -25,23 +24,20 @@
 #           Libraries/LibGfx/Palette.h
 #           Libraries/LibGfx/Point.cpp
 #           Libraries/LibGfx/Point.h
-#           Libraries/LibGfx/Rect.cpp
 #           Libraries/LibGfx/Rect.h
-#           Libraries/LibGfx/Size.cpp
 #           Libraries/LibGfx/Size.h
 #           Libraries/LibGfx/TextAlignment.h
-#           Libraries/LibWeb/PixelUnits.cpp
 #           Libraries/LibWeb/PixelUnits.h
 #
 #==============================================================================================
 
 ## Ported from Libraries/LibGfx/AffineTransform.h:19 Gfx::AffineTransform::AffineTransform.
 pub func affine_transform_construct(this: AffineTransform*):
-    return
+    trap("unported: Gfx::AffineTransform::AffineTransform")
 
 ## Ported from Libraries/LibGfx/AffineTransform.h:24 Gfx::AffineTransform::AffineTransform.
 pub func affine_transform_construct_f32(this: AffineTransform*, a: f32, b: f32, c_: f32, d: f32, e: f32, f: f32):
-    return
+    trap("unported: Gfx::AffineTransform::AffineTransform")
 
 ## Ported from Libraries/LibGfx/AffineTransform.h:29 Gfx::AffineTransform::is_identity.
 pub func affine_transform_is_identity(this: const AffineTransform*) -> bool:
@@ -56,22 +52,7 @@ pub func affine_transform_is_identity_or_translation_or_scale(this: const Affine
     trap("unported: Gfx::AffineTransform::is_identity_or_translation_or_scale")
 
 ## Ported from Libraries/LibGfx/AffineTransform.cpp:154 Gfx::AffineTransform::map.
-pub func affine_transform_map_f32(this: const AffineTransform*, unmapped_x: f32, unmapped_y: f32, mapped_x: f32*, mapped_y: f32*):
-    trap("unported: Gfx::AffineTransform::map")
-
-## Ported from Libraries/LibGfx/AffineTransform.h:47 Gfx::AffineTransform::map.
-# unmapped: Gfx::Point<T>; Gfx::Point<T>
-pub func affine_transform_map_opaque_const[T](this: const AffineTransform*, arg0: void*?) -> void*?:
-    trap("unported: Gfx::AffineTransform::map")
-
-## Ported from Libraries/LibGfx/AffineTransform.h:50 Gfx::AffineTransform::map.
-# unmapped: Gfx::Size<T>; Gfx::Size<T>
-pub func affine_transform_map_opaque_const_2[T](this: const AffineTransform*, arg0: void*?) -> void*?:
-    trap("unported: Gfx::AffineTransform::map")
-
-## Ported from Libraries/LibGfx/AffineTransform.h:53 Gfx::AffineTransform::map.
-# unmapped: Gfx::Rect<T>; Gfx::Rect<T>
-pub func affine_transform_map_opaque_const_3[T](this: const AffineTransform*, arg0: void*?) -> void*?:
+pub func affine_transform_map(this: const AffineTransform*, unmapped_x: f32, unmapped_y: f32, mapped_x: f32*, mapped_y: f32*):
     trap("unported: Gfx::AffineTransform::map")
 
 ## Ported from Libraries/LibGfx/AffineTransform.cpp:231 Gfx::AffineTransform::map_to_quad.
@@ -187,19 +168,19 @@ pub func affine_transform_to_matrix(this: const AffineTransform*) -> FloatMatrix
     trap("unported: Gfx::AffineTransform::to_matrix")
 
 ## Ported from Libraries/LibGfx/AffineTransform.cpp:161 Gfx::AffineTransform::map.
-pub func affine_transform_map_int_point(this: const AffineTransform*, point: IntPoint) -> IntPoint:
+pub func affine_transform_map_i32_int_point(this: const AffineTransform*, point: IntPoint) -> IntPoint:
     trap("unported: Gfx::AffineTransform::map")
 
 ## Ported from Libraries/LibGfx/AffineTransform.cpp:170 Gfx::AffineTransform::map.
-pub func affine_transform_map_float_point(this: const AffineTransform*, point: FloatPoint) -> FloatPoint:
+pub func affine_transform_map_f32_float_point(this: const AffineTransform*, point: FloatPoint) -> FloatPoint:
     trap("unported: Gfx::AffineTransform::map")
 
 ## Ported from Libraries/LibGfx/AffineTransform.cpp:179 Gfx::AffineTransform::map.
-pub func affine_transform_map_int_size(this: const AffineTransform*, size: IntSize) -> IntSize:
+pub func affine_transform_map_i32_int_size(this: const AffineTransform*, size: IntSize) -> IntSize:
     trap("unported: Gfx::AffineTransform::map")
 
 ## Ported from Libraries/LibGfx/AffineTransform.cpp:188 Gfx::AffineTransform::map.
-pub func affine_transform_map_float_size(this: const AffineTransform*, size: FloatSize) -> FloatSize:
+pub func affine_transform_map_f32_float_size(this: const AffineTransform*, size: FloatSize) -> FloatSize:
     trap("unported: Gfx::AffineTransform::map")
 
 ## Ported from Libraries/LibGfx/AffineTransform.cpp:194 Gfx::smallest_of.
@@ -213,11 +194,11 @@ pub func largest_of[T](p1: T, p2: T, p3: T, p4: T) -> T:
     trap("unported: Gfx::largest_of")
 
 ## Ported from Libraries/LibGfx/AffineTransform.cpp:206 Gfx::AffineTransform::map.
-pub func affine_transform_map_float_rect(this: const AffineTransform*, rect: FloatRect) -> FloatRect:
+pub func affine_transform_map_f32_float_rect(this: const AffineTransform*, rect: FloatRect) -> FloatRect:
     trap("unported: Gfx::AffineTransform::map")
 
 ## Ported from Libraries/LibGfx/AffineTransform.cpp:226 Gfx::AffineTransform::map.
-pub func affine_transform_map_device_pixel_rect(this: const AffineTransform*, rect: DevicePixelRect) -> DevicePixelRect:
+pub func affine_transform_map_i32_device_pixel_rect(this: const AffineTransform*, rect: DevicePixelRect) -> DevicePixelRect:
     trap("unported: Gfx::AffineTransform::map")
 
 ## Ported from Libraries/LibGfx/Color.cpp:26 Gfx::(anonymous)::nth_digit.
@@ -240,7 +221,7 @@ pub func color_construct_color_named_color(this: Color*, named: ColorNamedColor)
 
 ## Ported from Libraries/LibGfx/Color.h:133 Gfx::Color::Color.
 pub func color_construct_u8_u8_u8(this: Color*, r: u8, g: u8, b: u8):
-    return
+    trap("unported: Gfx::Color::Color")
 
 ## Ported from Libraries/LibGfx/Color.cpp:134 Gfx::parse_rgb_color.
 # internal linkage in C++: make it private when it is ported.
@@ -249,7 +230,7 @@ pub func parse_rgb_color(string: ak.StringView) -> Color?:
 
 ## Ported from Libraries/LibGfx/Color.h:138 Gfx::Color::Color.
 pub func color_construct_u8_u8_u8_u8(this: Color*, r: u8, g: u8, b: u8, a: u8):
-    return
+    trap("unported: Gfx::Color::Color")
 
 ## Ported from Libraries/LibGfx/Color.h:568 Gfx::Color::branded_color.
 pub func color_branded_color(color: ColorBrandedColor) -> Color:
@@ -524,19 +505,11 @@ pub func color_suggested_foreground_color(this: const Color*) -> Color:
 
 ## Ported from Libraries/LibGfx/Color.h:472 Gfx::Color::Color.
 pub func color_construct_u32(this: Color*, argb: u32):
-    return
-
-## Ported from Libraries/LibGfx/Color.cpp:527 IPC::encode.
-pub func ipc_encode_color(encoder: IpcEncoder*, color: Color) -> !:
-    trap("unported: IPC::encode")
-
-## Ported from Libraries/LibGfx/Color.cpp:533 IPC::decode.
-pub func ipc_decode_3(decoder: IpcDecoder*) -> Color!:
-    trap("unported: IPC::decode")
+    trap("unported: Gfx::Color::Color")
 
 ## Ported from Libraries/LibGfx/ColorConversion.h:20 Gfx::ColorComponents::ColorComponents.
 pub func color_components_construct(this: ColorComponents*, first: f32, second: f32, third: f32, alpha: f32 = 1.0):
-    return
+    trap("unported: Gfx::ColorComponents::ColorComponents")
 
 ## Ported from Libraries/LibGfx/ColorConversion.h:26 Gfx::ColorComponents::operator[].
 pub func color_components_at(this: ColorComponents*, index: usize) -> f32*:
@@ -750,7 +723,7 @@ pub func polar_to_rectangular(components: ColorComponents) -> ColorComponents:
 
 ## Ported from Libraries/LibGfx/ColorSpace.cpp:26 Gfx::ColorSpace::ColorSpace.
 pub func color_space_construct(this: ColorSpace*):
-    return
+    trap("unported: Gfx::ColorSpace::ColorSpace")
 
 ## Ported from Libraries/LibGfx/ColorSpace.cpp:52 Gfx::ColorSpace::from_cicp.
 pub func color_space_from_cicp(cicp: MediaCodingIndependentCodePoints) -> ColorSpace!:
@@ -760,25 +733,13 @@ pub func color_space_from_cicp(cicp: MediaCodingIndependentCodePoints) -> ColorS
 pub func color_space_load_from_icc_bytes(icc_bytes: const u8[]) -> ColorSpace!:
     trap("unported: Gfx::ColorSpace::load_from_icc_bytes")
 
-## Ported from Libraries/LibGfx/ColorSpace.h:39 Gfx::ColorSpace::color_space.
-pub func color_space_color_space_2[T](this: ColorSpace*) -> T*:
-    trap("unported: Gfx::ColorSpace::color_space")
-
 ## Ported from Libraries/LibGfx/ColorSpace.cpp:47 Gfx::ColorSpace::ColorSpace.
 pub func color_space_construct_color_space_impl(this: ColorSpace*, color_space: ColorSpaceImpl*):
-    return
-
-## Ported from Libraries/LibGfx/ColorSpace.cpp:170 IPC::encode.
-pub func ipc_encode_color_space(encoder: IpcEncoder*, color_space: ColorSpace) -> !:
-    trap("unported: IPC::encode")
-
-## Ported from Libraries/LibGfx/ColorSpace.cpp:183 IPC::decode.
-pub func ipc_decode_4(decoder: IpcDecoder*) -> ColorSpace!:
-    trap("unported: IPC::decode")
+    trap("unported: Gfx::ColorSpace::ColorSpace")
 
 ## Ported from Libraries/LibGfx/ColorSpace.cpp:160 Gfx::ColorSpace::color_space.
 # unmapped: sk_sp<SkColorSpace>
-pub func color_space_color_space(this: ColorSpace*) -> void*?:
+pub func color_space_color_space_sk_sp(this: ColorSpace*) -> void*?:
     trap("unported: Gfx::ColorSpace::color_space")
 
 ## Ported from Libraries/LibGfx/Cursor.cpp:14 Gfx::ImageCursor::operator==.
@@ -788,14 +749,6 @@ pub func image_cursor_eq(this: const ImageCursor*, other: ImageCursor) -> bool:
 ## Ported from Libraries/LibGfx/Cursor.h:50 Gfx::standard_cursor_to_string.
 pub func standard_cursor_to_string(cursor: StandardCursor) -> ak.StringView:
     trap("unported: Gfx::standard_cursor_to_string")
-
-## Ported from Libraries/LibGfx/Cursor.cpp:25 IPC::encode.
-pub func ipc_encode_image_cursor(encoder: IpcEncoder*, image_cursor: ImageCursor) -> !:
-    trap("unported: IPC::encode")
-
-## Ported from Libraries/LibGfx/Cursor.cpp:33 IPC::decode.
-pub func ipc_decode_5(decoder: IpcDecoder*) -> ImageCursor!:
-    trap("unported: IPC::decode")
 
 ## Ported from Libraries/LibGfx/Matrix.h:25 Gfx::Matrix::Matrix<N, T> for FloatMatrix4X4.
 # unmapped: initializer_list<T>
@@ -939,11 +892,11 @@ pub func palette_impl_replace_internal_buffer(this: PaletteImpl*, buffer: CoreAn
 
 ## Ported from Libraries/LibGfx/Palette.cpp:18 Gfx::PaletteImpl::PaletteImpl.
 pub func palette_impl_construct(this: PaletteImpl*, buffer: CoreAnonymousBuffer):
-    return
+    trap("unported: Gfx::PaletteImpl::PaletteImpl")
 
 ## Ported from Libraries/LibGfx/Palette.cpp:23 Gfx::Palette::Palette.
 pub func palette_construct(this: Palette*, impl: PaletteImpl*):
-    return
+    trap("unported: Gfx::Palette::Palette")
 
 ## Ported from Libraries/LibGfx/Palette.h:64 Gfx::Palette::accent.
 pub func palette_accent(this: const Palette*) -> Color:
@@ -1443,15 +1396,15 @@ pub func palette_impl_const(this: const Palette*) -> PaletteImpl:
 
 ## Ported from Libraries/LibGfx/Point.h:24 Gfx::Point::Point<T> for CssPixelPoint.
 pub func css_pixel_point_construct(this: CssPixelPoint*, x: CssPixels, y: CssPixels):
-    return
+    trap("unported: Gfx::Point::Point<T>")
 
 ## Ported from Libraries/LibGfx/Point.h:24 Gfx::Point::Point<T> for FloatPoint.
 pub func float_point_construct(this: FloatPoint*, x: f32, y: f32):
-    return
+    trap("unported: Gfx::Point::Point<T>")
 
 ## Ported from Libraries/LibGfx/Point.h:24 Gfx::Point::Point<T> for IntPoint.
 pub func int_point_construct(this: IntPoint*, x: i32, y: i32):
-    return
+    trap("unported: Gfx::Point::Point<T>")
 
 ## Ported from Libraries/LibGfx/Point.h:31 Gfx::Point::Point<T> for CssPixelPoint.
 pub func css_pixel_point_point_t_u[U](this: CssPixelPoint*, x: U, y: U):
@@ -2086,33 +2039,17 @@ pub func quadratic_interpolate[T](p1: void*?, p2: void*?, c1: void*?, t: f32) ->
 pub func cubic_interpolate[T](p1: void*?, p2: void*?, c1: void*?, c2: void*?, t: f32) -> void*?:
     trap("unported: Gfx::cubic_interpolate")
 
-## Ported from Libraries/LibGfx/Point.cpp:55 IPC::encode.
-pub func ipc_encode_int_point(encoder: IpcEncoder*, point: IntPoint) -> !:
-    trap("unported: IPC::encode")
-
-## Ported from Libraries/LibGfx/Point.cpp:63 IPC::encode.
-pub func ipc_encode_float_point(encoder: IpcEncoder*, point: FloatPoint) -> !:
-    trap("unported: IPC::encode")
-
-## Ported from Libraries/LibGfx/Point.cpp:71 IPC::decode.
-pub func ipc_decode_6(decoder: IpcDecoder*) -> IntPoint!:
-    trap("unported: IPC::decode")
-
-## Ported from Libraries/LibGfx/Point.cpp:79 IPC::decode.
-pub func ipc_decode_7(decoder: IpcDecoder*) -> FloatPoint!:
-    trap("unported: IPC::decode")
-
 ## Ported from Libraries/LibGfx/Rect.h:24 Gfx::Rect::Rect<T> for CssPixelRect.
 pub func css_pixel_rect_construct_css_pixels(this: CssPixelRect*, x: CssPixels, y: CssPixels, width: CssPixels, height: CssPixels):
-    return
+    trap("unported: Gfx::Rect::Rect<T>")
 
 ## Ported from Libraries/LibGfx/Rect.h:24 Gfx::Rect::Rect<T> for DevicePixelRect.
 pub func device_pixel_rect_construct_i32(this: DevicePixelRect*, x: i32, y: i32, width: i32, height: i32):
-    return
+    trap("unported: Gfx::Rect::Rect<T>")
 
 ## Ported from Libraries/LibGfx/Rect.h:24 Gfx::Rect::Rect<T> for FloatRect.
 pub func float_rect_construct_f32(this: FloatRect*, x: f32, y: f32, width: f32, height: f32):
-    return
+    trap("unported: Gfx::Rect::Rect<T>")
 
 ## Ported from Libraries/LibGfx/Rect.h:31 Gfx::Rect::Rect<T> for CssPixelRect.
 pub func css_pixel_rect_rect_t_u[U](this: CssPixelRect*, x: U, y: U, width: U, height: U):
@@ -2128,15 +2065,15 @@ pub func float_rect_rect_t_u[U](this: FloatRect*, x: U, y: U, width: U, height: 
 
 ## Ported from Libraries/LibGfx/Rect.h:37 Gfx::Rect::Rect<T> for CssPixelRect.
 pub func css_pixel_rect_construct_css_pixel_point(this: CssPixelRect*, location: CssPixelPoint, size: CssPixelSize):
-    return
+    trap("unported: Gfx::Rect::Rect<T>")
 
 ## Ported from Libraries/LibGfx/Rect.h:37 Gfx::Rect::Rect<T> for DevicePixelRect.
 pub func device_pixel_rect_construct_int_point(this: DevicePixelRect*, location: IntPoint, size: IntSize):
-    return
+    trap("unported: Gfx::Rect::Rect<T>")
 
 ## Ported from Libraries/LibGfx/Rect.h:37 Gfx::Rect::Rect<T> for FloatRect.
 pub func float_rect_construct_float_point(this: FloatRect*, location: FloatPoint, size: FloatSize):
-    return
+    trap("unported: Gfx::Rect::Rect<T>")
 
 ## Ported from Libraries/LibGfx/Rect.h:44 Gfx::Rect::Rect<T> for CssPixelRect.
 # unmapped: Gfx::Point<U>; Gfx::Size<U>
@@ -3354,29 +3291,21 @@ pub func float_rect_to_byte_string(this: const FloatRect*) -> ak.ByteString:
 pub func enclosing_int_rect(float_rect: FloatRect) -> DevicePixelRect:
     trap("unported: Gfx::enclosing_int_rect")
 
-## Ported from Libraries/LibGfx/Rect.cpp:31 IPC::encode.
-pub func ipc_encode_device_pixel_rect(encoder: IpcEncoder*, rect: DevicePixelRect) -> !:
-    trap("unported: IPC::encode")
-
-## Ported from Libraries/LibGfx/Rect.cpp:39 IPC::decode.
-pub func ipc_decode_8(decoder: IpcDecoder*) -> DevicePixelRect!:
-    trap("unported: IPC::decode")
-
 ## Ported from Libraries/LibGfx/Size.h:21 Gfx::Size::Size<T> for CssPixelSize.
 pub func css_pixel_size_construct(this: CssPixelSize*, w: CssPixels, h: CssPixels):
-    return
+    trap("unported: Gfx::Size::Size<T>")
 
 ## Ported from Libraries/LibGfx/Size.h:21 Gfx::Size::Size<T> for FloatSize.
 pub func float_size_construct(this: FloatSize*, w: f32, h: f32):
-    return
+    trap("unported: Gfx::Size::Size<T>")
 
 ## Ported from Libraries/LibGfx/Size.h:21 Gfx::Size::Size<T> for IntSize.
 pub func int_size_construct(this: IntSize*, w: i32, h: i32):
-    return
+    trap("unported: Gfx::Size::Size<T>")
 
 ## Ported from Libraries/LibGfx/Size.h:21 Gfx::Size::Size<T> for SizeOfU32.
 pub func size_of_u32_construct(this: SizeOfU32*, w: u32, h: u32):
-    return
+    trap("unported: Gfx::Size::Size<T>")
 
 ## Ported from Libraries/LibGfx/Size.h:28 Gfx::Size::Size<T> for CssPixelSize.
 pub func css_pixel_size_size_t_u[U](this: CssPixelSize*, width: U, height: U):
@@ -3862,14 +3791,6 @@ pub func int_size_to_rounded[I](this: const IntSize*) -> void*?:
 pub func size_of_u32_to_rounded[I](this: const SizeOfU32*) -> void*?:
     trap("unported: Gfx::Size::to_rounded")
 
-## Ported from Libraries/LibGfx/Size.cpp:31 IPC::encode.
-pub func ipc_encode_int_size(encoder: IpcEncoder*, size: IntSize) -> !:
-    trap("unported: IPC::encode")
-
-## Ported from Libraries/LibGfx/Size.cpp:39 IPC::decode.
-pub func ipc_decode_10(decoder: IpcDecoder*) -> IntSize!:
-    trap("unported: IPC::decode")
-
 ## Ported from Libraries/LibGfx/TextAlignment.h:31 Gfx::is_right_text_alignment.
 pub func is_right_text_alignment(alignment: TextAlignment) -> bool:
     trap("unported: Gfx::is_right_text_alignment")
@@ -3899,7 +3820,7 @@ pub func gt_i32[T](left: i32, right: T) -> bool:
     trap("unported: Web::operator>")
 
 ## Ported from Libraries/LibWeb/PixelUnits.h:38 Web::operator<.
-pub func lt_i32[T](left: i32, right: T) -> bool:
+pub func lt_distinct_numeric[T](left: i32, right: T) -> bool:
     trap("unported: Web::operator<")
 
 ## Ported from Libraries/LibWeb/PixelUnits.h:41 Web::operator>=.
@@ -4099,15 +4020,15 @@ pub func gt_css_pixels_f64(left: CssPixels, right: f64) -> bool:
     trap("unported: Web::operator>")
 
 ## Ported from Libraries/LibWeb/PixelUnits.h:291 Web::operator<.
-pub func lt_css_pixels_t[T](left: CssPixels, right: T) -> bool:
+pub func lt_t[T](left: CssPixels, right: T) -> bool:
     trap("unported: Web::operator<")
 
 ## Ported from Libraries/LibWeb/PixelUnits.h:292 Web::operator<.
-pub func lt_css_pixels_f32(left: CssPixels, right: f32) -> bool:
+pub func lt_f32(left: CssPixels, right: f32) -> bool:
     trap("unported: Web::operator<")
 
 ## Ported from Libraries/LibWeb/PixelUnits.h:293 Web::operator<.
-pub func lt_css_pixels_f64(left: CssPixels, right: f64) -> bool:
+pub func lt_f64(left: CssPixels, right: f64) -> bool:
     trap("unported: Web::operator<")
 
 ## Ported from Libraries/LibWeb/PixelUnits.h:296 Web::operator*.
@@ -4140,7 +4061,7 @@ pub func css_pixel_fraction_construct_css_pixels(this: CssPixelFraction*, numera
 
 ## Ported from Libraries/LibWeb/PixelUnits.h:314 Web::CSSPixelFraction::CSSPixelFraction.
 pub func css_pixel_fraction_construct(this: CssPixelFraction*, value: CssPixels):
-    return
+    trap("unported: Web::CSSPixelFraction::CSSPixelFraction")
 
 ## Ported from Libraries/LibWeb/PixelUnits.h:321 Web::CSSPixelFraction::CSSPixelFraction.
 pub func css_pixel_fraction_css_pixel_fraction[I](this: CssPixelFraction*, numerator: I, denominator: I):
@@ -4237,35 +4158,3 @@ pub func square_distance_between(a: CssPixelPoint, b: CssPixelPoint) -> CssPixel
 ## Ported from Libraries/LibWeb/PixelUnits.h:471 constrained.
 pub func constrained(point: CssPixelPoint, rect: CssPixelRect) -> CssPixelPoint:
     trap("unported: constrained")
-
-## Ported from Libraries/LibWeb/PixelUnits.cpp:19 IPC::encode.
-pub func ipc_encode_i32(encoder: IpcEncoder*, value: i32) -> !:
-    trap("unported: IPC::encode")
-
-## Ported from Libraries/LibWeb/PixelUnits.cpp:26 IPC::decode.
-pub func ipc_decode_11(decoder: IpcDecoder*) -> i32!:
-    trap("unported: IPC::decode")
-
-## Ported from Libraries/LibWeb/PixelUnits.cpp:33 IPC::encode.
-pub func ipc_encode_int_point_2(encoder: IpcEncoder*, value: IntPoint) -> !:
-    trap("unported: IPC::encode")
-
-## Ported from Libraries/LibWeb/PixelUnits.cpp:41 IPC::decode.
-pub func ipc_decode_12(decoder: IpcDecoder*) -> IntPoint!:
-    trap("unported: IPC::decode")
-
-## Ported from Libraries/LibWeb/PixelUnits.cpp:49 IPC::encode.
-pub func ipc_encode_int_size_2(encoder: IpcEncoder*, value: IntSize) -> !:
-    trap("unported: IPC::encode")
-
-## Ported from Libraries/LibWeb/PixelUnits.cpp:57 IPC::decode.
-pub func ipc_decode_13(decoder: IpcDecoder*) -> IntSize!:
-    trap("unported: IPC::decode")
-
-## Ported from Libraries/LibWeb/PixelUnits.cpp:65 IPC::encode.
-pub func ipc_encode_device_pixel_rect_2(encoder: IpcEncoder*, value: DevicePixelRect) -> !:
-    trap("unported: IPC::encode")
-
-## Ported from Libraries/LibWeb/PixelUnits.cpp:73 IPC::decode.
-pub func ipc_decode_14(decoder: IpcDecoder*) -> DevicePixelRect!:
-    trap("unported: IPC::decode")

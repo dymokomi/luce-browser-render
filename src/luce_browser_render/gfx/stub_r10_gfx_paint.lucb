@@ -23,7 +23,6 @@
 #           Libraries/LibGfx/Painter.cpp
 #           Libraries/LibGfx/Painter.h
 #           Libraries/LibGfx/PaintingSurface.cpp
-#           Libraries/LibGfx/PaintingSurface.h
 #           Libraries/LibGfx/Path.h
 #           Libraries/LibGfx/ShareableBitmap.cpp
 #
@@ -231,22 +230,6 @@ pub func bitmap_allocate_backing_store(format_: BitmapFormat, size: IntSize, ini
 pub func get_metadata(bitmap: Bitmap) -> BitmapMetadata:
     trap("unported: Gfx::get_metadata")
 
-## Ported from Libraries/LibGfx/BitmapSequence.cpp:27 IPC::encode.
-pub func ipc_encode_bitmap_metadata(encoder: IpcEncoder*, metadata: BitmapMetadata) -> !:
-    trap("unported: IPC::encode")
-
-## Ported from Libraries/LibGfx/BitmapSequence.cpp:38 IPC::decode.
-pub func ipc_decode(decoder: IpcDecoder*) -> BitmapMetadata!:
-    trap("unported: IPC::decode")
-
-## Ported from Libraries/LibGfx/BitmapSequence.cpp:57 IPC::encode.
-pub func ipc_encode_bitmap_sequence(encoder: IpcEncoder*, bitmap_sequence: BitmapSequence) -> !:
-    trap("unported: IPC::encode")
-
-## Ported from Libraries/LibGfx/BitmapSequence.cpp:103 IPC::decode.
-pub func ipc_decode_2(decoder: IpcDecoder*) -> BitmapSequence!:
-    trap("unported: IPC::decode")
-
 ## Ported from Libraries/LibGfx/Filter.cpp:47 Gfx::Filter::arithmetic.
 pub func filter_arithmetic(background: const Filter*?, foreground: const Filter*?, k1: f32, k2: f32, k3: f32, k4: f32) -> Filter:
     trap("unported: Gfx::Filter::arithmetic")
@@ -325,7 +308,7 @@ pub func filter_impl(this: const Filter*) -> FilterImpl:
 
 ## Ported from Libraries/LibGfx/Filter.cpp:37 Gfx::Filter::Filter.
 pub func filter_construct(this: Filter*, impl: FilterImpl*):
-    return
+    trap("unported: Gfx::Filter::Filter")
 
 ## Ported from Libraries/LibGfx/FilterImpl.h:18 Gfx::FilterImpl::create.
 # unmapped: sk_sp<SkImageFilter>
@@ -441,7 +424,7 @@ pub func bytes_per_pixel_for_export_format(format_: ExportFormat) -> i32:
 
 ## Ported from Libraries/LibGfx/ImmutableBitmap.cpp:332 Gfx::ImmutableBitmap::ImmutableBitmap.
 pub func immutable_bitmap_construct(this: ImmutableBitmap*, impl: ImmutableBitmapImpl*):
-    return
+    trap("unported: Gfx::ImmutableBitmap::ImmutableBitmap")
 
 ## Ported from Libraries/LibGfx/ImmutableBitmap.cpp:344 Gfx::ImmutableBitmap::lock_context.
 pub func immutable_bitmap_lock_context(this: ImmutableBitmap*):
@@ -479,7 +462,7 @@ pub func solid_color_paint_style_color(this: SolidColorPaintStyle*) -> Color:
 
 ## Ported from Libraries/LibGfx/PaintStyle.h:41 Gfx::SolidColorPaintStyle::SolidColorPaintStyle.
 pub func solid_color_paint_style_construct(this: SolidColorPaintStyle*, color: Color):
-    return
+    trap("unported: Gfx::SolidColorPaintStyle::SolidColorPaintStyle")
 
 ## Ported from Libraries/LibGfx/PaintStyle.h:51 Gfx::GradientPaintStyle::add_color_stop.
 pub func gradient_paint_style_add_color_stop_f32(this: GradientPaintStyle*, position: f32, color: Color, transition_hint: f32? = none) -> !:
@@ -531,7 +514,7 @@ pub func canvas_pattern_paint_style_set_transform(this: CanvasPatternPaintStyle*
 
 ## Ported from Libraries/LibGfx/PaintStyle.cpp:13 Gfx::CanvasPatternPaintStyle::CanvasPatternPaintStyle.
 pub func canvas_pattern_paint_style_construct(this: CanvasPatternPaintStyle*, image: ImmutableBitmap*?, repetition: CanvasPatternPaintStyleRepetition):
-    return
+    trap("unported: Gfx::CanvasPatternPaintStyle::CanvasPatternPaintStyle")
 
 ## Ported from Libraries/LibGfx/PaintStyle.h:114 Gfx::CanvasLinearGradientPaintStyle::create.
 pub func canvas_linear_gradient_paint_style_create(p0: FloatPoint, p1: FloatPoint) -> CanvasLinearGradientPaintStyle*!:
@@ -547,7 +530,7 @@ pub func canvas_linear_gradient_paint_style_end_point(this: CanvasLinearGradient
 
 ## Ported from Libraries/LibGfx/PaintStyle.h:123 Gfx::CanvasLinearGradientPaintStyle::CanvasLinearGradientPaintStyle.
 pub func canvas_linear_gradient_paint_style_construct(this: CanvasLinearGradientPaintStyle*, p0: FloatPoint, p1: FloatPoint):
-    return
+    trap("unported: Gfx::CanvasLinearGradientPaintStyle::CanvasLinearGradientPaintStyle")
 
 ## Ported from Libraries/LibGfx/PaintStyle.h:135 Gfx::CanvasConicGradientPaintStyle::create.
 pub func canvas_conic_gradient_paint_style_create(center: FloatPoint, start_angle: f32 = 0.0) -> CanvasConicGradientPaintStyle*!:
@@ -563,7 +546,7 @@ pub func canvas_conic_gradient_paint_style_start_angle(this: CanvasConicGradient
 
 ## Ported from Libraries/LibGfx/PaintStyle.h:144 Gfx::CanvasConicGradientPaintStyle::CanvasConicGradientPaintStyle.
 pub func canvas_conic_gradient_paint_style_construct(this: CanvasConicGradientPaintStyle*, center: FloatPoint, start_angle: f32):
-    return
+    trap("unported: Gfx::CanvasConicGradientPaintStyle::CanvasConicGradientPaintStyle")
 
 ## Ported from Libraries/LibGfx/PaintStyle.h:156 Gfx::CanvasRadialGradientPaintStyle::create.
 pub func canvas_radial_gradient_paint_style_create(start_center: FloatPoint, start_radius: f32, end_center: FloatPoint, end_radius: f32) -> CanvasRadialGradientPaintStyle*!:
@@ -587,7 +570,7 @@ pub func canvas_radial_gradient_paint_style_end_radius(this: CanvasRadialGradien
 
 ## Ported from Libraries/LibGfx/PaintStyle.h:167 Gfx::CanvasRadialGradientPaintStyle::CanvasRadialGradientPaintStyle.
 pub func canvas_radial_gradient_paint_style_construct(this: CanvasRadialGradientPaintStyle*, start_center: FloatPoint, start_radius: f32, end_center: FloatPoint, end_radius: f32):
-    return
+    trap("unported: Gfx::CanvasRadialGradientPaintStyle::CanvasRadialGradientPaintStyle")
 
 ## Ported from Libraries/LibGfx/PaintStyle.h:193 Gfx::SVGGradientPaintStyle::set_spread_method.
 pub func svg_gradient_paint_style_set_spread_method(this: SvgGradientPaintStyle*, spread_method: SvgGradientPaintStyleSpreadMethod):
@@ -619,7 +602,7 @@ pub func svg_linear_gradient_paint_style_set_end_point(this: SvgLinearGradientPa
 
 ## Ported from Libraries/LibGfx/PaintStyle.h:226 Gfx::SVGLinearGradientPaintStyle::SVGLinearGradientPaintStyle.
 pub func svg_linear_gradient_paint_style_construct(this: SvgLinearGradientPaintStyle*, p0: FloatPoint, p1: FloatPoint):
-    return
+    trap("unported: Gfx::SVGLinearGradientPaintStyle::SVGLinearGradientPaintStyle")
 
 ## Ported from Libraries/LibGfx/PaintStyle.h:239 Gfx::SVGRadialGradientPaintStyle::create.
 pub func svg_radial_gradient_paint_style_create(start_center: FloatPoint, start_radius: f32, end_center: FloatPoint, end_radius: f32) -> SvgRadialGradientPaintStyle*!:
@@ -643,7 +626,7 @@ pub func svg_radial_gradient_paint_style_set_end_radius(this: SvgRadialGradientP
 
 ## Ported from Libraries/LibGfx/PaintStyle.h:264 Gfx::SVGRadialGradientPaintStyle::SVGRadialGradientPaintStyle.
 pub func svg_radial_gradient_paint_style_construct(this: SvgRadialGradientPaintStyle*, start_center: FloatPoint, start_radius: f32, end_center: FloatPoint, end_radius: f32):
-    return
+    trap("unported: Gfx::SVGRadialGradientPaintStyle::SVGRadialGradientPaintStyle")
 
 ## Ported from Libraries/LibGfx/Painter.cpp:16 Gfx::Painter::create.
 pub func painter_create(target_bitmap: Bitmap*) -> Painter*:
@@ -754,10 +737,6 @@ pub func painting_surface_canvas(this: const PaintingSurface*) -> SkCanvas*:
 pub func painting_surface_sk_surface(this: const PaintingSurface*) -> SkSurface*:
     trap("unported: Gfx::PaintingSurface::sk_surface")
 
-## Ported from Libraries/LibGfx/PaintingSurface.h:66 Gfx::PaintingSurface::sk_image_snapshot.
-pub func painting_surface_sk_image_snapshot_const_2[T](this: const PaintingSurface*) -> T:
-    trap("unported: Gfx::PaintingSurface::sk_image_snapshot")
-
 ## Ported from Libraries/LibGfx/PaintingSurface.cpp:218 Gfx::PaintingSurface::skia_backend_context.
 pub func painting_surface_skia_backend_context(this: const PaintingSurface*) -> SkiaBackendContext*?:
     trap("unported: Gfx::PaintingSurface::skia_backend_context")
@@ -776,11 +755,11 @@ pub func painting_surface_unlock_context(this: const PaintingSurface*):
 
 ## Ported from Libraries/LibGfx/PaintingSurface.cpp:151 Gfx::PaintingSurface::PaintingSurface.
 pub func painting_surface_construct(this: PaintingSurface*, impl: PaintingSurfaceImpl*):
-    return
+    trap("unported: Gfx::PaintingSurface::PaintingSurface")
 
 ## Ported from Libraries/LibGfx/PaintingSurface.cpp:213 Gfx::PaintingSurface::sk_image_snapshot.
 # unmapped: sk_sp<SkImage>
-pub func painting_surface_sk_image_snapshot_const(this: const PaintingSurface*) -> void*?:
+pub func painting_surface_sk_image_snapshot_sk_sp(this: const PaintingSurface*) -> void*?:
     trap("unported: Gfx::PaintingSurface::sk_image_snapshot")
 
 ## Ported from Libraries/LibGfx/Path.h:75 Gfx::Path::clear.
@@ -877,7 +856,7 @@ pub func shareable_bitmap_construct(this: ShareableBitmap*):
 
 ## Ported from Libraries/LibGfx/ShareableBitmap.cpp:18 Gfx::ShareableBitmap::ShareableBitmap.
 pub func shareable_bitmap_construct_bitmap(this: ShareableBitmap*, bitmap: Bitmap*, arg1: ShareableBitmapTag):
-    return
+    trap("unported: Gfx::ShareableBitmap::ShareableBitmap")
 
 ## Ported from Libraries/LibGfx/ShareableBitmap.cpp:31 Gfx::ShareableBitmap::is_valid.
 pub func shareable_bitmap_is_valid(this: const ShareableBitmap*) -> bool:
@@ -890,11 +869,3 @@ pub func shareable_bitmap_bitmap_const(this: const ShareableBitmap*) -> const Bi
 ## Ported from Libraries/LibGfx/ShareableBitmap.cpp:34 Gfx::ShareableBitmap::bitmap.
 pub func shareable_bitmap_bitmap(this: ShareableBitmap*) -> Bitmap*?:
     return this.m_bitmap
-
-## Ported from Libraries/LibGfx/ShareableBitmap.cpp:41 IPC::encode.
-pub func ipc_encode_shareable_bitmap(encoder: IpcEncoder*, shareable_bitmap: ShareableBitmap) -> !:
-    trap("unported: IPC::encode")
-
-## Ported from Libraries/LibGfx/ShareableBitmap.cpp:56 IPC::decode.
-pub func ipc_decode_9(decoder: IpcDecoder*) -> ShareableBitmap!:
-    trap("unported: IPC::decode")
