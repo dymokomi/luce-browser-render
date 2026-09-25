@@ -1,0 +1,262 @@
+#==============================================================================================
+#
+#   transform - an affine transformation matrix
+#
+#   DESCRIPTION:
+#       Port of tiny-skia-path transform.rs: Transform (sx, kx, ky, sy, tx, ty), its
+#       constructors, classification, pre/post concatenation, point mapping and inversion
+#       (in f64, as Skia does).
+#
+#==============================================================================================
+
+## An affine transformation matrix. Unlike other types, doesn't guarantee to be valid. This
+## is Skia quirk. Mainly because the Skia's Matrix is 3x3, not 2x3 as ours.
+pub struct Transform:
+    pub var sx: f32 = 1.0
+    pub var kx: f32 = 0.0
+    pub var ky: f32 = 0.0
+    pub var sy: f32 = 1.0
+    pub var tx: f32 = 0.0
+    pub var ty: f32 = 0.0
+
+    ## Creates an identity transform.
+    pub static func identity() -> Transform:
+        return Transform()
+
+    ## Creates a new `Transform`. We are using column-major-column-vector matrix notation,
+    ## therefore it's ky-kx, not kx-ky.
+    pub static func from_row(sx: f32, ky: f32, kx: f32, sy: f32, tx: f32, ty: f32) -> Transform:
+        return Transform(sx = sx, kx = kx, ky = ky, sy = sy, tx = tx, ty = ty)
+
+    ## Creates a new translating `Transform`.
+    pub static func from_translate(tx: f32, ty: f32) -> Transform:
+        return Transform.from_row(1.0, 0.0, 0.0, 1.0, tx, ty)
+
+    ## Creates a new scaling `Transform`.
+    pub static func from_scale(sx: f32, sy: f32) -> Transform:
+        return Transform.from_row(sx, 0.0, 0.0, sy, 0.0, 0.0)
+
+    ## Creates a new skewing `Transform`.
+    pub static func from_skew(kx: f32, ky: f32) -> Transform:
+        return Transform.from_row(1.0, ky, kx, 1.0, 0.0, 0.0)
+
+    ## Creates a new rotating `Transform`. `angle` in degrees.
+    pub static func from_rotate(angle: f32) -> Transform:
+        let rads_per_deg: f32 = 3.14159265358979323846 / 180.0
+        let v = angle * rads_per_deg
+        let a = math32.cos(v)
+        let b = math32.sin(v)
+        let c = -b
+        let d = a
+        return Transform.from_row(a, b, c, d, 0.0, 0.0)
+
+    ## Creates a new rotating `Transform` at the specified position. `angle` in degrees.
+    pub static func from_rotate_at(angle: f32, tx: f32, ty: f32) -> Transform:
+        var ts = Transform()
+        ts = ts.pre_translate(tx, ty)
+        ts = ts.pre_concat(Transform.from_rotate(angle))
+        ts = ts.pre_translate(-tx, -ty)
+        return ts
+
+    ## Converts `Rect` into a bounding box `Transform`.
+    pub static func from_bbox(bbox: NonZeroRect) -> Transform:
+        return Transform.from_row(bbox.width(), 0.0, 0.0, bbox.height(), bbox.x(), bbox.y())
+
+    ## Checks that transform is finite.
+    pub func is_finite() -> bool:
+        return math32.is_finite(self.sx) and math32.is_finite(self.ky) and math32.is_finite(self.kx) and math32.is_finite(self.sy) and math32.is_finite(self.tx) and math32.is_finite(self.ty)
+
+    ## Checks that transform is finite and has non-zero scale.
+    pub func is_valid() -> bool:
+        if self.is_finite():
+            let (sx, sy) = self.get_scale()
+            return not (is_nearly_zero_within_tolerance(sx, f32_epsilon) or is_nearly_zero_within_tolerance(sy, f32_epsilon))
+        return false
+
+    ## Checks that transform is identity.
+    pub func is_identity() -> bool:
+        return self.sx == 1.0 and self.kx == 0.0 and self.ky == 0.0 and self.sy == 1.0 and self.tx == 0.0 and self.ty == 0.0
+
+    ## Checks that transform is scale-only.
+    pub func is_scale() -> bool:
+        return self.has_scale() and not self.has_skew() and not self.has_translate()
+
+    ## Checks that transform is skew-only.
+    pub func is_skew() -> bool:
+        return not self.has_scale() and self.has_skew() and not self.has_translate()
+
+    ## Checks that transform is translate-only.
+    pub func is_translate() -> bool:
+        return not self.has_scale() and not self.has_skew() and self.has_translate()
+
+    ## Checks that transform contains only scale and translate.
+    pub func is_scale_translate() -> bool:
+        return (self.has_scale() or self.has_translate()) and not self.has_skew()
+
+    ## Checks that transform contains a scale part.
+    pub func has_scale() -> bool:
+        return self.sx != 1.0 or self.sy != 1.0
+
+    ## Checks that transform contains a skew part.
+    pub func has_skew() -> bool:
+        return self.kx != 0.0 or self.ky != 0.0
+
+    ## Checks that transform contains a translate part.
+    pub func has_translate() -> bool:
+        return self.tx != 0.0 or self.ty != 0.0
+
+    ## Returns transform's scale part.
+    pub func get_scale() -> (f32, f32):
+        let x_scale = math32.sqrt(self.sx * self.sx + self.kx * self.kx)
+        let y_scale = math32.sqrt(self.ky * self.ky + self.sy * self.sy)
+        return (x_scale, y_scale)
+
+    ## Pre-scales the current transform.
+    pub func pre_scale(sx: f32, sy: f32) -> Transform:
+        return self.pre_concat(Transform.from_scale(sx, sy))
+
+    ## Post-scales the current transform.
+    pub func post_scale(sx: f32, sy: f32) -> Transform:
+        return self.post_concat(Transform.from_scale(sx, sy))
+
+    ## Pre-translates the current transform.
+    pub func pre_translate(tx: f32, ty: f32) -> Transform:
+        return self.pre_concat(Transform.from_translate(tx, ty))
+
+    ## Post-translates the current transform.
+    pub func post_translate(tx: f32, ty: f32) -> Transform:
+        return self.post_concat(Transform.from_translate(tx, ty))
+
+    ## Pre-rotates the current transform. `angle` in degrees.
+    pub func pre_rotate(angle: f32) -> Transform:
+        return self.pre_concat(Transform.from_rotate(angle))
+
+    ## Post-rotates the current transform. `angle` in degrees.
+    pub func post_rotate(angle: f32) -> Transform:
+        return self.post_concat(Transform.from_rotate(angle))
+
+    ## Pre-rotates the current transform by the specified position. `angle` in degrees.
+    pub func pre_rotate_at(angle: f32, tx: f32, ty: f32) -> Transform:
+        return self.pre_concat(Transform.from_rotate_at(angle, tx, ty))
+
+    ## Post-rotates the current transform by the specified position. `angle` in degrees.
+    pub func post_rotate_at(angle: f32, tx: f32, ty: f32) -> Transform:
+        return self.post_concat(Transform.from_rotate_at(angle, tx, ty))
+
+    ## Pre-concats the current transform.
+    pub func pre_concat(other: Transform) -> Transform:
+        return concat(self, other)
+
+    ## Post-concats the current transform.
+    pub func post_concat(other: Transform) -> Transform:
+        return concat(other, self)
+
+    static func from_sin_cos(sin: f32, cos: f32) -> Transform:
+        return Transform.from_row(cos, sin, -sin, cos, 0.0, 0.0)
+
+    ## Transforms a point using the current transform.
+    pub func map_point(point: Point*):
+        if self.is_identity():
+            # Do nothing.
+            return
+        elif self.is_translate():
+            point.x += self.tx
+            point.y += self.ty
+        elif self.is_scale_translate():
+            point.x = point.x * self.sx + self.tx
+            point.y = point.y * self.sy + self.ty
+        else:
+            let x = point.x * self.sx + point.y * self.kx + self.tx
+            let y = point.x * self.ky + point.y * self.sy + self.ty
+            point.x = x
+            point.y = y
+
+    ## Transforms a slice of points using the current transform.
+    pub func map_points(points: Point[]):
+        if points.length == 0:
+            return
+        # TODO: simd
+        if self.is_identity():
+            # Do nothing.
+            return
+        elif self.is_translate():
+            for p in &points:
+                p.x += self.tx
+                p.y += self.ty
+        elif self.is_scale_translate():
+            for p in &points:
+                p.x = p.x * self.sx + self.tx
+                p.y = p.y * self.sy + self.ty
+        else:
+            for p in &points:
+                let x = p.x * self.sx + p.y * self.kx + self.tx
+                let y = p.x * self.ky + p.y * self.sy + self.ty
+                p.x = x
+                p.y = y
+
+    ## Returns an inverted transform.
+    pub func invert() -> Transform?:
+        # Allow the trivial case to be inlined.
+        if self.is_identity():
+            return self
+        return invert_transform(self)
+
+func invert_transform(ts: Transform) -> Transform?:
+    if ts.is_scale_translate():
+        if ts.has_scale():
+            let inv_x = invert(ts.sx)
+            let inv_y = invert(ts.sy)
+            return Transform.from_row(inv_x, 0.0, 0.0, inv_y, -ts.tx * inv_x, -ts.ty * inv_y)
+        # translate only
+        return Transform.from_translate(-ts.tx, -ts.ty)
+    let inv_det = inv_determinant(ts) else return none
+    let inv_ts = compute_inv(ts, inv_det)
+    if inv_ts.is_finite():
+        return inv_ts
+    return none
+
+func inv_determinant(ts: Transform) -> f64?:
+    let det = dcross((f64)ts.sx, (f64)ts.sy, (f64)ts.kx, (f64)ts.ky)
+    # Since the determinant is on the order of the cube of the matrix members, compare to the
+    # cube of the default nearly-zero constant (although an estimate of the condition number
+    # would be better if it wasn't so expensive).
+    let tolerance = scalar_nearly_zero * scalar_nearly_zero * scalar_nearly_zero
+    if is_nearly_zero_within_tolerance((f32)det, tolerance):
+        return none
+    return 1.0 / det
+
+func compute_inv(ts: Transform, inv_det: f64) -> Transform:
+    return Transform.from_row(
+        (f32)((f64)ts.sy * inv_det),
+        (f32)((f64)(-ts.ky) * inv_det),
+        (f32)((f64)(-ts.kx) * inv_det),
+        (f32)((f64)ts.sx * inv_det),
+        dcross_dscale(ts.kx, ts.ty, ts.sy, ts.tx, inv_det),
+        dcross_dscale(ts.ky, ts.tx, ts.sx, ts.ty, inv_det),
+    )
+
+func dcross(a: f64, b: f64, c: f64, d: f64) -> f64:
+    return a * b - c * d
+
+func dcross_dscale(a: f32, b: f32, c: f32, d: f32, scale: f64) -> f32:
+    return (f32)(dcross((f64)a, (f64)b, (f64)c, (f64)d) * scale)
+
+func concat(a: Transform, b: Transform) -> Transform:
+    if a.is_identity():
+        return b
+    elif b.is_identity():
+        return a
+    elif not a.has_skew() and not b.has_skew():
+        # just scale and translate
+        return Transform.from_row(a.sx * b.sx, 0.0, 0.0, a.sy * b.sy, a.sx * b.tx + a.tx, a.sy * b.ty + a.ty)
+    return Transform.from_row(
+        mul_add_mul(a.sx, b.sx, a.kx, b.ky),
+        mul_add_mul(a.ky, b.sx, a.sy, b.ky),
+        mul_add_mul(a.sx, b.kx, a.kx, b.sy),
+        mul_add_mul(a.ky, b.kx, a.sy, b.sy),
+        mul_add_mul(a.sx, b.tx, a.kx, b.ty) + a.tx,
+        mul_add_mul(a.ky, b.tx, a.sy, b.ty) + a.ty,
+    )
+
+func mul_add_mul(a: f32, b: f32, c: f32, d: f32) -> f32:
+    return (f32)((f64)a * (f64)b + (f64)c * (f64)d)

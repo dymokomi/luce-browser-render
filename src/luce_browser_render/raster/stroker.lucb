@@ -1,0 +1,515 @@
+#==============================================================================================
+#
+#   stroker - path stroking (SkStroke): the stroke description and the contour walk
+#
+#   DESCRIPTION:
+#       Port of tiny-skia-path stroker.rs, part 1 (lines 1-620): Stroke, LineCap, LineJoin,
+#       the cap/join procedure types, SwappableBuilders, PathStroker and its per-segment
+#       entry points (move_to, line_to, quad_to, cubic_to). Based on SkStroke.cpp. The
+#       curve approximation is in stroker_curves.lucb, the caps and joins in
+#       stroker_joins.lucb.
+#
+#==============================================================================================
+
+# Skia swaps pointers to inner and outer builders during joining, but not builders itself.
+struct SwappableBuilders:
+    var inner: PathBuilder*
+    var outer: PathBuilder*
+
+    mutating func swap():
+        let tmp = self.inner
+        self.inner = self.outer
+        self.outer = tmp
+
+## Stroke properties.
+pub struct Stroke:
+    ## A stroke thickness. Must be >= 0. When set to 0, a hairline stroking will be used.
+    ## Default: 1.0
+    pub var width: f32 = 1.0
+
+    ## The limit at which a sharp corner is drawn beveled. Default: 4.0
+    pub var miter_limit: f32 = 4.0
+
+    ## A stroke line cap. Default: Butt
+    pub var line_cap: LineCap = .butt
+
+    ## A stroke line join. Default: Miter
+    pub var line_join: LineJoin = .miter
+
+    ## A stroke dashing properties. Default: none
+    pub var dash: StrokeDash?
+
+## Draws at the beginning and end of an open path contour.
+pub enum LineCap as u8:
+    ## No stroke extension.
+    butt = 0
+    ## Adds circle.
+    round = 1
+    ## Adds square.
+    square = 2
+
+## Specifies how corners are drawn when a shape is stroked. Join affects the four corners of
+## a stroked rectangle, and the connected segments in a stroked path. Choose miter join to
+## draw sharp corners. Choose round join to draw a circle with a radius equal to the stroke
+## width on top of the corner. Choose bevel join to minimally connect the thick strokes.
+## The fill path constructed to describe the stroked path respects the join setting but may
+## not contain the actual join. For instance, a fill path constructed with round joins does
+## not necessarily include circles at each connected segment.
+pub enum LineJoin as u8:
+    ## Extends to miter limit, then switches to bevel.
+    miter = 0
+    ## Extends to miter limit, then clips the corner.
+    miter_clip = 1
+    ## Adds circle.
+    round = 2
+    ## Connects outside edges.
+    bevel = 3
+
+let quad_recursive_limit: usize = 3
+
+# quads with extreme widths (e.g. (0,1) (1,6) (0,3) width=5e7) recurse to point of failure
+# largest seen for normal cubics: 5, 26
+# largest seen for normal quads: 11
+let recursive_limits: i32[4] = [5 * 3, 26 * 3, 11 * 3, 11 * 3] # 3x limits seen in practice
+
+type CapProc = func(Point, Point, Point, const PathBuilder*?, PathBuilder*) -> unit
+
+type JoinProc = func(Point, Point, Point, f32, f32, bool, bool, SwappableBuilders) -> unit
+
+enum ReductionType as u8:
+    point = 0       # all curve points are practically identical
+    line = 1        # the control point is on the line between the ends
+    quad = 2        # the control point is outside the line between the ends
+    degenerate = 3  # the control point is on the line but outside the ends
+    degenerate2 = 4 # two control points are on the line but outside ends (cubic)
+    degenerate3 = 5 # three areas of max curvature found (for cubic)
+
+enum StrokeType as i8:
+    outer = 1  # use sign-opposite values later to flip perpendicular axis
+    inner = -1
+
+enum ResultType as u8:
+    split = 0      # the caller should split the quad stroke in two
+    degenerate = 1 # the caller should add a line
+    quad = 2       # the caller should (continue to try to) add a quad stroke
+
+enum IntersectRayType as u8:
+    ctrl_pt = 0
+    result_type = 1
+
+## A path stroker.
+pub struct PathStroker:
+    var radius: f32
+    var inv_miter_limit: f32
+    var res_scale: f32
+    var inv_res_scale: f32
+    var inv_res_scale_squared: f32
+
+    var first_normal: Point
+    var prev_normal: Point
+    var first_unit_normal: Point
+    var prev_unit_normal: Point
+
+    # on original path
+    var first_pt: Point
+    var prev_pt: Point
+
+    var first_outer_pt: Point
+    var first_outer_pt_index_in_contour: usize
+    var segment_count: i32
+    var prev_is_line: bool
+
+    var capper: CapProc
+    var joiner: JoinProc
+
+    # outer is our working answer, inner is temp
+    var inner: PathBuilder
+    var outer: PathBuilder
+    var cusper: PathBuilder
+
+    var stroke_type: StrokeType
+
+    var recursion_depth: i32 # track stack depth to abort if numerics run amok
+    var found_tangents: bool # do less work until tangents meet (cubic)
+    var join_completed: bool # previous join was not degenerate
+
+    ## Creates a new PathStroker.
+    pub static func new_() -> PathStroker:
+        return PathStroker(
+            radius = 0.0,
+            inv_miter_limit = 0.0,
+            res_scale = 1.0,
+            inv_res_scale = 1.0,
+            inv_res_scale_squared = 1.0,
+            first_normal = Point.zero(),
+            prev_normal = Point.zero(),
+            first_unit_normal = Point.zero(),
+            prev_unit_normal = Point.zero(),
+            first_pt = Point.zero(),
+            prev_pt = Point.zero(),
+            first_outer_pt = Point.zero(),
+            first_outer_pt_index_in_contour = 0,
+            segment_count = -1,
+            prev_is_line = false,
+            capper = butt_capper,
+            joiner = miter_joiner,
+            inner = PathBuilder(),
+            outer = PathBuilder(),
+            cusper = PathBuilder(),
+            stroke_type = .outer,
+            recursion_depth = 0,
+            found_tangents = false,
+            join_completed = false,
+        )
+
+    ## Computes a resolution scale. Resolution scale is the "intended" resolution for the
+    ## output. Default is 1.0. Larger values (res > 1) indicate that the result should be
+    ## more precise, since it will be zoomed up, and small errors will be magnified. Smaller
+    ## values (0 < res < 1) indicate that the result can be less precise, since it will be
+    ## zoomed down, and small errors may be invisible.
+    pub static func compute_resolution_scale(ts: Transform) -> f32:
+        let sx = Point.from_xy(ts.sx, ts.kx).length()
+        let sy = Point.from_xy(ts.ky, ts.sy).length()
+        if math32.is_finite(sx) and math32.is_finite(sy):
+            let scale = fmax(sx, sy)
+            if scale > 0.0:
+                return scale
+        return 1.0
+
+    ## Stroke the path. Can be none when: `width` <= 0 or Nan/inf, `miter_limit` < 4 or
+    ## NaN/inf (only when LineJoin::Miter is used). Unlike `Path.stroke`, allows to reuse
+    ## internal allocations.
+    pub mutating func stroke(path: const Path*, stroke: const Stroke*, resolution_scale: f32) -> Path?:
+        let width = stroke.width
+        if not (math32.is_finite(width) and width > 0.0):
+            return none
+        return self.stroke_inner(path, width, stroke.miter_limit, stroke.line_cap, stroke.line_join, resolution_scale)
+
+    ## Frees the stroker's working storage.
+    pub mutating func release():
+        self.inner.release()
+        self.outer.release()
+        self.cusper.release()
+
+    mutating func stroke_inner(path: const Path*, width: f32, miter_limit: f32, line_cap: LineCap, line_join0: LineJoin, res_scale: f32) -> Path?:
+        # TODO: stroke_rect optimization
+        var line_join = line_join0
+        var inv_miter_limit: f32 = 0.0
+
+        if line_join == .miter:
+            if miter_limit <= 1.0:
+                line_join = .bevel
+            else:
+                inv_miter_limit = invert(miter_limit)
+
+        if line_join == .miter_clip:
+            inv_miter_limit = invert(miter_limit)
+
+        self.res_scale = res_scale
+        # The '4' below matches the fill scan converter's error term.
+        self.inv_res_scale = invert(res_scale * 4.0)
+        self.inv_res_scale_squared = sqr(self.inv_res_scale)
+
+        self.radius = half(width)
+        self.inv_miter_limit = inv_miter_limit
+
+        self.first_normal = Point.zero()
+        self.prev_normal = Point.zero()
+        self.first_unit_normal = Point.zero()
+        self.prev_unit_normal = Point.zero()
+
+        self.first_pt = Point.zero()
+        self.prev_pt = Point.zero()
+
+        self.first_outer_pt = Point.zero()
+        self.first_outer_pt_index_in_contour = 0
+        self.segment_count = -1
+        self.prev_is_line = false
+
+        self.capper = cap_factory(line_cap)
+        self.joiner = join_factory(line_join)
+
+        # Need some estimate of how large our final result (fOuter) and our per-contour temp
+        # (fInner) will be, so we don't spend extra time repeatedly growing these arrays.
+        #
+        # 1x for inner == 'wag' (worst contour length would be better guess)
+        self.inner.clear()
+        self.inner.reserve(path.verbs.len, path.points.len)
+
+        # 3x for result == inner + outer + join (swag)
+        self.outer.clear()
+        self.outer.reserve(path.verbs.len * 3, path.points.len * 3)
+
+        self.cusper.clear()
+
+        self.stroke_type = .outer
+
+        self.recursion_depth = 0
+        self.found_tangents = false
+        self.join_completed = false
+
+        var last_segment_is_line = false
+        var iter = path.segments()
+        iter.set_auto_close(true)
+        while let segment = iter.next():
+            match segment:
+                .move_to(p):
+                    self.move_to(p)
+                .line_to(p):
+                    self.line_to(p, &iter)
+                    last_segment_is_line = true
+                .quad_to(p1, p2):
+                    self.quad_to(p1, p2)
+                    last_segment_is_line = false
+                .cubic_to(p1, p2, p3):
+                    self.cubic_to(p1, p2, p3)
+                    last_segment_is_line = false
+                .close:
+                    if line_cap != .butt:
+                        # If the stroke consists of a moveTo followed by a close, treat it as
+                        # if it were followed by a zero-length line. Lines without length can
+                        # have square and round end caps.
+                        if self.has_only_move_to():
+                            self.line_to(self.move_to_pt(), none)
+                            last_segment_is_line = true
+                            continue
+
+                        # If the stroke consists of a moveTo followed by one or more
+                        # zero-length verbs, then followed by a close, treat is as if it were
+                        # followed by a zero-length line. Lines without length can have
+                        # square & round end caps.
+                        if self.is_current_contour_empty():
+                            last_segment_is_line = true
+                            continue
+
+                    self.close(last_segment_is_line)
+
+        return self.finish(last_segment_is_line)
+
+    mutating func builders() -> SwappableBuilders:
+        return SwappableBuilders(inner = &self.inner, outer = &self.outer)
+
+    func move_to_pt() -> Point:
+        return self.first_pt
+
+    mutating func move_to(p: Point):
+        if self.segment_count > 0:
+            self.finish_contour(false, false)
+
+        self.segment_count = 0
+        self.first_pt = p
+        self.prev_pt = p
+        self.join_completed = false
+
+    mutating func line_to(p: Point, iter: const PathSegmentsIter*?):
+        let teeny_line = self.prev_pt.equals_within_tolerance(p, scalar_nearly_zero * self.inv_res_scale)
+        if fn_ptr_eq(self.capper, butt_capper) and teeny_line:
+            return
+
+        if teeny_line:
+            if self.join_completed:
+                return
+            if let it = iter:
+                if it.has_valid_tangent():
+                    return
+
+        var normal = Point.zero()
+        var unit_normal = Point.zero()
+        if not self.pre_join_to(p, true, &normal, &unit_normal):
+            return
+
+        self.outer.line_to(p.x + normal.x, p.y + normal.y)
+        self.inner.line_to(p.x - normal.x, p.y - normal.y)
+
+        self.post_join_to(p, normal, unit_normal)
+
+    mutating func quad_to(p1: Point, p2: Point):
+        let quad: Point[3] = [self.prev_pt, p1, p2]
+        let (reduction, reduction_type) = check_quad_linear(quad)
+        if reduction_type == .point:
+            # If the stroke consists of a moveTo followed by a degenerate curve, treat it as
+            # if it were followed by a zero-length line. Lines without length can have square
+            # and round end caps.
+            self.line_to(p2, none)
+            return
+
+        if reduction_type == .line:
+            self.line_to(p2, none)
+            return
+
+        if reduction_type == .degenerate:
+            self.line_to(reduction, none)
+            let save_joiner = self.joiner
+            self.joiner = round_joiner
+            self.line_to(p2, none)
+            self.joiner = save_joiner
+            return
+
+        var normal_ab = Point.zero()
+        var unit_ab = Point.zero()
+        var normal_bc = Point.zero()
+        var unit_bc = Point.zero()
+        if not self.pre_join_to(p1, false, &normal_ab, &unit_ab):
+            self.line_to(p2, none)
+            return
+
+        var quad_points = QuadConstruct.default()
+        init_quad(&self, .outer, 0.0, 1.0, &quad_points)
+        discard(quad_stroke(&self, quad, &quad_points))
+        init_quad(&self, .inner, 0.0, 1.0, &quad_points)
+        discard(quad_stroke(&self, quad, &quad_points))
+
+        let ok = set_normal_unit_normal(quad[1], quad[2], self.res_scale, self.radius, &normal_bc, &unit_bc)
+        if not ok:
+            normal_bc = normal_ab
+            unit_bc = unit_ab
+
+        self.post_join_to(p2, normal_bc, unit_bc)
+
+    mutating func cubic_to(pt1: Point, pt2: Point, pt3: Point):
+        let cubic: Point[4] = [self.prev_pt, pt1, pt2, pt3]
+        var reduction: Point[3] = [Point.zero(), Point.zero(), Point.zero()]
+        var tangent_pt = Point.zero()
+        let reduction_type = check_cubic_linear(cubic, reduction, &tangent_pt)
+        if reduction_type == .point:
+            # If the stroke consists of a moveTo followed by a degenerate curve, treat it as
+            # if it were followed by a zero-length line. Lines without length can have square
+            # and round end caps.
+            self.line_to(pt3, none)
+            return
+
+        if reduction_type == .line:
+            self.line_to(pt3, none)
+            return
+
+        if (u8)ReductionType.degenerate <= (u8)reduction_type and (u8)ReductionType.degenerate3 >= (u8)reduction_type:
+            self.line_to(reduction[0], none)
+            let save_joiner = self.joiner
+            self.joiner = round_joiner
+            if (u8)ReductionType.degenerate2 <= (u8)reduction_type:
+                self.line_to(reduction[1], none)
+
+            if reduction_type == .degenerate3:
+                self.line_to(reduction[2], none)
+
+            self.line_to(pt3, none)
+            self.joiner = save_joiner
+            return
+
+        var normal_ab = Point.zero()
+        var unit_ab = Point.zero()
+        var normal_cd = Point.zero()
+        var unit_cd = Point.zero()
+        if not self.pre_join_to(tangent_pt, false, &normal_ab, &unit_ab):
+            self.line_to(pt3, none)
+            return
+
+        var t_values = new_t_values()
+        let t_count = find_cubic_inflections(cubic, t_values)
+        var last_t: f32 = 0.0
+        for index in 0..=t_count:
+            let next_t = t_values[index] if index < t_count else 1.0
+
+            var quad_points = QuadConstruct.default()
+            init_quad(&self, .outer, last_t, next_t, &quad_points)
+            discard(cubic_stroke(&self, cubic, &quad_points))
+            init_quad(&self, .inner, last_t, next_t, &quad_points)
+            discard(cubic_stroke(&self, cubic, &quad_points))
+            last_t = next_t
+
+        if let cusp = find_cubic_cusp(cubic):
+            let cusp_loc = eval_cubic_pos_at(cubic, cusp)
+            self.cusper.push_circle(cusp_loc.x, cusp_loc.y, self.radius)
+
+        # emit the join even if one stroke succeeded but the last one failed
+        # this avoids reversing an inner stroke with a partial path followed by another moveto
+        set_cubic_end_normal(&self, cubic, normal_ab, unit_ab, &normal_cd, &unit_cd)
+
+        self.post_join_to(pt3, normal_cd, unit_cd)
+
+    mutating func close(is_line: bool):
+        self.finish_contour(true, is_line)
+
+    mutating func finish_contour(close: bool, curr_is_line: bool):
+        if self.segment_count > 0:
+            if close:
+                self.joiner(self.prev_unit_normal, self.prev_pt, self.first_unit_normal, self.radius, self.inv_miter_limit, self.prev_is_line, curr_is_line, self.builders())
+                self.outer.close()
+
+                # now add inner as its own contour
+                let pt = self.inner.last_point() else Point.zero()
+                self.outer.move_to(pt.x, pt.y)
+                self.outer.reverse_path_to(&self.inner)
+                self.outer.close()
+            else:
+                # add caps to start and end
+
+                # cap the end
+                let pt = self.inner.last_point() else Point.zero()
+                let end_other: const PathBuilder*? = &self.inner if curr_is_line else none
+                self.capper(self.prev_pt, self.prev_normal, pt, end_other, &self.outer)
+                self.outer.reverse_path_to(&self.inner)
+
+                # cap the start
+                let start_other: const PathBuilder*? = &self.inner if self.prev_is_line else none
+                self.capper(self.first_pt, self.first_normal.neg(), self.first_outer_pt, start_other, &self.outer)
+                self.outer.close()
+
+            if not self.cusper.is_empty():
+                self.outer.push_path_builder(&self.cusper)
+                self.cusper.clear()
+
+        # since we may re-use `inner`, we rewind instead of reset, to save on reallocating its
+        # internal storage.
+        self.inner.clear()
+        self.segment_count = -1
+        self.first_outer_pt_index_in_contour = self.outer.points.len
+
+    mutating func pre_join_to(p: Point, curr_is_line: bool, normal: Point*, unit_normal: Point*) -> bool:
+        let prev_x = self.prev_pt.x
+        let prev_y = self.prev_pt.y
+
+        let normal_set = set_normal_unit_normal(self.prev_pt, p, self.res_scale, self.radius, normal, unit_normal)
+        if not normal_set:
+            if fn_ptr_eq(self.capper, butt_capper):
+                return false
+
+            # Square caps and round caps draw even if the segment length is zero. Since the
+            # zero length segment has no direction, set the orientation to upright as the
+            # default orientation.
+            *normal = Point.from_xy(self.radius, 0.0)
+            *unit_normal = Point.from_xy(1.0, 0.0)
+
+        if self.segment_count == 0:
+            self.first_normal = *normal
+            self.first_unit_normal = *unit_normal
+            self.first_outer_pt = Point.from_xy(prev_x + normal.x, prev_y + normal.y)
+
+            self.outer.move_to(self.first_outer_pt.x, self.first_outer_pt.y)
+            self.inner.move_to(prev_x - normal.x, prev_y - normal.y)
+        else:
+            # we have a previous segment
+            self.joiner(self.prev_unit_normal, self.prev_pt, *unit_normal, self.radius, self.inv_miter_limit, self.prev_is_line, curr_is_line, self.builders())
+        self.prev_is_line = curr_is_line
+        return true
+
+    mutating func post_join_to(p: Point, normal: Point, unit_normal: Point):
+        self.join_completed = true
+        self.prev_pt = p
+        self.prev_unit_normal = unit_normal
+        self.prev_normal = normal
+        self.segment_count += 1
+
+    mutating func finish(is_line: bool) -> Path?:
+        self.finish_contour(false, is_line)
+
+        # Swap out the outer builder.
+        var buf = self.outer
+        self.outer = PathBuilder()
+        return buf.finish()
+
+    func has_only_move_to() -> bool:
+        return self.segment_count == 0
+
+    func is_current_contour_empty() -> bool:
+        return self.inner.is_zero_length_since_point(0) and self.outer.is_zero_length_since_point(self.first_outer_pt_index_in_contour)

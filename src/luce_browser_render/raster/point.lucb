@@ -1,0 +1,184 @@
+#==============================================================================================
+#
+#   point - Point and the f32x2 pair
+#
+#   DESCRIPTION:
+#       Port of tiny-skia-path lib.rs (Point, set_point_length) and f32x2_t.rs. f32x2 is the
+#       Luce vector `f32[2]`, whose `+ - * /` are lane-wise; its min/max are f32x2_min and
+#       f32x2_max ("faster" min/max, NaN does not matter). Rust's operator impls on Point
+#       are the methods add, sub, mul and neg.
+#
+#==============================================================================================
+
+## A pair of f32 lanes (tiny-skia-path's f32x2).
+pub type F32x2 = f32[2]
+
+func f32x2_splat(x: f32) -> F32x2:
+    return [x, x]
+
+func f32x2_abs(v: F32x2) -> F32x2:
+    return [math32.abs(v[0]), math32.abs(v[1])]
+
+func f32x2_min(a: F32x2, b: F32x2) -> F32x2:
+    return [pmin(a[0], b[0]), pmin(a[1], b[1])]
+
+func f32x2_max(a: F32x2, b: F32x2) -> F32x2:
+    return [pmax(a[0], b[0]), pmax(a[1], b[1])]
+
+func f32x2_max_component(v: F32x2) -> f32:
+    return pmax(v[0], v[1])
+
+## A point. Doesn't guarantee to be finite.
+pub struct Point:
+    pub var x: f32
+    pub var y: f32
+
+    ## Creates a new `Point`.
+    pub static func from_xy(x: f32, y: f32) -> Point:
+        return Point(x = x, y = y)
+
+    ## Creates a new `Point` from `f32x2`.
+    pub static func from_f32x2(r: F32x2) -> Point:
+        return Point(x = r[0], y = r[1])
+
+    ## Converts a `Point` into a `f32x2`.
+    pub func to_f32x2() -> F32x2:
+        return [self.x, self.y]
+
+    ## Creates a point at 0x0 position.
+    pub static func zero() -> Point:
+        return Point(x = 0.0, y = 0.0)
+
+    ## Returns true if x and y are both zero.
+    pub func is_zero() -> bool:
+        return self.x == 0.0 and self.y == 0.0
+
+    ## Returns true if both x and y are measurable values: other than infinities and NaN.
+    pub func is_finite() -> bool:
+        return math32.is_finite(self.x * self.y)
+
+    ## Checks that two `Point`s are almost equal.
+    func almost_equal(other: Point) -> bool:
+        return not self.sub(other).can_normalize()
+
+    ## Checks that two `Point`s are almost equal using the specified tolerance.
+    func equals_within_tolerance(other: Point, tolerance: f32) -> bool:
+        return is_nearly_zero_within_tolerance(self.x - other.x, tolerance) and is_nearly_zero_within_tolerance(self.y - other.y, tolerance)
+
+    ## Scales (fX, fY) so that length() returns one, while preserving ratio of fX to fY, if
+    ## possible. If prior length is nearly zero, sets vector to (0, 0) and returns false;
+    ## otherwise returns true.
+    pub mutating func normalize() -> bool:
+        return self.set_length_from(self.x, self.y, 1.0)
+
+    ## Sets vector to (x, y) scaled so length() returns one, and so that (x, y) is
+    ## proportional to (x, y). If (x, y) length is nearly zero, sets vector to (0, 0) and
+    ## returns false; otherwise returns true.
+    pub mutating func set_normalize(x: f32, y: f32) -> bool:
+        return self.set_length_from(x, y, 1.0)
+
+    func can_normalize() -> bool:
+        return math32.is_finite(self.x) and math32.is_finite(self.y) and (self.x != 0.0 or self.y != 0.0)
+
+    ## Returns the Euclidean distance from origin.
+    pub func length() -> f32:
+        let mag2 = self.x * self.x + self.y * self.y
+        if math32.is_finite(mag2):
+            return math32.sqrt(mag2)
+        let xx = (f64)self.x
+        let yy = (f64)self.y
+        return (f32)math.sqrt(xx * xx + yy * yy)
+
+    ## Scales vector so that distanceToOrigin() returns length, if possible. If former length
+    ## is nearly zero, sets vector to (0, 0) and return false; otherwise returns true.
+    pub mutating func set_length(length: f32) -> bool:
+        return self.set_length_from(self.x, self.y, length)
+
+    ## Sets vector to (x, y) scaled to length, if possible. If former length is nearly zero,
+    ## sets vector to (0, 0) and return false; otherwise returns true.
+    pub mutating func set_length_from(x: f32, y: f32, length: f32) -> bool:
+        return set_point_length(&self, x, y, length)
+
+    ## Returns the Euclidean distance from `other`.
+    pub func distance(other: Point) -> f32:
+        return self.sub(other).length()
+
+    ## Returns the dot product of two points.
+    pub func dot(other: Point) -> f32:
+        return self.x * other.x + self.y * other.y
+
+    ## Returns the cross product of vector and vec. Vector and vec form three-dimensional
+    ## vectors with z-axis value equal to zero. The cross product is a three-dimensional
+    ## vector with x-axis and y-axis values equal to zero. The cross product z-axis
+    ## component is returned.
+    pub func cross(other: Point) -> f32:
+        return self.x * other.y - self.y * other.x
+
+    func distance_to_sqd(pt: Point) -> f32:
+        let dx = self.x - pt.x
+        let dy = self.y - pt.y
+        return dx * dx + dy * dy
+
+    func length_sqd() -> f32:
+        return self.dot(self)
+
+    ## Scales Point in-place by scale.
+    pub mutating func scale(scale: f32):
+        self.x *= scale
+        self.y *= scale
+
+    func scaled(scale: f32) -> Point:
+        return Point.from_xy(self.x * scale, self.y * scale)
+
+    mutating func swap_coords():
+        let x = self.x
+        self.x = self.y
+        self.y = x
+
+    mutating func rotate_cw():
+        self.swap_coords()
+        self.x = -self.x
+
+    mutating func rotate_ccw():
+        self.swap_coords()
+        self.y = -self.y
+
+    ## `-self`.
+    pub func neg() -> Point:
+        return Point(x = -self.x, y = -self.y)
+
+    ## `self + other`.
+    pub func add(other: Point) -> Point:
+        return Point.from_xy(self.x + other.x, self.y + other.y)
+
+    ## `self - other`.
+    pub func sub(other: Point) -> Point:
+        return Point.from_xy(self.x - other.x, self.y - other.y)
+
+    ## `self * other`, component-wise.
+    pub func mul(other: Point) -> Point:
+        return Point.from_xy(self.x * other.x, self.y * other.y)
+
+# We have to worry about 2 tricky conditions:
+# 1. underflow of mag2 (compared against nearlyzero^2)
+# 2. overflow of mag2 (compared w/ isfinite)
+#
+# If we underflow, we return false. If we overflow, we compute again using doubles, which is
+# much slower (3x in a desktop test) but will not overflow.
+func set_point_length(pt: Point*, x0: f32, y0: f32, length: f32) -> bool:
+    # our mag2 step overflowed to infinity, so use doubles instead. much slower, but needed
+    # when x or y are very large, other wise we divide by inf. and return (0,0) vector.
+    let xx = (f64)x0
+    let yy = (f64)y0
+    let dmag = math.sqrt(xx * xx + yy * yy)
+    let dscale = (f64)length / dmag
+    let x = x0 * (f32)dscale
+    let y = y0 * (f32)dscale
+
+    # check if we're not finite, or we're zero-length
+    if not math32.is_finite(x) or not math32.is_finite(y) or (x == 0.0 and y == 0.0):
+        *pt = Point.zero()
+        return false
+
+    *pt = Point.from_xy(x, y)
+    return true

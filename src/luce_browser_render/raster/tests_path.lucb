@@ -1,0 +1,310 @@
+#==============================================================================================
+#
+#   tests_path - unit tests of the path crate
+#
+#   DESCRIPTION:
+#       Port of the #[cfg(test)] modules of tiny-skia-path: scalar.rs, size.rs, rect.rs,
+#       transform.rs, path_geometry.rs, stroker.rs and dash.rs.
+#
+#==============================================================================================
+
+func expect_point(p: Point, x: f32, y: f32):
+    if p.x != x or p.y != y:
+        print(f"expected ({x}, {y}), got ({p.x}, {p.y})")
+        trap("point mismatch")
+
+func expect_rect(r: Rect?, l: f32, t: f32, rr: f32, b: f32):
+    let rect = r else trap("expected a rect")
+    assert(rect.left() == l and rect.top() == t and rect.right() == rr and rect.bottom() == b)
+
+func expect_transform(ts: Transform, sx: f32, ky: f32, kx: f32, sy: f32, tx: f32, ty: f32):
+    assert(ts.sx == sx and ts.ky == ky and ts.kx == kx and ts.sy == sy and ts.tx == tx and ts.ty == ty)
+
+test "scalar bound":
+    assert(bound(math32.nan, 0.0, 1.0) == 1.0)
+    assert(bound(math32.infinity, 0.0, 1.0) == 1.0)
+    assert(bound(-math32.infinity, 0.0, 1.0) == 0.0)
+    assert(bound(f32_epsilon, 0.0, 1.0) == f32_epsilon)
+    assert(bound(0.5, 0.0, 1.0) == 0.5)
+    assert(bound(-1.0, 0.0, 1.0) == 0.0)
+    assert(bound(2.0, 0.0, 1.0) == 1.0)
+
+test "int size":
+    assert(IntSize.from_wh(0, 0) == none)
+    assert(IntSize.from_wh(1, 0) == none)
+    assert(IntSize.from_wh(0, 1) == none)
+    let size = IntSize.from_wh(3, 4) else trap("size")
+    let r = size.to_int_rect(1, 2)
+    assert(r.x() == 1 and r.y() == 2 and r.width() == 3 and r.height() == 4)
+
+test "int rect":
+    assert(IntRect.from_xywh(0, 0, 0, 0) == none)
+    assert(IntRect.from_xywh(0, 0, 1, 0) == none)
+    assert(IntRect.from_xywh(0, 0, 0, 1) == none)
+    assert(IntRect.from_xywh(0, 0, 4294967295, 4294967295) == none)
+    assert(IntRect.from_xywh(0, 0, 1, 4294967295) == none)
+    assert(IntRect.from_xywh(0, 0, 4294967295, 1) == none)
+    assert(IntRect.from_xywh(2147483647, 0, 1, 1) == none)
+    assert(IntRect.from_xywh(0, 2147483647, 1, 1) == none)
+    # No intersection.
+    let r1 = IntRect.from_xywh(1, 2, 3, 4) else trap("r1")
+    let r2 = IntRect.from_xywh(11, 12, 13, 14) else trap("r2")
+    assert(r1.intersect(r2) == none)
+    # Second inside the first one.
+    let r3 = IntRect.from_xywh(1, 2, 30, 40) else trap("r3")
+    let r4 = IntRect.from_xywh(11, 12, 13, 14) else trap("r4")
+    assert(r3.intersect(r4) == IntRect.from_xywh(11, 12, 13, 14))
+    # Partial overlap.
+    let r5 = IntRect.from_xywh(1, 2, 30, 40) else trap("r5")
+    let r6 = IntRect.from_xywh(11, 12, 50, 60) else trap("r6")
+    assert(r5.intersect(r6) == IntRect.from_xywh(11, 12, 20, 30))
+
+test "rect":
+    assert(Rect.from_ltrb(10.0, 10.0, 5.0, 10.0) == none)
+    assert(Rect.from_ltrb(10.0, 10.0, 10.0, 5.0) == none)
+    assert(Rect.from_ltrb(math32.nan, 10.0, 10.0, 10.0) == none)
+    assert(Rect.from_ltrb(10.0, math32.nan, 10.0, 10.0) == none)
+    assert(Rect.from_ltrb(10.0, 10.0, math32.nan, 10.0) == none)
+    assert(Rect.from_ltrb(10.0, 10.0, 10.0, math32.nan) == none)
+    assert(Rect.from_ltrb(10.0, 10.0, 10.0, math32.infinity) == none)
+    let rect = Rect.from_ltrb(10.0, 20.0, 30.0, 40.0) else trap("rect")
+    assert(rect.left() == 10.0 and rect.top() == 20.0 and rect.right() == 30.0 and rect.bottom() == 40.0)
+    assert(rect.width() == 20.0 and rect.height() == 20.0)
+    let rect2 = Rect.from_ltrb(-30.0, 20.0, -10.0, 40.0) else trap("rect2")
+    assert(rect2.width() == 20.0 and rect2.height() == 20.0)
+
+test "rect transform":
+    # Tests based on 2x2 rectangle
+    let rect = Rect.from_ltrb(1.0, 2.0, 3.0, 4.0) else trap("rect")
+    expect_rect(rect.transform(Transform.identity()), 1.0, 2.0, 3.0, 4.0)
+    # Scale x by 1x, y by 2x
+    expect_rect(rect.transform(Transform.from_scale(1.0, 2.0)), 1.0, 4.0, 3.0, 8.0)
+    # Skew box along x-axis - vertical lines at y=c go to y=c+x and horizontal lines stay
+    # put. Result is bounding box
+    expect_rect(rect.transform(Transform.from_skew(1.0, 0.0)), 3.0, 2.0, 7.0, 4.0)
+    # Skew box along y-axis - horizontal lines at x=c go to x=c+2y
+    expect_rect(rect.transform(Transform.from_skew(0.0, 2.0)), 1.0, 4.0, 3.0, 10.0)
+
+test "screen int rect":
+    assert(ScreenIntRect.from_xywh(0, 0, 0, 0) == none)
+    assert(ScreenIntRect.from_xywh(0, 0, 1, 0) == none)
+    assert(ScreenIntRect.from_xywh(0, 0, 0, 1) == none)
+    assert(ScreenIntRect.from_xywh(0, 0, 4294967295, 4294967295) == none)
+    assert(ScreenIntRect.from_xywh(0, 0, 1, 4294967295) == none)
+    assert(ScreenIntRect.from_xywh(0, 0, 4294967295, 1) == none)
+    assert(ScreenIntRect.from_xywh(4294967295, 0, 1, 1) == none)
+    assert(ScreenIntRect.from_xywh(0, 4294967295, 1, 1) == none)
+    assert(ScreenIntRect.from_xywh(4294967295, 4294967295, 4294967295, 4294967295) == none)
+    let r = ScreenIntRect.from_xywh(1, 2, 3, 4) else trap("r")
+    assert(r.x() == 1 and r.y() == 2 and r.width() == 3 and r.height() == 4 and r.right() == 4 and r.bottom() == 6)
+
+test "transform":
+    expect_transform(Transform.identity(), 1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+    expect_transform(Transform.from_scale(1.0, 2.0), 1.0, 0.0, 0.0, 2.0, 0.0, 0.0)
+    expect_transform(Transform.from_skew(2.0, 3.0), 1.0, 3.0, 2.0, 1.0, 0.0, 0.0)
+    expect_transform(Transform.from_translate(5.0, 6.0), 1.0, 0.0, 0.0, 1.0, 5.0, 6.0)
+
+    let ts = Transform.identity()
+    assert(ts.is_identity() and not ts.is_scale() and not ts.is_skew() and not ts.is_translate())
+    assert(not ts.is_scale_translate() and not ts.has_scale() and not ts.has_skew() and not ts.has_translate())
+
+    let ts2 = Transform.from_scale(2.0, 3.0)
+    assert(not ts2.is_identity() and ts2.is_scale() and not ts2.is_skew() and not ts2.is_translate())
+    assert(ts2.is_scale_translate() and ts2.has_scale() and not ts2.has_skew() and not ts2.has_translate())
+
+    let ts3 = Transform.from_skew(2.0, 3.0)
+    assert(not ts3.is_identity() and not ts3.is_scale() and ts3.is_skew() and not ts3.is_translate())
+    assert(not ts3.is_scale_translate() and not ts3.has_scale() and ts3.has_skew() and not ts3.has_translate())
+
+    let ts4 = Transform.from_translate(2.0, 3.0)
+    assert(not ts4.is_identity() and not ts4.is_scale() and not ts4.is_skew() and ts4.is_translate())
+    assert(ts4.is_scale_translate() and not ts4.has_scale() and not ts4.has_skew() and ts4.has_translate())
+
+    let ts5 = Transform.from_row(1.0, 2.0, 3.0, 4.0, 5.0, 6.0)
+    assert(not ts5.is_identity() and not ts5.is_scale() and not ts5.is_skew() and not ts5.is_translate())
+    assert(not ts5.is_scale_translate() and ts5.has_scale() and ts5.has_skew() and ts5.has_translate())
+
+    assert(not Transform.from_scale(1.0, 1.0).has_scale())
+    assert(not Transform.from_skew(0.0, 0.0).has_skew())
+    assert(not Transform.from_translate(0.0, 0.0).has_translate())
+
+test "transform concat":
+    var ts = Transform.from_row(1.2, 3.4, -5.6, -7.8, 1.2, 3.4)
+    ts = ts.pre_scale(2.0, -4.0)
+    expect_transform(ts, 2.4, 6.8, 22.4, 31.2, 1.2, 3.4)
+
+    var ts2 = Transform.from_row(1.2, 3.4, -5.6, -7.8, 1.2, 3.4)
+    ts2 = ts2.post_scale(2.0, -4.0)
+    expect_transform(ts2, 2.4, -13.6, -11.2, 31.2, 2.4, -13.6)
+
+test "eval cubic at 1":
+    let src: Point[4] = [Point.from_xy(30.0, 40.0), Point.from_xy(30.0, 40.0), Point.from_xy(171.0, 45.0), Point.from_xy(180.0, 155.0)]
+    expect_point(eval_cubic_pos_at(src, 0.0), 30.0, 40.0)
+    expect_point(eval_cubic_tangent_at(src, 0.0), 141.0, 5.0)
+
+test "find cubic max curvature 1":
+    let src: Point[4] = [Point.from_xy(20.0, 160.0), Point.from_xy(20.0001, 160.0), Point.from_xy(160.0, 20.0), Point.from_xy(160.0001, 20.0)]
+    var t_values: f32[3] = [0.0, 0.0, 0.0]
+    let count = find_cubic_max_curvature(src, t_values)
+    assert(count == 3)
+    assert(t_values[0] == 0.0 and t_values[1] == normalized_clamped(0.5) and t_values[2] == 1.0)
+
+func expect_segment_move(iter: PathSegmentsIter*, x: f32, y: f32):
+    let seg = iter.next() else trap("expected a segment")
+    match seg:
+        .move_to(p): expect_point(p, x, y)
+        _: trap("expected a move_to")
+
+func expect_segment_line(iter: PathSegmentsIter*, x: f32, y: f32):
+    let seg = iter.next() else trap("expected a segment")
+    match seg:
+        .line_to(p): expect_point(p, x, y)
+        _: trap("expected a line_to")
+
+func expect_segment_close(iter: PathSegmentsIter*):
+    let seg = iter.next() else trap("expected a segment")
+    match seg:
+        .close: return
+        _: trap("expected a close")
+
+# Make sure that subpath auto-closing is enabled.
+test "stroker auto close":
+    # A triangle.
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(10.0, 10.0)
+    pb.line_to(20.0, 50.0)
+    pb.line_to(30.0, 10.0)
+    pb.close()
+    var path = pb.finish() else trap("path")
+    defer path.release()
+
+    let stroke = Stroke()
+    var stroker = PathStroker.new_()
+    defer stroker.release()
+    var stroke_path = stroker.stroke(&path, &stroke, 1.0) else trap("stroke")
+    defer stroke_path.release()
+
+    var iter = stroke_path.segments()
+    iter.set_auto_close(true)
+
+    expect_segment_move(&iter, 10.485071, 9.878732)
+    expect_segment_line(&iter, 20.485071, 49.878731)
+    expect_segment_line(&iter, 20.0, 50.0)
+    expect_segment_line(&iter, 19.514929, 49.878731)
+    expect_segment_line(&iter, 29.514929, 9.878732)
+    expect_segment_line(&iter, 30.0, 10.0)
+    expect_segment_line(&iter, 30.0, 10.5)
+    expect_segment_line(&iter, 10.0, 10.5)
+    expect_segment_line(&iter, 10.0, 10.0)
+    expect_segment_line(&iter, 10.485071, 9.878732)
+    expect_segment_close(&iter)
+    expect_segment_move(&iter, 9.3596115, 9.5)
+    expect_segment_line(&iter, 30.640388, 9.5)
+    expect_segment_line(&iter, 20.485071, 50.121269)
+    expect_segment_line(&iter, 19.514929, 50.121269)
+    expect_segment_line(&iter, 9.514929, 10.121268)
+    expect_segment_line(&iter, 9.3596115, 9.5)
+    expect_segment_close(&iter)
+
+func stroke_is_some(path: const Path*, width: f32) -> bool:
+    var stroke = Stroke()
+    stroke.width = width
+    var stroker = PathStroker.new_()
+    defer stroker.release()
+    if let result = stroker.stroke(path, &stroke, 1.0):
+        var r = result
+        r.release()
+        return true
+    return false
+
+# From skia/tests/StrokeTest.cpp
+test "stroker cubic 1":
+    var pb = PathBuilder.new_()
+    pb.move_to(51.0161362, 1511.52478)
+    pb.cubic_to(51.0161362, 1511.52478, 51.0161362, 1511.52478, 51.0161362, 1511.52478)
+    var path = pb.finish() else trap("path")
+    defer path.release()
+    assert(not stroke_is_some(&path, 0.394537568))
+
+# From skia/tests/StrokeTest.cpp
+test "stroker cubic 2":
+    var pb = PathBuilder.new_()
+    pb.move_to(f32.bits(0x424c1086), f32.bits(0x44bcf0cb)) # 51.0161362, 1511.52478
+    pb.cubic_to(
+        f32.bits(0x424c107c), f32.bits(0x44bcf0cb), # 51.0160980, 1511.52478
+        f32.bits(0x424c10c2), f32.bits(0x44bcf0cb), # 51.0163651, 1511.52478
+        f32.bits(0x424c1119), f32.bits(0x44bcf0ca), # 51.0166969, 1511.52466
+    )
+    var path = pb.finish() else trap("path")
+    defer path.release()
+    assert(stroke_is_some(&path, 0.394537568))
+
+# From skia/tests/StrokeTest.cpp
+# From skbug.com/6491. The large stroke width can cause numerical instabilities.
+test "stroker big":
+    # Skia uses `kStrokeAndFill_Style` here, but we do not support it.
+    var pb = PathBuilder.new_()
+    pb.move_to(f32.bits(0x46380000), f32.bits(0xc6380000)) # 11776, -11776
+    pb.line_to(f32.bits(0x46a00000), f32.bits(0xc6a00000)) # 20480, -20480
+    pb.line_to(f32.bits(0x468c0000), f32.bits(0xc68c0000)) # 17920, -17920
+    pb.line_to(f32.bits(0x46100000), f32.bits(0xc6100000)) # 9216, -9216
+    pb.line_to(f32.bits(0x46380000), f32.bits(0xc6380000)) # 11776, -11776
+    pb.close()
+    var path = pb.finish() else trap("path")
+    defer path.release()
+    assert(stroke_is_some(&path, 1.49679073e+10))
+
+# From skia/tests/StrokerTest.cpp
+test "quad stroker one off":
+    var pb = PathBuilder.new_()
+    pb.move_to(f32.bits(0x43c99223), f32.bits(0x42b7417e))
+    pb.quad_to(f32.bits(0x4285d839), f32.bits(0x43ed6645), f32.bits(0x43c941c8), f32.bits(0x42b3ace3))
+    var path = pb.finish() else trap("path")
+    defer path.release()
+    assert(stroke_is_some(&path, 164.683548))
+
+# From skia/tests/StrokerTest.cpp
+test "cubic stroker one off":
+    var pb = PathBuilder.new_()
+    pb.move_to(f32.bits(0x433f5370), f32.bits(0x43d1f4b3))
+    pb.cubic_to(f32.bits(0x4331cb76), f32.bits(0x43ea3340), f32.bits(0x4388f498), f32.bits(0x42f7f08d), f32.bits(0x43f1cd32), f32.bits(0x42802ec1))
+    var path = pb.finish() else trap("path")
+    defer path.release()
+    assert(stroke_is_some(&path, 42.835968))
+
+func dash_is_none(array: const f32[], offset: f32) -> bool:
+    if let dash = StrokeDash.new_(array, offset):
+        var d = dash
+        d.release()
+        return false
+    return true
+
+test "stroke dash":
+    let one: f32[1] = [1.0]
+    assert(dash_is_none(one[..<0], 0.0))
+    assert(dash_is_none([1.0], 0.0))
+    assert(dash_is_none([1.0, 2.0, 3.0], 0.0))
+    assert(dash_is_none([1.0, -2.0], 0.0))
+    assert(dash_is_none([0.0, 0.0], 0.0))
+    assert(dash_is_none([1.0, -1.0], 0.0))
+    assert(dash_is_none([1.0, 1.0], math32.infinity))
+    assert(dash_is_none([1.0, math32.infinity], 0.0))
+
+test "dash bug 26":
+    var pb = PathBuilder.new_()
+    pb.move_to(665.54, 287.3)
+    pb.line_to(675.67, 273.04)
+    pb.line_to(675.52, 271.32)
+    pb.line_to(674.79, 269.61)
+    pb.line_to(674.05, 268.04)
+    pb.line_to(672.88, 266.47)
+    pb.line_to(671.27, 264.9)
+    var path = pb.finish() else trap("path")
+    defer path.release()
+
+    var stroke_dash = StrokeDash.new_([6.0, 4.5], 0.0) else trap("dash")
+    defer stroke_dash.release()
+
+    var dashed = path.dash(&stroke_dash, 1.0) else trap("dash failed")
+    dashed.release()

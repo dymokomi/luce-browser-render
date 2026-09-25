@@ -1,0 +1,235 @@
+#==============================================================================================
+#
+#   conic - conics: arcs as weighted quads, and their subdivision into quads
+#
+#   DESCRIPTION:
+#       Port of tiny-skia-path path_geometry.rs from `struct Conic` to the end: Conic
+#       (compute_quad_pow2, chop_into_quads_pow2, chop, build_unit_arc), subdivide,
+#       between and AutoConicToQuads. Paths have no conic verb; conics are converted to
+#       quads when they are added (PathBuilder.conic_to).
+#
+#==============================================================================================
+
+struct Conic:
+    var points: Point[3]
+    var weight: f32
+
+    static func new_(pt0: Point, pt1: Point, pt2: Point, weight: f32) -> Conic:
+        return Conic(points = [pt0, pt1, pt2], weight = weight)
+
+    static func from_points(points: const Point[], weight: f32) -> Conic:
+        return Conic(points = [points[0], points[1], points[2]], weight = weight)
+
+    static func zero() -> Conic:
+        return Conic(points = [Point.zero(), Point.zero(), Point.zero()], weight = 0.0)
+
+    func compute_quad_pow2(tolerance: f32) -> u8?:
+        if tolerance < 0.0 or not math32.is_finite(tolerance):
+            return none
+
+        if not self.points[0].is_finite() or not self.points[1].is_finite() or not self.points[2].is_finite():
+            return none
+
+        # Limit the number of suggested quads to approximate a conic
+        let max_conic_to_quad_pow2 = 4
+
+        # "High order approximation of conic sections by quadratic splines"
+        # by Michael Floater, 1993
+        let a = self.weight - 1.0
+        let k = a / (4.0 * (2.0 + a))
+        let x = k * (self.points[0].x - 2.0 * self.points[1].x + self.points[2].x)
+        let y = k * (self.points[0].y - 2.0 * self.points[1].y + self.points[2].y)
+
+        var err = math32.sqrt(x * x + y * y)
+        var pow2: u8 = 0
+        for _i in 0..<max_conic_to_quad_pow2:
+            if err <= tolerance:
+                break
+            err *= 0.25
+            pow2 += 1
+
+        # Unlike Skia, we always expect `pow2` to be at least 1.
+        # Otherwise it produces ugly results.
+        return pow2 if pow2 > 1 else 1
+
+    # Chop this conic into N quads, stored continuously in pts[], where
+    # N = 1 << pow2. The amount of storage needed is (1 + 2 * N)
+    func chop_into_quads_pow2(pow2: u8, points: Point[]) -> u8:
+        points[0] = self.points[0]
+        discard(subdivide(&self, points[1..], pow2))
+
+        let quad_count: usize = (usize)1 << (usize)pow2
+        let pt_count = 2 * quad_count + 1
+        var any_non_finite = false
+        for p in points[..<pt_count]:
+            if not p.is_finite():
+                any_non_finite = true
+        if any_non_finite:
+            # if we generated a non-finite, pin ourselves to the middle of the hull, as our
+            # first and last are already on the first/last pts of the hull.
+            for i in 1..<pt_count - 1:
+                points[i] = self.points[1]
+
+        return (u8)1 << pow2
+
+    func chop() -> (Conic, Conic):
+        let scale = f32x2_splat(invert(1.0 + self.weight))
+        let new_w = subdivide_weight_value(self.weight)
+
+        let p0 = self.points[0].to_f32x2()
+        let p1 = self.points[1].to_f32x2()
+        let p2 = self.points[2].to_f32x2()
+        let ww = f32x2_splat(self.weight)
+
+        let wp1 = ww * p1
+        let m = (p0 + times_2(wp1) + p2) * scale * f32x2_splat(0.5)
+        var m_pt = Point.from_f32x2(m)
+        if not m_pt.is_finite():
+            let w_d = (f64)self.weight
+            let w_2 = w_d * 2.0
+            let scale_half = 1.0 / (1.0 + w_d) * 0.5
+            m_pt.x = (f32)(((f64)self.points[0].x + w_2 * (f64)self.points[1].x + (f64)self.points[2].x) * scale_half)
+            m_pt.y = (f32)(((f64)self.points[0].y + w_2 * (f64)self.points[1].y + (f64)self.points[2].y) * scale_half)
+
+        return (
+            Conic(points = [self.points[0], Point.from_f32x2((p0 + wp1) * scale), m_pt], weight = new_w),
+            Conic(points = [m_pt, Point.from_f32x2((wp1 + p2) * scale), self.points[2]], weight = new_w),
+        )
+
+    ## Writes the conics of the unit arc from `u_start` to `u_stop` into `dst` (5 slots) and
+    ## answers how many (0 is Rust's `None`).
+    static func build_unit_arc(u_start: Point, u_stop: Point, dir: PathDirection, user_transform: Transform, dst: Conic[]) -> usize:
+        # rotate by x,y so that u_start is (1.0)
+        let x = u_start.dot(u_stop)
+        var y = u_start.cross(u_stop)
+
+        let abs_y = math32.abs(y)
+
+        # check for (effectively) coincident vectors
+        # this can happen if our angle is nearly 0 or nearly 180 (y == 0)
+        # ... we use the dot-prod to distinguish between 0 and 180 (x > 0)
+        if abs_y <= scalar_nearly_zero and x > 0.0 and ((y >= 0.0 and dir == .cw) or (y <= 0.0 and dir == .ccw)):
+            return 0
+
+        if dir == .ccw:
+            y = -y
+
+        # We decide to use 1-conic per quadrant of a circle. What quadrant does [xy] lie in?
+        #      0 == [0  .. 90)
+        #      1 == [90 ..180)
+        #      2 == [180..270)
+        #      3 == [270..360)
+        #
+        var quadrant: usize = 0
+        if y == 0.0:
+            quadrant = 2 # 180
+        elif x == 0.0:
+            quadrant = 1 if y > 0.0 else 3 # 90 / 270
+        else:
+            if y < 0.0:
+                quadrant += 2
+            if (x < 0.0) != (y < 0.0):
+                quadrant += 1
+
+        let quadrant_points: Point[8] = [
+            Point.from_xy(1.0, 0.0),
+            Point.from_xy(1.0, 1.0),
+            Point.from_xy(0.0, 1.0),
+            Point.from_xy(-1.0, 1.0),
+            Point.from_xy(-1.0, 0.0),
+            Point.from_xy(-1.0, -1.0),
+            Point.from_xy(0.0, -1.0),
+            Point.from_xy(1.0, -1.0),
+        ]
+
+        let quadrant_weight = scalar_root_2_over_2
+
+        var conic_count = quadrant
+        for i in 0..<conic_count:
+            dst[i] = Conic.from_points(quadrant_points[i * 2..], quadrant_weight)
+
+        # Now compute any remaining (sub-90-degree) arc for the last conic
+        let final_pt = Point.from_xy(x, y)
+        let last_q = quadrant_points[quadrant * 2] # will already be a unit-vector
+        let dot = last_q.dot(final_pt)
+
+        if dot < 1.0:
+            var off_curve = Point.from_xy(last_q.x + x, last_q.y + y)
+            # compute the bisector vector, and then rescale to be the off-curve point. we
+            # compute its length from cos(theta/2) = length / 1, using half-angle identity we
+            # get length = sqrt(2 / (1 + cos(theta)). We already have cos() when to computed
+            # the dot. This is nice, since our computed weight is cos(theta/2) as well!
+            let cos_theta_over_2 = math32.sqrt((1.0 + dot) / 2.0)
+            discard(off_curve.set_length(invert(cos_theta_over_2)))
+            if not last_q.almost_equal(off_curve):
+                dst[conic_count] = Conic.new_(last_q, off_curve, final_pt, cos_theta_over_2)
+                conic_count += 1
+
+        # now handle counter-clockwise and the initial unitStart rotation
+        var transform = Transform.from_sin_cos(u_start.y, u_start.x)
+        if dir == .ccw:
+            transform = transform.pre_scale(1.0, -1.0)
+
+        transform = transform.post_concat(user_transform)
+
+        for i in 0..<conic_count:
+            transform.map_points(dst[i].points)
+
+        return conic_count
+
+func subdivide_weight_value(w: f32) -> f32:
+    return math32.sqrt(0.5 + w * 0.5)
+
+func subdivide(src: const Conic*, points0: Point[], level0: u8) -> Point[]:
+    var points = points0
+    var level = level0
+    if level == 0:
+        points[0] = src.points[1]
+        points[1] = src.points[2]
+        return points[2..]
+
+    let pair = src.chop()
+    var d0 = pair.0
+    var d1 = pair.1
+
+    let start_y = src.points[0].y
+    let end_y = src.points[2].y
+    if between(start_y, src.points[1].y, end_y):
+        # If the input is monotonic and the output is not, the scan converter hangs.
+        # Ensure that the chopped conics maintain their y-order.
+        let mid_y = d0.points[2].y
+        if not between(start_y, mid_y, end_y):
+            # If the computed midpoint is outside the ends, move it to the closer one.
+            let closer_y = start_y if math32.abs(mid_y - start_y) < math32.abs(mid_y - end_y) else end_y
+            d0.points[2].y = closer_y
+            d1.points[0].y = closer_y
+
+        if not between(start_y, d0.points[1].y, d0.points[2].y):
+            # If the 1st control is not between the start and end, put it at the start.
+            # This also reduces the quad to a line.
+            d0.points[1].y = start_y
+
+        if not between(d1.points[0].y, d1.points[1].y, end_y):
+            # If the 2nd control is not between the start and end, put it at the end.
+            # This also reduces the quad to a line.
+            d1.points[1].y = end_y
+
+    level -= 1
+    points = subdivide(&d0, points, level)
+    return subdivide(&d1, points, level)
+
+# This was originally developed and tested for pathops: see SkOpTypes.h
+# returns true if (a <= b <= c) || (a >= b >= c)
+func between(a: f32, b: f32, c: f32) -> bool:
+    return (a - b) * (c - b) <= 0.0
+
+struct AutoConicToQuads:
+    var points: Point[64]
+    var len: u8 # the number of quads
+
+    static func compute(pt0: Point, pt1: Point, pt2: Point, weight: f32) -> AutoConicToQuads?:
+        let conic = Conic.new_(pt0, pt1, pt2, weight)
+        let pow2 = conic.compute_quad_pow2(0.25) else return none
+        var result: AutoConicToQuads
+        result.len = conic.chop_into_quads_pow2(pow2, result.points)
+        return result

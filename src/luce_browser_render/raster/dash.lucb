@@ -1,0 +1,519 @@
+#==============================================================================================
+#
+#   dash - path dashing: SkDashPath, SkDashPathEffect, SkContourMeasure, SkPathMeasure
+#
+#   DESCRIPTION:
+#       Port of tiny-skia-path dash.rs: StrokeDash (the dash array, owned; `release()`
+#       frees it), dash_impl, and the contour measuring (ContourMeasureIter, ContourMeasure,
+#       Segment, the curve length subdivision and segment_to).
+#
+#==============================================================================================
+
+## A stroke dashing properties. Contains an array of pairs, where the first number indicates
+## an "on" interval and the second one indicates an "off" interval; a dash offset
+## (sometimes also called "phase"). Guarantees that the dash array has an even number of
+## non-negative values, their sum is positive and finite, and the offset is finite.
+pub struct StrokeDash:
+    var array: Vec[f32]
+    var offset: f32
+    var interval_len: f32
+    var first_len: f32 # TODO: PositiveF32
+    var first_index: usize
+
+    ## Creates a new stroke dashing object (the dash array is copied).
+    pub static func new_(dash_array: const f32[], dash_offset: f32) -> StrokeDash?:
+        if not math32.is_finite(dash_offset):
+            return none
+
+        if dash_array.length < 2 or dash_array.length % 2 != 0:
+            return none
+
+        for n in dash_array:
+            if n < 0.0:
+                return none
+
+        var interval_len: f32 = 0.0
+        for n in dash_array:
+            interval_len += n
+        if not (math32.is_finite(interval_len) and interval_len > 0.0):
+            return none
+
+        let offset = adjust_dash_offset(dash_offset, interval_len)
+
+        let (first_len, first_index) = find_first_interval(dash_array, offset)
+
+        var array: Vec[f32]
+        array.extend(dash_array)
+        return StrokeDash(array = array, offset = offset, interval_len = interval_len, first_len = first_len, first_index = first_index)
+
+    ## A copy with its own storage.
+    pub func clone() -> StrokeDash:
+        return StrokeDash(array = self.array.clone(), offset = self.offset, interval_len = self.interval_len, first_len = self.first_len, first_index = self.first_index)
+
+    ## Frees the dash array.
+    pub mutating func release():
+        self.array.release()
+
+# Adjust phase to be between 0 and len, "flipping" phase if negative.
+# e.g., if len is 100, then phase of -20 (or -120) is equivalent to 80.
+func adjust_dash_offset(offset0: f32, len: f32) -> f32:
+    var offset = offset0
+    if offset < 0.0:
+        offset = -offset
+        if offset > len:
+            offset = math32.mod(offset, len)
+
+        offset = len - offset
+
+        # Due to finite precision, it's possible that phase == len, even after the subtract
+        # (if len >>> phase), so fix that here.
+        if offset == len:
+            offset = 0.0
+
+        return offset
+    elif offset >= len:
+        return math32.mod(offset, len)
+    return offset
+
+func find_first_interval(dash_array: const f32[], dash_offset0: f32) -> (f32, usize):
+    var dash_offset = dash_offset0
+    for (i, gap) in dash_array.indexed():
+        if dash_offset > gap or (dash_offset == gap and gap != 0.0):
+            dash_offset -= gap
+        else:
+            return (gap - dash_offset, i)
+
+    # If we get here, phase "appears" to be larger than our length. This shouldn't happen
+    # with perfect precision, but we can accumulate errors during the initial length
+    # computation (rounding can make our sum be too big or too small. In that event, we just
+    # have to eat the error here.
+    return (dash_array[0], 0)
+
+func is_even(x: usize) -> bool:
+    return x % 2 == 0
+
+func dash_impl(src: const Path*, dash: const StrokeDash*, res_scale: f32) -> Path?:
+    # We do not support the `cull_path` branch here. Skia has a lot of code for cases when a
+    # path contains only a single zero-length line or when a path is a rect. Not sure why. We
+    # simply ignoring it for the sake of simplicity.
+
+    # We also doesn't support the `SpecialLineRec` case. I have no idea what the point in it.
+
+    var pb = PathBuilder()
+    var dash_count: f32 = 0.0
+    var contours = ContourMeasureIter.new_(src, res_scale)
+    while let contour0 = contours.next():
+        var contour = contour0
+        defer contour.release()
+        var skip_first_segment = contour.is_closed
+        var added_segment = false
+        let length = contour.length
+        var index = dash.first_index
+
+        # Since the path length / dash length ratio may be arbitrarily large, we can exert
+        # significant memory pressure while attempting to build the filtered path. To avoid
+        # this, we simply give up dashing beyond a certain threshold.
+        #
+        # The original bug report (http://crbug.com/165432) is based on a path yielding more
+        # than 90 million dash segments and crashing the memory allocator. A limit of 1
+        # million segments seems reasonable: at 2 verbs per segment * 9 bytes per verb, this
+        # caps the maximum dash memory overhead at roughly 17MB per path.
+        let max_dash_count: usize = 1000000
+        dash_count += length * (f32)(dash.array.len >> 1) / dash.interval_len
+        if dash_count > (f32)max_dash_count:
+            pb.release()
+            return none
+
+        # Using double precision to avoid looping indefinitely due to single precision
+        # rounding (for extreme path_length/dash_length ratios). See test_infinite_dash()
+        # unittest.
+        var distance: f32 = 0.0
+        var d_len = dash.first_len
+
+        while distance < length:
+            added_segment = false
+            if is_even(index) and not skip_first_segment:
+                added_segment = true
+                contour.push_segment(distance, distance + d_len, true, &pb)
+
+            distance += d_len
+
+            # clear this so we only respect it the first time around
+            skip_first_segment = false
+
+            # wrap around our intervals array if necessary
+            index += 1
+            if index == dash.array.len:
+                index = 0
+
+            # fetch our next d_len
+            d_len = dash.array.data[index]
+
+        # extend if we ended on a segment and we need to join up with the (skipped) initial
+        # segment
+        if contour.is_closed and is_even(dash.first_index) and dash.first_len >= 0.0:
+            contour.push_segment(0.0, dash.first_len, not added_segment, &pb)
+
+    return pb.finish()
+
+let max_t_value: u32 = 0x3FFFFFFF
+
+struct ContourMeasureIter:
+    var iter: PathSegmentsIter
+    var tolerance: f32
+
+    static func new_(path: const Path*, res_scale: f32) -> ContourMeasureIter:
+        # can't use tangents, since we need [0..1..................2] to be seen as definitely
+        # not a line (it is when drawn, but not parametrically) so we compare midpoints
+        let cheap_dist_limit: f32 = 0.5 # just made this value up
+        return ContourMeasureIter(iter = path.segments(), tolerance = cheap_dist_limit * invert(res_scale))
+
+    # If it encounters a zero-length contour, it is skipped.
+    mutating func next() -> ContourMeasure?:
+        # Note: as we accumulate distance, we have to check that the result of += actually
+        # made it larger, since a very small delta might be > 0, but still have no effect on
+        # distance (if distance >>> delta).
+        #
+        # We do this check below, and in compute_quad_segs and compute_cubic_segs
+
+        var contour: ContourMeasure
+
+        var point_index: usize = 0
+        var distance: f32 = 0.0
+        var have_seen_close = false
+        var prev_p = Point.zero()
+        while let seg = self.iter.next():
+            match seg:
+                .move_to(p0):
+                    contour.points.push(p0)
+                    prev_p = p0
+                .line_to(p0):
+                    let prev_d = distance
+                    distance = contour.compute_line_seg(prev_p, p0, distance, point_index)
+
+                    if distance > prev_d:
+                        contour.points.push(p0)
+                        point_index += 1
+
+                    prev_p = p0
+                .quad_to(p0, p1):
+                    let prev_d = distance
+                    distance = contour.compute_quad_segs(prev_p, p0, p1, distance, 0, max_t_value, point_index, self.tolerance)
+
+                    if distance > prev_d:
+                        contour.points.push(p0)
+                        contour.points.push(p1)
+                        point_index += 2
+
+                    prev_p = p1
+                .cubic_to(p0, p1, p2):
+                    let prev_d = distance
+                    distance = contour.compute_cubic_segs(prev_p, p0, p1, p2, distance, 0, max_t_value, point_index, self.tolerance)
+
+                    if distance > prev_d:
+                        contour.points.push(p0)
+                        contour.points.push(p1)
+                        contour.points.push(p2)
+                        point_index += 3
+
+                    prev_p = p2
+                .close:
+                    have_seen_close = true
+
+            # TODO: to contour iter?
+            if let next_verb = self.iter.next_verb():
+                if next_verb == .move:
+                    break
+
+        if not math32.is_finite(distance):
+            contour.release()
+            return none
+
+        if have_seen_close:
+            let prev_d = distance
+            let first_pt = contour.points.data[0]
+            distance = contour.compute_line_seg(contour.points.data[point_index], first_pt, distance, point_index)
+
+            if distance > prev_d:
+                contour.points.push(first_pt)
+
+        contour.length = distance
+        contour.is_closed = have_seen_close
+
+        if contour.points.is_empty():
+            contour.release()
+            return none
+        return contour
+
+enum SegmentType as u8:
+    line = 0
+    quad = 1
+    cubic = 2
+
+struct Segment:
+    var distance: f32      # total distance up to this point
+    var point_index: usize # index into the ContourMeasure::points array
+    var t_value: u32
+    var kind: SegmentType
+
+    func scalar_t() -> f32:
+        # 1/kMaxTValue can't be represented as a float, but it's close and the limits work
+        # fine.
+        let max_t_reciprocal: f32 = 1.0 / (f32)max_t_value
+        return (f32)self.t_value * max_t_reciprocal
+
+struct ContourMeasure:
+    var segments: Vec[Segment]
+    var points: Vec[Point]
+    var length: f32
+    var is_closed: bool
+
+    mutating func release():
+        self.segments.release()
+        self.points.release()
+
+    func push_segment(start_d0: f32, stop_d0: f32, start_with_move_to: bool, pb: PathBuilder*):
+        var start_d = start_d0
+        var stop_d = stop_d0
+        if start_d < 0.0:
+            start_d = 0.0
+
+        if stop_d > self.length:
+            stop_d = self.length
+
+        if not (start_d <= stop_d):
+            # catch NaN values as well
+            return
+
+        if self.segments.is_empty():
+            return
+
+        let start_pair = self.distance_to_segment(start_d) else return
+        let seg_index = start_pair.0
+        var start_t = start_pair.1
+        var seg = self.segments.data[seg_index]
+
+        let stop_pair = self.distance_to_segment(stop_d) else return
+        let stop_seg_index = stop_pair.0
+        let stop_t = stop_pair.1
+        let stop_seg = self.segments.data[stop_seg_index]
+
+        let points = self.points.view()
+        var p = Point.zero()
+        if start_with_move_to:
+            compute_pos_tan(points[seg.point_index..], seg.kind, start_t, &p, none)
+            pb.move_to(p.x, p.y)
+
+        if seg.point_index == stop_seg.point_index:
+            segment_to(points[seg.point_index..], seg.kind, start_t, stop_t, pb)
+        else:
+            var new_seg_index = seg_index
+            while true:
+                segment_to(points[seg.point_index..], seg.kind, start_t, 1.0, pb)
+
+                let old_point_index = seg.point_index
+                while true:
+                    new_seg_index += 1
+                    if self.segments.data[new_seg_index].point_index != old_point_index:
+                        break
+                seg = self.segments.data[new_seg_index]
+
+                start_t = 0.0
+
+                if seg.point_index >= stop_seg.point_index:
+                    break
+
+            segment_to(points[seg.point_index..], seg.kind, 0.0, stop_t, pb)
+
+    func distance_to_segment(distance: f32) -> (usize, f32)?:
+        var index = find_segment(self.segments.view(), distance)
+        # don't care if we hit an exact match or not, so we xor index if it is negative
+        index ^= index >> 31
+        let seg_index = (usize)index
+        let seg = self.segments.data[seg_index]
+
+        # now interpolate t-values with the prev segment (if possible)
+        var start_t: f32 = 0.0
+        var start_d: f32 = 0.0
+        # check if the prev segment is legal, and references the same set of points
+        if seg_index > 0:
+            start_d = self.segments.data[seg_index - 1].distance
+            if self.segments.data[seg_index - 1].point_index == seg.point_index:
+                start_t = self.segments.data[seg_index - 1].scalar_t()
+
+        let t = start_t + (seg.scalar_t() - start_t) * (distance - start_d) / (seg.distance - start_d)
+        let nt = normalized_new(t) else return none
+        return (seg_index, nt)
+
+    mutating func compute_line_seg(p0: Point, p1: Point, distance0: f32, point_index: usize) -> f32:
+        var distance = distance0
+        let d = p0.distance(p1)
+        let prev_d = distance
+        distance += d
+        if distance > prev_d:
+            self.segments.push(Segment(distance = distance, point_index = point_index, t_value = max_t_value, kind = .line))
+
+        return distance
+
+    mutating func compute_quad_segs(p0: Point, p1: Point, p2: Point, distance0: f32, min_t: u32, max_t: u32, point_index: usize, tolerance: f32) -> f32:
+        var distance = distance0
+        if t_span_big_enough(max_t - min_t) != 0 and quad_too_curvy(p0, p1, p2, tolerance):
+            var tmp: Point[5] = [Point.zero(), Point.zero(), Point.zero(), Point.zero(), Point.zero()]
+            let half_t = (min_t + max_t) >> 1
+
+            chop_quad_at([p0, p1, p2], normalized_exclusive_half, tmp)
+            distance = self.compute_quad_segs(tmp[0], tmp[1], tmp[2], distance, min_t, half_t, point_index, tolerance)
+            distance = self.compute_quad_segs(tmp[2], tmp[3], tmp[4], distance, half_t, max_t, point_index, tolerance)
+        else:
+            let d = p0.distance(p2)
+            let prev_d = distance
+            distance += d
+            if distance > prev_d:
+                self.segments.push(Segment(distance = distance, point_index = point_index, t_value = max_t, kind = .quad))
+
+        return distance
+
+    mutating func compute_cubic_segs(p0: Point, p1: Point, p2: Point, p3: Point, distance0: f32, min_t: u32, max_t: u32, point_index: usize, tolerance: f32) -> f32:
+        var distance = distance0
+        if t_span_big_enough(max_t - min_t) != 0 and cubic_too_curvy(p0, p1, p2, p3, tolerance):
+            var tmp: Point[7] = [Point.zero(), Point.zero(), Point.zero(), Point.zero(), Point.zero(), Point.zero(), Point.zero()]
+            let half_t = (min_t + max_t) >> 1
+
+            chop_cubic_at2([p0, p1, p2, p3], normalized_exclusive_half, tmp)
+            distance = self.compute_cubic_segs(tmp[0], tmp[1], tmp[2], tmp[3], distance, min_t, half_t, point_index, tolerance)
+            distance = self.compute_cubic_segs(tmp[3], tmp[4], tmp[5], tmp[6], distance, half_t, max_t, point_index, tolerance)
+        else:
+            let d = p0.distance(p3)
+            let prev_d = distance
+            distance += d
+            if distance > prev_d:
+                self.segments.push(Segment(distance = distance, point_index = point_index, t_value = max_t, kind = .cubic))
+
+        return distance
+
+func find_segment(base: const Segment[], key: f32) -> i32:
+    var lo: u32 = 0
+    var hi = (u32)(base.length - 1)
+
+    while lo < hi:
+        let mid = (hi + lo) >> 1
+        if base[(usize)mid].distance < key:
+            lo = mid + 1
+        else:
+            hi = mid
+
+    if base[(usize)hi].distance < key:
+        hi += 1
+        hi = ~hi
+    elif key < base[(usize)hi].distance:
+        hi = ~hi
+
+    return (i32)hi
+
+func compute_pos_tan(points: const Point[], seg_kind: SegmentType, t: f32, pos: Point*?, tangent: Point*?):
+    match seg_kind:
+        .line:
+            if let p = pos:
+                *p = Point.from_xy(dash_interp(points[0].x, points[1].x, t), dash_interp(points[0].y, points[1].y, t))
+
+            if let tg = tangent:
+                discard(tg.set_normalize(points[1].x - points[0].x, points[1].y - points[0].y))
+        .quad:
+            if let p = pos:
+                *p = eval_quad_at(points, t)
+
+            if let tg = tangent:
+                *tg = eval_quad_tangent_at(points, t)
+                discard(tg.normalize())
+        .cubic:
+            if let p = pos:
+                *p = eval_cubic_pos_at(points, t)
+
+            if let tg = tangent:
+                *tg = eval_cubic_tangent_at(points, t)
+                discard(tg.normalize())
+        _:
+            return
+
+func segment_to(points: const Point[], seg_kind: SegmentType, start_t: f32, stop_t: f32, pb: PathBuilder*):
+    if start_t == stop_t:
+        if let pt = pb.last_point():
+            # If the dash as a zero-length on segment, add a corresponding zero-length line.
+            # The stroke code will add end caps to zero length lines as appropriate.
+            pb.line_to(pt.x, pt.y)
+        return
+
+    match seg_kind:
+        .line:
+            if stop_t == 1.0:
+                pb.line_to(points[1].x, points[1].y)
+            else:
+                pb.line_to(dash_interp(points[0].x, points[1].x, stop_t), dash_interp(points[0].y, points[1].y, stop_t))
+        .quad:
+            var tmp0: Point[5] = [Point.zero(), Point.zero(), Point.zero(), Point.zero(), Point.zero()]
+            var tmp1: Point[5] = [Point.zero(), Point.zero(), Point.zero(), Point.zero(), Point.zero()]
+            if start_t == 0.0:
+                if stop_t == 1.0:
+                    pb.quad_to_pt(points[1], points[2])
+                else:
+                    let stop_tt = normalized_exclusive_new_bounded(stop_t)
+                    chop_quad_at(points, stop_tt, tmp0)
+                    pb.quad_to_pt(tmp0[1], tmp0[2])
+            else:
+                let start_tt = normalized_exclusive_new_bounded(start_t)
+                chop_quad_at(points, start_tt, tmp0)
+                if stop_t == 1.0:
+                    pb.quad_to_pt(tmp0[3], tmp0[4])
+                else:
+                    let new_t = normalized_exclusive_new_bounded((stop_t - start_t) / (1.0 - start_t))
+                    chop_quad_at(tmp0[2..], new_t, tmp1)
+                    pb.quad_to_pt(tmp1[1], tmp1[2])
+        .cubic:
+            var tmp0: Point[7] = [Point.zero(), Point.zero(), Point.zero(), Point.zero(), Point.zero(), Point.zero(), Point.zero()]
+            var tmp1: Point[7] = [Point.zero(), Point.zero(), Point.zero(), Point.zero(), Point.zero(), Point.zero(), Point.zero()]
+            if start_t == 0.0:
+                if stop_t == 1.0:
+                    pb.cubic_to_pt(points[1], points[2], points[3])
+                else:
+                    let stop_tt = normalized_exclusive_new_bounded(stop_t)
+                    chop_cubic_at2(points, stop_tt, tmp0)
+                    pb.cubic_to_pt(tmp0[1], tmp0[2], tmp0[3])
+            else:
+                let start_tt = normalized_exclusive_new_bounded(start_t)
+                chop_cubic_at2(points, start_tt, tmp0)
+                if stop_t == 1.0:
+                    pb.cubic_to_pt(tmp0[4], tmp0[5], tmp0[6])
+                else:
+                    let new_t = normalized_exclusive_new_bounded((stop_t - start_t) / (1.0 - start_t))
+                    chop_cubic_at2(tmp0[3..], new_t, tmp1)
+                    pb.cubic_to_pt(tmp1[1], tmp1[2], tmp1[3])
+        _:
+            return
+
+func t_span_big_enough(t_span: u32) -> u32:
+    return t_span >> 10
+
+func quad_too_curvy(p0: Point, p1: Point, p2: Point, tolerance: f32) -> bool:
+    # diff = (a/4 + b/2 + c/4) - (a/2 + c/2)
+    # diff = -a/4 + b/2 - c/4
+    let dx = half(p1.x) - half(half(p0.x + p2.x))
+    let dy = half(p1.y) - half(half(p0.y + p2.y))
+
+    let dist = fmax(math32.abs(dx), math32.abs(dy))
+    return dist > tolerance
+
+func cubic_too_curvy(p0: Point, p1: Point, p2: Point, p3: Point, tolerance: f32) -> bool:
+    let n0 = cheap_dist_exceeds_limit(p1, interp_safe(p0.x, p3.x, 1.0 / 3.0), interp_safe(p0.y, p3.y, 1.0 / 3.0), tolerance)
+    let n1 = cheap_dist_exceeds_limit(p2, interp_safe(p0.x, p3.x, 2.0 / 3.0), interp_safe(p0.y, p3.y, 2.0 / 3.0), tolerance)
+    return n0 or n1
+
+func cheap_dist_exceeds_limit(pt: Point, x: f32, y: f32, tolerance: f32) -> bool:
+    let dist = fmax(math32.abs(x - pt.x), math32.abs(y - pt.y))
+    # just made up the 1/2
+    return dist > tolerance
+
+func dash_interp(a: f32, b: f32, t: f32) -> f32:
+    return a + (b - a) * t
+
+func interp_safe(a: f32, b: f32, t: f32) -> f32:
+    return a + (b - a) * t

@@ -1,0 +1,416 @@
+#==============================================================================================
+#
+#   stroker_joins - stroke caps and joins, and the curve linearity tests
+#
+#   DESCRIPTION:
+#       Port of tiny-skia-path stroker.rs, part 3 (lines 1010-2030): the cap procedures
+#       (butt, round, square), the join procedures (bevel, round, miter, miter-clip),
+#       set_normal_unit_normal, QuadConstruct's helpers and the quad/cubic linearity and
+#       intersection tests.
+#
+#==============================================================================================
+
+# mark: Caps ==================================================================================
+
+func cap_factory(cap: LineCap) -> CapProc:
+    match cap:
+        .butt: return butt_capper
+        .round: return round_capper
+        .square: return square_capper
+        _: return butt_capper
+
+func butt_capper(_pivot: Point, _normal: Point, stop: Point, _other_path: const PathBuilder*?, path: PathBuilder*):
+    path.line_to(stop.x, stop.y)
+
+func round_capper(pivot: Point, normal: Point, stop: Point, _other_path: const PathBuilder*?, path: PathBuilder*):
+    var parallel = normal
+    parallel.rotate_cw()
+
+    let projected_center = pivot.add(parallel)
+
+    path.conic_points_to(projected_center.add(normal), projected_center, scalar_root_2_over_2)
+    path.conic_points_to(projected_center.sub(normal), stop, scalar_root_2_over_2)
+
+func square_capper(pivot: Point, normal: Point, stop: Point, other_path: const PathBuilder*?, path: PathBuilder*):
+    var parallel = normal
+    parallel.rotate_cw()
+
+    if other_path != none:
+        path.set_last_point(Point.from_xy(pivot.x + normal.x + parallel.x, pivot.y + normal.y + parallel.y))
+        path.line_to(pivot.x - normal.x + parallel.x, pivot.y - normal.y + parallel.y)
+    else:
+        path.line_to(pivot.x + normal.x + parallel.x, pivot.y + normal.y + parallel.y)
+        path.line_to(pivot.x - normal.x + parallel.x, pivot.y - normal.y + parallel.y)
+        path.line_to(stop.x, stop.y)
+
+func fn_ptr_eq(f1: CapProc, f2: CapProc) -> bool:
+    return (void*)f1 == (void*)f2
+
+# mark: Joins =================================================================================
+
+func join_factory(join: LineJoin) -> JoinProc:
+    match join:
+        .miter: return miter_joiner
+        .miter_clip: return miter_clip_joiner
+        .round: return round_joiner
+        .bevel: return bevel_joiner
+        _: return miter_joiner
+
+func is_clockwise(before: Point, after: Point) -> bool:
+    return before.x * after.y > before.y * after.x
+
+enum AngleType as u8:
+    nearly180 = 0
+    sharp = 1
+    shallow = 2
+    nearly_line = 3
+
+func dot_to_angle_type(dot: f32) -> AngleType:
+    if dot >= 0.0:
+        # shallow or line
+        if is_nearly_zero(1.0 - dot):
+            return .nearly_line
+        return .shallow
+    # sharp or 180
+    if is_nearly_zero(1.0 + dot):
+        return .nearly180
+    return .sharp
+
+func handle_inner_join(pivot: Point, after: Point, inner: PathBuilder*):
+    # In the degenerate case that the stroke radius is larger than our segments just
+    # connecting the two inner segments may "show through" as a funny diagonal. To
+    # pseudo-fix this, we go through the pivot point. This adds an extra point/edge, but I
+    # can't see a cheap way to know when this is not needed :(
+    inner.line_to(pivot.x, pivot.y)
+
+    inner.line_to(pivot.x - after.x, pivot.y - after.y)
+
+func bevel_joiner(before_unit_normal: Point, pivot: Point, after_unit_normal: Point, radius: f32, _inv_miter_limit: f32, _prev_is_line: bool, _curr_is_line: bool, builders0: SwappableBuilders):
+    var builders = builders0
+    var after = after_unit_normal.scaled(radius)
+
+    if not is_clockwise(before_unit_normal, after_unit_normal):
+        builders.swap()
+        after = after.neg()
+
+    builders.outer.line_to(pivot.x + after.x, pivot.y + after.y)
+    handle_inner_join(pivot, after, builders.inner)
+
+func round_joiner(before_unit_normal: Point, pivot: Point, after_unit_normal: Point, radius: f32, _inv_miter_limit: f32, _prev_is_line: bool, _curr_is_line: bool, builders0: SwappableBuilders):
+    var builders = builders0
+    let dot_prod = before_unit_normal.dot(after_unit_normal)
+    let angle_type = dot_to_angle_type(dot_prod)
+
+    if angle_type == .nearly_line:
+        return
+
+    var before = before_unit_normal
+    var after = after_unit_normal
+    var dir = PathDirection.cw
+
+    if not is_clockwise(before, after):
+        builders.swap()
+        before = before.neg()
+        after = after.neg()
+        dir = .ccw
+
+    let ts = Transform.from_row(radius, 0.0, 0.0, radius, pivot.x, pivot.y)
+
+    var conics: Conic[5] = [Conic.zero(), Conic.zero(), Conic.zero(), Conic.zero(), Conic.zero()]
+    let count = Conic.build_unit_arc(before, after, dir, ts, conics)
+    if count > 0:
+        for conic in conics[..<count]:
+            builders.outer.conic_points_to(conic.points[1], conic.points[2], conic.weight)
+
+        after.scale(radius)
+        handle_inner_join(pivot, after, builders.inner)
+
+func miter_joiner(before_unit_normal: Point, pivot: Point, after_unit_normal: Point, radius: f32, inv_miter_limit: f32, prev_is_line: bool, curr_is_line: bool, builders: SwappableBuilders):
+    miter_joiner_inner(before_unit_normal, pivot, after_unit_normal, radius, inv_miter_limit, false, prev_is_line, curr_is_line, builders)
+
+func miter_clip_joiner(before_unit_normal: Point, pivot: Point, after_unit_normal: Point, radius: f32, inv_miter_limit: f32, prev_is_line: bool, curr_is_line: bool, builders: SwappableBuilders):
+    miter_joiner_inner(before_unit_normal, pivot, after_unit_normal, radius, inv_miter_limit, true, prev_is_line, curr_is_line, builders)
+
+func do_blunt_or_clipped(builders: SwappableBuilders, pivot: Point, radius: f32, prev_is_line: bool, curr_is_line: bool, before0: Point, mid0: Point, after0: Point, inv_miter_limit: f32, miter_clip: bool):
+    var before = before0
+    var mid = mid0
+    var after = after0
+    after.scale(radius)
+
+    if miter_clip:
+        discard(mid.normalize())
+
+        let cos_beta = before.dot(mid)
+        let sin_beta = before.cross(mid)
+
+        let x = 1.0 / inv_miter_limit if math32.abs(sin_beta) <= scalar_nearly_zero else ((1.0 / inv_miter_limit) - cos_beta) / sin_beta
+
+        before.scale(radius)
+
+        var before_tangent = before
+        before_tangent.rotate_cw()
+
+        var after_tangent = after
+        after_tangent.rotate_ccw()
+
+        let c1 = pivot.add(before).add(before_tangent.scaled(x))
+        let c2 = pivot.add(after).add(after_tangent.scaled(x))
+
+        if prev_is_line:
+            builders.outer.set_last_point(c1)
+        else:
+            builders.outer.line_to(c1.x, c1.y)
+
+        builders.outer.line_to(c2.x, c2.y)
+
+    if not curr_is_line:
+        builders.outer.line_to(pivot.x + after.x, pivot.y + after.y)
+
+    handle_inner_join(pivot, after, builders.inner)
+
+func do_miter(builders: SwappableBuilders, pivot: Point, radius: f32, prev_is_line: bool, curr_is_line: bool, mid: Point, after0: Point):
+    var after = after0
+    after.scale(radius)
+
+    if prev_is_line:
+        builders.outer.set_last_point(Point.from_xy(pivot.x + mid.x, pivot.y + mid.y))
+    else:
+        builders.outer.line_to(pivot.x + mid.x, pivot.y + mid.y)
+
+    if not curr_is_line:
+        builders.outer.line_to(pivot.x + after.x, pivot.y + after.y)
+
+    handle_inner_join(pivot, after, builders.inner)
+
+func miter_joiner_inner(before_unit_normal: Point, pivot: Point, after_unit_normal: Point, radius: f32, inv_miter_limit: f32, miter_clip: bool, prev_is_line: bool, curr_is_line0: bool, builders0: SwappableBuilders):
+    var builders = builders0
+    var curr_is_line = curr_is_line0
+    # negate the dot since we're using normals instead of tangents
+    let dot_prod = before_unit_normal.dot(after_unit_normal)
+    let angle_type = dot_to_angle_type(dot_prod)
+    var before = before_unit_normal
+    var after = after_unit_normal
+    var mid: Point = ---
+
+    if angle_type == .nearly_line:
+        return
+
+    if angle_type == .nearly180:
+        curr_is_line = false
+        mid = after.sub(before).scaled(radius / 2.0)
+        do_blunt_or_clipped(builders, pivot, radius, prev_is_line, curr_is_line, before, mid, after, inv_miter_limit, miter_clip)
+        return
+
+    let ccw = not is_clockwise(before, after)
+    if ccw:
+        builders.swap()
+        before = before.neg()
+        after = after.neg()
+
+    # Before we enter the world of square-roots and divides, check if we're trying to join an
+    # upright right angle (common case for stroking rectangles). If so, special case that
+    # (for speed an accuracy). Note: we only need to check one normal if dot==0
+    if dot_prod == 0.0 and inv_miter_limit <= scalar_root_2_over_2:
+        mid = before.add(after).scaled(radius)
+        do_miter(builders, pivot, radius, prev_is_line, curr_is_line, mid, after)
+        return
+
+    # choose the most accurate way to form the initial mid-vector
+    if angle_type == .sharp:
+        mid = Point.from_xy(after.y - before.y, before.x - after.x)
+        if ccw:
+            mid = mid.neg()
+    else:
+        mid = Point.from_xy(before.x + after.x, before.y + after.y)
+
+    # midLength = radius / sinHalfAngle
+    # if (midLength > miterLimit * radius) abort
+    # if (radius / sinHalf > miterLimit * radius) abort
+    # if (1 / sinHalf > miterLimit) abort
+    # if (1 / miterLimit > sinHalf) abort
+    # My dotProd is opposite sign, since it is built from normals and not tangents
+    # hence 1 + dot instead of 1 - dot in the formula
+    let sin_half_angle = math32.sqrt(half(1.0 + dot_prod))
+    if sin_half_angle < inv_miter_limit:
+        curr_is_line = false
+        do_blunt_or_clipped(builders, pivot, radius, prev_is_line, curr_is_line, before, mid, after, inv_miter_limit, miter_clip)
+        return
+
+    discard(mid.set_length(radius / sin_half_angle))
+    do_miter(builders, pivot, radius, prev_is_line, curr_is_line, mid, after)
+
+func set_normal_unit_normal(before: Point, after: Point, scale: f32, radius: f32, normal: Point*, unit_normal: Point*) -> bool:
+    if not unit_normal.set_normalize((after.x - before.x) * scale, (after.y - before.y) * scale):
+        return false
+
+    unit_normal.rotate_ccw()
+    *normal = unit_normal.scaled(radius)
+    return true
+
+func set_normal_unit_normal2(vec: Point, radius: f32, normal: Point*, unit_normal: Point*) -> bool:
+    if not unit_normal.set_normalize(vec.x, vec.y):
+        return false
+
+    unit_normal.rotate_ccw()
+    *normal = unit_normal.scaled(radius)
+    return true
+
+# mark: Linearity tests =======================================================================
+
+func check_quad_linear(quad: const Point[]) -> (Point, ReductionType):
+    let degenerate_ab = degenerate_vector(quad[1].sub(quad[0]))
+    let degenerate_bc = degenerate_vector(quad[2].sub(quad[1]))
+    if degenerate_ab and degenerate_bc:
+        return (Point.zero(), ReductionType.point)
+
+    if degenerate_ab or degenerate_bc:
+        return (Point.zero(), ReductionType.line)
+
+    if not quad_in_line(quad):
+        return (Point.zero(), ReductionType.quad)
+
+    let t = find_quad_max_curvature(quad)
+    if t == 0.0 or t == 1.0:
+        return (Point.zero(), ReductionType.line)
+
+    return (eval_quad_at(quad, t), ReductionType.degenerate)
+
+func degenerate_vector(v: Point) -> bool:
+    return not v.can_normalize()
+
+func quad_in_line(quad: const Point[]) -> bool:
+    var pt_max: f32 = -1.0
+    var outer1: usize = 0
+    var outer2: usize = 0
+    for index: usize in 0..<2:
+        for inner in index + 1..<3:
+            let test_diff = quad[inner].sub(quad[index])
+            let test_max = fmax(math32.abs(test_diff.x), math32.abs(test_diff.y))
+            if pt_max < test_max:
+                outer1 = index
+                outer2 = inner
+                pt_max = test_max
+
+    let mid = outer1 ^ outer2 ^ 3
+    let curvature_slop: f32 = 0.000005 # this multiplier is pulled out of the air
+    let line_slop = pt_max * pt_max * curvature_slop
+    return pt_to_line(quad[mid], quad[outer1], quad[outer2]) <= line_slop
+
+# returns the distance squared from the point to the line
+func pt_to_line(pt: Point, line_start: Point, line_end: Point) -> f32:
+    let dxy = line_end.sub(line_start)
+    let ab0 = pt.sub(line_start)
+    let numer = dxy.dot(ab0)
+    let denom = dxy.dot(dxy)
+    let t = numer / denom
+    if t >= 0.0 and t <= 1.0:
+        let hit = Point.from_xy(line_start.x * (1.0 - t) + line_end.x * t, line_start.y * (1.0 - t) + line_end.y * t)
+        return hit.distance_to_sqd(pt)
+    return pt.distance_to_sqd(line_start)
+
+# Intersect the line with the quad and return the t values on the quad where the line
+# crosses.
+func intersect_quad_ray(line: const Point[], quad: const Point[], roots: f32[]) -> usize:
+    let vec = line[1].sub(line[0])
+    var r: f32[3] = [0.0, 0.0, 0.0]
+    for n: usize in 0..<3:
+        r[n] = (quad[n].y - line[0].y) * vec.x - (quad[n].x - line[0].x) * vec.y
+    var a = r[2]
+    var b = r[1]
+    let c = r[0]
+    a += c - 2.0 * b # A = a - 2*b + c
+    b -= c # B = -(b - c)
+
+    return find_unit_quad_roots(a, 2.0 * b, c, roots)
+
+func points_within_dist(near_pt: Point, far_pt: Point, limit: f32) -> bool:
+    return near_pt.distance_to_sqd(far_pt) <= limit * limit
+
+func sharp_angle(quad: const Point[]) -> bool:
+    var smaller = quad[1].sub(quad[0])
+    var larger = quad[1].sub(quad[2])
+    let smaller_len = smaller.length_sqd()
+    var larger_len = larger.length_sqd()
+    if smaller_len > larger_len:
+        let tmp = smaller
+        smaller = larger
+        larger = tmp
+        larger_len = smaller_len
+
+    if not smaller.set_length(larger_len):
+        return false
+
+    let dot = smaller.dot(larger)
+    return dot > 0.0
+
+# Return true if the point is close to the bounds of the quad. This is used as a quick reject.
+func pt_in_quad_bounds(quad: const Point[], pt: Point, inv_res_scale: f32) -> bool:
+    let x_min = fmin(fmin(quad[0].x, quad[1].x), quad[2].x)
+    if pt.x + inv_res_scale < x_min:
+        return false
+
+    let x_max = fmax(fmax(quad[0].x, quad[1].x), quad[2].x)
+    if pt.x - inv_res_scale > x_max:
+        return false
+
+    let y_min = fmin(fmin(quad[0].y, quad[1].y), quad[2].y)
+    if pt.y + inv_res_scale < y_min:
+        return false
+
+    let y_max = fmax(fmax(quad[0].y, quad[1].y), quad[2].y)
+    if pt.y - inv_res_scale > y_max:
+        return false
+
+    return true
+
+func check_cubic_linear(cubic: const Point[], reduction: Point[], tangent_pt: Point*?) -> ReductionType:
+    let degenerate_ab = degenerate_vector(cubic[1].sub(cubic[0]))
+    let degenerate_bc = degenerate_vector(cubic[2].sub(cubic[1]))
+    let degenerate_cd = degenerate_vector(cubic[3].sub(cubic[2]))
+    if degenerate_ab and degenerate_bc and degenerate_cd:
+        return .point
+
+    if (i32)degenerate_ab + (i32)degenerate_bc + (i32)degenerate_cd == 2:
+        return .line
+
+    if not cubic_in_line(cubic):
+        if let t = tangent_pt:
+            *t = cubic[2] if degenerate_ab else cubic[1]
+        return .quad
+
+    var t_values: f32[3] = [0.0, 0.0, 0.0]
+    let count = find_cubic_max_curvature(cubic, t_values)
+    var r_count: usize = 0
+    # Now loop over the t-values, and reject any that evaluate to either end-point
+    for t in t_values[..<count]:
+        if 0.0 >= t or t >= 1.0:
+            continue
+
+        reduction[r_count] = eval_cubic_pos_at(cubic, t)
+        if not points_equal(reduction[r_count], cubic[0]) and not points_equal(reduction[r_count], cubic[3]):
+            r_count += 1
+
+    match r_count:
+        0: return .line
+        1: return .degenerate
+        2: return .degenerate2
+        3: return .degenerate3
+        _: trap("unreachable")
+
+func cubic_in_line(cubic: const Point[]) -> bool:
+    var pt_max: f32 = -1.0
+    var outer1: usize = 0
+    var outer2: usize = 0
+    for index: usize in 0..<3:
+        for inner in index + 1..<4:
+            let test_diff = cubic[inner].sub(cubic[index])
+            let test_max = fmax(math32.abs(test_diff.x), math32.abs(test_diff.y))
+            if pt_max < test_max:
+                outer1 = index
+                outer2 = inner
+                pt_max = test_max
+    let mid1: usize = ((usize)1 + ((usize)2 >> outer2)) >> outer1
+    let mid2 = outer1 ^ outer2 ^ mid1
+    let line_slop = pt_max * pt_max * 0.00001 # this multiplier is pulled out of the air
+
+    return pt_to_line(cubic[mid1], cubic[outer1], cubic[outer2]) <= line_slop and pt_to_line(cubic[mid2], cubic[outer1], cubic[outer2]) <= line_slop

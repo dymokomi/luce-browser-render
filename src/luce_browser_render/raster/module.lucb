@@ -1,0 +1,204 @@
+#==============================================================================================
+#
+#   raster - the CPU rasterizer of luce-browser: a port of tiny-skia
+#
+#   DESCRIPTION:
+#       A faithful port of tiny-skia 0.12.0 (linebender/tiny-skia at 5d47547) and its
+#       tiny-skia-path crate to luce-base: pixmaps and masks, premultiplied colors, paints
+#       and shaders (solid color, linear, radial and sweep gradients, patterns), every
+#       blend mode, the raster pipeline (lowp and highp stages), paths (builder, transforms,
+#       stroker, dasher, bezier math), the scan converters (hairlines, anti-aliased
+#       hairlines, non-AA and 4x4 supersampled anti-aliased path filling, exactly as Skia
+#       does) and clip masks. tiny-skia is itself a port of Skia's CPU raster core, so
+#       coverage, stroking, dashing, gradients and blending match Skia's, which Ladybird's
+#       reftests and screenshot tests are rendered with.
+#
+#       The port keeps tiny-skia's algorithms, structure, constants, comments and names
+#       (snake_case; `Type::new` is `Type.new_`, since `new` is reserved). It follows
+#       tiny-skia's portable code path (the one it takes without the `simd` feature), so
+#       every result is bit-exact with tiny-skia; the reference images of tiny-skia's test
+#       suite are reproduced pixel for pixel (tests/raster). The design notes that apply
+#       to every fragment:
+#
+#       - Rust's SIMD wrapper types become arrays of 16-byte Luce vectors: f32x8 is
+#         `F4[2]`, u16x16 is `U16x8[2]`, f32x16 is `F4[4]`, with the lane-wise operators
+#         where Luce has them and small per-lane helpers where it does not (min, max,
+#         comparisons, select). The lane counts (8 for highp, 16 for lowp) are kept,
+#         because tiny-skia's mask stages skip whole chunks.
+#       - Memory: every buffer is allocated from `memory.heap` (the raster module is
+#         standalone and does not use the browser's GC, DESIGN.md §3). Types that own
+#         memory (Pixmap, Mask, Path, PathBuilder, StrokeDash, gradient shaders, the
+#         pipeline) have a `release()` method, the Rust `Drop`. Running out of memory traps,
+#         as Rust aborts.
+#       - `Option<T>` is `T?`; tiny-skia's strict number types (FiniteF32, NormalizedF32,
+#         NonZeroPositiveF32, LengthU32, NonZeroU16) are the plain scalars, validated where
+#         tiny-skia constructs them. `debug_assert!`s are not ported.
+#       - Rust integer arithmetic is checked (`+` traps like a Rust debug build); Skia's
+#         intentional wrap-arounds (u16 lowp lanes, unsigned "in range" tricks) use the
+#         wrapping operators.
+#       - Rust's f32::min/max ignore NaN: `fmin`/`fmax`. tiny-skia's "faster" min/max are
+#         `pmin`/`pmax`.
+#       - The two crates and their Rust submodules share one Luce module, so free
+#         functions whose names collide carry the name of their Rust module as a prefix:
+#         `highp_`/`lowp_` for the pipeline stages, `scan_`, `scan_aa_`, `hairline_`,
+#         `hairline_aa_` for the scan converters.
+#
+#       Copyright (c) 2011 Google Inc. All rights reserved.
+#       Copyright (c) 2020 Yevhenii Reizner All rights reserved.
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-tiny-skia)
+#
+#==============================================================================================
+
+import memory
+import math32
+import math
+
+# mark: Vec ===================================================================================
+
+## A growable array in `memory.heap`: Rust's `Vec<T>`, private to the module. Out of memory
+## traps, as Rust's allocation failure aborts.
+struct Vec[T]:
+    var data: T[]
+    var len: usize
+
+    ## The elements.
+    func view() -> T[]:
+        return self.data[..<self.len]
+
+    ## Whether there are no elements.
+    func is_empty() -> bool:
+        return self.len == 0
+
+    ## The last element, if any.
+    func last() -> T?:
+        if self.len == 0:
+            return none
+        return self.data[self.len - 1]
+
+    ## Make room for `additional` more elements.
+    mutating func reserve(additional: usize):
+        let needed = self.len + additional
+        if needed <= self.data.length:
+            return
+        var capacity = self.data.length * 2
+        if capacity < needed:
+            capacity = needed
+        if capacity < 4:
+            capacity = 4
+        let fresh = (alloc T[capacity] in memory.heap) else trap("raster: out of memory")
+        for i in 0..<self.len:
+            fresh[i] = self.data[i]
+        if self.data.length > 0:
+            free(self.data) in memory.heap
+        self.data = fresh
+
+    ## Append `value`.
+    mutating func push(value: T):
+        if self.len == self.data.length:
+            self.reserve(1)
+        self.data[self.len] = value
+        self.len += 1
+
+    ## Remove and return the last element.
+    mutating func pop() -> T?:
+        if self.len == 0:
+            return none
+        self.len -= 1
+        return self.data[self.len]
+
+    ## Insert `value` at `index`, shifting the rest up.
+    mutating func insert(index: usize, value: T):
+        if self.len == self.data.length:
+            self.reserve(1)
+        var i = self.len
+        while i > index:
+            self.data[i] = self.data[i - 1]
+            i -= 1
+        self.data[index] = value
+        self.len += 1
+
+    ## Append every element of `values`.
+    mutating func extend(values: const T[]):
+        self.reserve(values.length)
+        for value in values:
+            self.data[self.len] = value
+            self.len += 1
+
+    ## Remove every element, keeping the storage.
+    mutating func clear():
+        self.len = 0
+
+    ## A copy with its own storage.
+    func clone() -> Vec[T]:
+        var copy: Vec[T]
+        copy.extend(self.view())
+        return copy
+
+    ## Free the storage.
+    mutating func release():
+        if self.data.length > 0:
+            free(self.data) in memory.heap
+        self.data = self.data[..<0]
+        self.len = 0
+
+## An owned copy of `values` in `memory.heap`; free it with `free(...) in memory.heap`.
+func copy_span[T](values: const T[]) -> T[]:
+    let copy = (alloc T[values.length] in memory.heap) else trap("raster: out of memory")
+    for i in 0..<values.length:
+        copy[i] = values[i]
+    return copy
+
+## A stable sort (Rust's `slice::sort_by`): `less(a, b)` answers whether `a` orders before
+## `b`. Equal elements keep their order. A merge sort over a scratch buffer.
+func stable_sort[T](items: T[], less: func(const T*, const T*) -> bool):
+    let n = items.length
+    if n < 2:
+        return
+    if n <= 20:
+        # insertion sort
+        for i in 1..<n:
+            let item = items[i]
+            var j = i
+            while j > 0 and less(&item, &items[j - 1]):
+                items[j] = items[j - 1]
+                j -= 1
+            items[j] = item
+        return
+    let scratch = (alloc T[n] in memory.heap) else trap("raster: out of memory")
+    defer free(scratch) in memory.heap
+    var width: usize = 1
+    var source = items
+    var target = scratch
+    while width < n:
+        var start: usize = 0
+        while start < n:
+            let middle = start + width if start + width < n else n
+            let end = start + 2 * width if start + 2 * width < n else n
+            var i = start
+            var j = middle
+            var k = start
+            while i < middle and j < end:
+                if less(&source[j], &source[i]):
+                    target[k] = source[j]
+                    j += 1
+                else:
+                    target[k] = source[i]
+                    i += 1
+                k += 1
+            while i < middle:
+                target[k] = source[i]
+                i += 1
+                k += 1
+            while j < end:
+                target[k] = source[j]
+                j += 1
+                k += 1
+            start = end
+        let swap = source
+        source = target
+        target = swap
+        width *= 2
+    if source.data != items.data:
+        for i in 0..<n:
+            items[i] = source[i]

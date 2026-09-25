@@ -1,0 +1,309 @@
+#==============================================================================================
+#
+#   path_builder - building paths: SkPath's builder side
+#
+#   DESCRIPTION:
+#       Port of tiny-skia-path path_builder.rs: PathDirection and PathBuilder (move_to,
+#       line_to, quad_to, conic_to via quads, cubic_to, close, rect/oval/circle, path
+#       concatenation and reversal, finish). NOTE (tiny-skia): this is not SkPathBuilder, but
+#       rather a reimplementation of SkPath. `finish()` hands the storage to the Path, as
+#       Rust's `finish(self)` consumes the builder; the builder is empty afterwards.
+#
+#==============================================================================================
+
+enum PathDirection as u8:
+    # Clockwise direction for adding closed contours.
+    cw = 0
+    # Counter-clockwise direction for adding closed contours.
+    ccw = 1
+
+## A path builder.
+pub struct PathBuilder:
+    var verbs: Vec[PathVerb]
+    var points: Vec[Point]
+    var last_move_to_index: usize
+    var move_to_required: bool = true
+
+    ## Creates a new builder.
+    pub static func new_() -> PathBuilder:
+        return PathBuilder()
+
+    ## Creates a new builder with a specified capacity. Number of points depends on a verb
+    ## type: Move - 1, Line - 1, Quad - 2, Cubic - 3, Close - 0.
+    pub static func with_capacity(verbs_capacity: usize, points_capacity: usize) -> PathBuilder:
+        var b = PathBuilder()
+        b.verbs.reserve(verbs_capacity)
+        b.points.reserve(points_capacity)
+        return b
+
+    ## Creates a new `Path` from `Rect`. Never fails since `Rect` is always valid. Segments
+    ## are created clockwise: TopLeft -> TopRight -> BottomRight -> BottomLeft. The contour
+    ## is closed.
+    pub static func from_rect(rect: Rect) -> Path:
+        var verbs: Vec[PathVerb]
+        verbs.push(.move)
+        verbs.push(.line)
+        verbs.push(.line)
+        verbs.push(.line)
+        verbs.push(.close)
+        var points: Vec[Point]
+        points.push(Point.from_xy(rect.left(), rect.top()))
+        points.push(Point.from_xy(rect.right(), rect.top()))
+        points.push(Point.from_xy(rect.right(), rect.bottom()))
+        points.push(Point.from_xy(rect.left(), rect.bottom()))
+        return Path(verbs = verbs, points = points, bounds_ = rect)
+
+    ## Creates a new `Path` from a circle. See `PathBuilder.push_circle` for details.
+    pub static func from_circle(cx: f32, cy: f32, radius: f32) -> Path?:
+        var b = PathBuilder()
+        b.push_circle(cx, cy, radius)
+        return b.finish()
+
+    ## Creates a new `Path` from an oval. See `PathBuilder.push_oval` for details.
+    pub static func from_oval(oval: Rect) -> Path?:
+        var b = PathBuilder()
+        b.push_oval(oval)
+        return b.finish()
+
+    mutating func reserve(additional_verbs: usize, additional_points: usize):
+        self.verbs.reserve(additional_verbs)
+        self.points.reserve(additional_points)
+
+    ## Returns the current number of segments in the builder.
+    pub func len() -> usize:
+        return self.verbs.len
+
+    ## Checks if the builder has any segments added.
+    pub func is_empty() -> bool:
+        return self.verbs.len == 0
+
+    ## Adds beginning of a contour. Multiple continuous MoveTo segments are not allowed. If
+    ## the previous segment was also MoveTo, it will be overwritten with the current one.
+    pub mutating func move_to(x: f32, y: f32):
+        if let last = self.verbs.last():
+            if last == .move:
+                let last_idx = self.points.len - 1
+                self.points.data[last_idx] = Point.from_xy(x, y)
+                return
+        self.last_move_to_index = self.points.len
+        self.move_to_required = false
+        self.verbs.push(.move)
+        self.points.push(Point.from_xy(x, y))
+
+    mutating func inject_move_to_if_needed():
+        if self.move_to_required:
+            if self.last_move_to_index < self.points.len:
+                let p = self.points.data[self.last_move_to_index]
+                self.move_to(p.x, p.y)
+            else:
+                self.move_to(0.0, 0.0)
+
+    ## Adds a line from the last point. If `Path` is empty - adds Move(0, 0) first. If `Path`
+    ## ends with Close - adds Move(last_x, last_y) first.
+    pub mutating func line_to(x: f32, y: f32):
+        self.inject_move_to_if_needed()
+        self.verbs.push(.line)
+        self.points.push(Point.from_xy(x, y))
+
+    ## Adds a quad curve from the last point to `x`, `y`. If `Path` is empty - adds
+    ## Move(0, 0) first. If `Path` ends with Close - adds Move(last_x, last_y) first.
+    pub mutating func quad_to(x1: f32, y1: f32, x: f32, y: f32):
+        self.inject_move_to_if_needed()
+        self.verbs.push(.quad)
+        self.points.push(Point.from_xy(x1, y1))
+        self.points.push(Point.from_xy(x, y))
+
+    mutating func quad_to_pt(p1: Point, p: Point):
+        self.quad_to(p1.x, p1.y, p.x, p.y)
+
+    # We do not support conic segments, but Skia still relies on them from time to time.
+    # This method will simply convert the input data into quad segments.
+    mutating func conic_to(x1: f32, y1: f32, x: f32, y: f32, weight: f32):
+        # check for <= 0 or NaN with this test
+        if not (weight > 0.0):
+            self.line_to(x, y)
+        elif not math32.is_finite(weight):
+            self.line_to(x1, y1)
+            self.line_to(x, y)
+        elif weight == 1.0:
+            self.quad_to(x1, y1, x, y)
+        else:
+            self.inject_move_to_if_needed()
+            let last = self.last_point() else trap("unreachable")
+            if let quadder = AutoConicToQuads.compute(last, Point.from_xy(x1, y1), Point.from_xy(x, y), weight):
+                # Points are ordered as: 0 - 1 2 - 3 4 - 5 6 - ..
+                # `count` is a number of pairs +1
+                var offset: usize = 1
+                for _i in 0..<(usize)quadder.len:
+                    let pt1 = quadder.points[offset + 0]
+                    let pt2 = quadder.points[offset + 1]
+                    self.quad_to(pt1.x, pt1.y, pt2.x, pt2.y)
+                    offset += 2
+
+    mutating func conic_points_to(pt1: Point, pt2: Point, weight: f32):
+        self.conic_to(pt1.x, pt1.y, pt2.x, pt2.y, weight)
+
+    ## Adds a cubic curve from the last point to `x`, `y`. If `Path` is empty - adds
+    ## Move(0, 0) first. If `Path` ends with Close - adds Move(last_x, last_y) first.
+    pub mutating func cubic_to(x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32):
+        self.inject_move_to_if_needed()
+        self.verbs.push(.cubic)
+        self.points.push(Point.from_xy(x1, y1))
+        self.points.push(Point.from_xy(x2, y2))
+        self.points.push(Point.from_xy(x, y))
+
+    mutating func cubic_to_pt(p1: Point, p2: Point, p: Point):
+        self.cubic_to(p1.x, p1.y, p2.x, p2.y, p.x, p.y)
+
+    ## Closes the current contour. A closed contour connects the first and the last Point
+    ## with a line, forming a continuous loop. Does nothing when `Path` is empty or already
+    ## closed. Open and closed contour will be filled the same way. Stroking an open contour
+    ## will add LineCap at contour's start and end. Stroking an closed contour will add
+    ## LineJoin at contour's start and end.
+    pub mutating func close():
+        # don't add a close if it's the first verb or a repeat
+        if self.verbs.len > 0:
+            let last = self.verbs.data[self.verbs.len - 1]
+            if last != .close:
+                self.verbs.push(.close)
+        self.move_to_required = true
+
+    ## Returns the last point if any.
+    pub func last_point() -> Point?:
+        return self.points.last()
+
+    mutating func set_last_point(pt: Point):
+        if self.points.len > 0:
+            self.points.data[self.points.len - 1] = pt
+        else:
+            self.move_to(pt.x, pt.y)
+
+    func is_zero_length_since_point(start_pt_index: usize) -> bool:
+        let count = self.points.len - start_pt_index
+        if count < 2:
+            return true
+        let first = self.points.data[start_pt_index]
+        for i in 1..<count:
+            if not points_equal(first, self.points.data[start_pt_index + i]):
+                return false
+        return true
+
+    ## Adds a rectangle contour. The contour is closed and has a clock-wise direction.
+    pub mutating func push_rect(rect: Rect):
+        self.move_to(rect.left(), rect.top())
+        self.line_to(rect.right(), rect.top())
+        self.line_to(rect.right(), rect.bottom())
+        self.line_to(rect.left(), rect.bottom())
+        self.close()
+
+    ## Adds an oval contour bounded by the provided rectangle. The contour is closed and has
+    ## a clock-wise direction.
+    pub mutating func push_oval(oval: Rect):
+        let cx = half(oval.left()) + half(oval.right())
+        let cy = half(oval.top()) + half(oval.bottom())
+
+        let oval_points: Point[4] = [
+            Point.from_xy(cx, oval.bottom()),
+            Point.from_xy(oval.left(), cy),
+            Point.from_xy(cx, oval.top()),
+            Point.from_xy(oval.right(), cy),
+        ]
+
+        let rect_points: Point[4] = [
+            Point.from_xy(oval.right(), oval.bottom()),
+            Point.from_xy(oval.left(), oval.bottom()),
+            Point.from_xy(oval.left(), oval.top()),
+            Point.from_xy(oval.right(), oval.top()),
+        ]
+
+        let weight = scalar_root_2_over_2
+        self.move_to(oval_points[3].x, oval_points[3].y)
+        for i: usize in 0..<4:
+            self.conic_points_to(rect_points[i], oval_points[i], weight)
+        self.close()
+
+    ## Adds a circle contour. The contour is closed and has a clock-wise direction. Does
+    ## nothing when: radius <= 0, any value is not finite or really large.
+    pub mutating func push_circle(x: f32, y: f32, r: f32):
+        if let rect = Rect.from_xywh(x - r, y - r, r + r, r + r):
+            self.push_oval(rect)
+
+    ## Adds a path.
+    pub mutating func push_path(other: const Path*):
+        self.last_move_to_index = self.points.len
+        self.verbs.extend(other.verbs.view())
+        self.points.extend(other.points.view())
+
+    mutating func push_path_builder(other: const PathBuilder*):
+        if other.is_empty():
+            return
+        if self.last_move_to_index != 0:
+            self.last_move_to_index = self.points.len + other.last_move_to_index
+        self.verbs.extend(other.verbs.view())
+        self.points.extend(other.points.view())
+
+    ## Appends, in a reverse order, the first contour of path separated by a MoveTo.
+    mutating func reverse_path_to(other: const PathBuilder*):
+        if other.is_empty():
+            return
+        var points_offset = other.points.len - 1
+        var index = other.verbs.len
+        while index > 0:
+            index -= 1
+            let verb = other.verbs.data[index]
+            match verb:
+                .move:
+                    # if the path has multiple contours, stop after reversing the last
+                    break
+                .line:
+                    # We're moving one point back manually, to prevent points_offset overflow.
+                    let pt = other.points.data[points_offset - 1]
+                    points_offset -= 1
+                    self.line_to(pt.x, pt.y)
+                .quad:
+                    let pt1 = other.points.data[points_offset - 1]
+                    let pt2 = other.points.data[points_offset - 2]
+                    points_offset -= 2
+                    self.quad_to(pt1.x, pt1.y, pt2.x, pt2.y)
+                .cubic:
+                    let pt1 = other.points.data[points_offset - 1]
+                    let pt2 = other.points.data[points_offset - 2]
+                    let pt3 = other.points.data[points_offset - 3]
+                    points_offset -= 3
+                    self.cubic_to(pt1.x, pt1.y, pt2.x, pt2.y, pt3.x, pt3.y)
+                .close:
+                    continue
+                _:
+                    continue
+
+    ## Reset the builder. Memory is not deallocated.
+    pub mutating func clear():
+        self.verbs.clear()
+        self.points.clear()
+        self.last_move_to_index = 0
+        self.move_to_required = true
+
+    ## Finishes the builder and returns a `Path`. Returns none when `Path` is empty or has
+    ## invalid bounds. The builder's storage moves into the path; the builder is empty
+    ## afterwards (and its storage is freed when there is no path).
+    pub mutating func finish() -> Path?:
+        if self.is_empty() or self.verbs.len == 1:
+            # Just a move to? Bail.
+            self.release()
+            return none
+        if let bounds = Rect.from_points(self.points.view()):
+            let path = Path(verbs = self.verbs, points = self.points, bounds_ = bounds)
+            self.verbs = Vec[PathVerb]()
+            self.points = Vec[Point]()
+            self.last_move_to_index = 0
+            self.move_to_required = true
+            return path
+        self.release()
+        return none
+
+    ## Frees the builder's storage.
+    pub mutating func release():
+        self.verbs.release()
+        self.points.release()
+        self.last_move_to_index = 0
+        self.move_to_required = true

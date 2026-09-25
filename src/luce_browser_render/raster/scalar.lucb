@@ -1,0 +1,300 @@
+#==============================================================================================
+#
+#   scalar - float helpers, saturating casts, fixed-point numbers
+#
+#   DESCRIPTION:
+#       Port of tiny-skia-path scalar.rs (the Scalar trait and SCALAR_* constants) and
+#       floating_point.rs (SaturateCast, SaturateRound, f32_as_2s_compliment and the strict
+#       number helpers), and of tiny-skia math.rs (left_shift, bound, approx_powf) and
+#       fixed_point.rs (FDot6, FDot8, FDot16). Also the Rust f32/f64 min and max semantics
+#       the port relies on (fmin/fmax ignore a NaN operand, as Rust's std does; pmin/pmax
+#       are tiny-skia's "faster" min/max, which do not care about NaN).
+#
+#==============================================================================================
+
+# mark: Constants =============================================================================
+
+## The largest finite f32.
+pub let scalar_max: f32 = 3.402823466e+38
+## 1 / 4096, the tolerance of the "nearly zero" tests.
+pub let scalar_nearly_zero: f32 = 1.0 / 4096.0
+## sqrt(2) / 2.
+pub let scalar_root_2_over_2: f32 = 0.707106781
+
+let float_pi: f32 = 3.14159265
+let f32_epsilon: f32 = 1.1920929e-7
+let f64_epsilon: f64 = 2.220446049250313e-16
+let max_i32_fits_in_f32: f32 = 2147483520.0
+let min_i32_fits_in_f32: f32 = -2147483520.0
+let i32_max: i32 = 2147483647
+let i32_min: i32 = -2147483648
+
+# mark: Rust's f32 and f64 semantics ==========================================================
+
+## Rust's `f32::min`: a NaN operand is ignored.
+func fmin(a: f32, b: f32) -> f32:
+    if math32.is_nan(a):
+        return b
+    if math32.is_nan(b):
+        return a
+    return a if a < b else b
+
+## Rust's `f32::max`: a NaN operand is ignored.
+func fmax(a: f32, b: f32) -> f32:
+    if math32.is_nan(a):
+        return b
+    if math32.is_nan(b):
+        return a
+    return a if a > b else b
+
+## Rust's `f64::min`: a NaN operand is ignored.
+func fmin64(a: f64, b: f64) -> f64:
+    if math.is_nan(a):
+        return b
+    if math.is_nan(b):
+        return a
+    return a if a < b else b
+
+## Rust's `f64::max`: a NaN operand is ignored.
+func fmax64(a: f64, b: f64) -> f64:
+    if math.is_nan(a):
+        return b
+    if math.is_nan(b):
+        return a
+    return a if a > b else b
+
+## tiny-skia's `faster_min`: unlike std, NaN does not matter.
+func pmin(a: f32, b: f32) -> f32:
+    return b if b < a else a
+
+## tiny-skia's `faster_max`: unlike std, NaN does not matter.
+func pmax(a: f32, b: f32) -> f32:
+    return b if a < b else a
+
+## Rust's `f32::is_finite`.
+func is_finite(x: f32) -> bool:
+    return math32.is_finite(x)
+
+## The number of leading zero bits of `x` (Rust's `u32::leading_zeros`).
+func leading_zeros(x: u32) -> u32:
+    if x == 0:
+        return 32
+    var n: u32 = 0
+    var v = x
+    while (v & 0x80000000) == 0:
+        v <<= 1
+        n += 1
+    return n
+
+# mark: Scalar ================================================================================
+
+func half(x: f32) -> f32:
+    return x * 0.5
+
+func ave(a: f32, b: f32) -> f32:
+    return (a + b) * 0.5
+
+func sqr(x: f32) -> f32:
+    return x * x
+
+func invert(x: f32) -> f32:
+    return 1.0 / x
+
+## Works just like SkTPin, returning `max` for NaN/inf: a non-panicking clamp.
+func bound(x: f32, min: f32, max: f32) -> f32:
+    return fmax(fmin(max, x), min)
+
+func is_nearly_equal(a: f32, b: f32) -> bool:
+    return math32.abs(a - b) <= scalar_nearly_zero
+
+func is_nearly_equal_within_tolerance(a: f32, b: f32, tolerance: f32) -> bool:
+    return math32.abs(a - b) <= tolerance
+
+func is_nearly_zero(x: f32) -> bool:
+    return is_nearly_zero_within_tolerance(x, scalar_nearly_zero)
+
+func is_nearly_zero_within_tolerance(x: f32, tolerance: f32) -> bool:
+    return math32.abs(x) <= tolerance
+
+## From SkPathOpsTypes.
+func almost_dequal_ulps(a: f32, b: f32) -> bool:
+    let ulps_epsilon: i32 = 16
+    let a_bits = f32_as_2s_compliment(a)
+    let b_bits = f32_as_2s_compliment(b)
+    # Find the difference in ULPs.
+    return a_bits < b_bits + ulps_epsilon and b_bits < a_bits + ulps_epsilon
+
+# mark: Floating point ========================================================================
+
+## Return the closest integer for the given float. Returns MAX_I32_FITS_IN_F32 for NaN.
+## (i32::saturate_from(f32))
+func saturate_from(value: f32) -> i32:
+    var x = value
+    x = x if x < max_i32_fits_in_f32 else max_i32_fits_in_f32
+    x = x if x > min_i32_fits_in_f32 else min_i32_fits_in_f32
+    return (i32)x
+
+## Return the closest integer for the given double. Returns i32::MAX for NaN.
+## (i32::saturate_from(f64))
+func saturate_from64(value: f64) -> i32:
+    var x = value
+    x = x if x < 2147483647.0 else 2147483647.0
+    x = x if x > -2147483648.0 else -2147483648.0
+    return (i32)x
+
+func saturate_floor(x: f32) -> i32:
+    return saturate_from(math32.floor(x))
+
+func saturate_ceil(x: f32) -> i32:
+    return saturate_from(math32.ceil(x))
+
+func saturate_round(x: f32) -> i32:
+    return saturate_from(math32.floor(x) + 0.5)
+
+## Return the float as a 2s compliment int. Just to be used to compare floats to each other
+## or against positive float-bit-constants (like 0). This does not return the int equivalent
+## of the float, just something cheaper for compares-only.
+func f32_as_2s_compliment(x: f32) -> i32:
+    return sign_bit_to_2s_compliment((i32)x.bits())
+
+## Convert a sign-bit int (i.e. float interpreted as int) into a 2s compliement int. This also
+## converts -0 (0x80000000) to 0. Doing this to a float allows it to be compared using normal
+## C operators (<, <=, etc.)
+func sign_bit_to_2s_compliment(value: i32) -> i32:
+    var x = value
+    if x < 0:
+        x &= 0x7FFFFFFF
+        x = -x
+    return x
+
+## NormalizedF32::new_clamped: a value in [0, 1]; zero for NaN or infinity.
+func normalized_clamped(n: f32) -> f32:
+    if is_finite(n):
+        return fmax(fmin(1.0, n), 0.0)
+    return 0.0
+
+## NormalizedF32::new: `n` when it is finite and in [0, 1].
+func normalized_new(n: f32) -> f32?:
+    if is_finite(n) and n >= 0.0 and n <= 1.0:
+        return n
+    return none
+
+## NormalizedF32Exclusive::new: `n` when it is in (0, 1).
+func normalized_exclusive_new(n: f32) -> f32?:
+    if n > 0.0 and n < 1.0:
+        return n
+    return none
+
+## NormalizedF32Exclusive::new_bounded: `n` clamped to [EPSILON, 1 - EPSILON].
+func normalized_exclusive_new_bounded(n: f32) -> f32:
+    return bound(n, f32_epsilon, 1.0 - f32_epsilon)
+
+## NormalizedF32Exclusive::HALF (and ANY).
+let normalized_exclusive_half: f32 = 0.5
+
+# mark: Math ==================================================================================
+
+func left_shift(value: i32, shift: i32) -> i32:
+    return (i32)((u32)value << (u32)shift)
+
+func left_shift64(value: i64, shift: i32) -> i64:
+    return (i64)((u64)value << (u64)shift)
+
+func bound_i64(min: i64, value: i64, max: i64) -> i64:
+    let v = value if value < max else max
+    return v if v > min else min
+
+## Skia cites http://www.machinedlearnings.com/2011/06/fast-approximate-logarithm-exponential.html
+func approx_powf(value: f32, y: f32) -> f32:
+    if value == 0.0 or value == 1.0:
+        return value
+    let e = (f32)value.bits() * (1.0 / 8388608.0)
+    let m = f32.bits((value.bits() & 0x007fffff) | 0x3f000000)
+    let log2_x = e - 124.225514990 - 1.498030302 * m - 1.725879990 / (0.3520887068 + m)
+    let x = log2_x * y
+    let f = x - math32.floor(x)
+    var a = x + 121.274057500
+    a -= f * 1.490129070
+    a += 27.728023300 / (4.84252568 - f)
+    a *= 8388608.0
+    let infinity_bits: u32 = 0x7f800000
+    if a < (f32)infinity_bits:
+        if a > 0.0:
+            return f32.bits((u32)math32.round(a))
+        return 0.0
+    return math32.infinity
+
+# mark: Fixed point ===========================================================================
+# Skia uses fixed points pretty chaotically, therefore we cannot use strongly typed wrappers.
+
+type FDot6 = i32
+type FDot8 = i32
+type FDot16 = i32
+
+let fdot6_one: FDot6 = 64
+let fdot16_half: FDot16 = 32768
+let fdot16_one: FDot16 = 65536
+
+func fdot6_from_i32(n: i32) -> FDot6:
+    return n << 6
+
+func fdot6_from_f32(n: f32) -> FDot6:
+    return (i32)(n * 64.0)
+
+func fdot6_floor(n: FDot6) -> FDot6:
+    return n >> 6
+
+func fdot6_ceil(n: FDot6) -> FDot6:
+    return (n + 63) >> 6
+
+func fdot6_round(n: FDot6) -> FDot6:
+    return (n + 32) >> 6
+
+func fdot6_to_fdot16(n: FDot6) -> FDot16:
+    return left_shift(n, 10)
+
+func fdot6_div(a: FDot6, b: FDot6) -> FDot16:
+    if a >= -32768 and a <= 32767:
+        return left_shift(a, 16) // b
+    return fdot16_div(a, b)
+
+func fdot6_can_convert_to_fdot16(n: FDot6) -> bool:
+    let max_dot6 = i32_max >> (16 - 6)
+    return math.iabs((i64)n) <= (i64)max_dot6
+
+func fdot6_small_scale(value: u8, dot6: FDot6) -> u8:
+    return (u8)(((i32)value * dot6) >> 6)
+
+# Extracted from SkScan_Antihair.cpp
+func fdot8_from_fdot16(x: FDot16) -> FDot8:
+    return (x + 0x80) >> 8
+
+## `from_f32` seems to lack a rounding step. For all fixed-point values, this version is as
+## accurate as possible for (fixed -> float -> fixed). Rounding reduces accuracy if the
+## intermediate floats are in the range that only holds integers (adding 0.5 to an odd integer
+## then snaps to nearest even). Using double for the rounding math gives maximum accuracy for
+## (float -> fixed -> float), but that's usually overkill.
+func fdot16_from_f32(x: f32) -> FDot16:
+    return saturate_from(x * (f32)fdot16_one)
+
+func fdot16_floor_to_i32(x: FDot16) -> i32:
+    return x >> 16
+
+func fdot16_ceil_to_i32(x: FDot16) -> i32:
+    return (x + fdot16_one - 1) >> 16
+
+func fdot16_round_to_i32(x: FDot16) -> i32:
+    return (x + fdot16_half) >> 16
+
+## The divide may exceed 32 bits. Clamp to a signed 32 bit result.
+func fdot16_mul(a: FDot16, b: FDot16) -> FDot16:
+    return (i32)(((i64)a * (i64)b) >> 16)
+
+## The divide may exceed 32 bits. Clamp to a signed 32 bit result.
+func fdot16_div(numer: FDot6, denom: FDot6) -> FDot16:
+    let v = left_shift64((i64)numer, 16) // (i64)denom
+    let n = bound_i64((i64)i32_min, v, (i64)i32_max)
+    return (i32)n
+
+func fdot16_fast_div(a: FDot6, b: FDot6) -> FDot16:
+    return left_shift(a, 16) // b
