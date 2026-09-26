@@ -850,8 +850,8 @@ pub func rotation_matrix[T](axis: void*?, angle: T) -> void*?:
     trap("unported: Gfx::rotation_matrix")
 
 ## Ported from Libraries/LibGfx/Matrix4x4.h:86 Gfx::extract_2d_affine_transform.
-# unmapped: Matrix4x4<T>
-pub func extract_2d_affine_transform[T](m: void*?) -> AffineTransform:
+# Signature fixed by region r51a: the one instantiation LibWeb uses, Matrix4x4<float>.
+pub func extract_2d_affine_transform(m: const FloatMatrix4X4*) -> AffineTransform:
     trap("unported: Gfx::extract_2d_affine_transform")
 
 ## Ported from Libraries/LibGfx/Palette.cpp:13 Gfx::PaletteImpl::create_with_anonymous_buffer.

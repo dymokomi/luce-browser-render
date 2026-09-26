@@ -1,0 +1,73 @@
+#==============================================================================================
+#
+#   types_display_list_player_cpu - declarations of DisplayListPlayerCpu
+#
+#   DESCRIPTION:
+#       Written by hand (region r51a) in the generator's form (DESIGN.md §2.3): the CPU
+#       player that replaces Web::Painting::DisplayListPlayerSkia (DESIGN.md §7.3), whose
+#       generated types_display_list_player_skia.lucb it replaces. It takes the Skia
+#       player's place in the DisplayListPlayer hierarchy (class id 1).
+#
+#==============================================================================================
+
+# mark: CpuSurfaceCanvas =======================================================================
+
+## The canvas the player draws on for one PaintingSurface (the Skia player draws on the
+## surface's SkCanvas): made when the player first draws on the surface, written back and
+## dropped when it flushes.
+struct CpuSurfaceCanvas:
+    var surface: gfx.PaintingSurface*
+    var canvas: CpuCanvas*
+
+# mark: DisplayListPlayerCpu ===================================================================
+
+## Web::Painting::DisplayListPlayerCpu: the DisplayListPlayer that rasterizes on the CPU.
+pub struct DisplayListPlayerCpu: IsDisplayListPlayerCpu, IsDisplayListPlayer:
+    pub var display_list_player_base: DisplayListPlayer  # primary base
+    var m_canvases: ak.Vector[CpuSurfaceCanvas]
+
+    func display_list_player_cpu() -> DisplayListPlayerCpu*: return (DisplayListPlayerCpu*)&self
+
+    func display_list_player() -> DisplayListPlayer*: return (DisplayListPlayer*)&self
+
+## Upcast to Web::Painting::DisplayListPlayerCpu (implemented by every struct in its hierarchy).
+pub interface IsDisplayListPlayerCpu:
+    func display_list_player_cpu() -> DisplayListPlayerCpu*
+
+## Virtual functions introduced by Web::Painting::DisplayListPlayerCpu.
+pub struct DisplayListPlayerCpuVTable:
+    pub let display_list_player_vtable: DisplayListPlayerVTable
+
+## The vtable of Web::Painting::DisplayListPlayerCpu.
+pub let display_list_player_cpu_vtable: DisplayListPlayerCpuVTable = DisplayListPlayerCpuVTable(display_list_player_vtable = DisplayListPlayerVTable(class_info = &display_list_player_cpu_class,
+    flush = display_list_player_cpu_flush_impl, draw_glyph_run = display_list_player_cpu_draw_glyph_run_impl, fill_rect = display_list_player_cpu_fill_rect_impl,
+    draw_scaled_immutable_bitmap = display_list_player_cpu_draw_scaled_immutable_bitmap_impl, draw_repeated_immutable_bitmap = display_list_player_cpu_draw_repeated_immutable_bitmap_impl,
+    draw_external_content = display_list_player_cpu_draw_external_content_impl, save = display_list_player_cpu_save_impl, save_layer = display_list_player_cpu_save_layer_impl,
+    restore = display_list_player_cpu_restore_impl, translate = display_list_player_cpu_translate_impl, add_clip_rect = display_list_player_cpu_add_clip_rect_impl,
+    paint_linear_gradient = display_list_player_cpu_paint_linear_gradient_impl, paint_radial_gradient = display_list_player_cpu_paint_radial_gradient_impl,
+    paint_conic_gradient = display_list_player_cpu_paint_conic_gradient_impl, paint_outer_box_shadow = display_list_player_cpu_paint_outer_box_shadow_impl,
+    paint_inner_box_shadow = display_list_player_cpu_paint_inner_box_shadow_impl, paint_text_shadow = display_list_player_cpu_paint_text_shadow_impl,
+    fill_rect_with_rounded_corners = display_list_player_cpu_fill_rect_with_rounded_corners_impl, fill_path = display_list_player_cpu_fill_path_impl,
+    stroke_path = display_list_player_cpu_stroke_path_impl, draw_ellipse = display_list_player_cpu_draw_ellipse_impl, fill_ellipse = display_list_player_cpu_fill_ellipse_impl,
+    draw_line = display_list_player_cpu_draw_line_impl, apply_backdrop_filter = display_list_player_cpu_apply_backdrop_filter_impl, draw_rect = display_list_player_cpu_draw_rect_impl,
+    add_rounded_rect_clip = display_list_player_cpu_add_rounded_rect_clip_impl, paint_nested_display_list = display_list_player_cpu_paint_nested_display_list_impl,
+    paint_scrollbar = display_list_player_cpu_paint_scrollbar_impl, apply_effects = display_list_player_cpu_apply_effects_impl,
+    apply_transform = display_list_player_cpu_apply_transform_impl, would_be_fully_clipped_by_painter = display_list_player_cpu_would_be_fully_clipped_by_painter_impl,
+    add_clip_path = display_list_player_cpu_add_clip_path_impl))
+
+## Class information of Web::Painting::DisplayListPlayerCpu: name, class-id range (pre-order), size, vtable.
+pub let display_list_player_cpu_class: ak.ClassInfo = ak.ClassInfo(name = "DisplayListPlayerCpu", first_id = 1, last_id = 1, size = sizeof(DisplayListPlayerCpu), vtable = (const void*)&display_list_player_cpu_vtable)
+
+## is<Web::Painting::DisplayListPlayerCpu>: the class-id range test.
+pub func is_display_list_player_cpu[P: IsDisplayListPlayer](p: P*) -> bool:
+    let id = p.display_list_player().class_id
+    return id >= display_list_player_cpu_class.first_id and id <= display_list_player_cpu_class.last_id
+
+## as_if<Web::Painting::DisplayListPlayerCpu>.
+pub func as_if_display_list_player_cpu[P: IsDisplayListPlayer](p: P*) -> DisplayListPlayerCpu*?:
+    if is_display_list_player_cpu(p): return (DisplayListPlayerCpu*)p
+    return none
+
+## as<Web::Painting::DisplayListPlayerCpu> (verify_cast).
+pub func as_display_list_player_cpu[P: IsDisplayListPlayer](p: P*) -> DisplayListPlayerCpu*:
+    return as_if_display_list_player_cpu(p) else trap("as<Web::Painting::DisplayListPlayerCpu> failed")

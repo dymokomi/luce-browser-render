@@ -215,6 +215,8 @@ pub struct DisplayList:
     pub var m_visual_context_tree: const AccumulatedVisualContextTree*
     pub var m_commands: ak.Vector[DisplayListCommandListItem]
 
-## Web::Painting::DisplayList::CommandListItem (Libraries/LibWeb/Painting/DisplayList.h:81): opaque in this phase (not in the phase-1 closure).
+## Web::Painting::DisplayList::CommandListItem (Libraries/LibWeb/Painting/DisplayList.h:81). Fields filled
+## by hand (region r51a): the generator left the struct opaque.
 pub struct DisplayListCommandListItem:
-    pub var opaque_: u8
+    pub var context_index: u64  # C++ default: { }
+    pub var command: DisplayListCommand

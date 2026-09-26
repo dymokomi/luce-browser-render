@@ -1,0 +1,176 @@
+#==============================================================================================
+#
+#   tests_cpu_gradient - gradient stops, tiling, geometry and interpolation spaces
+#
+#   DESCRIPTION:
+#       Tests of the gradient shaders' parts: SkGradientBaseShader's stop normalization, the
+#       tile modes, t for each geometry, premultiplied and unpremultiplied interpolation,
+#       hue methods, and the color-space conversions (checked against the values CSS Color 4
+#       gives for sRGB red and against round trips).
+#
+#==============================================================================================
+
+## A gradient with the given stops (position, 0xRRGGBBAA) over a unit linear geometry.
+func test_gradient(stops: const (f32, u32)[], space: CpuColorSpace, premul: bool) -> CpuGradient:
+    var list: ak.Vector[CpuGradientStop]
+    for stop in stops:
+        let (position, rgba) = stop
+        let color: CpuColor4 = [(f32)((rgba >> 24) & 0xff) / 255.0, (f32)((rgba >> 16) & 0xff) / 255.0, (f32)((rgba >> 8) & 0xff) / 255.0, (f32)(rgba & 0xff) / 255.0]
+        ak.vector_append_t(&list, CpuGradientStop(position = position, color = color))
+    return CpuGradient(geometry = .linear(x0 = 0.0, y0 = 0.0, x1 = 1.0, y1 = 0.0), stops = list, tile_mode = CpuTileMode.clamp, space = space,
+        premul = premul, local_matrix = raster.Transform.identity(), linear_to_srgb = false)
+
+## Whether two floats are within `epsilon`.
+func near(a: f32, b: f32, epsilon: f32) -> bool:
+    return math32.abs(a - b) <= epsilon
+
+## The premultiplied pixel of the gradient at t, as 0xAARRGGBB.
+func test_gradient_pixel(prepared: const CpuPreparedGradient*, t: f32) -> u32:
+    let p = cpu_gradient_to_pixel(prepared, cpu_gradient_color_at(prepared, t))
+    return ((u32)p.alpha() << 24) | ((u32)p.red() << 16) | ((u32)p.green() << 8) | (u32)p.blue()
+
+test "cpu gradient: missing end stops are added and positions pinned":
+    test_cpu_gradient_normalization()
+
+noinline func test_cpu_gradient_normalization():
+    let stops: (f32, u32)[3] = [(0.5, 0xff0000ff), (0.3, 0x00ff00ff), (1.2, 0x0000ffff)]
+    let gradient = test_gradient(stops, CpuColorSpace.srgb, false)
+    let prepared = cpu_gradient_prepare(&gradient)
+    let positions = ak.vector_span_const(&prepared.positions)
+    let colors = ak.vector_span_const(&prepared.colors)
+    assert(positions.length == 5 and colors.length == 5)
+    assert(positions[0] == 0.0 and positions[1] == 0.5 and positions[2] == 0.5 and positions[3] == 1.0 and positions[4] == 1.0)
+    assert(colors[0][0] == 1.0 and colors[1][0] == 1.0 and colors[2][1] == 1.0 and colors[3][2] == 1.0 and colors[4][2] == 1.0)
+
+test "cpu gradient: interpolation and hard stops":
+    test_cpu_gradient_interpolation()
+
+noinline func test_cpu_gradient_interpolation():
+    let stops: (f32, u32)[4] = [(0.0, 0xff0000ff), (0.5, 0x0000ffff), (0.5, 0x00ff00ff), (1.0, 0x00ff00ff)]
+    let gradient = test_gradient(stops, CpuColorSpace.srgb, false)
+    let prepared = cpu_gradient_prepare(&gradient)
+    assert(test_gradient_pixel(&prepared, 0.0) == 0xffff0000)
+    assert(test_gradient_pixel(&prepared, 0.25) == 0xff800080)
+    # At a hard stop the later color wins.
+    assert(test_gradient_pixel(&prepared, 0.5) == 0xff00ff00)
+    assert(test_gradient_pixel(&prepared, 0.49999) == 0xff0000ff)
+    assert(test_gradient_pixel(&prepared, 1.0) == 0xff00ff00)
+
+test "cpu gradient: premultiplied and unpremultiplied interpolation":
+    test_cpu_gradient_premul()
+
+noinline func test_cpu_gradient_premul():
+    let stops: (f32, u32)[2] = [(0.0, 0xff0000ff), (1.0, 0x0000ff00)]
+    let premul = test_gradient(stops, CpuColorSpace.srgb, true)
+    let prepared_premul = cpu_gradient_prepare(&premul)
+    # Premultiplied: the transparent blue adds no blue.
+    assert(test_gradient_pixel(&prepared_premul, 0.5) == 0x80800000)
+    let plain = test_gradient(stops, CpuColorSpace.srgb, false)
+    let prepared_plain = cpu_gradient_prepare(&plain)
+    assert(test_gradient_pixel(&prepared_plain, 0.5) == 0x80400040)
+
+test "cpu gradient: tile modes":
+    test_cpu_gradient_tiling()
+
+noinline func test_cpu_gradient_tiling():
+    assert(cpu_tile(-0.25, CpuTileMode.clamp) == 0.0 and cpu_tile(1.5, CpuTileMode.clamp) == 1.0)
+    assert(cpu_tile(1.25, CpuTileMode.repeat) == 0.25 and cpu_tile(-0.25, CpuTileMode.repeat) == 0.75)
+    assert(cpu_tile(1.25, CpuTileMode.mirror) == 0.75 and cpu_tile(-0.25, CpuTileMode.mirror) == 0.25 and cpu_tile(2.25, CpuTileMode.mirror) == 0.25)
+    assert(cpu_tile(0.5, CpuTileMode.decal) == 0.5 and cpu_tile(1.5, CpuTileMode.decal) == none)
+    assert(cpu_tile(math32.nan, CpuTileMode.clamp) == none)
+
+test "cpu gradient: t of each geometry":
+    test_cpu_gradient_geometry()
+
+noinline func test_cpu_gradient_geometry():
+    let linear: CpuGradientGeometry = .linear(x0 = 2.0, y0 = 0.0, x1 = 6.0, y1 = 0.0)
+    assert(cpu_gradient_t(&linear, 4.0, 7.0) == 0.5)
+    let radial: CpuGradientGeometry = .radial(cx = 1.0, cy = 1.0, radius = 10.0)
+    assert(cpu_gradient_t(&radial, 4.0, 5.0) == 0.5)
+    let sweep: CpuGradientGeometry = .sweep(cx = 0.0, cy = 0.0)
+    assert(cpu_gradient_t(&sweep, 1.0, 0.0) == 0.0)
+    let quarter = cpu_gradient_t(&sweep, 0.0, 1.0) else trap("t")
+    assert(near(quarter, 0.25, 0.00001))
+    let three_quarters = cpu_gradient_t(&sweep, 0.0, -1.0) else trap("t")
+    assert(near(three_quarters, 0.75, 0.00001))
+    # A two-point conical gradient from a point to a circle around it is the radial one.
+    let conical: CpuGradientGeometry = .two_point_conical(x0 = 1.0, y0 = 1.0, r0 = 0.0, x1 = 1.0, y1 = 1.0, r1 = 10.0)
+    let t = cpu_gradient_t(&conical, 4.0, 5.0) else trap("t")
+    assert(near(t, 0.5, 0.00001))
+    # A focal point inside the end circle: t is 1 on the circle.
+    let focal: CpuGradientGeometry = .two_point_conical(x0 = 2.0, y0 = 0.0, r0 = 0.0, x1 = 0.0, y1 = 0.0, r1 = 4.0)
+    let edge = cpu_gradient_t(&focal, -4.0, 0.0) else trap("t")
+    assert(near(edge, 1.0, 0.00001))
+    let point: CpuGradientGeometry = .linear(x0 = 1.0, y0 = 1.0, x1 = 1.0, y1 = 1.0)
+    assert(cpu_gradient_is_degenerate(&point))
+    assert(not cpu_gradient_is_degenerate(&linear))
+
+test "cpu gradient: a degenerate gradient":
+    test_cpu_gradient_degenerate()
+
+noinline func test_cpu_gradient_degenerate():
+    let stops: (f32, u32)[2] = [(0.0, 0xff0000ff), (1.0, 0x0000ffff)]
+    let gradient = test_gradient(stops, CpuColorSpace.srgb, false)
+    let prepared = cpu_gradient_prepare(&gradient)
+    let last = cpu_degenerate_color(&prepared, CpuTileMode.clamp) else trap("color")
+    assert(last[2] == 1.0 and last[0] == 0.0)
+    let average = cpu_degenerate_color(&prepared, CpuTileMode.repeat) else trap("color")
+    assert(near(average[0], 0.5, 0.0001) and near(average[2], 0.5, 0.0001))
+    assert(cpu_degenerate_color(&prepared, CpuTileMode.decal) == none)
+
+test "cpu gradient: hue methods":
+    test_cpu_gradient_hue_methods()
+
+## The prepared hues of HSL stops of hues 350 and 10 (fully saturated) under `method`.
+func test_prepared_hues(method: CpuHueMethod) -> (f32, f32):
+    # hsl(350, 100%, 50%) is rgb(255, 0, 43); hsl(10, 100%, 50%) is rgb(255, 43, 0).
+    let stops: (f32, u32)[2] = [(0.0, 0xff002bff), (1.0, 0xff2b00ff)]
+    var gradient = test_gradient(stops, CpuColorSpace.hsl, false)
+    gradient.hue_method = method
+    let prepared = cpu_gradient_prepare(&gradient)
+    let colors = ak.vector_span_const(&prepared.colors)
+    return (colors[0][0], colors[1][0])
+
+noinline func test_cpu_gradient_hue_methods():
+    let (s1, s2) = test_prepared_hues(CpuHueMethod.shorter)
+    assert(near(s1, 349.88, 0.1) and near(s2, 370.12, 0.1))
+    let (l1, l2) = test_prepared_hues(CpuHueMethod.longer)
+    assert(near(l1, 349.88, 0.1) and near(l2, 10.12, 0.1))
+    let (i1, i2) = test_prepared_hues(CpuHueMethod.increasing)
+    assert(near(i1, 349.88, 0.1) and near(i2, 370.12, 0.1))
+    let (d1, d2) = test_prepared_hues(CpuHueMethod.decreasing)
+    assert(near(d1, 349.88, 0.1) and near(d2, 10.12, 0.1))
+
+test "cpu color spaces: sRGB red in Lab, OkLab and the polar spaces":
+    test_cpu_color_spaces_red()
+
+noinline func test_cpu_color_spaces_red():
+    let red: CpuColor4 = [1.0, 0.0, 0.0, 1.0]
+    # CSS Color 4: lab(54.29 80.8 69.89), oklab(0.62796 0.22486 0.12585), oklch(0.62796 0.25768 29.2339).
+    let lab = cpu_color_from_srgb(CpuColorSpace.lab, red)
+    assert(near(lab[0], 54.2905, 0.01) and near(lab[1], 80.8049, 0.01) and near(lab[2], 69.891, 0.01))
+    let oklab = cpu_color_from_srgb(CpuColorSpace.oklab, red)
+    assert(near(oklab[0], 0.62796, 0.0001) and near(oklab[1], 0.22486, 0.0001) and near(oklab[2], 0.12585, 0.0001))
+    let oklch = cpu_color_from_srgb(CpuColorSpace.oklch, red)
+    assert(near(oklch[1], 0.25768, 0.0001) and near(oklch[2], 29.2339, 0.01))
+    let hsl = cpu_color_from_srgb(CpuColorSpace.hsl, red)
+    assert(hsl[0] == 0.0 and hsl[1] == 1.0 and hsl[2] == 0.5)
+    let hwb = cpu_color_from_srgb(CpuColorSpace.hwb, [0.5, 0.25, 0.25, 1.0])
+    assert(hwb[0] == 0.0 and hwb[1] == 0.25 and hwb[2] == 0.5)
+    let linear = cpu_color_from_srgb(CpuColorSpace.srgb_linear, [0.5, 0.0, 1.0, 1.0])
+    assert(near(linear[0], 0.21404, 0.00001) and linear[2] == 1.0)
+
+test "cpu color spaces: every space round-trips":
+    test_cpu_color_spaces_round_trip()
+
+noinline func test_cpu_color_spaces_round_trip():
+    let spaces: CpuColorSpace[12] = [CpuColorSpace.srgb, CpuColorSpace.srgb_linear, CpuColorSpace.lab, CpuColorSpace.oklab, CpuColorSpace.display_p3,
+        CpuColorSpace.a98_rgb, CpuColorSpace.prophoto_rgb, CpuColorSpace.rec2020, CpuColorSpace.hsl, CpuColorSpace.hwb, CpuColorSpace.lch, CpuColorSpace.oklch]
+    let colors: CpuColor4[4] = [[0.2, 0.4, 0.6, 1.0], [1.0, 1.0, 1.0, 0.5], [0.9, 0.1, 0.05, 1.0], [0.0, 0.7, 0.3, 0.25]]
+    for s in 0..<spaces.length:
+        for color in colors:
+            let back = cpu_color_to_srgb(spaces[s], cpu_color_from_srgb(spaces[s], color))
+            for c in 0..<4usize:
+                if not near(back[c], color[c], 0.0005):
+                    print(f"space {s} channel {c}: {color[c]} -> {back[c]}")
+                    trap("round trip")

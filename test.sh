@@ -9,6 +9,10 @@ for module in gfx web_fonts display_list; do
     luce-base check "src/luce_browser_render/$module"
 done
 
+# display_list: the module's tests (the CPU player against Skia's pixels, the ported LibWeb logic).
+echo "== luce-base test src/luce_browser_render/display_list"
+luce-base test src/luce_browser_render/display_list --native
+
 # raster: written by hand (not generated); run its tests once it exists.
 if [ -f src/luce_browser_render/raster/ORDER ]; then
     echo "== luce-base test src/luce_browser_render/raster"

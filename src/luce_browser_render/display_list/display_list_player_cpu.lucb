@@ -1,0 +1,430 @@
+#==============================================================================================
+#
+#   display_list_player_cpu - the CPU display-list player (1): surfaces, images, clips, gradients
+#
+#   DESCRIPTION:
+#       DisplayListPlayerCpu replaces Libraries/LibWeb/Painting/DisplayListPlayerSkia.cpp
+#       (lines 1-870) and DisplayListPlayerSkia.h (DESIGN.md §7.3): the same virtuals, in the
+#       same order and with the same drawing decisions, each Skia call replaced by the
+#       CpuCanvas (cpu_canvas.lucb) or raster call that does what it does. This fragment
+#       holds the player's surfaces, the seams to the modules that own paths, glyphs and
+#       filters, and the virtuals from `flush` through the gradients; the second fragment
+#       holds the rest.
+#
+#       Surfaces: the player draws on a CpuCanvas per PaintingSurface. The canvas starts
+#       from the surface's pixels (PaintingSurface::read_into_bitmap) and is written back
+#       on `flush` (write_from_bitmap), where the Skia player's canvas draws into the
+#       surface directly. Surfaces the player makes itself (pattern tiles) start transparent.
+#
+#       Seams: gfx.Path, the glyph outlines of a GlyphRun's cached text blob and gfx.Filter
+#       are implemented by other regions (r10, r09) on top of this module's inputs; the
+#       three functions under "Seams" name what the player needs from them.
+#
+#       Copyright (c) 2024-2026, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
+#       Copyright (c) 2025, Jelle Raaijmakers <jelle@ladybird.org>
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+# mark: Seams ==================================================================================
+
+## A path as the rasterizer takes it: its contours and its fill rule (an SkPath carries both).
+struct CpuPath:
+    var path: raster.Path
+    var fill_rule: raster.FillRule
+
+## Seam to region r10 (LibGfx/Path, replacing SkiaUtils' `to_skia_path` over PathImplSkia):
+## `path`'s contours as a raster path with the path's fill type (Path::set_fill_type), or
+## none when it has no contour. r10 implements PathImpl on the raster path type (DESIGN.md
+## §7.2) and fills this in; the caller releases the path.
+func to_raster_path(path: const gfx.Path*) -> CpuPath?:
+    trap("unported: seam to_raster_path (r10: gfx.Path as a raster.Path)")
+
+## Seam to regions r09 and r10 (LibGfx/TextLayout's GlyphRun::ensure_text_blob and
+## `cached_skia_text_blob`): the glyph outlines of `glyph_run`'s cached text blob, in blob
+## coordinates, the path SkCanvas::drawTextBlob fills: glyph i's outline at the font size
+## times the blob's scale, placed at (position.x * scale, (position.y + ascent) * scale).
+## None when the run has no blob or no outlines.
+func text_blob_path(glyph_run: const web_fonts.GlyphRun*) -> raster.Path?:
+    trap("unported: seam text_blob_path (r09/r10: a GlyphRun's cached text blob as a raster.Path)")
+
+## Seam to region r10 (LibGfx/Filter, replacing SkiaUtils' `to_skia_image_filter`): runs
+## the image filter `filter` over `pixmap` in place.
+func apply_gfx_filter(filter: const gfx.Filter*, pixmap: raster.Pixmap*):
+    trap("unported: seam apply_gfx_filter (r10: gfx.Filter applied to a raster.Pixmap)")
+
+# mark: Construction and surfaces ==============================================================
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:20 Web::Painting::DisplayListPlayerSkia::DisplayListPlayerSkia.
+pub func display_list_player_cpu_construct(this: DisplayListPlayerCpu*):
+    this.display_list_player_base.vtable = (const DisplayListPlayerVTable*)&display_list_player_cpu_vtable
+    this.display_list_player_base.class_id = display_list_player_cpu_class.first_id
+
+## `make<DisplayListPlayerCpu>()`: a new CPU player.
+pub func display_list_player_cpu_create() -> DisplayListPlayerCpu*:
+    let this = new DisplayListPlayerCpu(display_list_player_base = DisplayListPlayer(vtable = (const DisplayListPlayerVTable*)&display_list_player_cpu_vtable, class_id = display_list_player_cpu_class.first_id)) else trap("out of memory")
+    display_list_player_cpu_construct(this)
+    return this
+
+## The canvas record of `surface`, or none.
+func display_list_player_cpu_find_canvas(this: DisplayListPlayerCpu*, surface: const gfx.PaintingSurface*) -> usize?:
+    for i in 0..<ak.vector_size(&this.m_canvases):
+        if ak.vector_at(&this.m_canvases, i).surface == surface:
+            return i
+    return none
+
+## Draws on `canvas` whenever the player's surface is `surface` (a surface the player made).
+func display_list_player_cpu_attach_canvas(this: DisplayListPlayerCpu*, surface: gfx.PaintingSurface*, canvas: CpuCanvas*):
+    ak.vector_append_t(&this.m_canvases, CpuSurfaceCanvas(surface = surface, canvas = canvas))
+
+## Drops `surface`'s canvas record and answers its canvas (which the caller releases).
+func display_list_player_cpu_detach_canvas(this: DisplayListPlayerCpu*, surface: const gfx.PaintingSurface*) -> CpuCanvas*?:
+    let index = display_list_player_cpu_find_canvas(this, surface) else return none
+    let record = ak.vector_take(&this.m_canvases, index)
+    return record.canvas
+
+## `surface().canvas()`: the canvas of the player's current surface, made from the surface's
+## pixels the first time the player draws on it.
+func display_list_player_cpu_canvas(this: DisplayListPlayerCpu*) -> CpuCanvas*:
+    let surface = display_list_player_surface(this.display_list_player())
+    if let index = display_list_player_cpu_find_canvas(this, surface):
+        return ak.vector_at(&this.m_canvases, index).canvas
+    let size = gfx.painting_surface_size(surface)
+    let canvas = cpu_canvas_create((u32)size.m_width, (u32)size.m_height)
+    let bitmap = gfx.bitmap_create_alpha_type(gfx.BitmapFormat.bgra8888, gfx.AlphaType.premultiplied, size) else trap("MUST: Bitmap::create")
+    gfx.painting_surface_read_into_bitmap(surface, bitmap)
+    cpu_copy_bitmap_into_pixmap(bitmap, cpu_canvas_pixmap(canvas))
+    display_list_player_cpu_attach_canvas(this, surface, canvas)
+    return canvas
+
+## Copies a Gfx::Bitmap's pixels into a premultiplied RGBA pixmap of at least its size,
+## premultiplying unpremultiplied pixels and treating the x formats as opaque.
+func cpu_copy_bitmap_into_pixmap(bitmap: const gfx.Bitmap*, pixmap: raster.Pixmap*):
+    let width = cpu_min_i32(gfx.bitmap_width(bitmap), (i32)pixmap.width())
+    let height = cpu_min_i32(gfx.bitmap_height(bitmap), (i32)pixmap.height())
+    let format_ = gfx.bitmap_format(bitmap)
+    let opaque = format_ == gfx.BitmapFormat.bg_rx8888 or format_ == gfx.BitmapFormat.rg_bx8888
+    let bgr = format_ == gfx.BitmapFormat.bgra8888 or format_ == gfx.BitmapFormat.bg_rx8888
+    let premultiplied = gfx.bitmap_alpha_type(bitmap) == gfx.AlphaType.premultiplied
+    let pixels = pixmap.pixels_mut()
+    let row_width = (usize)pixmap.width()
+    for y in 0..<height:
+        let row = gfx.bitmap_scanline_const(bitmap, y) else continue
+        for x in 0..<width:
+            # A 32-bit pixel: B, G, R, A bytes (BGRA) or R, G, B, A (RGBA) in memory.
+            let value = row[(usize)x]
+            let c0 = (u8)(value & 0xff)
+            let c1 = (u8)((value >> 8) & 0xff)
+            let c2 = (u8)((value >> 16) & 0xff)
+            let a: u8 = 255 if opaque else (u8)((value >> 24) & 0xff)
+            var r = c2 if bgr else c0
+            let g = c1
+            var b = c0 if bgr else c2
+            var gg = g
+            if not premultiplied or opaque:
+                r = raster.premultiply_u8(r, a)
+                gg = raster.premultiply_u8(g, a)
+                b = raster.premultiply_u8(b, a)
+            pixels[(usize)y * row_width + (usize)x] = raster.PremultipliedColorU8.from_rgba(r, gg, b, a) else raster.PremultipliedColorU8.transparent()
+
+## Copies a premultiplied RGBA pixmap into a premultiplied BGRA8888 Gfx::Bitmap.
+func cpu_copy_pixmap_into_bitmap(pixmap: const raster.Pixmap*, bitmap: gfx.Bitmap*):
+    let width = cpu_min_i32(gfx.bitmap_width(bitmap), (i32)pixmap.width())
+    let height = cpu_min_i32(gfx.bitmap_height(bitmap), (i32)pixmap.height())
+    let pixels = pixmap.pixels()
+    let row_width = (usize)pixmap.width()
+    for y in 0..<height:
+        let row = gfx.bitmap_scanline(bitmap, y) else continue
+        for x in 0..<width:
+            let p = pixels[(usize)y * row_width + (usize)x]
+            row[(usize)x] = ((u32)p.alpha() << 24) | ((u32)p.red() << 16) | ((u32)p.green() << 8) | (u32)p.blue()
+
+## An immutable bitmap's pixels as a premultiplied RGBA pixmap (Skia's SkImage of it), or
+## none when it has no CPU bitmap.
+func cpu_pixmap_of_immutable_bitmap(image: const gfx.ImmutableBitmap*) -> raster.Pixmap?:
+    let bitmap = gfx.immutable_bitmap_bitmap(image) else return none
+    let width = gfx.bitmap_width(bitmap)
+    let height = gfx.bitmap_height(bitmap)
+    if width <= 0 or height <= 0:
+        return none
+    var pixmap = raster.Pixmap.new_((u32)width, (u32)height) else return none
+    cpu_copy_bitmap_into_pixmap(bitmap, &pixmap)
+    return pixmap
+
+## `to_skia_sampling_options`: the raster filter quality of a scaling mode (the mipmapped
+## mode samples bilinearly; the raster module has no mipmaps).
+func cpu_filter_quality(scaling_mode: gfx.ScalingMode) -> raster.FilterQuality:
+    match scaling_mode:
+        .bilinear, .bilinear_mipmap: return raster.FilterQuality.bilinear
+        _: return raster.FilterQuality.nearest
+
+## SkCanvas::drawImageRect(image, src = the whole image, dst, sampling, paint with
+## anti-aliasing): the image scaled onto `dst`.
+func cpu_canvas_draw_image_rect(canvas: CpuCanvas*, image: const raster.Pixmap*, dst: raster.Rect, quality: raster.FilterQuality):
+    let sx = dst.width() / (f32)image.width()
+    let sy = dst.height() / (f32)image.height()
+    var paint = raster.Paint()
+    paint.anti_alias = true
+    paint.shader = raster.Pattern.new_(image.as_ref(), raster.SpreadMode.pad_, quality, 1.0, raster.Transform.from_row(sx, 0.0, 0.0, sy, dst.left(), dst.top()))
+    cpu_canvas_fill_rect(canvas, dst, &paint)
+
+# mark: flush, glyph runs, rects, bitmaps ======================================================
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:24 Web::Painting::DisplayListPlayerSkia::flush (override):
+## writes the canvas back into the surface and flushes it.
+func display_list_player_cpu_flush_impl(base: DisplayListPlayer*):
+    let this = (DisplayListPlayerCpu*)base
+    let surface = display_list_player_surface(base)
+    if let canvas = display_list_player_cpu_detach_canvas(this, surface):
+        let size = gfx.painting_surface_size(surface)
+        let bitmap = gfx.bitmap_create_alpha_type(gfx.BitmapFormat.bgra8888, gfx.AlphaType.premultiplied, size) else trap("MUST: Bitmap::create")
+        cpu_copy_pixmap_into_bitmap(cpu_canvas_pixmap(canvas), bitmap)
+        gfx.painting_surface_write_from_bitmap(surface, bitmap)
+        cpu_canvas_release(canvas)
+    gfx.painting_surface_flush(surface)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:25 Web::Painting::DisplayListPlayerSkia::draw_glyph_run (override).
+func display_list_player_cpu_draw_glyph_run_impl(base: DisplayListPlayer*, command: DrawGlyphRun):
+    var blob = text_blob_path(command.glyph_run) else return
+    defer blob.release()
+
+    let paint = cpu_color_paint(command.color, true)
+
+    let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
+    let translation = command.translation
+
+    match command.orientation:
+        .horizontal:
+            cpu_canvas_save(canvas)
+            cpu_canvas_translate(canvas, translation.m_x, translation.m_y)
+            cpu_canvas_fill_path(canvas, &blob, &paint, raster.FillRule.winding)
+            cpu_canvas_restore(canvas)
+        .vertical:
+            cpu_canvas_save(canvas)
+            cpu_canvas_translate(canvas, (f32)command.rect.m_size.m_width, 0.0)
+            cpu_canvas_rotate(canvas, 90.0, (f32)command.rect.m_location.m_x, (f32)command.rect.m_location.m_y)
+            cpu_canvas_translate(canvas, translation.m_x, translation.m_y)
+            cpu_canvas_fill_path(canvas, &blob, &paint, raster.FillRule.winding)
+            cpu_canvas_restore(canvas)
+        _:
+            discard(0)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:26 Web::Painting::DisplayListPlayerSkia::fill_rect (override).
+func display_list_player_cpu_fill_rect_impl(base: DisplayListPlayer*, command: FillRect):
+    let rect = cpu_rect(command.rect) else return
+    let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
+    let paint = cpu_color_paint(command.color, true)
+    cpu_canvas_fill_rect(canvas, rect, &paint)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:29 Web::Painting::DisplayListPlayerSkia::draw_external_content (override).
+func display_list_player_cpu_draw_external_content_impl(base: DisplayListPlayer*, command: DrawExternalContent):
+    let bitmap = external_content_source_current_bitmap(command.source) else return
+    var image = cpu_pixmap_of_immutable_bitmap(bitmap) else return
+    defer image.release()
+    let dst_rect = cpu_rect(command.dst_rect) else return
+    let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
+    cpu_canvas_draw_image_rect(canvas, &image, dst_rect, cpu_filter_quality(command.scaling_mode))
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:27 Web::Painting::DisplayListPlayerSkia::draw_scaled_immutable_bitmap (override).
+func display_list_player_cpu_draw_scaled_immutable_bitmap_impl(base: DisplayListPlayer*, command: DrawScaledImmutableBitmap):
+    var image = cpu_pixmap_of_immutable_bitmap(command.bitmap) else return
+    defer image.release()
+
+    let dst_rect = cpu_rect(command.dst_rect) else return
+    let clip_rect = cpu_rect(command.clip_rect) else return
+    let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
+    cpu_canvas_save(canvas)
+    cpu_canvas_clip_rect(canvas, clip_rect, true)
+    cpu_canvas_draw_image_rect(canvas, &image, dst_rect, cpu_filter_quality(command.scaling_mode))
+    cpu_canvas_restore(canvas)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:28 Web::Painting::DisplayListPlayerSkia::draw_repeated_immutable_bitmap (override).
+func display_list_player_cpu_draw_repeated_immutable_bitmap_impl(base: DisplayListPlayer*, command: DrawRepeatedImmutableBitmap):
+    var image = cpu_pixmap_of_immutable_bitmap(command.bitmap) else return
+    defer image.release()
+
+    let dst_rect = int_rect_to_float_rect(command.dst_rect)
+    let src_width = (f32)image.width()
+    let src_height = (f32)image.height()
+    # matrix.setScale(dst_w / src_w, dst_h / src_h); matrix.postTranslate(dst_x, dst_y)
+    let matrix = raster.Transform.from_row(dst_rect.m_size.m_width / src_width, 0.0, 0.0, dst_rect.m_size.m_height / src_height, dst_rect.m_location.m_x, dst_rect.m_location.m_y)
+
+    # canvas.drawPaint(paint) with a kRepeat or kDecal image shader per axis. The raster
+    # pattern repeats on both axes; a decal axis is kept to the image's own span by filling
+    # only that span on it.
+    let huge: f32 = 1073741824.0
+    let left = dst_rect.m_location.m_x if not command.repeat.x else -huge
+    let right = dst_rect.m_location.m_x + dst_rect.m_size.m_width if not command.repeat.x else huge
+    let top = dst_rect.m_location.m_y if not command.repeat.y else -huge
+    let bottom = dst_rect.m_location.m_y + dst_rect.m_size.m_height if not command.repeat.y else huge
+    let fill_rect = raster.Rect.from_ltrb(left, top, right, bottom) else return
+
+    var paint = raster.Paint()
+    paint.anti_alias = true
+    paint.shader = raster.Pattern.new_(image.as_ref(), raster.SpreadMode.repeat, cpu_filter_quality(command.scaling_mode), 1.0, matrix)
+    let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
+    cpu_canvas_fill_rect(canvas, fill_rect, &paint)
+
+# mark: Clips and state ========================================================================
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:30 Web::Painting::DisplayListPlayerSkia::add_clip_rect (override).
+func display_list_player_cpu_add_clip_rect_impl(base: DisplayListPlayer*, command: AddClipRect):
+    let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
+    let rect = cpu_rect(command.rect) else return
+    cpu_canvas_clip_rect(canvas, rect, true)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:31 Web::Painting::DisplayListPlayerSkia::save (override).
+func display_list_player_cpu_save_impl(base: DisplayListPlayer*, arg0: Save):
+    cpu_canvas_save(display_list_player_cpu_canvas((DisplayListPlayerCpu*)base))
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:32 Web::Painting::DisplayListPlayerSkia::save_layer (override).
+func display_list_player_cpu_save_layer_impl(base: DisplayListPlayer*, arg0: SaveLayer):
+    cpu_canvas_save_layer(display_list_player_cpu_canvas((DisplayListPlayerCpu*)base), CpuLayerEffects())
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:33 Web::Painting::DisplayListPlayerSkia::restore (override).
+func display_list_player_cpu_restore_impl(base: DisplayListPlayer*, arg0: Restore):
+    cpu_canvas_restore(display_list_player_cpu_canvas((DisplayListPlayerCpu*)base))
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:34 Web::Painting::DisplayListPlayerSkia::translate (override).
+func display_list_player_cpu_translate_impl(base: DisplayListPlayer*, command: Translate):
+    cpu_canvas_translate(display_list_player_cpu_canvas((DisplayListPlayerCpu*)base), (f32)command.delta.m_x, (f32)command.delta.m_y)
+
+# mark: Gradients ==============================================================================
+
+## `to_skia_interpolation`: the interpolation space and hue method of a CSS color
+## interpolation method; always premultiplied.
+func cpu_interpolation(gradient: CpuGradient*, interpolation_method: ColorInterpolationMethod):
+    match interpolation_method:
+        .rectangular_color_space(color_space):
+            match color_space:
+                .srgb: gradient.space = CpuColorSpace.srgb
+                .srgb_linear: gradient.space = CpuColorSpace.srgb_linear
+                .lab: gradient.space = CpuColorSpace.lab
+                .oklab: gradient.space = CpuColorSpace.oklab
+                .display_p3: gradient.space = CpuColorSpace.display_p3
+                .a98_rgb: gradient.space = CpuColorSpace.a98_rgb
+                .prophoto_rgb: gradient.space = CpuColorSpace.prophoto_rgb
+                .rec2020: gradient.space = CpuColorSpace.rec2020
+                .display_p3_linear, .xyz_d50, .xyz_d65:
+                    ak.dbgln("FIXME: Unsupported gradient color space")
+                    gradient.space = CpuColorSpace.oklab
+                .xyz:
+                    # NB: Xyz should have been canonicalized to XyzD65 at parse time
+                    trap("VERIFY_NOT_REACHED")
+                _:
+                    trap("VERIFY_NOT_REACHED")
+        .polar_color_interpolation_method(color_space):
+            match color_space.color_space:
+                .hsl: gradient.space = CpuColorSpace.hsl
+                .hwb: gradient.space = CpuColorSpace.hwb
+                .lch: gradient.space = CpuColorSpace.lch
+                .oklch: gradient.space = CpuColorSpace.oklch
+                _: trap("VERIFY_NOT_REACHED")
+
+            match color_space.hue_interpolation_method:
+                .shorter: gradient.hue_method = CpuHueMethod.shorter
+                .longer: gradient.hue_method = CpuHueMethod.longer
+                .increasing: gradient.hue_method = CpuHueMethod.increasing
+                .decreasing: gradient.hue_method = CpuHueMethod.decreasing
+                _: trap("VERIFY_NOT_REACHED")
+
+    gradient.premul = true
+
+## The color and position lists of a CSS gradient: the stops, skipping a stop equal to the
+## one before it, with each position mapped by `(position - first_position) / scale`.
+func cpu_gradient_stops(color_stop_list: const ak.Vector[gfx.ColorStop]*, first_position: f32, scale: f32) -> ak.Vector[CpuGradientStop]:
+    var stops: ak.Vector[CpuGradientStop]
+    let list = ak.vector_span_const(color_stop_list)
+    for stop_index in 0..<list.length:
+        let stop = list[stop_index]
+        if stop_index > 0 and stop == list[stop_index - 1]:
+            continue
+        ak.vector_append_t(&stops, CpuGradientStop(position = (stop.position - first_position) / scale, color = cpu_color4(stop.color)))
+    return stops
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:35 Web::Painting::DisplayListPlayerSkia::paint_linear_gradient (override).
+func display_list_player_cpu_paint_linear_gradient_impl(base: DisplayListPlayer*, command: PaintLinearGradient):
+    let linear_gradient_data = command.linear_gradient_data
+    let color_stop_list = &linear_gradient_data.color_stops.list
+    let repeat_length = linear_gradient_data.color_stops.repeat_length
+    assert(not ak.vector_is_empty(color_stop_list))
+
+    let first_position: f32 = ak.vector_first_const(color_stop_list).position if repeat_length != none else 0.0
+    let stops = cpu_gradient_stops(color_stop_list, first_position, repeat_length else 1.0)
+
+    let rect = int_rect_to_float_rect(command.gradient_rect)
+    let length = gfx.calculate_gradient_length(rect.m_size, linear_gradient_data.gradient_angle)
+
+    # Starting and ending points before rotation (0deg / "to top")
+    let rect_center = gfx.FloatPoint(m_x = rect.m_location.m_x + rect.m_size.m_width / 2.0, m_y = rect.m_location.m_y + rect.m_size.m_height / 2.0)
+    let start = gfx.FloatPoint(m_x = rect_center.m_x, m_y = rect_center.m_y + (0.5 - first_position) * length)
+    let end = gfx.FloatPoint(m_x = start.m_x, m_y = start.m_y + (repeat_length else 1.0) * -length)
+
+    # matrix.setRotate(gradient_angle, rect_center)
+    let matrix = raster.Transform.from_rotate_at(linear_gradient_data.gradient_angle, rect_center.m_x, rect_center.m_y)
+
+    var gradient = CpuGradient(geometry = .linear(x0 = start.m_x, y0 = start.m_y, x1 = end.m_x, y1 = end.m_y), stops = stops,
+        tile_mode = CpuTileMode.repeat, premul = true, local_matrix = matrix, linear_to_srgb = false)
+    cpu_interpolation(&gradient, linear_gradient_data.interpolation_method)
+
+    let draw_rect = cpu_float_rect(rect) else return
+    var path = cpu_rect_path(draw_rect)
+    defer path.release()
+    # paint.setDither(true): the CPU player does not dither.
+    let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
+    cpu_canvas_fill_path_with_gradient(canvas, &path, raster.FillRule.winding, false, &gradient, 1.0)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:47 Web::Painting::DisplayListPlayerSkia::paint_radial_gradient (override).
+func display_list_player_cpu_paint_radial_gradient_impl(base: DisplayListPlayer*, command: PaintRadialGradient):
+    let radial_gradient_data = command.radial_gradient_data
+    let color_stop_list = &radial_gradient_data.color_stops.list
+    assert(not ak.vector_is_empty(color_stop_list))
+
+    let stops = cpu_gradient_stops(color_stop_list, 0.0, 1.0)
+
+    let rect = command.rect
+    let center = gfx.FloatPoint(m_x = (f32)(command.center.m_x + rect.m_location.m_x), m_y = (f32)(command.center.m_y + rect.m_location.m_y))
+
+    let size = int_size_to_float_size(command.size)
+    # Skia does not support specifying of horizontal and vertical radius's separately,
+    # so instead we apply scale matrix
+    let aspect_ratio = size.m_width / size.m_height
+    let sx: f32 = 1.0 if math32.is_infinite(aspect_ratio) else aspect_ratio
+    # matrix.setScale(sx, 1.0f, center.x(), center.y())
+    let matrix = raster.Transform.from_row(sx, 0.0, 0.0, 1.0, center.m_x - sx * center.m_x, 0.0)
+
+    let tile_mode = CpuTileMode.repeat if radial_gradient_data.color_stops.repeating else CpuTileMode.clamp
+
+    var gradient = CpuGradient(geometry = .radial(cx = center.m_x, cy = center.m_y, radius = size.m_height), stops = stops,
+        tile_mode = tile_mode, premul = true, local_matrix = matrix, linear_to_srgb = false)
+    cpu_interpolation(&gradient, radial_gradient_data.interpolation_method)
+
+    let draw_rect = cpu_rect(rect) else return
+    var path = cpu_rect_path(draw_rect)
+    defer path.release()
+    let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
+    cpu_canvas_fill_path_with_gradient(canvas, &path, raster.FillRule.winding, true, &gradient, 1.0)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:48 Web::Painting::DisplayListPlayerSkia::paint_conic_gradient (override).
+func display_list_player_cpu_paint_conic_gradient_impl(base: DisplayListPlayer*, command: PaintConicGradient):
+    let conic_gradient_data = command.conic_gradient_data
+    let color_stop_list = &conic_gradient_data.color_stops.list
+    assert(not ak.vector_is_empty(color_stop_list))
+
+    let stops = cpu_gradient_stops(color_stop_list, 0.0, 1.0)
+
+    let rect = command.rect
+    let center = gfx.FloatPoint(m_x = (f32)(command.position.m_x + rect.m_location.m_x), m_y = (f32)(command.position.m_y + rect.m_location.m_y))
+
+    # matrix.setRotate(-90 + start_angle, center)
+    let matrix = raster.Transform.from_rotate_at(-90.0 + conic_gradient_data.start_angle, center.m_x, center.m_y)
+    var gradient = CpuGradient(geometry = .sweep(cx = center.m_x, cy = center.m_y), stops = stops,
+        tile_mode = CpuTileMode.repeat, premul = true, local_matrix = matrix, linear_to_srgb = false)
+    cpu_interpolation(&gradient, conic_gradient_data.interpolation_method)
+
+    let draw_rect = cpu_rect(rect) else return
+    var path = cpu_rect_path(draw_rect)
+    defer path.release()
+    let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
+    cpu_canvas_fill_path_with_gradient(canvas, &path, raster.FillRule.winding, true, &gradient, 1.0)

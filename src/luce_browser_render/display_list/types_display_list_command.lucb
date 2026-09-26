@@ -21,8 +21,8 @@ pub struct DrawGlyphRun:
     pub var orientation: gfx.Orientation  # C++ default: { Gfx :: Orientation :: Horizontal }
 
 ## Web::Painting::DrawGlyphRun::command_name (Libraries/LibWeb/Painting/DisplayListCommand.h:39).
-# C++ initializer: "DrawGlyphRun"sv
-pub var draw_glyph_run_command_name: ak.StringView
+# C++ `static constexpr StringView command_name = "DrawGlyphRun"sv`: a str constant (region r51a).
+pub let draw_glyph_run_command_name: str = "DrawGlyphRun"
 
 # mark: FillRect ================================================================================
 
@@ -32,8 +32,8 @@ pub struct FillRect:
     pub var color: gfx.Color
 
 ## Web::Painting::FillRect::command_name (Libraries/LibWeb/Painting/DisplayListCommand.h:52).
-# C++ initializer: "FillRect"sv
-pub var fill_rect_command_name: ak.StringView
+# C++ `static constexpr StringView command_name = "FillRect"sv`: a str constant (region r51a).
+pub let fill_rect_command_name: str = "FillRect"
 
 # mark: DrawScaledImmutableBitmap ===============================================================
 
@@ -45,8 +45,8 @@ pub struct DrawScaledImmutableBitmap:
     pub var scaling_mode: gfx.ScalingMode
 
 ## Web::Painting::DrawScaledImmutableBitmap::command_name (Libraries/LibWeb/Painting/DisplayListCommand.h:62).
-# C++ initializer: "DrawScaledImmutableBitmap"sv
-pub var draw_scaled_immutable_bitmap_command_name: ak.StringView
+# C++ `static constexpr StringView command_name = "DrawScaledImmutableBitmap"sv`: a str constant (region r51a).
+pub let draw_scaled_immutable_bitmap_command_name: str = "DrawScaledImmutableBitmap"
 
 # mark: DrawRepeatedImmutableBitmap =============================================================
 
@@ -59,8 +59,8 @@ pub struct DrawRepeatedImmutableBitmap:
     pub var repeat: DrawRepeatedImmutableBitmapRepeat
 
 ## Web::Painting::DrawRepeatedImmutableBitmap::command_name (Libraries/LibWeb/Painting/DisplayListCommand.h:74).
-# C++ initializer: "DrawRepeatedImmutableBitmap"sv
-pub var draw_repeated_immutable_bitmap_command_name: ak.StringView
+# C++ `static constexpr StringView command_name = "DrawRepeatedImmutableBitmap"sv`: a str constant (region r51a).
+pub let draw_repeated_immutable_bitmap_command_name: str = "DrawRepeatedImmutableBitmap"
 
 # mark: DrawRepeatedImmutableBitmapRepeat =======================================================
 
@@ -78,8 +78,8 @@ pub struct DrawExternalContent:
     pub var scaling_mode: gfx.ScalingMode
 
 ## Web::Painting::DrawExternalContent::command_name (Libraries/LibWeb/Painting/DisplayListCommand.h:92).
-# C++ initializer: "DrawExternalContent"sv
-pub var draw_external_content_command_name: ak.StringView
+# C++ `static constexpr StringView command_name = "DrawExternalContent"sv`: a str constant (region r51a).
+pub let draw_external_content_command_name: str = "DrawExternalContent"
 
 # mark: Save ====================================================================================
 
@@ -88,8 +88,8 @@ pub struct Save:
     pub var empty_: u8
 
 ## Web::Painting::Save::command_name (Libraries/LibWeb/Painting/DisplayListCommand.h:103).
-# C++ initializer: "Save"sv
-pub var save_command_name: ak.StringView
+# C++ `static constexpr StringView command_name = "Save"sv`: a str constant (region r51a).
+pub let save_command_name: str = "Save"
 
 ## Web::Painting::Save::nesting_level_change (Libraries/LibWeb/Painting/DisplayListCommand.h:104).
 pub let save_nesting_level_change: i32 = 1
@@ -101,8 +101,8 @@ pub struct SaveLayer:
     pub var empty_: u8
 
 ## Web::Painting::SaveLayer::command_name (Libraries/LibWeb/Painting/DisplayListCommand.h:110).
-# C++ initializer: "SaveLayer"sv
-pub var save_layer_command_name: ak.StringView
+# C++ `static constexpr StringView command_name = "SaveLayer"sv`: a str constant (region r51a).
+pub let save_layer_command_name: str = "SaveLayer"
 
 ## Web::Painting::SaveLayer::nesting_level_change (Libraries/LibWeb/Painting/DisplayListCommand.h:111).
 pub let save_layer_nesting_level_change: i32 = 1
@@ -114,8 +114,8 @@ pub struct Restore:
     pub var empty_: u8
 
 ## Web::Painting::Restore::command_name (Libraries/LibWeb/Painting/DisplayListCommand.h:117).
-# C++ initializer: "Restore"sv
-pub var restore_command_name: ak.StringView
+# C++ `static constexpr StringView command_name = "Restore"sv`: a str constant (region r51a).
+pub let restore_command_name: str = "Restore"
 
 ## Web::Painting::Restore::nesting_level_change (Libraries/LibWeb/Painting/DisplayListCommand.h:118).
 pub let restore_nesting_level_change: i32 = -1
@@ -127,8 +127,8 @@ pub struct Translate:
     pub var delta: gfx.IntPoint
 
 ## Web::Painting::Translate::command_name (Libraries/LibWeb/Painting/DisplayListCommand.h:124).
-# C++ initializer: "Translate"sv
-pub var translate_command_name: ak.StringView
+# C++ `static constexpr StringView command_name = "Translate"sv`: a str constant (region r51a).
+pub let translate_command_name: str = "Translate"
 
 # mark: AddClipRect =============================================================================
 
@@ -137,8 +137,8 @@ pub struct AddClipRect:
     pub var rect: gfx.DevicePixelRect
 
 ## Web::Painting::AddClipRect::command_name (Libraries/LibWeb/Painting/DisplayListCommand.h:132).
-# C++ initializer: "AddClipRect"sv
-pub var add_clip_rect_command_name: ak.StringView
+# C++ `static constexpr StringView command_name = "AddClipRect"sv`: a str constant (region r51a).
+pub let add_clip_rect_command_name: str = "AddClipRect"
 
 # mark: PaintLinearGradient =====================================================================
 
@@ -148,8 +148,8 @@ pub struct PaintLinearGradient:
     pub var linear_gradient_data: LinearGradientData
 
 ## Web::Painting::PaintLinearGradient::command_name (Libraries/LibWeb/Painting/DisplayListCommand.h:142).
-# C++ initializer: "PaintLinearGradient"sv
-pub var paint_linear_gradient_command_name: ak.StringView
+# C++ `static constexpr StringView command_name = "PaintLinearGradient"sv`: a str constant (region r51a).
+pub let paint_linear_gradient_command_name: str = "PaintLinearGradient"
 
 # mark: PaintOuterBoxShadow =====================================================================
 
@@ -163,8 +163,8 @@ pub struct PaintOuterBoxShadow:
     pub var shadow_corner_radii: CornerRadii
 
 ## Web::Painting::PaintOuterBoxShadow::command_name (Libraries/LibWeb/Painting/DisplayListCommand.h:153).
-# C++ initializer: "PaintOuterBoxShadow"sv
-pub var paint_outer_box_shadow_command_name: ak.StringView
+# C++ `static constexpr StringView command_name = "PaintOuterBoxShadow"sv`: a str constant (region r51a).
+pub let paint_outer_box_shadow_command_name: str = "PaintOuterBoxShadow"
 
 # mark: PaintInnerBoxShadow =====================================================================
 
@@ -179,8 +179,8 @@ pub struct PaintInnerBoxShadow:
     pub var inner_shadow_corner_radii: CornerRadii
 
 ## Web::Painting::PaintInnerBoxShadow::command_name (Libraries/LibWeb/Painting/DisplayListCommand.h:167).
-# C++ initializer: "PaintInnerBoxShadow"sv
-pub var paint_inner_box_shadow_command_name: ak.StringView
+# C++ `static constexpr StringView command_name = "PaintInnerBoxShadow"sv`: a str constant (region r51a).
+pub let paint_inner_box_shadow_command_name: str = "PaintInnerBoxShadow"
 
 # mark: PaintTextShadow =========================================================================
 
@@ -194,8 +194,8 @@ pub struct PaintTextShadow:
     pub var color: gfx.Color
 
 ## Web::Painting::PaintTextShadow::command_name (Libraries/LibWeb/Painting/DisplayListCommand.h:182).
-# C++ initializer: "PaintTextShadow"sv
-pub var paint_text_shadow_command_name: ak.StringView
+# C++ `static constexpr StringView command_name = "PaintTextShadow"sv`: a str constant (region r51a).
+pub let paint_text_shadow_command_name: str = "PaintTextShadow"
 
 # mark: FillRectWithRoundedCorners ==============================================================
 
@@ -206,8 +206,8 @@ pub struct FillRectWithRoundedCorners:
     pub var corner_radii: CornerRadii
 
 ## Web::Painting::FillRectWithRoundedCorners::command_name (Libraries/LibWeb/Painting/DisplayListCommand.h:196).
-# C++ initializer: "FillRectWithRoundedCorners"sv
-pub var fill_rect_with_rounded_corners_command_name: ak.StringView
+# C++ `static constexpr StringView command_name = "FillRectWithRoundedCorners"sv`: a str constant (region r51a).
+pub let fill_rect_with_rounded_corners_command_name: str = "FillRectWithRoundedCorners"
 
 # mark: FillPath ================================================================================
 
@@ -225,8 +225,8 @@ pub func fill_path_init_fields(this: FillPath*):
     this.opacity = 1.0
 
 ## Web::Painting::FillPath::command_name (Libraries/LibWeb/Painting/DisplayListCommand.h:207).
-# C++ initializer: "FillPath"sv
-pub var fill_path_command_name: ak.StringView
+# C++ `static constexpr StringView command_name = "FillPath"sv`: a str constant (region r51a).
+pub let fill_path_command_name: str = "FillPath"
 
 # mark: StrokePath ==============================================================================
 
@@ -245,8 +245,8 @@ pub struct StrokePath:
     pub var should_anti_alias: ShouldAntiAlias  # C++ default: { ShouldAntiAlias :: Yes }
 
 ## Web::Painting::StrokePath::command_name (Libraries/LibWeb/Painting/DisplayListCommand.h:222).
-# C++ initializer: "StrokePath"sv
-pub var stroke_path_command_name: ak.StringView
+# C++ `static constexpr StringView command_name = "StrokePath"sv`: a str constant (region r51a).
+pub let stroke_path_command_name: str = "StrokePath"
 
 # mark: DrawEllipse =============================================================================
 
@@ -257,8 +257,8 @@ pub struct DrawEllipse:
     pub var thickness: i32
 
 ## Web::Painting::DrawEllipse::command_name (Libraries/LibWeb/Painting/DisplayListCommand.h:242).
-# C++ initializer: "DrawEllipse"sv
-pub var draw_ellipse_command_name: ak.StringView
+# C++ `static constexpr StringView command_name = "DrawEllipse"sv`: a str constant (region r51a).
+pub let draw_ellipse_command_name: str = "DrawEllipse"
 
 # mark: FillEllipse =============================================================================
 
@@ -268,8 +268,8 @@ pub struct FillEllipse:
     pub var color: gfx.Color
 
 ## Web::Painting::FillEllipse::command_name (Libraries/LibWeb/Painting/DisplayListCommand.h:254).
-# C++ initializer: "FillEllipse"sv
-pub var fill_ellipse_command_name: ak.StringView
+# C++ `static constexpr StringView command_name = "FillEllipse"sv`: a str constant (region r51a).
+pub let fill_ellipse_command_name: str = "FillEllipse"
 
 # mark: DrawLine ================================================================================
 
@@ -283,8 +283,8 @@ pub struct DrawLine:
     pub var alternate_color: gfx.Color
 
 ## Web::Painting::DrawLine::command_name (Libraries/LibWeb/Painting/DisplayListCommand.h:265).
-# C++ initializer: "DrawLine"sv
-pub var draw_line_command_name: ak.StringView
+# C++ `static constexpr StringView command_name = "DrawLine"sv`: a str constant (region r51a).
+pub let draw_line_command_name: str = "DrawLine"
 
 # mark: ApplyBackdropFilter =====================================================================
 
@@ -295,8 +295,8 @@ pub struct ApplyBackdropFilter:
     pub var backdrop_filter: gfx.Filter?
 
 ## Web::Painting::ApplyBackdropFilter::command_name (Libraries/LibWeb/Painting/DisplayListCommand.h:279).
-# C++ initializer: "ApplyBackdropFilter"sv
-pub var apply_backdrop_filter_command_name: ak.StringView
+# C++ `static constexpr StringView command_name = "ApplyBackdropFilter"sv`: a str constant (region r51a).
+pub let apply_backdrop_filter_command_name: str = "ApplyBackdropFilter"
 
 # mark: DrawRect ================================================================================
 
@@ -307,8 +307,8 @@ pub struct DrawRect:
     pub var rough: bool
 
 ## Web::Painting::DrawRect::command_name (Libraries/LibWeb/Painting/DisplayListCommand.h:291).
-# C++ initializer: "DrawRect"sv
-pub var draw_rect_command_name: ak.StringView
+# C++ `static constexpr StringView command_name = "DrawRect"sv`: a str constant (region r51a).
+pub let draw_rect_command_name: str = "DrawRect"
 
 # mark: PaintRadialGradient =====================================================================
 
@@ -320,8 +320,8 @@ pub struct PaintRadialGradient:
     pub var size: gfx.IntSize
 
 ## Web::Painting::PaintRadialGradient::command_name (Libraries/LibWeb/Painting/DisplayListCommand.h:303).
-# C++ initializer: "PaintRadialGradient"sv
-pub var paint_radial_gradient_command_name: ak.StringView
+# C++ `static constexpr StringView command_name = "PaintRadialGradient"sv`: a str constant (region r51a).
+pub let paint_radial_gradient_command_name: str = "PaintRadialGradient"
 
 # mark: PaintConicGradient ======================================================================
 
@@ -332,8 +332,8 @@ pub struct PaintConicGradient:
     pub var position: gfx.IntPoint
 
 ## Web::Painting::PaintConicGradient::command_name (Libraries/LibWeb/Painting/DisplayListCommand.h:316).
-# C++ initializer: "PaintConicGradient"sv
-pub var paint_conic_gradient_command_name: ak.StringView
+# C++ `static constexpr StringView command_name = "PaintConicGradient"sv`: a str constant (region r51a).
+pub let paint_conic_gradient_command_name: str = "PaintConicGradient"
 
 # mark: AddRoundedRectClip ======================================================================
 
@@ -344,8 +344,8 @@ pub struct AddRoundedRectClip:
     pub var corner_clip: CornerClip
 
 ## Web::Painting::AddRoundedRectClip::command_name (Libraries/LibWeb/Painting/DisplayListCommand.h:328).
-# C++ initializer: "AddRoundedRectClip"sv
-pub var add_rounded_rect_clip_command_name: ak.StringView
+# C++ `static constexpr StringView command_name = "AddRoundedRectClip"sv`: a str constant (region r51a).
+pub let add_rounded_rect_clip_command_name: str = "AddRoundedRectClip"
 
 # mark: PaintNestedDisplayList ==================================================================
 
@@ -355,8 +355,8 @@ pub struct PaintNestedDisplayList:
     pub var rect: gfx.DevicePixelRect
 
 ## Web::Painting::PaintNestedDisplayList::command_name (Libraries/LibWeb/Painting/DisplayListCommand.h:341).
-# C++ initializer: "PaintNestedDisplayList"sv
-pub var paint_nested_display_list_command_name: ak.StringView
+# C++ `static constexpr StringView command_name = "PaintNestedDisplayList"sv`: a str constant (region r51a).
+pub let paint_nested_display_list_command_name: str = "PaintNestedDisplayList"
 
 # mark: PaintScrollBar ==========================================================================
 
@@ -371,8 +371,8 @@ pub struct PaintScrollBar:
     pub var vertical: bool
 
 ## Web::Painting::PaintScrollBar::command_name (Libraries/LibWeb/Painting/DisplayListCommand.h:352).
-# C++ initializer: "PaintScrollBar"sv
-pub var paint_scroll_bar_command_name: ak.StringView
+# C++ `static constexpr StringView command_name = "PaintScrollBar"sv`: a str constant (region r51a).
+pub let paint_scroll_bar_command_name: str = "PaintScrollBar"
 
 # mark: ApplyEffects ============================================================================
 
@@ -389,8 +389,8 @@ pub func apply_effects_init_fields(this: ApplyEffects*):
     this.compositing_and_blending_operator = gfx.CompositingAndBlendingOperator.normal
 
 ## Web::Painting::ApplyEffects::command_name (Libraries/LibWeb/Painting/DisplayListCommand.h:366).
-# C++ initializer: "ApplyEffects"sv
-pub var apply_effects_command_name: ak.StringView
+# C++ `static constexpr StringView command_name = "ApplyEffects"sv`: a str constant (region r51a).
+pub let apply_effects_command_name: str = "ApplyEffects"
 
 ## Web::Painting::ApplyEffects::nesting_level_change (Libraries/LibWeb/Painting/DisplayListCommand.h:367).
 pub let apply_effects_nesting_level_change: i32 = 1

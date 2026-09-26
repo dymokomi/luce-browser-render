@@ -1,0 +1,49 @@
+#==============================================================================================
+#
+#   gfx_conversions - the geometry template conversions the display list uses
+#
+#   DESCRIPTION:
+#       The instantiations of LibGfx's conversion templates that the ported files call:
+#       `Point<U>::to_type<V>()`, `Rect<U>::to_type<V>()`, `Size<U>::to_type<V>()` and
+#       `Rect<float>::to_rounded<int>()` (LibGfx/Point.h, Rect.h, Size.h). The gfx skeleton
+#       declares these templates with untyped placeholder signatures (`to_type[U](...) ->
+#       void*?`), so each instantiation is written here, as the C++ template expands it:
+#       `to_type` constructs the other type member by member (a float or CSSPixels to int
+#       conversion truncates toward zero, CSSPixels::to_int()), and `to_rounded<int>` applies
+#       AK::round_to<int> to x, y, width and height.
+#
+#       Copyright (c) 2018-2026, the Ladybird developers.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+## `Gfx::FloatPoint::to_type<int>()`.
+pub func float_point_to_int_point(point: gfx.FloatPoint) -> gfx.IntPoint:
+    return gfx.IntPoint(m_x = (i32)point.m_x, m_y = (i32)point.m_y)
+
+## `Gfx::IntPoint::to_type<float>()`.
+pub func int_point_to_float_point(point: gfx.IntPoint) -> gfx.FloatPoint:
+    return gfx.FloatPoint(m_x = (f32)point.m_x, m_y = (f32)point.m_y)
+
+## `Gfx::IntSize::to_type<float>()`.
+pub func int_size_to_float_size(size: gfx.IntSize) -> gfx.FloatSize:
+    return gfx.FloatSize(m_width = (f32)size.m_width, m_height = (f32)size.m_height)
+
+## `Gfx::IntRect::to_type<float>()`.
+pub func int_rect_to_float_rect(rect: gfx.DevicePixelRect) -> gfx.FloatRect:
+    return gfx.FloatRect(m_location = int_point_to_float_point(rect.m_location), m_size = int_size_to_float_size(rect.m_size))
+
+## `Web::CSSPixelPoint::to_type<int>()`: CSSPixels::to_int() per coordinate.
+pub func css_pixel_point_to_int_point(point: gfx.CssPixelPoint) -> gfx.IntPoint:
+    return gfx.IntPoint(m_x = gfx.css_pixels_to_int_const(&point.m_x), m_y = gfx.css_pixels_to_int_const(&point.m_y))
+
+## `Web::CSSPixelRect::to_type<int>()`: CSSPixels::to_int() per member.
+pub func css_pixel_rect_to_int_rect(rect: gfx.CssPixelRect) -> gfx.DevicePixelRect:
+    return gfx.DevicePixelRect(m_location = css_pixel_point_to_int_point(rect.m_location),
+        m_size = gfx.IntSize(m_width = gfx.css_pixels_to_int_const(&rect.m_size.m_width), m_height = gfx.css_pixels_to_int_const(&rect.m_size.m_height)))
+
+## `Gfx::FloatRect::to_rounded<int>()`: AK::round_to<int> of x, y, width and height.
+pub func float_rect_to_rounded_int_rect(rect: gfx.FloatRect) -> gfx.DevicePixelRect:
+    return gfx.DevicePixelRect(
+        m_location = gfx.IntPoint(m_x = ak.rounding_round_to_f32_i32(rect.m_location.m_x), m_y = ak.rounding_round_to_f32_i32(rect.m_location.m_y)),
+        m_size = gfx.IntSize(m_width = ak.rounding_round_to_f32_i32(rect.m_size.m_width), m_height = ak.rounding_round_to_f32_i32(rect.m_size.m_height)))

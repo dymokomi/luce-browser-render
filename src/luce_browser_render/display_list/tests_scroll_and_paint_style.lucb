@@ -1,0 +1,180 @@
+#==============================================================================================
+#
+#   tests_scroll_and_paint_style - scroll frames, SVG paint styles, external content
+#
+#   DESCRIPTION:
+#       Tests of ScrollFrame/ScrollState/ScrollStateSnapshot, the SVG paint-server styles and
+#       ExternalContentSource, pinned to the behaviour of the C++ in the donor's headers
+#       (ScrollState.h, PaintStyle.h). Frames are added as the engine's
+#       `create_scroll_frame_for`/`create_sticky_frame_for` add them.
+#
+#==============================================================================================
+
+# mark: Scroll state ===========================================================================
+
+## A scroll state with frames: 1 scrolls (root), 2 sticky under 1, 3 sticky under 2, 4
+## scrolls under 3.
+func test_scroll_state() -> ScrollState:
+    var state: ScrollState
+    scroll_state_construct(&state)
+    let parents: u64[4] = [0, 1, 2, 3]
+    let sticky: bool[4] = [false, true, true, false]
+    for i in 0..<4usize:
+        var frame: ScrollFrame
+        frame.m_sticky = sticky[i]
+        frame.m_parent_index = parents[i]
+        ak.vector_append_t(&state.m_scroll_frames, frame)
+    return state
+
+test "scroll state: the sentinel, frames and ancestors":
+    test_scroll_state_frames()
+
+noinline func test_scroll_state_frames():
+    var state = test_scroll_state()
+    assert(ak.vector_size(&state.m_scroll_frames) == 5)
+    assert(scroll_frame_is_sticky(scroll_state_frame_at_const(&state, 2)))
+    assert(scroll_frame_parent_index(scroll_state_frame_at(&state, 4)) == 3)
+    # The nearest scrolling ancestor skips sticky frames.
+    assert(scroll_state_nearest_scrolling_ancestor(&state, 4) == 1)
+    assert(scroll_state_nearest_scrolling_ancestor(&state, 2) == 1)
+    assert(scroll_state_nearest_scrolling_ancestor(&state, 1) == 0)
+
+    var scrolling: ak.Vector[u64]
+    for entry in scroll_state_for_each_scroll_frame(&state):
+        ak.vector_append_t(&scrolling, entry.index)
+        assert(not scroll_frame_is_sticky(entry.frame))
+    assert(ak.vector_size(&scrolling) == 2 and *ak.vector_at(&scrolling, 0) == 1 and *ak.vector_at(&scrolling, 1) == 4)
+    var sticky: ak.Vector[u64]
+    for entry in scroll_state_for_each_sticky_frame(&state):
+        ak.vector_append_t(&sticky, entry.index)
+    assert(ak.vector_size(&sticky) == 2 and *ak.vector_at(&sticky, 0) == 2 and *ak.vector_at(&sticky, 1) == 3)
+
+    scroll_state_clear(&state)
+    assert(ak.vector_size(&state.m_scroll_frames) == 1)
+    for entry in scroll_state_for_each_scroll_frame(&state):
+        discard(entry)
+        trap("a cleared scroll state has no frames")
+
+test "scroll state: offsets and sticky constraints":
+    test_scroll_frame_offsets()
+
+noinline func test_scroll_frame_offsets():
+    var frame: ScrollFrame
+    assert(not scroll_frame_has_sticky_constraints(&frame))
+    let offset = gfx.CssPixelPoint(m_x = gfx.CssPixels(m_value = 64), m_y = gfx.CssPixels(m_value = -32))
+    scroll_frame_set_own_offset(&frame, offset)
+    assert(scroll_frame_own_offset(&frame) == offset)
+    var constraints: StickyConstraints
+    constraints.needs_parent_offset_adjustment = true
+    scroll_frame_set_sticky_constraints(&frame, constraints)
+    assert(scroll_frame_has_sticky_constraints(&frame))
+    assert(scroll_frame_sticky_constraints(&frame).needs_parent_offset_adjustment)
+
+    # A snapshot answers (0, 0) past its frames.
+    var snapshot: ScrollStateSnapshot
+    ak.vector_append_t(&snapshot.m_device_offsets, gfx.FloatPoint(m_x = 1.5, m_y = 2.5))
+    assert(scroll_state_snapshot_device_offset_for_index(&snapshot, 0) == gfx.FloatPoint(m_x = 1.5, m_y = 2.5))
+    assert(scroll_state_snapshot_device_offset_for_index(&snapshot, 7) == gfx.FloatPoint(m_x = 0.0, m_y = 0.0))
+
+test "scroll state: cumulative offsets and snapshots (gated on r08)":
+    test_scroll_state_gated()
+
+noinline func test_scroll_state_gated():
+    if not gfx_geometry_is_ported:
+        return
+    var state = test_scroll_state()
+    scroll_frame_set_own_offset(scroll_state_frame_at(&state, 1), gfx.CssPixelPoint(m_x = gfx.CssPixels(m_value = 64), m_y = gfx.CssPixels(m_value = 128)))
+    scroll_frame_set_own_offset(scroll_state_frame_at(&state, 3), gfx.CssPixelPoint(m_x = gfx.CssPixels(m_value = 32), m_y = gfx.CssPixels(m_value = 0)))
+    let cumulative = scroll_state_cumulative_offset(&state, 4)
+    assert(cumulative.m_x.m_value == 96 and cumulative.m_y.m_value == 128)
+    let snapshot = scroll_state_snapshot(&state, 2.0)
+    assert(scroll_state_snapshot_device_offset_for_index(&snapshot, 1) == gfx.FloatPoint(m_x = 2.0, m_y = 4.0))
+    assert(scroll_state_snapshot_device_offset_for_index(&snapshot, 3) == gfx.FloatPoint(m_x = 1.0, m_y = 0.0))
+
+# mark: Paint styles ===========================================================================
+
+test "paint styles: gradients, their stops and their class":
+    test_paint_style_gradients()
+
+noinline func test_paint_style_gradients():
+    let linear = svg_linear_gradient_paint_style_create(gfx.FloatPoint(m_x = 1.0, m_y = 2.0), gfx.FloatPoint(m_x = 3.0, m_y = 4.0))
+    let gradient = linear.svg_gradient_paint_style()
+    assert(is_svg_gradient_paint_style(linear) and is_svg_linear_gradient_paint_style(linear) and not is_svg_radial_gradient_paint_style(linear))
+    assert(as_if_svg_pattern_paint_style(linear) == none)
+    assert(svg_linear_gradient_paint_style_end_point(linear) == gfx.FloatPoint(m_x = 3.0, m_y = 4.0))
+    svg_linear_gradient_paint_style_set_start_point(linear, gfx.FloatPoint(m_x = 0.0, m_y = 0.0))
+    assert(svg_linear_gradient_paint_style_start_point(linear) == gfx.FloatPoint(m_x = 0.0, m_y = 0.0))
+
+    # Defaults: pad, sRGB, no transform, no stops.
+    assert(svg_gradient_paint_style_spread_method(gradient) == SvgGradientPaintStyleSpreadMethod.pad_)
+    assert(svg_gradient_paint_style_color_space(gradient) == gfx.InterpolationColorSpace.srgb)
+    assert(svg_gradient_paint_style_gradient_transform(gradient) == none)
+    assert(svg_gradient_paint_style_color_stops(gradient).length == 0)
+
+    # add_color_stop sorts by position (AK's quick_sort) unless told not to.
+    svg_gradient_paint_style_add_color_stop_f32(gradient, 0.8, test_color(1, 0, 0, 255))
+    svg_gradient_paint_style_add_color_stop_f32(gradient, 0.2, test_color(2, 0, 0, 255))
+    svg_gradient_paint_style_add_color_stop_f32(gradient, 0.5, test_color(3, 0, 0, 255), 0.6)
+    var stops = svg_gradient_paint_style_color_stops(gradient)
+    assert(stops.length == 3 and stops[0].position == 0.2 and stops[1].position == 0.5 and stops[2].position == 0.8)
+    assert(stops[1].transition_hint == 0.6 and stops[0].transition_hint == none)
+    svg_gradient_paint_style_add_color_stop_color_stop(gradient, ColorStop(color = test_color(4, 0, 0, 255), position = 0.1), false)
+    stops = svg_gradient_paint_style_color_stops(gradient)
+    assert(stops[3].position == 0.1)
+
+    svg_gradient_paint_style_set_spread_method(gradient, SvgGradientPaintStyleSpreadMethod.reflect)
+    svg_gradient_paint_style_set_color_space(gradient, gfx.InterpolationColorSpace.linear_rgb)
+    svg_gradient_paint_style_set_gradient_transform(gradient, gfx.AffineTransform(m_values = [2.0, 0.0, 0.0, 2.0, 1.0, 1.0]))
+    assert(svg_gradient_paint_style_spread_method(gradient) == SvgGradientPaintStyleSpreadMethod.reflect)
+    assert(svg_gradient_paint_style_color_space(gradient) == gfx.InterpolationColorSpace.linear_rgb)
+    let transform = svg_gradient_paint_style_gradient_transform(gradient) else trap("a transform")
+    assert(transform.m_values[0] == 2.0 and transform.m_values[5] == 1.0)
+
+    let radial = svg_radial_gradient_paint_style_create(gfx.FloatPoint(m_x = 1.0, m_y = 1.0), 0.5, gfx.FloatPoint(m_x = 2.0, m_y = 2.0), 4.0)
+    assert(is_svg_radial_gradient_paint_style(radial) and is_svg_gradient_paint_style(radial))
+    assert(svg_radial_gradient_paint_style_start_radius(radial) == 0.5 and svg_radial_gradient_paint_style_end_radius(radial) == 4.0)
+    svg_radial_gradient_paint_style_set_end_radius(radial, 5.0)
+    svg_radial_gradient_paint_style_set_start_center(radial, gfx.FloatPoint(m_x = 0.0, m_y = 0.0))
+    assert(svg_radial_gradient_paint_style_end_radius(radial) == 5.0)
+    assert(svg_radial_gradient_paint_style_start_center(radial) == gfx.FloatPoint(m_x = 0.0, m_y = 0.0))
+    assert(svg_radial_gradient_paint_style_end_center(radial) == gfx.FloatPoint(m_x = 2.0, m_y = 2.0))
+
+test "paint styles: patterns":
+    test_paint_style_pattern()
+
+noinline func test_paint_style_pattern():
+    let tile = display_list_create(accumulated_visual_context_tree_create())
+    let rect = gfx.FloatRect(m_location = gfx.FloatPoint(m_x = 1.0, m_y = 2.0), m_size = gfx.FloatSize(m_width = 3.0, m_height = 4.0))
+    let pattern = svg_pattern_paint_style_create(tile, rect, none)
+    assert(is_svg_pattern_paint_style(pattern) and not is_svg_gradient_paint_style(pattern))
+    assert(svg_pattern_paint_style_tile_display_list(pattern) == tile)
+    assert(svg_pattern_paint_style_tile_rect(pattern) == rect)
+    assert(svg_pattern_paint_style_pattern_transform(pattern) == none)
+    assert(as_if_svg_pattern_paint_style(pattern) != none)
+
+# mark: External content =======================================================================
+
+test "external content source: update, current and clear":
+    test_external_content_source()
+
+noinline func test_external_content_source():
+    let source = external_content_source_create()
+    assert(external_content_source_current_bitmap(source) == none)
+    # Only the pointer matters here: storage the size of an ImmutableBitmap stands in for one.
+    let storage = new u8[sizeof(gfx.ImmutableBitmap)] else trap("out of memory")
+    let bitmap = (gfx.ImmutableBitmap*)storage.data
+    external_content_source_update(source, bitmap)
+    assert(external_content_source_current_bitmap(source) == bitmap)
+    external_content_source_clear(source)
+    assert(external_content_source_current_bitmap(source) == none)
+
+# mark: Initial values =========================================================================
+
+test "initial values: the scrollbar colors":
+    test_initial_scrollbar_color()
+
+noinline func test_initial_scrollbar_color():
+    # Color(DarkGray).with_alpha(192) and Color(WarmGray).with_alpha(192).
+    let colors = initial_values_scrollbar_color()
+    assert(colors.thumb_color == test_color(64, 64, 64, 192))
+    assert(colors.track_color == test_color(212, 208, 200, 192))

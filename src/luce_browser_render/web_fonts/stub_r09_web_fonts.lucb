@@ -638,7 +638,8 @@ pub func glyph_run_get_glyph_intercepts(this: const GlyphRun*, scale: f32, y_top
     trap("unported: Gfx::GlyphRun::get_glyph_intercepts")
 
 ## Ported from Libraries/LibGfx/TextLayout.cpp:198 Gfx::shape_text.
-pub func shape_text_f32(baseline_start: gfx.FloatPoint, letter_spacing: f32, string: ak.Utf16View, font: Font, text_type: GlyphRunTextType) -> GlyphRun*:
+# Signature fixed by region r51a: C++ takes `Font const&`, not a copy of the font.
+pub func shape_text_f32(baseline_start: gfx.FloatPoint, letter_spacing: f32, string: ak.Utf16View, font: const Font*, text_type: GlyphRunTextType) -> GlyphRun*:
     trap("unported: Gfx::shape_text")
 
 ## Ported from Libraries/LibGfx/TextLayout.cpp:115 Gfx::shape_text.

@@ -1,4 +1,16 @@
 # C++ name	package	module	Luce name	file:line	kind
+(r51a: DisplayListRecorder recorder(display_list), the recorder as a value.)	luce-browser-render	display_list	display_list_recorder_new	-	addition
+(r51a: DisplayListRecorderStateSaver saver(recorder), the saver as a value.)	luce-browser-render	display_list	display_list_recorder_state_saver_new	-	addition
+(r51a: Gfx::FloatPoint::to_type<int>().)	luce-browser-render	display_list	float_point_to_int_point	-	addition
+(r51a: Gfx::FloatRect::to_rounded<int>().)	luce-browser-render	display_list	float_rect_to_rounded_int_rect	-	addition
+(r51a: Gfx::IntPoint::to_type<float>().)	luce-browser-render	display_list	int_point_to_float_point	-	addition
+(r51a: Gfx::IntRect::to_type<float>().)	luce-browser-render	display_list	int_rect_to_float_rect	-	addition
+(r51a: Gfx::IntSize::to_type<float>().)	luce-browser-render	display_list	int_size_to_float_size	-	addition
+(r51a: Web::CSSPixelPoint::to_type<int>().)	luce-browser-render	display_list	css_pixel_point_to_int_point	-	addition
+(r51a: Web::CSSPixelRect::to_type<int>().)	luce-browser-render	display_list	css_pixel_rect_to_int_rect	-	addition
+(r51a: make<DisplayListPlayerCpu>(), a new CPU player.)	luce-browser-render	display_list	display_list_player_cpu_create	-	addition
+(r51a: one step of ScrollState::for_each_scroll_frame/for_each_sticky_frame, the callback arguments.)	luce-browser-render	display_list	ScrollFrameEntry	-	addition
+(r51a: the loop of ScrollState::for_each_scroll_frame/for_each_sticky_frame as an iterator.)	luce-browser-render	display_list	ScrollFrameIterator	-	addition
 Core::AnonymousBuffer	luce-browser-render	gfx	CoreAnonymousBuffer	Libraries/LibCore/AnonymousBuffer.h:38	opaque
 Gfx::(anonymous)::format_to_8bit_compatible	luce-browser-render	gfx	format_to_8bit_compatible	Libraries/LibGfx/Color.cpp:45	stub
 Gfx::(anonymous)::nth_digit	luce-browser-render	gfx	nth_digit	Libraries/LibGfx/Color.cpp:26	stub
@@ -1502,7 +1514,7 @@ SkBitmap	luce-browser-render	gfx	SkBitmap	Build/vcpkg_installed/arm64-osx-dynami
 SkCanvas	luce-browser-render	gfx	SkCanvas	Libraries/LibGfx/PaintingSurface.h:29	opaque
 SkFont	luce-browser-render	web_fonts	SkFont	Libraries/LibGfx/Font/Font.h:20	opaque
 SkImage	luce-browser-render	gfx	SkImage	Libraries/LibGfx/ImmutableBitmap.h:20	opaque
-SkPaint	luce-browser-render	display_list	SkPaint	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:14	opaque
+SkPaint	luce-browser-render	display_list	SkPaint	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:14	dropped (the CPU player has no SkPaint)
 SkSurface	luce-browser-render	gfx	SkSurface	Libraries/LibGfx/SkiaBackendContext.h:22	opaque
 SkTextBlob	luce-browser-render	web_fonts	SkTextBlob	Libraries/LibGfx/TextLayout.h:22	opaque
 SkTypeface	luce-browser-render	web_fonts	SkTypeface	Libraries/LibGfx/Font/Typeface.h:21	opaque
@@ -1533,6 +1545,8 @@ WOFF::try_load_from_resource	luce-browser-render	web_fonts	woff_try_load_from_re
 Web::CSS::BorderData	luce-browser-render	display_list	BorderData	Libraries/LibWeb/CSS/ComputedValues.h:390	struct
 Web::CSS::BorderData [default member initializers]	luce-browser-render	display_list	border_data_init_fields	Libraries/LibWeb/CSS/ComputedValues.h:390	init fields
 Web::CSS::ColorInterpolationMethodStyleValue::PolarColorInterpolationMethod	luce-browser-render	display_list	PolarColorInterpolationMethod	Libraries/LibWeb/CSS/StyleValues/ColorInterpolationMethodStyleValue.h:17	struct
+Web::CSS::InitialValues::scrollbar_color	luce-browser-render	display_list	initial_values_scrollbar_color	Libraries/LibWeb/CSS/ComputedValues.h:288	ported (moved into display_list, DESIGN.md §4.1.3)
+Web::CSS::ScrollbarColorData	luce-browser-render	display_list	ScrollbarColorData	Libraries/LibWeb/CSS/ComputedValues.h:102	struct (moved into display_list, DESIGN.md §4.1.3)
 Web::CSSPixelFraction	luce-browser-render	gfx	CssPixelFraction	Libraries/LibWeb/PixelUnits.h:305	struct
 Web::CSSPixelFraction::CSSPixelFraction	luce-browser-render	gfx	css_pixel_fraction_construct	Libraries/LibWeb/PixelUnits.h:314	construct
 Web::CSSPixelFraction::CSSPixelFraction	luce-browser-render	gfx	css_pixel_fraction_construct_css_pixels	Libraries/LibWeb/PixelUnits.h:307	construct
@@ -1596,53 +1610,53 @@ Web::CSSPixels::to_int	luce-browser-render	gfx	css_pixels_to_int_const	Libraries
 Web::DevicePixels_decl	luce-browser-render	gfx	DevicePixelsDecl	Libraries/LibWeb/PixelUnits.h:26	struct
 Web::Painting::AccumulatedVisualContextNode	luce-browser-render	display_list	AccumulatedVisualContextNode	Libraries/LibWeb/Painting/AccumulatedVisualContext.h:78	struct
 Web::Painting::AccumulatedVisualContextTree	luce-browser-render	display_list	AccumulatedVisualContextTree	Libraries/LibWeb/Painting/AccumulatedVisualContext.h:85	struct
-Web::Painting::AccumulatedVisualContextTree::append	luce-browser-render	display_list	accumulated_visual_context_tree_append	Libraries/LibWeb/Painting/AccumulatedVisualContext.cpp:28	stub
-Web::Painting::AccumulatedVisualContextTree::build_ancestor_chain	luce-browser-render	display_list	accumulated_visual_context_tree_build_ancestor_chain	Libraries/LibWeb/Painting/AccumulatedVisualContext.cpp:63	stub
-Web::Painting::AccumulatedVisualContextTree::create	luce-browser-render	display_list	accumulated_visual_context_tree_create	Libraries/LibWeb/Painting/AccumulatedVisualContext.cpp:20	stub
-Web::Painting::AccumulatedVisualContextTree::dump	luce-browser-render	display_list	accumulated_visual_context_tree_dump	Libraries/LibWeb/Painting/AccumulatedVisualContext.cpp:199	stub
-Web::Painting::AccumulatedVisualContextTree::find_common_ancestor	luce-browser-render	display_list	accumulated_visual_context_tree_find_common_ancestor	Libraries/LibWeb/Painting/AccumulatedVisualContext.cpp:46	stub
-Web::Painting::AccumulatedVisualContextTree::has_empty_effective_clip	luce-browser-render	display_list	accumulated_visual_context_tree_has_empty_effective_clip	Libraries/LibWeb/Painting/AccumulatedVisualContext.h:99	stub
-Web::Painting::AccumulatedVisualContextTree::inverse_transform_point	luce-browser-render	display_list	accumulated_visual_context_tree_inverse_transform_point	Libraries/LibWeb/Painting/AccumulatedVisualContext.cpp:136	stub
-Web::Painting::AccumulatedVisualContextTree::node_at	luce-browser-render	display_list	accumulated_visual_context_tree_node_at	Libraries/LibWeb/Painting/AccumulatedVisualContext.h:91	stub
-Web::Painting::AccumulatedVisualContextTree::transform_point_for_hit_test	luce-browser-render	display_list	accumulated_visual_context_tree_transform_point_for_hit_test	Libraries/LibWeb/Painting/AccumulatedVisualContext.cpp:73	stub
-Web::Painting::AccumulatedVisualContextTree::transform_rect_to_viewport	luce-browser-render	display_list	accumulated_visual_context_tree_transform_rect_to_viewport	Libraries/LibWeb/Painting/AccumulatedVisualContext.cpp:169	stub
+Web::Painting::AccumulatedVisualContextTree::append	luce-browser-render	display_list	accumulated_visual_context_tree_append	Libraries/LibWeb/Painting/AccumulatedVisualContext.cpp:28	ported
+Web::Painting::AccumulatedVisualContextTree::build_ancestor_chain	luce-browser-render	display_list	accumulated_visual_context_tree_build_ancestor_chain	Libraries/LibWeb/Painting/AccumulatedVisualContext.cpp:63	ported
+Web::Painting::AccumulatedVisualContextTree::create	luce-browser-render	display_list	accumulated_visual_context_tree_create	Libraries/LibWeb/Painting/AccumulatedVisualContext.cpp:20	ported
+Web::Painting::AccumulatedVisualContextTree::dump	luce-browser-render	display_list	accumulated_visual_context_tree_dump	Libraries/LibWeb/Painting/AccumulatedVisualContext.cpp:199	ported
+Web::Painting::AccumulatedVisualContextTree::find_common_ancestor	luce-browser-render	display_list	accumulated_visual_context_tree_find_common_ancestor	Libraries/LibWeb/Painting/AccumulatedVisualContext.cpp:46	ported
+Web::Painting::AccumulatedVisualContextTree::has_empty_effective_clip	luce-browser-render	display_list	accumulated_visual_context_tree_has_empty_effective_clip	Libraries/LibWeb/Painting/AccumulatedVisualContext.h:99	ported
+Web::Painting::AccumulatedVisualContextTree::inverse_transform_point	luce-browser-render	display_list	accumulated_visual_context_tree_inverse_transform_point	Libraries/LibWeb/Painting/AccumulatedVisualContext.cpp:136	ported
+Web::Painting::AccumulatedVisualContextTree::node_at	luce-browser-render	display_list	accumulated_visual_context_tree_node_at	Libraries/LibWeb/Painting/AccumulatedVisualContext.h:91	ported
+Web::Painting::AccumulatedVisualContextTree::transform_point_for_hit_test	luce-browser-render	display_list	accumulated_visual_context_tree_transform_point_for_hit_test	Libraries/LibWeb/Painting/AccumulatedVisualContext.cpp:73	ported
+Web::Painting::AccumulatedVisualContextTree::transform_rect_to_viewport	luce-browser-render	display_list	accumulated_visual_context_tree_transform_rect_to_viewport	Libraries/LibWeb/Painting/AccumulatedVisualContext.cpp:169	ported
 Web::Painting::AddClipRect	luce-browser-render	display_list	AddClipRect	Libraries/LibWeb/Painting/DisplayListCommand.h:131	struct
-Web::Painting::AddClipRect::bounding_rect	luce-browser-render	display_list	add_clip_rect_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:136	stub
-Web::Painting::AddClipRect::command_name	luce-browser-render	display_list	add_clip_rect_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:132	variable
-Web::Painting::AddClipRect::dump	luce-browser-render	display_list	add_clip_rect_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:70	stub
-Web::Painting::AddClipRect::is_clip	luce-browser-render	display_list	add_clip_rect_is_clip	Libraries/LibWeb/Painting/DisplayListCommand.h:137	stub
+Web::Painting::AddClipRect::bounding_rect	luce-browser-render	display_list	add_clip_rect_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:136	ported
+Web::Painting::AddClipRect::command_name	luce-browser-render	display_list	add_clip_rect_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:132	constant (str)
+Web::Painting::AddClipRect::dump	luce-browser-render	display_list	add_clip_rect_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:70	ported
+Web::Painting::AddClipRect::is_clip	luce-browser-render	display_list	add_clip_rect_is_clip	Libraries/LibWeb/Painting/DisplayListCommand.h:137	ported
 Web::Painting::AddRoundedRectClip	luce-browser-render	display_list	AddRoundedRectClip	Libraries/LibWeb/Painting/DisplayListCommand.h:327	struct
-Web::Painting::AddRoundedRectClip::bounding_rect	luce-browser-render	display_list	add_rounded_rect_clip_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:334	stub
-Web::Painting::AddRoundedRectClip::command_name	luce-browser-render	display_list	add_rounded_rect_clip_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:328	variable
-Web::Painting::AddRoundedRectClip::dump	luce-browser-render	display_list	add_rounded_rect_clip_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:144	stub
-Web::Painting::AddRoundedRectClip::is_clip	luce-browser-render	display_list	add_rounded_rect_clip_is_clip	Libraries/LibWeb/Painting/DisplayListCommand.h:335	stub
+Web::Painting::AddRoundedRectClip::bounding_rect	luce-browser-render	display_list	add_rounded_rect_clip_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:334	ported
+Web::Painting::AddRoundedRectClip::command_name	luce-browser-render	display_list	add_rounded_rect_clip_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:328	constant (str)
+Web::Painting::AddRoundedRectClip::dump	luce-browser-render	display_list	add_rounded_rect_clip_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:144	ported
+Web::Painting::AddRoundedRectClip::is_clip	luce-browser-render	display_list	add_rounded_rect_clip_is_clip	Libraries/LibWeb/Painting/DisplayListCommand.h:335	ported
 Web::Painting::ApplyBackdropFilter	luce-browser-render	display_list	ApplyBackdropFilter	Libraries/LibWeb/Painting/DisplayListCommand.h:278	struct
-Web::Painting::ApplyBackdropFilter::bounding_rect	luce-browser-render	display_list	apply_backdrop_filter_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:285	stub
-Web::Painting::ApplyBackdropFilter::command_name	luce-browser-render	display_list	apply_backdrop_filter_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:279	variable
-Web::Painting::ApplyBackdropFilter::dump	luce-browser-render	display_list	apply_backdrop_filter_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:134	stub
+Web::Painting::ApplyBackdropFilter::bounding_rect	luce-browser-render	display_list	apply_backdrop_filter_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:285	ported
+Web::Painting::ApplyBackdropFilter::command_name	luce-browser-render	display_list	apply_backdrop_filter_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:279	constant (str)
+Web::Painting::ApplyBackdropFilter::dump	luce-browser-render	display_list	apply_backdrop_filter_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:134	ported
 Web::Painting::ApplyEffects	luce-browser-render	display_list	ApplyEffects	Libraries/LibWeb/Painting/DisplayListCommand.h:365	struct
 Web::Painting::ApplyEffects [default member initializers]	luce-browser-render	display_list	apply_effects_init_fields	Libraries/LibWeb/Painting/DisplayListCommand.h:365	init fields
-Web::Painting::ApplyEffects::command_name	luce-browser-render	display_list	apply_effects_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:366	variable
-Web::Painting::ApplyEffects::dump	luce-browser-render	display_list	apply_effects_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:158	stub
+Web::Painting::ApplyEffects::command_name	luce-browser-render	display_list	apply_effects_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:366	constant (str)
+Web::Painting::ApplyEffects::dump	luce-browser-render	display_list	apply_effects_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:158	ported
 Web::Painting::ApplyEffects::nesting_level_change	luce-browser-render	display_list	apply_effects_nesting_level_change	Libraries/LibWeb/Painting/DisplayListCommand.h:367	variable
 Web::Painting::BorderDataDevicePixels	luce-browser-render	display_list	BorderDataDevicePixels	Libraries/LibWeb/Painting/BordersData.h:24	struct
 Web::Painting::BorderDataDevicePixels [default member initializers]	luce-browser-render	display_list	border_data_device_pixels_init_fields	Libraries/LibWeb/Painting/BordersData.h:24	init fields
 Web::Painting::BorderEdge	luce-browser-render	display_list	BorderEdge	Libraries/LibWeb/Painting/BordersData.h:17	enum
 Web::Painting::BorderRadiiData	luce-browser-render	display_list	BorderRadiiData	Libraries/LibWeb/Painting/BorderRadiiData.h:109	struct
-Web::Painting::BorderRadiiData::contains	luce-browser-render	display_list	border_radii_data_contains	Libraries/LibWeb/Painting/BorderRadiiData.h:120	stub
-Web::Painting::BorderRadiiData::has_any_radius	luce-browser-render	display_list	border_radii_data_has_any_radius	Libraries/LibWeb/Painting/BorderRadiiData.h:115	stub
-Web::Painting::BorderRadiiData::inflate	luce-browser-render	display_list	border_radii_data_inflate	Libraries/LibWeb/Painting/BorderRadiiData.h:143	stub
-Web::Painting::BorderRadiiData::shrink	luce-browser-render	display_list	border_radii_data_shrink	Libraries/LibWeb/Painting/BorderRadiiData.h:135	stub
+Web::Painting::BorderRadiiData::contains	luce-browser-render	display_list	border_radii_data_contains	Libraries/LibWeb/Painting/BorderRadiiData.h:120	ported
+Web::Painting::BorderRadiiData::has_any_radius	luce-browser-render	display_list	border_radii_data_has_any_radius	Libraries/LibWeb/Painting/BorderRadiiData.h:115	ported
+Web::Painting::BorderRadiiData::inflate	luce-browser-render	display_list	border_radii_data_inflate	Libraries/LibWeb/Painting/BorderRadiiData.h:143	ported
+Web::Painting::BorderRadiiData::shrink	luce-browser-render	display_list	border_radii_data_shrink	Libraries/LibWeb/Painting/BorderRadiiData.h:135	ported
 Web::Painting::BorderRadiusData	luce-browser-render	display_list	BorderRadiusData	Libraries/LibWeb/Painting/BorderRadiiData.h:27	struct
-Web::Painting::BorderRadiusData::operator bool	luce-browser-render	display_list	border_radius_data_to_bool	Libraries/LibWeb/Painting/BorderRadiiData.h:33	stub
-Web::Painting::BorderRadiusData::shrink	luce-browser-render	display_list	border_radius_data_shrink	Libraries/LibWeb/Painting/BorderRadiiData.h:38	stub
+Web::Painting::BorderRadiusData::operator bool	luce-browser-render	display_list	border_radius_data_to_bool	Libraries/LibWeb/Painting/BorderRadiiData.h:33	ported
+Web::Painting::BorderRadiusData::shrink	luce-browser-render	display_list	border_radius_data_shrink	Libraries/LibWeb/Painting/BorderRadiiData.h:38	ported
 Web::Painting::BordersData	luce-browser-render	display_list	BordersData	Libraries/LibWeb/Painting/BordersData.h:57	struct
 Web::Painting::BordersDataDevicePixels	luce-browser-render	display_list	BordersDataDevicePixels	Libraries/LibWeb/Painting/BordersData.h:31	struct
-Web::Painting::BordersDataDevicePixels::for_edge	luce-browser-render	display_list	borders_data_device_pixels_for_edge	Libraries/LibWeb/Painting/BordersData.h:37	stub
-Web::Painting::BordersDataDevicePixels::for_edge	luce-browser-render	display_list	borders_data_device_pixels_for_edge_const	Libraries/LibWeb/Painting/BordersData.h:51	stub
+Web::Painting::BordersDataDevicePixels::for_edge	luce-browser-render	display_list	borders_data_device_pixels_for_edge	Libraries/LibWeb/Painting/BordersData.h:37	ported
+Web::Painting::BordersDataDevicePixels::for_edge	luce-browser-render	display_list	borders_data_device_pixels_for_edge_const	Libraries/LibWeb/Painting/BordersData.h:51	ported
 Web::Painting::ClipData	luce-browser-render	display_list	ClipData	Libraries/LibWeb/Painting/AccumulatedVisualContext.h:35	struct
 Web::Painting::ClipData::ClipData	luce-browser-render	display_list	clip_data_construct	Libraries/LibWeb/Painting/AccumulatedVisualContext.h:39	construct
-Web::Painting::ClipData::contains	luce-browser-render	display_list	clip_data_contains	Libraries/LibWeb/Painting/AccumulatedVisualContext.cpp:15	stub
+Web::Painting::ClipData::contains	luce-browser-render	display_list	clip_data_contains	Libraries/LibWeb/Painting/AccumulatedVisualContext.cpp:15	ported
 Web::Painting::ClipPathData	luce-browser-render	display_list	ClipPathData	Libraries/LibWeb/Painting/AccumulatedVisualContext.h:57	struct
 Web::Painting::ColorStop	luce-browser-render	display_list	ColorStop	Libraries/LibWeb/Painting/PaintStyle.h:25	struct
 Web::Painting::ColorStop [default member initializers]	luce-browser-render	display_list	color_stop_init_fields	Libraries/LibWeb/Painting/PaintStyle.h:25	init fields
@@ -1650,19 +1664,19 @@ Web::Painting::ColorStopData	luce-browser-render	display_list	ColorStopData	Libr
 Web::Painting::ConicGradientData	luce-browser-render	display_list	ConicGradientData	Libraries/LibWeb/Painting/GradientData.h:31	struct
 Web::Painting::CornerClip	luce-browser-render	display_list	CornerClip	Libraries/LibWeb/Painting/BorderRadiusCornerClipper.h:14	enum
 Web::Painting::CornerRadii	luce-browser-render	display_list	CornerRadii	Libraries/LibWeb/Painting/BorderRadiiData.h:47	struct
-Web::Painting::CornerRadii::adjust_corners_for_spread_distance	luce-browser-render	display_list	corner_radii_adjust_corners_for_spread_distance	Libraries/LibWeb/Painting/BorderRadiiData.cpp:42	stub
-Web::Painting::CornerRadii::contains	luce-browser-render	display_list	corner_radii_contains	Libraries/LibWeb/Painting/BorderRadiiData.h:60	stub
-Web::Painting::CornerRadii::has_any_radius	luce-browser-render	display_list	corner_radii_has_any_radius	Libraries/LibWeb/Painting/BorderRadiiData.h:53	stub
+Web::Painting::CornerRadii::adjust_corners_for_spread_distance	luce-browser-render	display_list	corner_radii_adjust_corners_for_spread_distance	Libraries/LibWeb/Painting/BorderRadiiData.cpp:42	ported
+Web::Painting::CornerRadii::contains	luce-browser-render	display_list	corner_radii_contains	Libraries/LibWeb/Painting/BorderRadiiData.h:60	ported
+Web::Painting::CornerRadii::has_any_radius	luce-browser-render	display_list	corner_radii_has_any_radius	Libraries/LibWeb/Painting/BorderRadiiData.h:53	ported
 Web::Painting::CornerRadius	luce-browser-render	display_list	CornerRadius	Libraries/LibWeb/Painting/BorderRadiiData.h:17	struct
-Web::Painting::CornerRadius::operator bool	luce-browser-render	display_list	corner_radius_to_bool	Libraries/LibWeb/Painting/BorderRadiiData.h:21	stub
+Web::Painting::CornerRadius::operator bool	luce-browser-render	display_list	corner_radius_to_bool	Libraries/LibWeb/Painting/BorderRadiiData.h:21	ported
 Web::Painting::DisplayList	luce-browser-render	display_list	DisplayList	Libraries/LibWeb/Painting/DisplayList.h:72	struct
-Web::Painting::DisplayList::CommandListItem	luce-browser-render	display_list	DisplayListCommandListItem	Libraries/LibWeb/Painting/DisplayList.h:81	opaque
+Web::Painting::DisplayList::CommandListItem	luce-browser-render	display_list	DisplayListCommandListItem	Libraries/LibWeb/Painting/DisplayList.h:81	struct (fields filled by r51a)
 Web::Painting::DisplayList::DisplayList	luce-browser-render	display_list	display_list_construct	Libraries/LibWeb/Painting/DisplayList.h:92	construct
-Web::Painting::DisplayList::append	luce-browser-render	display_list	display_list_append	Libraries/LibWeb/Painting/DisplayList.cpp:13	stub
-Web::Painting::DisplayList::commands	luce-browser-render	display_list	display_list_commands	Libraries/LibWeb/Painting/DisplayList.h:89	stub
-Web::Painting::DisplayList::commands	luce-browser-render	display_list	display_list_commands_display_list_recorder	Libraries/LibWeb/Painting/DisplayList.h:88	stub
-Web::Painting::DisplayList::create	luce-browser-render	display_list	display_list_create	Libraries/LibWeb/Painting/DisplayList.h:74	stub
-Web::Painting::DisplayList::visual_context_tree	luce-browser-render	display_list	display_list_visual_context_tree	Libraries/LibWeb/Painting/DisplayList.h:86	stub
+Web::Painting::DisplayList::append	luce-browser-render	display_list	display_list_append	Libraries/LibWeb/Painting/DisplayList.cpp:13	ported
+Web::Painting::DisplayList::commands	luce-browser-render	display_list	display_list_commands	Libraries/LibWeb/Painting/DisplayList.h:89	ported
+Web::Painting::DisplayList::commands	luce-browser-render	display_list	display_list_commands_display_list_recorder	Libraries/LibWeb/Painting/DisplayList.h:88	ported
+Web::Painting::DisplayList::create	luce-browser-render	display_list	display_list_create	Libraries/LibWeb/Painting/DisplayList.h:74	ported
+Web::Painting::DisplayList::visual_context_tree	luce-browser-render	display_list	display_list_visual_context_tree	Libraries/LibWeb/Painting/DisplayList.h:86	ported
 Web::Painting::DisplayListPlayer	luce-browser-render	display_list	DisplayListPlayer	Libraries/LibWeb/Painting/DisplayList.h:23	struct
 Web::Painting::DisplayListPlayer::add_clip_path	luce-browser-render	display_list	display_list_player_add_clip_path_impl	Libraries/LibWeb/Painting/DisplayList.h:67	impl
 Web::Painting::DisplayListPlayer::add_clip_path [dispatch]	luce-browser-render	display_list	display_list_player_add_clip_path	Libraries/LibWeb/Painting/DisplayList.h:23	dispatcher
@@ -1690,9 +1704,9 @@ Web::Painting::DisplayListPlayer::draw_repeated_immutable_bitmap	luce-browser-re
 Web::Painting::DisplayListPlayer::draw_repeated_immutable_bitmap [dispatch]	luce-browser-render	display_list	display_list_player_draw_repeated_immutable_bitmap	Libraries/LibWeb/Painting/DisplayList.h:23	dispatcher
 Web::Painting::DisplayListPlayer::draw_scaled_immutable_bitmap	luce-browser-render	display_list	display_list_player_draw_scaled_immutable_bitmap_impl	Libraries/LibWeb/Painting/DisplayList.h:38	impl
 Web::Painting::DisplayListPlayer::draw_scaled_immutable_bitmap [dispatch]	luce-browser-render	display_list	display_list_player_draw_scaled_immutable_bitmap	Libraries/LibWeb/Painting/DisplayList.h:23	dispatcher
-Web::Painting::DisplayListPlayer::execute	luce-browser-render	display_list	display_list_player_execute	Libraries/LibWeb/Painting/DisplayList.cpp:43	stub
-Web::Painting::DisplayListPlayer::execute_display_list_into_surface	luce-browser-render	display_list	display_list_player_execute_display_list_into_surface	Libraries/LibWeb/Painting/DisplayList.cpp:58	stub
-Web::Painting::DisplayListPlayer::execute_impl	luce-browser-render	display_list	display_list_player_execute_impl	Libraries/LibWeb/Painting/DisplayList.cpp:65	stub
+Web::Painting::DisplayListPlayer::execute	luce-browser-render	display_list	display_list_player_execute	Libraries/LibWeb/Painting/DisplayList.cpp:43	ported
+Web::Painting::DisplayListPlayer::execute_display_list_into_surface	luce-browser-render	display_list	display_list_player_execute_display_list_into_surface	Libraries/LibWeb/Painting/DisplayList.cpp:58	ported
+Web::Painting::DisplayListPlayer::execute_impl	luce-browser-render	display_list	display_list_player_execute_impl	Libraries/LibWeb/Painting/DisplayList.cpp:65	ported
 Web::Painting::DisplayListPlayer::fill_ellipse	luce-browser-render	display_list	display_list_player_fill_ellipse_impl	Libraries/LibWeb/Painting/DisplayList.h:56	impl
 Web::Painting::DisplayListPlayer::fill_ellipse [dispatch]	luce-browser-render	display_list	display_list_player_fill_ellipse	Libraries/LibWeb/Painting/DisplayList.h:23	dispatcher
 Web::Painting::DisplayListPlayer::fill_path	luce-browser-render	display_list	display_list_player_fill_path_impl	Libraries/LibWeb/Painting/DisplayList.h:53	impl
@@ -1727,270 +1741,274 @@ Web::Painting::DisplayListPlayer::save_layer	luce-browser-render	display_list	di
 Web::Painting::DisplayListPlayer::save_layer [dispatch]	luce-browser-render	display_list	display_list_player_save_layer	Libraries/LibWeb/Painting/DisplayList.h:23	dispatcher
 Web::Painting::DisplayListPlayer::stroke_path	luce-browser-render	display_list	display_list_player_stroke_path_impl	Libraries/LibWeb/Painting/DisplayList.h:54	impl
 Web::Painting::DisplayListPlayer::stroke_path [dispatch]	luce-browser-render	display_list	display_list_player_stroke_path	Libraries/LibWeb/Painting/DisplayList.h:23	dispatcher
-Web::Painting::DisplayListPlayer::surface	luce-browser-render	display_list	display_list_player_surface	Libraries/LibWeb/Painting/DisplayList.h:30	stub
+Web::Painting::DisplayListPlayer::surface	luce-browser-render	display_list	display_list_player_surface	Libraries/LibWeb/Painting/DisplayList.h:30	ported
 Web::Painting::DisplayListPlayer::translate	luce-browser-render	display_list	display_list_player_translate_impl	Libraries/LibWeb/Painting/DisplayList.h:44	impl
 Web::Painting::DisplayListPlayer::translate [dispatch]	luce-browser-render	display_list	display_list_player_translate	Libraries/LibWeb/Painting/DisplayList.h:23	dispatcher
 Web::Painting::DisplayListPlayer::would_be_fully_clipped_by_painter	luce-browser-render	display_list	display_list_player_would_be_fully_clipped_by_painter_impl	Libraries/LibWeb/Painting/DisplayList.h:65	impl
 Web::Painting::DisplayListPlayer::would_be_fully_clipped_by_painter [dispatch]	luce-browser-render	display_list	display_list_player_would_be_fully_clipped_by_painter	Libraries/LibWeb/Painting/DisplayList.h:23	dispatcher
-Web::Painting::DisplayListPlayerSkia	luce-browser-render	display_list	DisplayListPlayerSkia	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:18	struct
-Web::Painting::DisplayListPlayerSkia::DisplayListPlayerSkia	luce-browser-render	display_list	display_list_player_skia_construct	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:20	construct
-Web::Painting::DisplayListPlayerSkia::add_clip_path	luce-browser-render	display_list	display_list_player_skia_add_clip_path_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:55	impl
-Web::Painting::DisplayListPlayerSkia::add_clip_rect	luce-browser-render	display_list	display_list_player_skia_add_clip_rect_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:30	impl
-Web::Painting::DisplayListPlayerSkia::add_rounded_rect_clip	luce-browser-render	display_list	display_list_player_skia_add_rounded_rect_clip_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:49	impl
-Web::Painting::DisplayListPlayerSkia::apply_backdrop_filter	luce-browser-render	display_list	display_list_player_skia_apply_backdrop_filter_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:45	impl
-Web::Painting::DisplayListPlayerSkia::apply_effects	luce-browser-render	display_list	display_list_player_skia_apply_effects_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:52	impl
-Web::Painting::DisplayListPlayerSkia::apply_transform	luce-browser-render	display_list	display_list_player_skia_apply_transform_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:53	impl
-Web::Painting::DisplayListPlayerSkia::draw_ellipse	luce-browser-render	display_list	display_list_player_skia_draw_ellipse_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:42	impl
-Web::Painting::DisplayListPlayerSkia::draw_external_content	luce-browser-render	display_list	display_list_player_skia_draw_external_content_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:29	impl
-Web::Painting::DisplayListPlayerSkia::draw_glyph_run	luce-browser-render	display_list	display_list_player_skia_draw_glyph_run_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:25	impl
-Web::Painting::DisplayListPlayerSkia::draw_line	luce-browser-render	display_list	display_list_player_skia_draw_line_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:44	impl
-Web::Painting::DisplayListPlayerSkia::draw_rect	luce-browser-render	display_list	display_list_player_skia_draw_rect_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:46	impl
-Web::Painting::DisplayListPlayerSkia::draw_repeated_immutable_bitmap	luce-browser-render	display_list	display_list_player_skia_draw_repeated_immutable_bitmap_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:28	impl
-Web::Painting::DisplayListPlayerSkia::draw_scaled_immutable_bitmap	luce-browser-render	display_list	display_list_player_skia_draw_scaled_immutable_bitmap_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:27	impl
-Web::Painting::DisplayListPlayerSkia::fill_ellipse	luce-browser-render	display_list	display_list_player_skia_fill_ellipse_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:43	impl
-Web::Painting::DisplayListPlayerSkia::fill_path	luce-browser-render	display_list	display_list_player_skia_fill_path_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:40	impl
-Web::Painting::DisplayListPlayerSkia::fill_rect	luce-browser-render	display_list	display_list_player_skia_fill_rect_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:26	impl
-Web::Painting::DisplayListPlayerSkia::fill_rect_with_rounded_corners	luce-browser-render	display_list	display_list_player_skia_fill_rect_with_rounded_corners_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:39	impl
-Web::Painting::DisplayListPlayerSkia::flush	luce-browser-render	display_list	display_list_player_skia_flush_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:24	impl
-Web::Painting::DisplayListPlayerSkia::paint_conic_gradient	luce-browser-render	display_list	display_list_player_skia_paint_conic_gradient_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:48	impl
-Web::Painting::DisplayListPlayerSkia::paint_inner_box_shadow	luce-browser-render	display_list	display_list_player_skia_paint_inner_box_shadow_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:37	impl
-Web::Painting::DisplayListPlayerSkia::paint_linear_gradient	luce-browser-render	display_list	display_list_player_skia_paint_linear_gradient_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:35	impl
-Web::Painting::DisplayListPlayerSkia::paint_nested_display_list	luce-browser-render	display_list	display_list_player_skia_paint_nested_display_list_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:51	impl
-Web::Painting::DisplayListPlayerSkia::paint_outer_box_shadow	luce-browser-render	display_list	display_list_player_skia_paint_outer_box_shadow_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:36	impl
-Web::Painting::DisplayListPlayerSkia::paint_radial_gradient	luce-browser-render	display_list	display_list_player_skia_paint_radial_gradient_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:47	impl
-Web::Painting::DisplayListPlayerSkia::paint_scrollbar	luce-browser-render	display_list	display_list_player_skia_paint_scrollbar_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:50	impl
-Web::Painting::DisplayListPlayerSkia::paint_style_to_skia_paint	luce-browser-render	display_list	display_list_player_skia_paint_style_to_skia_paint	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:59	stub
-Web::Painting::DisplayListPlayerSkia::paint_text_shadow	luce-browser-render	display_list	display_list_player_skia_paint_text_shadow_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:38	impl
-Web::Painting::DisplayListPlayerSkia::restore	luce-browser-render	display_list	display_list_player_skia_restore_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:33	impl
-Web::Painting::DisplayListPlayerSkia::save	luce-browser-render	display_list	display_list_player_skia_save_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:31	impl
-Web::Painting::DisplayListPlayerSkia::save_layer	luce-browser-render	display_list	display_list_player_skia_save_layer_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:32	impl
-Web::Painting::DisplayListPlayerSkia::stroke_path	luce-browser-render	display_list	display_list_player_skia_stroke_path_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:41	impl
-Web::Painting::DisplayListPlayerSkia::translate	luce-browser-render	display_list	display_list_player_skia_translate_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:34	impl
-Web::Painting::DisplayListPlayerSkia::would_be_fully_clipped_by_painter	luce-browser-render	display_list	display_list_player_skia_would_be_fully_clipped_by_painter_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:57	impl
+Web::Painting::DisplayListPlayerSkia	luce-browser-render	display_list	DisplayListPlayerCpu	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:18	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::DisplayListPlayerSkia	luce-browser-render	display_list	display_list_player_cpu_construct	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:20	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::add_clip_path	luce-browser-render	display_list	display_list_player_cpu_add_clip_path_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:55	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::add_clip_rect	luce-browser-render	display_list	display_list_player_cpu_add_clip_rect_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:30	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::add_rounded_rect_clip	luce-browser-render	display_list	display_list_player_cpu_add_rounded_rect_clip_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:49	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::apply_backdrop_filter	luce-browser-render	display_list	display_list_player_cpu_apply_backdrop_filter_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:45	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::apply_effects	luce-browser-render	display_list	display_list_player_cpu_apply_effects_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:52	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::apply_transform	luce-browser-render	display_list	display_list_player_cpu_apply_transform_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:53	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::draw_ellipse	luce-browser-render	display_list	display_list_player_cpu_draw_ellipse_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:42	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::draw_external_content	luce-browser-render	display_list	display_list_player_cpu_draw_external_content_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:29	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::draw_glyph_run	luce-browser-render	display_list	display_list_player_cpu_draw_glyph_run_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:25	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::draw_line	luce-browser-render	display_list	display_list_player_cpu_draw_line_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:44	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::draw_rect	luce-browser-render	display_list	display_list_player_cpu_draw_rect_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:46	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::draw_repeated_immutable_bitmap	luce-browser-render	display_list	display_list_player_cpu_draw_repeated_immutable_bitmap_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:28	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::draw_scaled_immutable_bitmap	luce-browser-render	display_list	display_list_player_cpu_draw_scaled_immutable_bitmap_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:27	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::fill_ellipse	luce-browser-render	display_list	display_list_player_cpu_fill_ellipse_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:43	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::fill_path	luce-browser-render	display_list	display_list_player_cpu_fill_path_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:40	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::fill_rect	luce-browser-render	display_list	display_list_player_cpu_fill_rect_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:26	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::fill_rect_with_rounded_corners	luce-browser-render	display_list	display_list_player_cpu_fill_rect_with_rounded_corners_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:39	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::flush	luce-browser-render	display_list	display_list_player_cpu_flush_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:24	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::paint_conic_gradient	luce-browser-render	display_list	display_list_player_cpu_paint_conic_gradient_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:48	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::paint_inner_box_shadow	luce-browser-render	display_list	display_list_player_cpu_paint_inner_box_shadow_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:37	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::paint_linear_gradient	luce-browser-render	display_list	display_list_player_cpu_paint_linear_gradient_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:35	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::paint_nested_display_list	luce-browser-render	display_list	display_list_player_cpu_paint_nested_display_list_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:51	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::paint_outer_box_shadow	luce-browser-render	display_list	display_list_player_cpu_paint_outer_box_shadow_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:36	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::paint_radial_gradient	luce-browser-render	display_list	display_list_player_cpu_paint_radial_gradient_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:47	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::paint_scrollbar	luce-browser-render	display_list	display_list_player_cpu_paint_scrollbar_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:50	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::paint_style_to_skia_paint	luce-browser-render	display_list	display_list_player_cpu_paint_style_to_shader	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:59	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::paint_text_shadow	luce-browser-render	display_list	display_list_player_cpu_paint_text_shadow_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:38	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::restore	luce-browser-render	display_list	display_list_player_cpu_restore_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:33	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::save	luce-browser-render	display_list	display_list_player_cpu_save_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:31	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::save_layer	luce-browser-render	display_list	display_list_player_cpu_save_layer_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:32	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::stroke_path	luce-browser-render	display_list	display_list_player_cpu_stroke_path_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:41	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::translate	luce-browser-render	display_list	display_list_player_cpu_translate_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:34	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
+Web::Painting::DisplayListPlayerSkia::would_be_fully_clipped_by_painter	luce-browser-render	display_list	display_list_player_cpu_would_be_fully_clipped_by_painter_impl	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:57	replaced (DESIGN.md §7.3: DisplayListPlayerCpu)
 Web::Painting::DisplayListRecorder	luce-browser-render	display_list	DisplayListRecorder	Libraries/LibWeb/Painting/DisplayListRecorder.h:33	struct
-Web::Painting::DisplayListRecorder::CommandCapture	luce-browser-render	display_list	DisplayListRecorderCommandCapture	Libraries/LibWeb/Painting/DisplayListRecorder.h:95	opaque
+Web::Painting::DisplayListRecorder::CommandCapture	luce-browser-render	display_list	DisplayListRecorderCommandCapture	Libraries/LibWeb/Painting/DisplayListRecorder.h:95	struct (fields filled by r51a)
+Web::Painting::DisplayListRecorder::CommandCapture::CommandCapture	luce-browser-render	display_list	display_list_recorder_command_capture_construct	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:23	ported
+Web::Painting::DisplayListRecorder::CommandCapture::take	luce-browser-render	display_list	display_list_recorder_command_capture_take	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:34	ported
+Web::Painting::DisplayListRecorder::CommandCapture::~CommandCapture	luce-browser-render	display_list	display_list_recorder_command_capture_destroy	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:28	ported (called where the C++ capture goes out of scope)
 Web::Painting::DisplayListRecorder::DisplayListRecorder	luce-browser-render	display_list	display_list_recorder_construct	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:14	construct
-Web::Painting::DisplayListRecorder::FillPathParams	luce-browser-render	display_list	DisplayListRecorderFillPathParams	Libraries/LibWeb/Painting/DisplayListRecorder.h:41	opaque
-Web::Painting::DisplayListRecorder::MaskInfo	luce-browser-render	display_list	DisplayListRecorderMaskInfo	Libraries/LibWeb/Painting/DisplayListRecorder.h:122	opaque
-Web::Painting::DisplayListRecorder::StrokePathParams	luce-browser-render	display_list	DisplayListRecorderStrokePathParams	Libraries/LibWeb/Painting/DisplayListRecorder.h:50	opaque
-Web::Painting::DisplayListRecorder::accumulated_visual_context	luce-browser-render	display_list	display_list_recorder_accumulated_visual_context	Libraries/LibWeb/Painting/DisplayListRecorder.h:91	stub
-Web::Painting::DisplayListRecorder::add_clip_rect	luce-browser-render	display_list	display_list_recorder_add_clip_rect	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:315	stub
-Web::Painting::DisplayListRecorder::add_rounded_rect_clip	luce-browser-render	display_list	display_list_recorder_add_rounded_rect_clip	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:94	stub
-Web::Painting::DisplayListRecorder::apply_backdrop_filter	luce-browser-render	display_list	display_list_recorder_apply_backdrop_filter	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:340	stub
-Web::Painting::DisplayListRecorder::apply_effects	luce-browser-render	display_list	display_list_recorder_apply_effects	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:416	stub
-Web::Painting::DisplayListRecorder::begin_command_capture	luce-browser-render	display_list	display_list_recorder_begin_command_capture	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:41	stub
-Web::Painting::DisplayListRecorder::begin_masks	luce-browser-render	display_list	display_list_recorder_begin_masks	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:99	stub
-Web::Painting::DisplayListRecorder::draw_ellipse	luce-browser-render	display_list	display_list_recorder_draw_ellipse	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:179	stub
-Web::Painting::DisplayListRecorder::draw_external_content	luce-browser-render	display_list	display_list_recorder_draw_external_content	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:235	stub
-Web::Painting::DisplayListRecorder::draw_glyph_run	luce-browser-render	display_list	display_list_recorder_draw_glyph_run	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:301	stub
-Web::Painting::DisplayListRecorder::draw_line	luce-browser-render	display_list	display_list_recorder_draw_line	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:265	stub
-Web::Painting::DisplayListRecorder::draw_rect	luce-browser-render	display_list	display_list_recorder_draw_rect	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:225	stub
-Web::Painting::DisplayListRecorder::draw_repeated_immutable_bitmap	luce-browser-render	display_list	display_list_recorder_draw_repeated_immutable_bitmap	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:254	stub
-Web::Painting::DisplayListRecorder::draw_scaled_immutable_bitmap	luce-browser-render	display_list	display_list_recorder_draw_scaled_immutable_bitmap	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:242	stub
-Web::Painting::DisplayListRecorder::draw_text	luce-browser-render	display_list	display_list_recorder_draw_text	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:279	stub
-Web::Painting::DisplayListRecorder::end_capture	luce-browser-render	display_list	display_list_recorder_end_capture	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:49	stub
-Web::Painting::DisplayListRecorder::end_masks	luce-browser-render	display_list	display_list_recorder_end_masks	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:108	stub
-Web::Painting::DisplayListRecorder::fill_ellipse	luce-browser-render	display_list	display_list_recorder_fill_ellipse	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:190	stub
-Web::Painting::DisplayListRecorder::fill_path	luce-browser-render	display_list	display_list_recorder_fill_path	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:135	stub
-Web::Painting::DisplayListRecorder::fill_rect	luce-browser-render	display_list	display_list_recorder_fill_rect	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:121	stub
-Web::Painting::DisplayListRecorder::fill_rect_transparent	luce-browser-render	display_list	display_list_recorder_fill_rect_transparent	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:128	stub
-Web::Painting::DisplayListRecorder::fill_rect_with_conic_gradient	luce-browser-render	display_list	display_list_recorder_fill_rect_with_conic_gradient	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:204	stub
-Web::Painting::DisplayListRecorder::fill_rect_with_linear_gradient	luce-browser-render	display_list	display_list_recorder_fill_rect_with_linear_gradient	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:197	stub
-Web::Painting::DisplayListRecorder::fill_rect_with_radial_gradient	luce-browser-render	display_list	display_list_recorder_fill_rect_with_radial_gradient	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:214	stub
-Web::Painting::DisplayListRecorder::fill_rect_with_rounded_corners	luce-browser-render	display_list	display_list_recorder_fill_rect_with_rounded_corners_corner_radii	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:373	stub
-Web::Painting::DisplayListRecorder::fill_rect_with_rounded_corners	luce-browser-render	display_list	display_list_recorder_fill_rect_with_rounded_corners_i32	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:390	stub
-Web::Painting::DisplayListRecorder::fill_rect_with_rounded_corners	luce-browser-render	display_list	display_list_recorder_fill_rect_with_rounded_corners_i32_i32	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:395	stub
-Web::Painting::DisplayListRecorder::paint_inner_box_shadow	luce-browser-render	display_list	display_list_recorder_paint_inner_box_shadow	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:356	stub
-Web::Painting::DisplayListRecorder::paint_nested_display_list	luce-browser-render	display_list	display_list_recorder_paint_nested_display_list	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:89	stub
-Web::Painting::DisplayListRecorder::paint_outer_box_shadow	luce-browser-render	display_list	display_list_recorder_paint_outer_box_shadow	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:351	stub
-Web::Painting::DisplayListRecorder::paint_scrollbar	luce-browser-render	display_list	display_list_recorder_paint_scrollbar	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:404	stub
-Web::Painting::DisplayListRecorder::paint_text_shadow	luce-browser-render	display_list	display_list_recorder_paint_text_shadow	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:361	stub
-Web::Painting::DisplayListRecorder::replay_cached_commands	luce-browser-render	display_list	display_list_recorder_replay_cached_commands	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:76	stub
-Web::Painting::DisplayListRecorder::restore	luce-browser-render	display_list	display_list_recorder_restore	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:335	stub
-Web::Painting::DisplayListRecorder::save	luce-browser-render	display_list	display_list_recorder_save	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:325	stub
-Web::Painting::DisplayListRecorder::save_layer	luce-browser-render	display_list	display_list_recorder_save_layer	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:330	stub
-Web::Painting::DisplayListRecorder::set_accumulated_visual_context	luce-browser-render	display_list	display_list_recorder_set_accumulated_visual_context	Libraries/LibWeb/Painting/DisplayListRecorder.h:90	stub
-Web::Painting::DisplayListRecorder::stroke_path	luce-browser-render	display_list	display_list_recorder_stroke_path	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:152	stub
-Web::Painting::DisplayListRecorder::translate	luce-browser-render	display_list	display_list_recorder_translate	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:320	stub
+Web::Painting::DisplayListRecorder::FillPathParams	luce-browser-render	display_list	DisplayListRecorderFillPathParams	Libraries/LibWeb/Painting/DisplayListRecorder.h:41	struct (fields filled by r51a)
+Web::Painting::DisplayListRecorder::MaskInfo	luce-browser-render	display_list	DisplayListRecorderMaskInfo	Libraries/LibWeb/Painting/DisplayListRecorder.h:122	struct (fields filled by r51a)
+Web::Painting::DisplayListRecorder::StrokePathParams	luce-browser-render	display_list	DisplayListRecorderStrokePathParams	Libraries/LibWeb/Painting/DisplayListRecorder.h:50	struct (fields filled by r51a)
+Web::Painting::DisplayListRecorder::accumulated_visual_context	luce-browser-render	display_list	display_list_recorder_accumulated_visual_context	Libraries/LibWeb/Painting/DisplayListRecorder.h:91	ported
+Web::Painting::DisplayListRecorder::add_clip_rect	luce-browser-render	display_list	display_list_recorder_add_clip_rect	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:315	ported
+Web::Painting::DisplayListRecorder::add_rounded_rect_clip	luce-browser-render	display_list	display_list_recorder_add_rounded_rect_clip	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:94	ported
+Web::Painting::DisplayListRecorder::apply_backdrop_filter	luce-browser-render	display_list	display_list_recorder_apply_backdrop_filter	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:340	ported
+Web::Painting::DisplayListRecorder::apply_effects	luce-browser-render	display_list	display_list_recorder_apply_effects	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:416	ported
+Web::Painting::DisplayListRecorder::begin_command_capture	luce-browser-render	display_list	display_list_recorder_begin_command_capture	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:41	ported
+Web::Painting::DisplayListRecorder::begin_masks	luce-browser-render	display_list	display_list_recorder_begin_masks	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:99	ported
+Web::Painting::DisplayListRecorder::draw_ellipse	luce-browser-render	display_list	display_list_recorder_draw_ellipse	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:179	ported
+Web::Painting::DisplayListRecorder::draw_external_content	luce-browser-render	display_list	display_list_recorder_draw_external_content	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:235	ported
+Web::Painting::DisplayListRecorder::draw_glyph_run	luce-browser-render	display_list	display_list_recorder_draw_glyph_run	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:301	ported
+Web::Painting::DisplayListRecorder::draw_line	luce-browser-render	display_list	display_list_recorder_draw_line	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:265	ported
+Web::Painting::DisplayListRecorder::draw_rect	luce-browser-render	display_list	display_list_recorder_draw_rect	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:225	ported
+Web::Painting::DisplayListRecorder::draw_repeated_immutable_bitmap	luce-browser-render	display_list	display_list_recorder_draw_repeated_immutable_bitmap	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:254	ported
+Web::Painting::DisplayListRecorder::draw_scaled_immutable_bitmap	luce-browser-render	display_list	display_list_recorder_draw_scaled_immutable_bitmap	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:242	ported
+Web::Painting::DisplayListRecorder::draw_text	luce-browser-render	display_list	display_list_recorder_draw_text	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:279	ported
+Web::Painting::DisplayListRecorder::end_capture	luce-browser-render	display_list	display_list_recorder_end_capture	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:49	ported
+Web::Painting::DisplayListRecorder::end_masks	luce-browser-render	display_list	display_list_recorder_end_masks	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:108	ported
+Web::Painting::DisplayListRecorder::fill_ellipse	luce-browser-render	display_list	display_list_recorder_fill_ellipse	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:190	ported
+Web::Painting::DisplayListRecorder::fill_path	luce-browser-render	display_list	display_list_recorder_fill_path	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:135	ported
+Web::Painting::DisplayListRecorder::fill_rect	luce-browser-render	display_list	display_list_recorder_fill_rect	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:121	ported
+Web::Painting::DisplayListRecorder::fill_rect_transparent	luce-browser-render	display_list	display_list_recorder_fill_rect_transparent	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:128	ported
+Web::Painting::DisplayListRecorder::fill_rect_with_conic_gradient	luce-browser-render	display_list	display_list_recorder_fill_rect_with_conic_gradient	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:204	ported
+Web::Painting::DisplayListRecorder::fill_rect_with_linear_gradient	luce-browser-render	display_list	display_list_recorder_fill_rect_with_linear_gradient	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:197	ported
+Web::Painting::DisplayListRecorder::fill_rect_with_radial_gradient	luce-browser-render	display_list	display_list_recorder_fill_rect_with_radial_gradient	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:214	ported
+Web::Painting::DisplayListRecorder::fill_rect_with_rounded_corners	luce-browser-render	display_list	display_list_recorder_fill_rect_with_rounded_corners_corner_radii	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:373	ported
+Web::Painting::DisplayListRecorder::fill_rect_with_rounded_corners	luce-browser-render	display_list	display_list_recorder_fill_rect_with_rounded_corners_i32	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:390	ported
+Web::Painting::DisplayListRecorder::fill_rect_with_rounded_corners	luce-browser-render	display_list	display_list_recorder_fill_rect_with_rounded_corners_i32_i32	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:395	ported
+Web::Painting::DisplayListRecorder::paint_inner_box_shadow	luce-browser-render	display_list	display_list_recorder_paint_inner_box_shadow	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:356	ported
+Web::Painting::DisplayListRecorder::paint_nested_display_list	luce-browser-render	display_list	display_list_recorder_paint_nested_display_list	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:89	ported
+Web::Painting::DisplayListRecorder::paint_outer_box_shadow	luce-browser-render	display_list	display_list_recorder_paint_outer_box_shadow	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:351	ported
+Web::Painting::DisplayListRecorder::paint_scrollbar	luce-browser-render	display_list	display_list_recorder_paint_scrollbar	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:404	ported
+Web::Painting::DisplayListRecorder::paint_text_shadow	luce-browser-render	display_list	display_list_recorder_paint_text_shadow	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:361	ported
+Web::Painting::DisplayListRecorder::replay_cached_commands	luce-browser-render	display_list	display_list_recorder_replay_cached_commands	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:76	ported
+Web::Painting::DisplayListRecorder::restore	luce-browser-render	display_list	display_list_recorder_restore	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:335	ported
+Web::Painting::DisplayListRecorder::save	luce-browser-render	display_list	display_list_recorder_save	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:325	ported
+Web::Painting::DisplayListRecorder::save_layer	luce-browser-render	display_list	display_list_recorder_save_layer	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:330	ported
+Web::Painting::DisplayListRecorder::set_accumulated_visual_context	luce-browser-render	display_list	display_list_recorder_set_accumulated_visual_context	Libraries/LibWeb/Painting/DisplayListRecorder.h:90	ported
+Web::Painting::DisplayListRecorder::stroke_path	luce-browser-render	display_list	display_list_recorder_stroke_path	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:152	ported
+Web::Painting::DisplayListRecorder::translate	luce-browser-render	display_list	display_list_recorder_translate	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:320	ported
 Web::Painting::DisplayListRecorderStateSaver	luce-browser-render	display_list	DisplayListRecorderStateSaver	Libraries/LibWeb/Painting/DisplayListRecorder.h:159	struct
 Web::Painting::DisplayListRecorderStateSaver::DisplayListRecorderStateSaver	luce-browser-render	display_list	display_list_recorder_state_saver_construct	Libraries/LibWeb/Painting/DisplayListRecorder.h:161	construct
+Web::Painting::DisplayListRecorderStateSaver::~DisplayListRecorderStateSaver	luce-browser-render	display_list	display_list_recorder_state_saver_destroy	Libraries/LibWeb/Painting/DisplayListRecorder.h:167	ported (called where the C++ saver goes out of scope)
 Web::Painting::DrawEllipse	luce-browser-render	display_list	DrawEllipse	Libraries/LibWeb/Painting/DisplayListCommand.h:241	struct
-Web::Painting::DrawEllipse::bounding_rect	luce-browser-render	display_list	draw_ellipse_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:248	stub
-Web::Painting::DrawEllipse::command_name	luce-browser-render	display_list	draw_ellipse_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:242	variable
-Web::Painting::DrawEllipse::dump	luce-browser-render	display_list	draw_ellipse_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:119	stub
+Web::Painting::DrawEllipse::bounding_rect	luce-browser-render	display_list	draw_ellipse_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:248	ported
+Web::Painting::DrawEllipse::command_name	luce-browser-render	display_list	draw_ellipse_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:242	constant (str)
+Web::Painting::DrawEllipse::dump	luce-browser-render	display_list	draw_ellipse_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:119	ported
 Web::Painting::DrawExternalContent	luce-browser-render	display_list	DrawExternalContent	Libraries/LibWeb/Painting/DisplayListCommand.h:91	struct
-Web::Painting::DrawExternalContent::bounding_rect	luce-browser-render	display_list	draw_external_content_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:98	stub
-Web::Painting::DrawExternalContent::command_name	luce-browser-render	display_list	draw_external_content_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:92	variable
-Web::Painting::DrawExternalContent::dump	luce-browser-render	display_list	draw_external_content_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:48	stub
+Web::Painting::DrawExternalContent::bounding_rect	luce-browser-render	display_list	draw_external_content_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:98	ported
+Web::Painting::DrawExternalContent::command_name	luce-browser-render	display_list	draw_external_content_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:92	constant (str)
+Web::Painting::DrawExternalContent::dump	luce-browser-render	display_list	draw_external_content_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:48	ported
 Web::Painting::DrawGlyphRun	luce-browser-render	display_list	DrawGlyphRun	Libraries/LibWeb/Painting/DisplayListCommand.h:38	struct
-Web::Painting::DrawGlyphRun::bounding_rect	luce-browser-render	display_list	draw_glyph_run_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.cpp:23	stub
-Web::Painting::DrawGlyphRun::command_name	luce-browser-render	display_list	draw_glyph_run_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:39	variable
-Web::Painting::DrawGlyphRun::dump	luce-browser-render	display_list	draw_glyph_run_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:28	stub
+Web::Painting::DrawGlyphRun::bounding_rect	luce-browser-render	display_list	draw_glyph_run_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.cpp:23	ported
+Web::Painting::DrawGlyphRun::command_name	luce-browser-render	display_list	draw_glyph_run_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:39	constant (str)
+Web::Painting::DrawGlyphRun::dump	luce-browser-render	display_list	draw_glyph_run_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:28	ported
 Web::Painting::DrawLine	luce-browser-render	display_list	DrawLine	Libraries/LibWeb/Painting/DisplayListCommand.h:264	struct
-Web::Painting::DrawLine::bounding_rect	luce-browser-render	display_list	draw_line_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:274	stub
-Web::Painting::DrawLine::command_name	luce-browser-render	display_list	draw_line_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:265	variable
-Web::Painting::DrawLine::dump	luce-browser-render	display_list	draw_line_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:129	stub
+Web::Painting::DrawLine::bounding_rect	luce-browser-render	display_list	draw_line_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:274	ported
+Web::Painting::DrawLine::command_name	luce-browser-render	display_list	draw_line_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:265	constant (str)
+Web::Painting::DrawLine::dump	luce-browser-render	display_list	draw_line_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:129	ported
 Web::Painting::DrawRect	luce-browser-render	display_list	DrawRect	Libraries/LibWeb/Painting/DisplayListCommand.h:290	struct
-Web::Painting::DrawRect::bounding_rect	luce-browser-render	display_list	draw_rect_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:297	stub
-Web::Painting::DrawRect::command_name	luce-browser-render	display_list	draw_rect_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:291	variable
-Web::Painting::DrawRect::dump	luce-browser-render	display_list	draw_rect_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:139	stub
+Web::Painting::DrawRect::bounding_rect	luce-browser-render	display_list	draw_rect_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:297	ported
+Web::Painting::DrawRect::command_name	luce-browser-render	display_list	draw_rect_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:291	constant (str)
+Web::Painting::DrawRect::dump	luce-browser-render	display_list	draw_rect_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:139	ported
 Web::Painting::DrawRepeatedImmutableBitmap	luce-browser-render	display_list	DrawRepeatedImmutableBitmap	Libraries/LibWeb/Painting/DisplayListCommand.h:73	struct
 Web::Painting::DrawRepeatedImmutableBitmap::Repeat	luce-browser-render	display_list	DrawRepeatedImmutableBitmapRepeat	Libraries/LibWeb/Painting/DisplayListCommand.h:76	struct
-Web::Painting::DrawRepeatedImmutableBitmap::bounding_rect	luce-browser-render	display_list	draw_repeated_immutable_bitmap_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:87	stub
-Web::Painting::DrawRepeatedImmutableBitmap::command_name	luce-browser-render	display_list	draw_repeated_immutable_bitmap_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:74	variable
-Web::Painting::DrawRepeatedImmutableBitmap::dump	luce-browser-render	display_list	draw_repeated_immutable_bitmap_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:43	stub
+Web::Painting::DrawRepeatedImmutableBitmap::bounding_rect	luce-browser-render	display_list	draw_repeated_immutable_bitmap_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:87	ported
+Web::Painting::DrawRepeatedImmutableBitmap::command_name	luce-browser-render	display_list	draw_repeated_immutable_bitmap_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:74	constant (str)
+Web::Painting::DrawRepeatedImmutableBitmap::dump	luce-browser-render	display_list	draw_repeated_immutable_bitmap_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:43	ported
 Web::Painting::DrawScaledImmutableBitmap	luce-browser-render	display_list	DrawScaledImmutableBitmap	Libraries/LibWeb/Painting/DisplayListCommand.h:61	struct
-Web::Painting::DrawScaledImmutableBitmap::bounding_rect	luce-browser-render	display_list	draw_scaled_immutable_bitmap_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:69	stub
-Web::Painting::DrawScaledImmutableBitmap::command_name	luce-browser-render	display_list	draw_scaled_immutable_bitmap_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:62	variable
-Web::Painting::DrawScaledImmutableBitmap::dump	luce-browser-render	display_list	draw_scaled_immutable_bitmap_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:38	stub
+Web::Painting::DrawScaledImmutableBitmap::bounding_rect	luce-browser-render	display_list	draw_scaled_immutable_bitmap_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:69	ported
+Web::Painting::DrawScaledImmutableBitmap::command_name	luce-browser-render	display_list	draw_scaled_immutable_bitmap_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:62	constant (str)
+Web::Painting::DrawScaledImmutableBitmap::dump	luce-browser-render	display_list	draw_scaled_immutable_bitmap_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:38	ported
 Web::Painting::EffectsData	luce-browser-render	display_list	EffectsData	Libraries/LibWeb/Painting/AccumulatedVisualContext.h:63	struct
 Web::Painting::EffectsData [default member initializers]	luce-browser-render	display_list	effects_data_init_fields	Libraries/LibWeb/Painting/AccumulatedVisualContext.h:63	init fields
-Web::Painting::EffectsData::needs_layer	luce-browser-render	display_list	effects_data_needs_layer	Libraries/LibWeb/Painting/AccumulatedVisualContext.h:68	stub
+Web::Painting::EffectsData::needs_layer	luce-browser-render	display_list	effects_data_needs_layer	Libraries/LibWeb/Painting/AccumulatedVisualContext.h:68	ported
 Web::Painting::ExternalContentSource	luce-browser-render	display_list	ExternalContentSource	Libraries/LibWeb/Painting/ExternalContentSource.h:16	struct
-Web::Painting::ExternalContentSource::clear	luce-browser-render	display_list	external_content_source_clear	Libraries/LibWeb/Painting/ExternalContentSource.cpp:27	stub
-Web::Painting::ExternalContentSource::create	luce-browser-render	display_list	external_content_source_create	Libraries/LibWeb/Painting/ExternalContentSource.cpp:12	stub
-Web::Painting::ExternalContentSource::current_bitmap	luce-browser-render	display_list	external_content_source_current_bitmap	Libraries/LibWeb/Painting/ExternalContentSource.cpp:36	stub
-Web::Painting::ExternalContentSource::update	luce-browser-render	display_list	external_content_source_update	Libraries/LibWeb/Painting/ExternalContentSource.cpp:17	stub
+Web::Painting::ExternalContentSource::clear	luce-browser-render	display_list	external_content_source_clear	Libraries/LibWeb/Painting/ExternalContentSource.cpp:27	ported
+Web::Painting::ExternalContentSource::create	luce-browser-render	display_list	external_content_source_create	Libraries/LibWeb/Painting/ExternalContentSource.cpp:12	ported
+Web::Painting::ExternalContentSource::current_bitmap	luce-browser-render	display_list	external_content_source_current_bitmap	Libraries/LibWeb/Painting/ExternalContentSource.cpp:36	ported
+Web::Painting::ExternalContentSource::update	luce-browser-render	display_list	external_content_source_update	Libraries/LibWeb/Painting/ExternalContentSource.cpp:17	ported
 Web::Painting::FillEllipse	luce-browser-render	display_list	FillEllipse	Libraries/LibWeb/Painting/DisplayListCommand.h:253	struct
-Web::Painting::FillEllipse::bounding_rect	luce-browser-render	display_list	fill_ellipse_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:259	stub
-Web::Painting::FillEllipse::command_name	luce-browser-render	display_list	fill_ellipse_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:254	variable
-Web::Painting::FillEllipse::dump	luce-browser-render	display_list	fill_ellipse_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:124	stub
+Web::Painting::FillEllipse::bounding_rect	luce-browser-render	display_list	fill_ellipse_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:259	ported
+Web::Painting::FillEllipse::command_name	luce-browser-render	display_list	fill_ellipse_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:254	constant (str)
+Web::Painting::FillEllipse::dump	luce-browser-render	display_list	fill_ellipse_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:124	ported
 Web::Painting::FillPath	luce-browser-render	display_list	FillPath	Libraries/LibWeb/Painting/DisplayListCommand.h:206	struct
 Web::Painting::FillPath [default member initializers]	luce-browser-render	display_list	fill_path_init_fields	Libraries/LibWeb/Painting/DisplayListCommand.h:206	init fields
-Web::Painting::FillPath::bounding_rect	luce-browser-render	display_list	fill_path_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:216	stub
-Web::Painting::FillPath::command_name	luce-browser-render	display_list	fill_path_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:207	variable
-Web::Painting::FillPath::dump	luce-browser-render	display_list	fill_path_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:110	stub
+Web::Painting::FillPath::bounding_rect	luce-browser-render	display_list	fill_path_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:216	ported
+Web::Painting::FillPath::command_name	luce-browser-render	display_list	fill_path_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:207	constant (str)
+Web::Painting::FillPath::dump	luce-browser-render	display_list	fill_path_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:110	ported
 Web::Painting::FillRect	luce-browser-render	display_list	FillRect	Libraries/LibWeb/Painting/DisplayListCommand.h:51	struct
-Web::Painting::FillRect::bounding_rect	luce-browser-render	display_list	fill_rect_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:57	stub
-Web::Painting::FillRect::command_name	luce-browser-render	display_list	fill_rect_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:52	variable
-Web::Painting::FillRect::dump	luce-browser-render	display_list	fill_rect_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:33	stub
+Web::Painting::FillRect::bounding_rect	luce-browser-render	display_list	fill_rect_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:57	ported
+Web::Painting::FillRect::command_name	luce-browser-render	display_list	fill_rect_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:52	constant (str)
+Web::Painting::FillRect::dump	luce-browser-render	display_list	fill_rect_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:33	ported
 Web::Painting::FillRectWithRoundedCorners	luce-browser-render	display_list	FillRectWithRoundedCorners	Libraries/LibWeb/Painting/DisplayListCommand.h:195	struct
-Web::Painting::FillRectWithRoundedCorners::bounding_rect	luce-browser-render	display_list	fill_rect_with_rounded_corners_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:202	stub
-Web::Painting::FillRectWithRoundedCorners::command_name	luce-browser-render	display_list	fill_rect_with_rounded_corners_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:196	variable
-Web::Painting::FillRectWithRoundedCorners::dump	luce-browser-render	display_list	fill_rect_with_rounded_corners_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:105	stub
+Web::Painting::FillRectWithRoundedCorners::bounding_rect	luce-browser-render	display_list	fill_rect_with_rounded_corners_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:202	ported
+Web::Painting::FillRectWithRoundedCorners::command_name	luce-browser-render	display_list	fill_rect_with_rounded_corners_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:196	constant (str)
+Web::Painting::FillRectWithRoundedCorners::dump	luce-browser-render	display_list	fill_rect_with_rounded_corners_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:105	ported
 Web::Painting::LinearGradientData	luce-browser-render	display_list	LinearGradientData	Libraries/LibWeb/Painting/GradientData.h:25	struct
 Web::Painting::PaintConicGradient	luce-browser-render	display_list	PaintConicGradient	Libraries/LibWeb/Painting/DisplayListCommand.h:315	struct
-Web::Painting::PaintConicGradient::bounding_rect	luce-browser-render	display_list	paint_conic_gradient_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:322	stub
-Web::Painting::PaintConicGradient::command_name	luce-browser-render	display_list	paint_conic_gradient_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:316	variable
-Web::Painting::PaintConicGradient::dump	luce-browser-render	display_list	paint_conic_gradient_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:85	stub
+Web::Painting::PaintConicGradient::bounding_rect	luce-browser-render	display_list	paint_conic_gradient_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:322	ported
+Web::Painting::PaintConicGradient::command_name	luce-browser-render	display_list	paint_conic_gradient_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:316	constant (str)
+Web::Painting::PaintConicGradient::dump	luce-browser-render	display_list	paint_conic_gradient_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:85	ported
 Web::Painting::PaintInnerBoxShadow	luce-browser-render	display_list	PaintInnerBoxShadow	Libraries/LibWeb/Painting/DisplayListCommand.h:166	struct
-Web::Painting::PaintInnerBoxShadow::bounding_rect	luce-browser-render	display_list	paint_inner_box_shadow_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.cpp:18	stub
-Web::Painting::PaintInnerBoxShadow::command_name	luce-browser-render	display_list	paint_inner_box_shadow_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:167	variable
-Web::Painting::PaintInnerBoxShadow::dump	luce-browser-render	display_list	paint_inner_box_shadow_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:95	stub
+Web::Painting::PaintInnerBoxShadow::bounding_rect	luce-browser-render	display_list	paint_inner_box_shadow_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.cpp:18	ported
+Web::Painting::PaintInnerBoxShadow::command_name	luce-browser-render	display_list	paint_inner_box_shadow_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:167	constant (str)
+Web::Painting::PaintInnerBoxShadow::dump	luce-browser-render	display_list	paint_inner_box_shadow_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:95	ported
 Web::Painting::PaintLinearGradient	luce-browser-render	display_list	PaintLinearGradient	Libraries/LibWeb/Painting/DisplayListCommand.h:141	struct
-Web::Painting::PaintLinearGradient::bounding_rect	luce-browser-render	display_list	paint_linear_gradient_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:147	stub
-Web::Painting::PaintLinearGradient::command_name	luce-browser-render	display_list	paint_linear_gradient_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:142	variable
-Web::Painting::PaintLinearGradient::dump	luce-browser-render	display_list	paint_linear_gradient_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:75	stub
+Web::Painting::PaintLinearGradient::bounding_rect	luce-browser-render	display_list	paint_linear_gradient_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:147	ported
+Web::Painting::PaintLinearGradient::command_name	luce-browser-render	display_list	paint_linear_gradient_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:142	constant (str)
+Web::Painting::PaintLinearGradient::dump	luce-browser-render	display_list	paint_linear_gradient_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:75	ported
 Web::Painting::PaintNestedDisplayList	luce-browser-render	display_list	PaintNestedDisplayList	Libraries/LibWeb/Painting/DisplayListCommand.h:340	struct
-Web::Painting::PaintNestedDisplayList::bounding_rect	luce-browser-render	display_list	paint_nested_display_list_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:346	stub
-Web::Painting::PaintNestedDisplayList::command_name	luce-browser-render	display_list	paint_nested_display_list_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:341	variable
-Web::Painting::PaintNestedDisplayList::dump	luce-browser-render	display_list	paint_nested_display_list_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:149	stub
+Web::Painting::PaintNestedDisplayList::bounding_rect	luce-browser-render	display_list	paint_nested_display_list_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:346	ported
+Web::Painting::PaintNestedDisplayList::command_name	luce-browser-render	display_list	paint_nested_display_list_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:341	constant (str)
+Web::Painting::PaintNestedDisplayList::dump	luce-browser-render	display_list	paint_nested_display_list_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:149	ported
 Web::Painting::PaintOuterBoxShadow	luce-browser-render	display_list	PaintOuterBoxShadow	Libraries/LibWeb/Painting/DisplayListCommand.h:152	struct
-Web::Painting::PaintOuterBoxShadow::bounding_rect	luce-browser-render	display_list	paint_outer_box_shadow_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.cpp:11	stub
-Web::Painting::PaintOuterBoxShadow::command_name	luce-browser-render	display_list	paint_outer_box_shadow_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:153	variable
-Web::Painting::PaintOuterBoxShadow::dump	luce-browser-render	display_list	paint_outer_box_shadow_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:90	stub
+Web::Painting::PaintOuterBoxShadow::bounding_rect	luce-browser-render	display_list	paint_outer_box_shadow_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.cpp:11	ported
+Web::Painting::PaintOuterBoxShadow::command_name	luce-browser-render	display_list	paint_outer_box_shadow_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:153	constant (str)
+Web::Painting::PaintOuterBoxShadow::dump	luce-browser-render	display_list	paint_outer_box_shadow_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:90	ported
 Web::Painting::PaintRadialGradient	luce-browser-render	display_list	PaintRadialGradient	Libraries/LibWeb/Painting/DisplayListCommand.h:302	struct
-Web::Painting::PaintRadialGradient::bounding_rect	luce-browser-render	display_list	paint_radial_gradient_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:310	stub
-Web::Painting::PaintRadialGradient::command_name	luce-browser-render	display_list	paint_radial_gradient_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:303	variable
-Web::Painting::PaintRadialGradient::dump	luce-browser-render	display_list	paint_radial_gradient_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:80	stub
+Web::Painting::PaintRadialGradient::bounding_rect	luce-browser-render	display_list	paint_radial_gradient_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:310	ported
+Web::Painting::PaintRadialGradient::command_name	luce-browser-render	display_list	paint_radial_gradient_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:303	constant (str)
+Web::Painting::PaintRadialGradient::dump	luce-browser-render	display_list	paint_radial_gradient_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:80	ported
 Web::Painting::PaintScrollBar	luce-browser-render	display_list	PaintScrollBar	Libraries/LibWeb/Painting/DisplayListCommand.h:351	struct
-Web::Painting::PaintScrollBar::command_name	luce-browser-render	display_list	paint_scroll_bar_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:352	variable
-Web::Painting::PaintScrollBar::dump	luce-browser-render	display_list	paint_scroll_bar_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:154	stub
+Web::Painting::PaintScrollBar::command_name	luce-browser-render	display_list	paint_scroll_bar_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:352	constant (str)
+Web::Painting::PaintScrollBar::dump	luce-browser-render	display_list	paint_scroll_bar_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:154	ported
 Web::Painting::PaintTextShadow	luce-browser-render	display_list	PaintTextShadow	Libraries/LibWeb/Painting/DisplayListCommand.h:181	struct
-Web::Painting::PaintTextShadow::bounding_rect	luce-browser-render	display_list	paint_text_shadow_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:191	stub
-Web::Painting::PaintTextShadow::command_name	luce-browser-render	display_list	paint_text_shadow_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:182	variable
-Web::Painting::PaintTextShadow::dump	luce-browser-render	display_list	paint_text_shadow_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:100	stub
+Web::Painting::PaintTextShadow::bounding_rect	luce-browser-render	display_list	paint_text_shadow_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:191	ported
+Web::Painting::PaintTextShadow::command_name	luce-browser-render	display_list	paint_text_shadow_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:182	constant (str)
+Web::Painting::PaintTextShadow::dump	luce-browser-render	display_list	paint_text_shadow_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:100	ported
 Web::Painting::PerspectiveData	luce-browser-render	display_list	PerspectiveData	Libraries/LibWeb/Painting/AccumulatedVisualContext.h:53	struct
 Web::Painting::RadialGradientData	luce-browser-render	display_list	RadialGradientData	Libraries/LibWeb/Painting/GradientData.h:37	struct
 Web::Painting::Restore	luce-browser-render	display_list	Restore	Libraries/LibWeb/Painting/DisplayListCommand.h:116	struct
-Web::Painting::Restore::command_name	luce-browser-render	display_list	restore_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:117	variable
-Web::Painting::Restore::dump	luce-browser-render	display_list	restore_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:61	stub
+Web::Painting::Restore::command_name	luce-browser-render	display_list	restore_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:117	constant (str)
+Web::Painting::Restore::dump	luce-browser-render	display_list	restore_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:61	ported
 Web::Painting::Restore::nesting_level_change	luce-browser-render	display_list	restore_nesting_level_change	Libraries/LibWeb/Painting/DisplayListCommand.h:118	variable
 Web::Painting::SVGGradientPaintStyle	luce-browser-render	display_list	SvgGradientPaintStyle	Libraries/LibWeb/Painting/PaintStyle.h:31	struct
 Web::Painting::SVGGradientPaintStyle [default member initializers]	luce-browser-render	display_list	svg_gradient_paint_style_init_fields	Libraries/LibWeb/Painting/PaintStyle.h:31	init fields
 Web::Painting::SVGGradientPaintStyle::SpreadMethod	luce-browser-render	display_list	SvgGradientPaintStyleSpreadMethod	Libraries/LibWeb/Painting/PaintStyle.h:33	enum
-Web::Painting::SVGGradientPaintStyle::add_color_stop	luce-browser-render	display_list	svg_gradient_paint_style_add_color_stop_color_stop	Libraries/LibWeb/Painting/PaintStyle.h:50	stub
-Web::Painting::SVGGradientPaintStyle::add_color_stop	luce-browser-render	display_list	svg_gradient_paint_style_add_color_stop_f32	Libraries/LibWeb/Painting/PaintStyle.h:45	stub
-Web::Painting::SVGGradientPaintStyle::color_space	luce-browser-render	display_list	svg_gradient_paint_style_color_space	Libraries/LibWeb/Painting/PaintStyle.h:60	stub
-Web::Painting::SVGGradientPaintStyle::color_stops	luce-browser-render	display_list	svg_gradient_paint_style_color_stops	Libraries/LibWeb/Painting/PaintStyle.h:57	stub
-Web::Painting::SVGGradientPaintStyle::gradient_transform	luce-browser-render	display_list	svg_gradient_paint_style_gradient_transform	Libraries/LibWeb/Painting/PaintStyle.h:39	stub
-Web::Painting::SVGGradientPaintStyle::repeat_length	luce-browser-render	display_list	svg_gradient_paint_style_repeat_length	Libraries/LibWeb/Painting/PaintStyle.h:58	stub
-Web::Painting::SVGGradientPaintStyle::set_color_space	luce-browser-render	display_list	svg_gradient_paint_style_set_color_space	Libraries/LibWeb/Painting/PaintStyle.h:61	stub
-Web::Painting::SVGGradientPaintStyle::set_gradient_transform	luce-browser-render	display_list	svg_gradient_paint_style_set_gradient_transform	Libraries/LibWeb/Painting/PaintStyle.h:40	stub
-Web::Painting::SVGGradientPaintStyle::set_spread_method	luce-browser-render	display_list	svg_gradient_paint_style_set_spread_method	Libraries/LibWeb/Painting/PaintStyle.h:43	stub
-Web::Painting::SVGGradientPaintStyle::spread_method	luce-browser-render	display_list	svg_gradient_paint_style_spread_method	Libraries/LibWeb/Painting/PaintStyle.h:42	stub
+Web::Painting::SVGGradientPaintStyle::add_color_stop	luce-browser-render	display_list	svg_gradient_paint_style_add_color_stop_color_stop	Libraries/LibWeb/Painting/PaintStyle.h:50	ported
+Web::Painting::SVGGradientPaintStyle::add_color_stop	luce-browser-render	display_list	svg_gradient_paint_style_add_color_stop_f32	Libraries/LibWeb/Painting/PaintStyle.h:45	ported
+Web::Painting::SVGGradientPaintStyle::color_space	luce-browser-render	display_list	svg_gradient_paint_style_color_space	Libraries/LibWeb/Painting/PaintStyle.h:60	ported
+Web::Painting::SVGGradientPaintStyle::color_stops	luce-browser-render	display_list	svg_gradient_paint_style_color_stops	Libraries/LibWeb/Painting/PaintStyle.h:57	ported
+Web::Painting::SVGGradientPaintStyle::gradient_transform	luce-browser-render	display_list	svg_gradient_paint_style_gradient_transform	Libraries/LibWeb/Painting/PaintStyle.h:39	ported
+Web::Painting::SVGGradientPaintStyle::repeat_length	luce-browser-render	display_list	svg_gradient_paint_style_repeat_length	Libraries/LibWeb/Painting/PaintStyle.h:58	ported
+Web::Painting::SVGGradientPaintStyle::set_color_space	luce-browser-render	display_list	svg_gradient_paint_style_set_color_space	Libraries/LibWeb/Painting/PaintStyle.h:61	ported
+Web::Painting::SVGGradientPaintStyle::set_gradient_transform	luce-browser-render	display_list	svg_gradient_paint_style_set_gradient_transform	Libraries/LibWeb/Painting/PaintStyle.h:40	ported
+Web::Painting::SVGGradientPaintStyle::set_spread_method	luce-browser-render	display_list	svg_gradient_paint_style_set_spread_method	Libraries/LibWeb/Painting/PaintStyle.h:43	ported
+Web::Painting::SVGGradientPaintStyle::spread_method	luce-browser-render	display_list	svg_gradient_paint_style_spread_method	Libraries/LibWeb/Painting/PaintStyle.h:42	ported
 Web::Painting::SVGLinearGradientPaintStyle	luce-browser-render	display_list	SvgLinearGradientPaintStyle	Libraries/LibWeb/Painting/PaintStyle.h:74	struct
 Web::Painting::SVGLinearGradientPaintStyle::SVGLinearGradientPaintStyle	luce-browser-render	display_list	svg_linear_gradient_paint_style_construct	Libraries/LibWeb/Painting/PaintStyle.h:88	construct
-Web::Painting::SVGLinearGradientPaintStyle::create	luce-browser-render	display_list	svg_linear_gradient_paint_style_create	Libraries/LibWeb/Painting/PaintStyle.h:76	stub
-Web::Painting::SVGLinearGradientPaintStyle::end_point	luce-browser-render	display_list	svg_linear_gradient_paint_style_end_point	Libraries/LibWeb/Painting/PaintStyle.h:82	stub
-Web::Painting::SVGLinearGradientPaintStyle::set_end_point	luce-browser-render	display_list	svg_linear_gradient_paint_style_set_end_point	Libraries/LibWeb/Painting/PaintStyle.h:85	stub
-Web::Painting::SVGLinearGradientPaintStyle::set_start_point	luce-browser-render	display_list	svg_linear_gradient_paint_style_set_start_point	Libraries/LibWeb/Painting/PaintStyle.h:84	stub
-Web::Painting::SVGLinearGradientPaintStyle::start_point	luce-browser-render	display_list	svg_linear_gradient_paint_style_start_point	Libraries/LibWeb/Painting/PaintStyle.h:81	stub
+Web::Painting::SVGLinearGradientPaintStyle::create	luce-browser-render	display_list	svg_linear_gradient_paint_style_create	Libraries/LibWeb/Painting/PaintStyle.h:76	ported
+Web::Painting::SVGLinearGradientPaintStyle::end_point	luce-browser-render	display_list	svg_linear_gradient_paint_style_end_point	Libraries/LibWeb/Painting/PaintStyle.h:82	ported
+Web::Painting::SVGLinearGradientPaintStyle::set_end_point	luce-browser-render	display_list	svg_linear_gradient_paint_style_set_end_point	Libraries/LibWeb/Painting/PaintStyle.h:85	ported
+Web::Painting::SVGLinearGradientPaintStyle::set_start_point	luce-browser-render	display_list	svg_linear_gradient_paint_style_set_start_point	Libraries/LibWeb/Painting/PaintStyle.h:84	ported
+Web::Painting::SVGLinearGradientPaintStyle::start_point	luce-browser-render	display_list	svg_linear_gradient_paint_style_start_point	Libraries/LibWeb/Painting/PaintStyle.h:81	ported
 Web::Painting::SVGPaintServerPaintStyle	luce-browser-render	display_list	SvgPaintServerPaintStyle	Libraries/LibWeb/Painting/PaintStyle.h:20	struct
 Web::Painting::SVGPatternPaintStyle	luce-browser-render	display_list	SvgPatternPaintStyle	Libraries/LibWeb/Painting/PaintStyle.h:130	struct
 Web::Painting::SVGPatternPaintStyle::SVGPatternPaintStyle	luce-browser-render	display_list	svg_pattern_paint_style_construct	Libraries/LibWeb/Painting/PaintStyle.cpp:17	construct
-Web::Painting::SVGPatternPaintStyle::create	luce-browser-render	display_list	svg_pattern_paint_style_create	Libraries/LibWeb/Painting/PaintStyle.cpp:12	stub
-Web::Painting::SVGPatternPaintStyle::pattern_transform	luce-browser-render	display_list	svg_pattern_paint_style_pattern_transform	Libraries/LibWeb/Painting/PaintStyle.h:138	stub
-Web::Painting::SVGPatternPaintStyle::tile_display_list	luce-browser-render	display_list	svg_pattern_paint_style_tile_display_list	Libraries/LibWeb/Painting/PaintStyle.h:136	stub
-Web::Painting::SVGPatternPaintStyle::tile_rect	luce-browser-render	display_list	svg_pattern_paint_style_tile_rect	Libraries/LibWeb/Painting/PaintStyle.h:137	stub
+Web::Painting::SVGPatternPaintStyle::create	luce-browser-render	display_list	svg_pattern_paint_style_create	Libraries/LibWeb/Painting/PaintStyle.cpp:12	ported
+Web::Painting::SVGPatternPaintStyle::pattern_transform	luce-browser-render	display_list	svg_pattern_paint_style_pattern_transform	Libraries/LibWeb/Painting/PaintStyle.h:138	ported
+Web::Painting::SVGPatternPaintStyle::tile_display_list	luce-browser-render	display_list	svg_pattern_paint_style_tile_display_list	Libraries/LibWeb/Painting/PaintStyle.h:136	ported
+Web::Painting::SVGPatternPaintStyle::tile_rect	luce-browser-render	display_list	svg_pattern_paint_style_tile_rect	Libraries/LibWeb/Painting/PaintStyle.h:137	ported
 Web::Painting::SVGRadialGradientPaintStyle	luce-browser-render	display_list	SvgRadialGradientPaintStyle	Libraries/LibWeb/Painting/PaintStyle.h:98	struct
 Web::Painting::SVGRadialGradientPaintStyle::SVGRadialGradientPaintStyle	luce-browser-render	display_list	svg_radial_gradient_paint_style_construct	Libraries/LibWeb/Painting/PaintStyle.h:116	construct
-Web::Painting::SVGRadialGradientPaintStyle::create	luce-browser-render	display_list	svg_radial_gradient_paint_style_create	Libraries/LibWeb/Painting/PaintStyle.h:100	stub
-Web::Painting::SVGRadialGradientPaintStyle::end_center	luce-browser-render	display_list	svg_radial_gradient_paint_style_end_center	Libraries/LibWeb/Painting/PaintStyle.h:107	stub
-Web::Painting::SVGRadialGradientPaintStyle::end_radius	luce-browser-render	display_list	svg_radial_gradient_paint_style_end_radius	Libraries/LibWeb/Painting/PaintStyle.h:108	stub
-Web::Painting::SVGRadialGradientPaintStyle::set_end_center	luce-browser-render	display_list	svg_radial_gradient_paint_style_set_end_center	Libraries/LibWeb/Painting/PaintStyle.h:112	stub
-Web::Painting::SVGRadialGradientPaintStyle::set_end_radius	luce-browser-render	display_list	svg_radial_gradient_paint_style_set_end_radius	Libraries/LibWeb/Painting/PaintStyle.h:113	stub
-Web::Painting::SVGRadialGradientPaintStyle::set_start_center	luce-browser-render	display_list	svg_radial_gradient_paint_style_set_start_center	Libraries/LibWeb/Painting/PaintStyle.h:110	stub
-Web::Painting::SVGRadialGradientPaintStyle::set_start_radius	luce-browser-render	display_list	svg_radial_gradient_paint_style_set_start_radius	Libraries/LibWeb/Painting/PaintStyle.h:111	stub
-Web::Painting::SVGRadialGradientPaintStyle::start_center	luce-browser-render	display_list	svg_radial_gradient_paint_style_start_center	Libraries/LibWeb/Painting/PaintStyle.h:105	stub
-Web::Painting::SVGRadialGradientPaintStyle::start_radius	luce-browser-render	display_list	svg_radial_gradient_paint_style_start_radius	Libraries/LibWeb/Painting/PaintStyle.h:106	stub
+Web::Painting::SVGRadialGradientPaintStyle::create	luce-browser-render	display_list	svg_radial_gradient_paint_style_create	Libraries/LibWeb/Painting/PaintStyle.h:100	ported
+Web::Painting::SVGRadialGradientPaintStyle::end_center	luce-browser-render	display_list	svg_radial_gradient_paint_style_end_center	Libraries/LibWeb/Painting/PaintStyle.h:107	ported
+Web::Painting::SVGRadialGradientPaintStyle::end_radius	luce-browser-render	display_list	svg_radial_gradient_paint_style_end_radius	Libraries/LibWeb/Painting/PaintStyle.h:108	ported
+Web::Painting::SVGRadialGradientPaintStyle::set_end_center	luce-browser-render	display_list	svg_radial_gradient_paint_style_set_end_center	Libraries/LibWeb/Painting/PaintStyle.h:112	ported
+Web::Painting::SVGRadialGradientPaintStyle::set_end_radius	luce-browser-render	display_list	svg_radial_gradient_paint_style_set_end_radius	Libraries/LibWeb/Painting/PaintStyle.h:113	ported
+Web::Painting::SVGRadialGradientPaintStyle::set_start_center	luce-browser-render	display_list	svg_radial_gradient_paint_style_set_start_center	Libraries/LibWeb/Painting/PaintStyle.h:110	ported
+Web::Painting::SVGRadialGradientPaintStyle::set_start_radius	luce-browser-render	display_list	svg_radial_gradient_paint_style_set_start_radius	Libraries/LibWeb/Painting/PaintStyle.h:111	ported
+Web::Painting::SVGRadialGradientPaintStyle::start_center	luce-browser-render	display_list	svg_radial_gradient_paint_style_start_center	Libraries/LibWeb/Painting/PaintStyle.h:105	ported
+Web::Painting::SVGRadialGradientPaintStyle::start_radius	luce-browser-render	display_list	svg_radial_gradient_paint_style_start_radius	Libraries/LibWeb/Painting/PaintStyle.h:106	ported
 Web::Painting::Save	luce-browser-render	display_list	Save	Libraries/LibWeb/Painting/DisplayListCommand.h:102	struct
-Web::Painting::Save::command_name	luce-browser-render	display_list	save_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:103	variable
-Web::Painting::Save::dump	luce-browser-render	display_list	save_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:53	stub
+Web::Painting::Save::command_name	luce-browser-render	display_list	save_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:103	constant (str)
+Web::Painting::Save::dump	luce-browser-render	display_list	save_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:53	ported
 Web::Painting::Save::nesting_level_change	luce-browser-render	display_list	save_nesting_level_change	Libraries/LibWeb/Painting/DisplayListCommand.h:104	variable
 Web::Painting::SaveLayer	luce-browser-render	display_list	SaveLayer	Libraries/LibWeb/Painting/DisplayListCommand.h:109	struct
-Web::Painting::SaveLayer::command_name	luce-browser-render	display_list	save_layer_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:110	variable
-Web::Painting::SaveLayer::dump	luce-browser-render	display_list	save_layer_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:57	stub
+Web::Painting::SaveLayer::command_name	luce-browser-render	display_list	save_layer_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:110	constant (str)
+Web::Painting::SaveLayer::dump	luce-browser-render	display_list	save_layer_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:57	ported
 Web::Painting::SaveLayer::nesting_level_change	luce-browser-render	display_list	save_layer_nesting_level_change	Libraries/LibWeb/Painting/DisplayListCommand.h:111	variable
 Web::Painting::ScrollData	luce-browser-render	display_list	ScrollData	Libraries/LibWeb/Painting/AccumulatedVisualContext.h:30	struct
 Web::Painting::ScrollFrame	luce-browser-render	display_list	ScrollFrame	Libraries/LibWeb/Painting/ScrollFrame.h:34	struct
-Web::Painting::ScrollFrame::has_sticky_constraints	luce-browser-render	display_list	scroll_frame_has_sticky_constraints	Libraries/LibWeb/Painting/ScrollFrame.h:53	stub
-Web::Painting::ScrollFrame::is_sticky	luce-browser-render	display_list	scroll_frame_is_sticky	Libraries/LibWeb/Painting/ScrollFrame.h:41	stub
-Web::Painting::ScrollFrame::own_offset	luce-browser-render	display_list	scroll_frame_own_offset	Libraries/LibWeb/Painting/ScrollFrame.h:43	stub
-Web::Painting::ScrollFrame::parent_index	luce-browser-render	display_list	scroll_frame_parent_index	Libraries/LibWeb/Painting/ScrollFrame.h:50	stub
-Web::Painting::ScrollFrame::set_own_offset	luce-browser-render	display_list	scroll_frame_set_own_offset	Libraries/LibWeb/Painting/ScrollFrame.h:45	stub
-Web::Painting::ScrollFrame::set_sticky_constraints	luce-browser-render	display_list	scroll_frame_set_sticky_constraints	Libraries/LibWeb/Painting/ScrollFrame.h:52	stub
-Web::Painting::ScrollFrame::sticky_constraints	luce-browser-render	display_list	scroll_frame_sticky_constraints	Libraries/LibWeb/Painting/ScrollFrame.h:54	stub
+Web::Painting::ScrollFrame::has_sticky_constraints	luce-browser-render	display_list	scroll_frame_has_sticky_constraints	Libraries/LibWeb/Painting/ScrollFrame.h:53	ported
+Web::Painting::ScrollFrame::is_sticky	luce-browser-render	display_list	scroll_frame_is_sticky	Libraries/LibWeb/Painting/ScrollFrame.h:41	ported
+Web::Painting::ScrollFrame::own_offset	luce-browser-render	display_list	scroll_frame_own_offset	Libraries/LibWeb/Painting/ScrollFrame.h:43	ported
+Web::Painting::ScrollFrame::parent_index	luce-browser-render	display_list	scroll_frame_parent_index	Libraries/LibWeb/Painting/ScrollFrame.h:50	ported
+Web::Painting::ScrollFrame::set_own_offset	luce-browser-render	display_list	scroll_frame_set_own_offset	Libraries/LibWeb/Painting/ScrollFrame.h:45	ported
+Web::Painting::ScrollFrame::set_sticky_constraints	luce-browser-render	display_list	scroll_frame_set_sticky_constraints	Libraries/LibWeb/Painting/ScrollFrame.h:52	ported
+Web::Painting::ScrollFrame::sticky_constraints	luce-browser-render	display_list	scroll_frame_sticky_constraints	Libraries/LibWeb/Painting/ScrollFrame.h:54	ported
 Web::Painting::ScrollFrameIndex_decl	luce-browser-render	display_list	ScrollFrameIndexDecl	Libraries/LibWeb/Painting/ScrollFrame.h:16	struct
 Web::Painting::ScrollState	luce-browser-render	display_list	ScrollState	Libraries/LibWeb/Painting/ScrollState.h:29	struct
 Web::Painting::ScrollState::ScrollState	luce-browser-render	display_list	scroll_state_construct	Libraries/LibWeb/Painting/ScrollState.h:34	construct
-Web::Painting::ScrollState::clear	luce-browser-render	display_list	scroll_state_clear	Libraries/LibWeb/Painting/ScrollState.h:97	stub
-Web::Painting::ScrollState::cumulative_offset	luce-browser-render	display_list	scroll_state_cumulative_offset	Libraries/LibWeb/Painting/ScrollState.h:56	stub
-Web::Painting::ScrollState::for_each_scroll_frame	luce-browser-render	display_list	scroll_state_for_each_scroll_frame	Libraries/LibWeb/Painting/ScrollState.h:78	stub
-Web::Painting::ScrollState::for_each_sticky_frame	luce-browser-render	display_list	scroll_state_for_each_sticky_frame	Libraries/LibWeb/Painting/ScrollState.h:88	stub
-Web::Painting::ScrollState::frame_at	luce-browser-render	display_list	scroll_state_frame_at	Libraries/LibWeb/Painting/ScrollState.h:54	stub
-Web::Painting::ScrollState::frame_at	luce-browser-render	display_list	scroll_state_frame_at_const	Libraries/LibWeb/Painting/ScrollState.h:53	stub
-Web::Painting::ScrollState::nearest_scrolling_ancestor	luce-browser-render	display_list	scroll_state_nearest_scrolling_ancestor	Libraries/LibWeb/Painting/ScrollState.h:66	stub
-Web::Painting::ScrollState::snapshot	luce-browser-render	display_list	scroll_state_snapshot	Libraries/LibWeb/Painting/ScrollState.h:105	stub
+Web::Painting::ScrollState::clear	luce-browser-render	display_list	scroll_state_clear	Libraries/LibWeb/Painting/ScrollState.h:97	ported
+Web::Painting::ScrollState::cumulative_offset	luce-browser-render	display_list	scroll_state_cumulative_offset	Libraries/LibWeb/Painting/ScrollState.h:56	ported
+Web::Painting::ScrollState::for_each_scroll_frame	luce-browser-render	display_list	scroll_state_for_each_scroll_frame	Libraries/LibWeb/Painting/ScrollState.h:78	ported
+Web::Painting::ScrollState::for_each_sticky_frame	luce-browser-render	display_list	scroll_state_for_each_sticky_frame	Libraries/LibWeb/Painting/ScrollState.h:88	ported
+Web::Painting::ScrollState::frame_at	luce-browser-render	display_list	scroll_state_frame_at	Libraries/LibWeb/Painting/ScrollState.h:54	ported
+Web::Painting::ScrollState::frame_at	luce-browser-render	display_list	scroll_state_frame_at_const	Libraries/LibWeb/Painting/ScrollState.h:53	ported
+Web::Painting::ScrollState::nearest_scrolling_ancestor	luce-browser-render	display_list	scroll_state_nearest_scrolling_ancestor	Libraries/LibWeb/Painting/ScrollState.h:66	ported
+Web::Painting::ScrollState::snapshot	luce-browser-render	display_list	scroll_state_snapshot	Libraries/LibWeb/Painting/ScrollState.h:105	ported
 Web::Painting::ScrollStateSnapshot	luce-browser-render	display_list	ScrollStateSnapshot	Libraries/LibWeb/Painting/ScrollState.h:14	struct
-Web::Painting::ScrollStateSnapshot::create	luce-browser-render	display_list	scroll_state_snapshot_create	Libraries/LibWeb/Painting/ScrollState.cpp:12	stub
-Web::Painting::ScrollStateSnapshot::device_offset_for_index	luce-browser-render	display_list	scroll_state_snapshot_device_offset_for_index	Libraries/LibWeb/Painting/ScrollState.h:18	stub
+Web::Painting::ScrollStateSnapshot::create	luce-browser-render	display_list	scroll_state_snapshot_create	Libraries/LibWeb/Painting/ScrollState.cpp:12	ported
+Web::Painting::ScrollStateSnapshot::device_offset_for_index	luce-browser-render	display_list	scroll_state_snapshot_device_offset_for_index	Libraries/LibWeb/Painting/ScrollState.h:18	ported
 Web::Painting::ShouldAntiAlias	luce-browser-render	display_list	ShouldAntiAlias	Libraries/LibWeb/Painting/ShouldAntiAlias.h:11	enum
 Web::Painting::StickyConstraints	luce-browser-render	display_list	StickyConstraints	Libraries/LibWeb/Painting/ScrollFrame.h:25	struct
 Web::Painting::StickyInsets	luce-browser-render	display_list	StickyInsets	Libraries/LibWeb/Painting/ScrollFrame.h:18	struct
 Web::Painting::StrokePath	luce-browser-render	display_list	StrokePath	Libraries/LibWeb/Painting/DisplayListCommand.h:221	struct
-Web::Painting::StrokePath::bounding_rect	luce-browser-render	display_list	stroke_path_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:236	stub
-Web::Painting::StrokePath::command_name	luce-browser-render	display_list	stroke_path_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:222	variable
-Web::Painting::StrokePath::dump	luce-browser-render	display_list	stroke_path_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:115	stub
+Web::Painting::StrokePath::bounding_rect	luce-browser-render	display_list	stroke_path_bounding_rect	Libraries/LibWeb/Painting/DisplayListCommand.h:236	ported
+Web::Painting::StrokePath::command_name	luce-browser-render	display_list	stroke_path_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:222	constant (str)
+Web::Painting::StrokePath::dump	luce-browser-render	display_list	stroke_path_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:115	ported
 Web::Painting::TransformData	luce-browser-render	display_list	TransformData	Libraries/LibWeb/Painting/AccumulatedVisualContext.h:48	struct
 Web::Painting::Translate	luce-browser-render	display_list	Translate	Libraries/LibWeb/Painting/DisplayListCommand.h:123	struct
-Web::Painting::Translate::command_name	luce-browser-render	display_list	translate_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:124	variable
-Web::Painting::Translate::dump	luce-browser-render	display_list	translate_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:65	stub
+Web::Painting::Translate::command_name	luce-browser-render	display_list	translate_command_name	Libraries/LibWeb/Painting/DisplayListCommand.h:124	constant (str)
+Web::Painting::Translate::dump	luce-browser-render	display_list	translate_dump	Libraries/LibWeb/Painting/DisplayListCommand.cpp:65	ported
 Web::Painting::VisualContextIndex_decl	luce-browser-render	display_list	VisualContextIndexDecl	Libraries/LibWeb/Painting/AccumulatedVisualContext.h:28	struct
-Web::Painting::add_spread_distance_to_border_radius	luce-browser-render	display_list	add_spread_distance_to_border_radius	Libraries/LibWeb/Painting/BorderRadiiData.cpp:22	stub
-Web::Painting::command_bounding_rectangle	luce-browser-render	display_list	command_bounding_rectangle	Libraries/LibWeb/Painting/DisplayList.cpp:21	stub
-Web::Painting::command_is_clip	luce-browser-render	display_list	command_is_clip	Libraries/LibWeb/Painting/DisplayList.cpp:32	stub
-Web::Painting::command_nesting_level_change	luce-browser-render	display_list	command_nesting_level_change	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:56	stub
+Web::Painting::add_spread_distance_to_border_radius	luce-browser-render	display_list	add_spread_distance_to_border_radius	Libraries/LibWeb/Painting/BorderRadiiData.cpp:22	ported
+Web::Painting::command_bounding_rectangle	luce-browser-render	display_list	command_bounding_rectangle	Libraries/LibWeb/Painting/DisplayList.cpp:21	ported
+Web::Painting::command_is_clip	luce-browser-render	display_list	command_is_clip	Libraries/LibWeb/Painting/DisplayList.cpp:32	ported
+Web::Painting::command_nesting_level_change	luce-browser-render	display_list	command_nesting_level_change	Libraries/LibWeb/Painting/DisplayListRecorder.cpp:56	ported
 Web::operator!=	luce-browser-render	gfx	ne	Libraries/LibWeb/PixelUnits.h:32	stub
 Web::operator%	luce-browser-render	gfx	rem	Libraries/LibWeb/PixelUnits.h:55	stub
 Web::operator*	luce-browser-render	gfx	mul_css_pixels_f32	Libraries/LibWeb/PixelUnits.h:297	stub

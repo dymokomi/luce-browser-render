@@ -1,0 +1,101 @@
+#==============================================================================================
+#
+#   cpu_blur - Gaussian blur of pixmaps and coverage masks
+#
+#   DESCRIPTION:
+#       New code for DisplayListPlayerCpu (DESIGN.md §7.3): the blur behind Skia's
+#       SkMaskFilter::MakeBlur (box shadows) and SkImageFilters::Blur (text shadows, CSS
+#       blur()). Like Skia's raster blur for all but tiny sigmas, the Gaussian is
+#       approximated by three successive box blurs, with the window sizes of the SVG and
+#       Filter Effects specifications: d = floor(sigma * 3 * sqrt(2 * pi) / 4 + 0.5); for an
+#       odd d, three centred boxes of width d; for an even d, two boxes of width d offset
+#       half a pixel left and right, then one centred box of width d + 1. Each channel is
+#       blurred on its own, premultiplied, and pixels outside the buffer count as
+#       transparent.
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+## The box width d for a Gaussian of standard deviation `sigma`.
+func cpu_blur_box_width(sigma: f32) -> usize:
+    if not (sigma > 0.0):
+        return 0
+    let d = math32.floor(sigma * 3.0 * 2.5066282746310002 / 4.0 + 0.5)
+    if d < 1.0:
+        return 0
+    if d > 4096.0:
+        return 4096
+    return (usize)d
+
+## Blurs `pixmap`'s four channels by `sigma_x` horizontally and `sigma_y` vertically.
+func cpu_blur_pixmap(pixmap: raster.Pixmap*, sigma_x: f32, sigma_y: f32):
+    let width = (usize)pixmap.width()
+    let height = (usize)pixmap.height()
+    cpu_blur_bytes(pixmap.data_mut(), width, height, 4, sigma_x, sigma_y)
+
+## Blurs a coverage mask by `sigma` in both directions.
+func cpu_blur_mask(mask: raster.Mask*, sigma: f32):
+    let width = (usize)mask.width()
+    let height = (usize)mask.height()
+    cpu_blur_bytes(mask.data_mut(), width, height, 1, sigma, sigma)
+
+## Blurs an image of `width` x `height` pixels of `channels` bytes each, rows packed.
+func cpu_blur_bytes(data: u8[], width: usize, height: usize, channels: usize, sigma_x: f32, sigma_y: f32):
+    let dx = cpu_blur_box_width(sigma_x)
+    let dy = cpu_blur_box_width(sigma_y)
+    let longest = width if width > height else height
+    if longest == 0:
+        return
+    let line = (new u32[longest] in memory.heap) else trap("out of memory")
+    defer free(line) in memory.heap
+    let scratch = (new u32[longest] in memory.heap) else trap("out of memory")
+    defer free(scratch) in memory.heap
+    if dx > 0:
+        for y in 0..<height:
+            for c in 0..<channels:
+                cpu_blur_line(data, y * width * channels + c, channels, width, dx, line, scratch)
+    if dy > 0:
+        for x in 0..<width:
+            for c in 0..<channels:
+                cpu_blur_line(data, x * channels + c, width * channels, height, dy, line, scratch)
+
+## Blurs the `count` bytes of `data` at `start`, `start + stride`, ... with the three box
+## passes for width `d`.
+func cpu_blur_line(data: u8[], start: usize, stride: usize, count: usize, d: usize, line: u32[], scratch: u32[]):
+    for i in 0..<count:
+        line[i] = data[start + i * stride]
+    let half = d // 2
+    if d % 2 == 1:
+        cpu_box_pass(line, scratch, count, half, half, d)
+        cpu_box_pass(scratch, line, count, half, half, d)
+        cpu_box_pass(line, scratch, count, half, half, d)
+    else:
+        # The first box covers [x - d/2, x + d/2 - 1], the second [x - d/2 + 1, x + d/2],
+        # the third [x - d/2, x + d/2] (width d + 1).
+        cpu_box_pass(line, scratch, count, half, half - 1, d)
+        cpu_box_pass(scratch, line, count, half - 1, half, d)
+        cpu_box_pass(line, scratch, count, half, half, d + 1)
+    for i in 0..<count:
+        data[start + i * stride] = (u8)scratch[i]
+
+## One box pass over `count` values: `output[x]` is the rounded mean of `input[x - left]`
+## through `input[x + right]` (a window of `width` = left + right + 1 values), values
+## outside [0, count) being zero.
+func cpu_box_pass(input: const u32[], output: u32[], count: usize, left: usize, right: usize, width: usize):
+    var sum: u32 = 0
+    # The window of x = 0 is [-left, right].
+    var i: usize = 0
+    while i <= right and i < count:
+        sum += input[i]
+        i += 1
+    let rounding = (u32)(width // 2)
+    for x in 0..<count:
+        output[x] = (sum + rounding) // (u32)width
+        # Slide the window: add x + 1 + right, drop x - left.
+        let incoming = x + 1 + right
+        if incoming < count:
+            sum += input[incoming]
+        if x >= left:
+            sum -= input[x - left]

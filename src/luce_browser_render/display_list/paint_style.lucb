@@ -1,0 +1,181 @@
+#==============================================================================================
+#
+#   paint_style - SVG paint servers: gradients and patterns, as the player consumes them
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibWeb/Painting/PaintStyle.h (lines 1-148) and PaintStyle.cpp
+#       (lines 1-26). The paint styles are a ref-counted class hierarchy without virtuals
+#       beyond the destructor: each object carries its vtable and class id (DESIGN.md §2.3),
+#       set by its `create`, which the `is_`/`as_` helpers of types_paint_style.lucb read.
+#       Reference counting is dropped (managed memory, §3.3).
+#
+#       Copyright (c) 2024, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
+#       Copyright (c) 2026, Tim Ledbetter <tim.ledbetter@ladybird.org>
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+# mark: SVGGradientPaintStyle ==================================================================
+
+## The SVGPaintServerPaintStyle header of a new object of the class `info` whose vtable is
+## `vtable` (the vptr and class id C++ sets while constructing).
+func svg_paint_server_paint_style_header(vtable: const void*, info: const ak.ClassInfo*) -> SvgPaintServerPaintStyle:
+    return SvgPaintServerPaintStyle(vtable = (const SvgPaintServerPaintStyleVTable*)vtable, class_id = info.first_id)
+
+## SVGGradientPaintStyle's default member initializers, below the header `base`.
+func svg_gradient_paint_style_default(base: SvgPaintServerPaintStyle) -> SvgGradientPaintStyle:
+    var gradient = SvgGradientPaintStyle(svg_paint_server_paint_style_base = base)
+    svg_gradient_paint_style_init_fields(&gradient)
+    return gradient
+
+## Ported from Libraries/LibWeb/Painting/PaintStyle.h:39 Web::Painting::SVGGradientPaintStyle::gradient_transform.
+pub func svg_gradient_paint_style_gradient_transform(this: const SvgGradientPaintStyle*) -> gfx.AffineTransform?:
+    return this.m_gradient_transform
+
+## Ported from Libraries/LibWeb/Painting/PaintStyle.h:40 Web::Painting::SVGGradientPaintStyle::set_gradient_transform.
+pub func svg_gradient_paint_style_set_gradient_transform(this: SvgGradientPaintStyle*, transform: gfx.AffineTransform):
+    this.m_gradient_transform = transform
+
+## Ported from Libraries/LibWeb/Painting/PaintStyle.h:42 Web::Painting::SVGGradientPaintStyle::spread_method.
+pub func svg_gradient_paint_style_spread_method(this: const SvgGradientPaintStyle*) -> SvgGradientPaintStyleSpreadMethod:
+    return this.m_spread_method
+
+## Ported from Libraries/LibWeb/Painting/PaintStyle.h:43 Web::Painting::SVGGradientPaintStyle::set_spread_method.
+pub func svg_gradient_paint_style_set_spread_method(this: SvgGradientPaintStyle*, spread_method: SvgGradientPaintStyleSpreadMethod):
+    this.m_spread_method = spread_method
+
+## Ported from Libraries/LibWeb/Painting/PaintStyle.h:45 Web::Painting::SVGGradientPaintStyle::add_color_stop.
+pub func svg_gradient_paint_style_add_color_stop_f32(this: SvgGradientPaintStyle*, position: f32, color: gfx.Color, transition_hint: f32? = none):
+    svg_gradient_paint_style_add_color_stop_color_stop(this, ColorStop(color = color, position = position, transition_hint = transition_hint))
+
+## The `quick_sort` comparator of `add_color_stop`: `a.position < b.position`.
+func color_stop_position_less(context: void*?, a: const ColorStop*, b: const ColorStop*) -> bool:
+    return a.position < b.position
+
+## Ported from Libraries/LibWeb/Painting/PaintStyle.h:50 Web::Painting::SVGGradientPaintStyle::add_color_stop.
+pub func svg_gradient_paint_style_add_color_stop_color_stop(this: SvgGradientPaintStyle*, stop: ColorStop, sort: bool = true):
+    ak.vector_append_t(&this.m_color_stops, stop)
+    if sort:
+        let less = ak.Function2[const ColorStop*, const ColorStop*, bool](call = color_stop_position_less, context = none)
+        ak.quick_sort_t_collection_t_less_than(ak.vector_span(&this.m_color_stops), less)
+
+## Ported from Libraries/LibWeb/Painting/PaintStyle.h:57 Web::Painting::SVGGradientPaintStyle::color_stops.
+pub func svg_gradient_paint_style_color_stops(this: const SvgGradientPaintStyle*) -> const ColorStop[]:
+    return ak.vector_span_const(&this.m_color_stops)
+
+## Ported from Libraries/LibWeb/Painting/PaintStyle.h:58 Web::Painting::SVGGradientPaintStyle::repeat_length.
+pub func svg_gradient_paint_style_repeat_length(this: const SvgGradientPaintStyle*) -> f32?:
+    return this.m_repeat_length
+
+## Ported from Libraries/LibWeb/Painting/PaintStyle.h:60 Web::Painting::SVGGradientPaintStyle::color_space.
+pub func svg_gradient_paint_style_color_space(this: const SvgGradientPaintStyle*) -> gfx.InterpolationColorSpace:
+    return this.m_color_space
+
+## Ported from Libraries/LibWeb/Painting/PaintStyle.h:61 Web::Painting::SVGGradientPaintStyle::set_color_space.
+pub func svg_gradient_paint_style_set_color_space(this: SvgGradientPaintStyle*, color_space: gfx.InterpolationColorSpace):
+    this.m_color_space = color_space
+
+# mark: SVGLinearGradientPaintStyle ============================================================
+
+## Ported from Libraries/LibWeb/Painting/PaintStyle.h:76 Web::Painting::SVGLinearGradientPaintStyle::create.
+pub func svg_linear_gradient_paint_style_create(start_point: gfx.FloatPoint, end_point: gfx.FloatPoint) -> SvgLinearGradientPaintStyle*:
+    let header = svg_paint_server_paint_style_header(&svg_linear_gradient_paint_style_vtable, &svg_linear_gradient_paint_style_class)
+    let this = new SvgLinearGradientPaintStyle(svg_gradient_paint_style_base = svg_gradient_paint_style_default(header)) else trap("out of memory")
+    svg_linear_gradient_paint_style_construct(this, start_point, end_point)
+    return this
+
+## Ported from Libraries/LibWeb/Painting/PaintStyle.h:81 Web::Painting::SVGLinearGradientPaintStyle::start_point.
+pub func svg_linear_gradient_paint_style_start_point(this: const SvgLinearGradientPaintStyle*) -> gfx.FloatPoint:
+    return this.m_start_point
+
+## Ported from Libraries/LibWeb/Painting/PaintStyle.h:82 Web::Painting::SVGLinearGradientPaintStyle::end_point.
+pub func svg_linear_gradient_paint_style_end_point(this: const SvgLinearGradientPaintStyle*) -> gfx.FloatPoint:
+    return this.m_end_point
+
+## Ported from Libraries/LibWeb/Painting/PaintStyle.h:84 Web::Painting::SVGLinearGradientPaintStyle::set_start_point.
+pub func svg_linear_gradient_paint_style_set_start_point(this: SvgLinearGradientPaintStyle*, start_point: gfx.FloatPoint):
+    this.m_start_point = start_point
+
+## Ported from Libraries/LibWeb/Painting/PaintStyle.h:85 Web::Painting::SVGLinearGradientPaintStyle::set_end_point.
+pub func svg_linear_gradient_paint_style_set_end_point(this: SvgLinearGradientPaintStyle*, end_point: gfx.FloatPoint):
+    this.m_end_point = end_point
+
+## Ported from Libraries/LibWeb/Painting/PaintStyle.h:88 Web::Painting::SVGLinearGradientPaintStyle::SVGLinearGradientPaintStyle.
+func svg_linear_gradient_paint_style_construct(this: SvgLinearGradientPaintStyle*, start_point: gfx.FloatPoint, end_point: gfx.FloatPoint):
+    this.m_start_point = start_point
+    this.m_end_point = end_point
+
+# mark: SVGRadialGradientPaintStyle ============================================================
+
+## Ported from Libraries/LibWeb/Painting/PaintStyle.h:100 Web::Painting::SVGRadialGradientPaintStyle::create.
+pub func svg_radial_gradient_paint_style_create(start_center: gfx.FloatPoint, start_radius: f32, end_center: gfx.FloatPoint, end_radius: f32) -> SvgRadialGradientPaintStyle*:
+    let header = svg_paint_server_paint_style_header(&svg_radial_gradient_paint_style_vtable, &svg_radial_gradient_paint_style_class)
+    let this = new SvgRadialGradientPaintStyle(svg_gradient_paint_style_base = svg_gradient_paint_style_default(header)) else trap("out of memory")
+    svg_radial_gradient_paint_style_construct(this, start_center, start_radius, end_center, end_radius)
+    return this
+
+## Ported from Libraries/LibWeb/Painting/PaintStyle.h:105 Web::Painting::SVGRadialGradientPaintStyle::start_center.
+pub func svg_radial_gradient_paint_style_start_center(this: const SvgRadialGradientPaintStyle*) -> gfx.FloatPoint:
+    return this.m_start_center
+
+## Ported from Libraries/LibWeb/Painting/PaintStyle.h:106 Web::Painting::SVGRadialGradientPaintStyle::start_radius.
+pub func svg_radial_gradient_paint_style_start_radius(this: const SvgRadialGradientPaintStyle*) -> f32:
+    return this.m_start_radius
+
+## Ported from Libraries/LibWeb/Painting/PaintStyle.h:107 Web::Painting::SVGRadialGradientPaintStyle::end_center.
+pub func svg_radial_gradient_paint_style_end_center(this: const SvgRadialGradientPaintStyle*) -> gfx.FloatPoint:
+    return this.m_end_center
+
+## Ported from Libraries/LibWeb/Painting/PaintStyle.h:108 Web::Painting::SVGRadialGradientPaintStyle::end_radius.
+pub func svg_radial_gradient_paint_style_end_radius(this: const SvgRadialGradientPaintStyle*) -> f32:
+    return this.m_end_radius
+
+## Ported from Libraries/LibWeb/Painting/PaintStyle.h:110 Web::Painting::SVGRadialGradientPaintStyle::set_start_center.
+pub func svg_radial_gradient_paint_style_set_start_center(this: SvgRadialGradientPaintStyle*, start_center: gfx.FloatPoint):
+    this.m_start_center = start_center
+
+## Ported from Libraries/LibWeb/Painting/PaintStyle.h:111 Web::Painting::SVGRadialGradientPaintStyle::set_start_radius.
+pub func svg_radial_gradient_paint_style_set_start_radius(this: SvgRadialGradientPaintStyle*, start_radius: f32):
+    this.m_start_radius = start_radius
+
+## Ported from Libraries/LibWeb/Painting/PaintStyle.h:112 Web::Painting::SVGRadialGradientPaintStyle::set_end_center.
+pub func svg_radial_gradient_paint_style_set_end_center(this: SvgRadialGradientPaintStyle*, end_center: gfx.FloatPoint):
+    this.m_end_center = end_center
+
+## Ported from Libraries/LibWeb/Painting/PaintStyle.h:113 Web::Painting::SVGRadialGradientPaintStyle::set_end_radius.
+pub func svg_radial_gradient_paint_style_set_end_radius(this: SvgRadialGradientPaintStyle*, end_radius: f32):
+    this.m_end_radius = end_radius
+
+## Ported from Libraries/LibWeb/Painting/PaintStyle.h:116 Web::Painting::SVGRadialGradientPaintStyle::SVGRadialGradientPaintStyle.
+func svg_radial_gradient_paint_style_construct(this: SvgRadialGradientPaintStyle*, start_center: gfx.FloatPoint, start_radius: f32, end_center: gfx.FloatPoint, end_radius: f32):
+    this.m_start_center = start_center
+    this.m_start_radius = start_radius
+    this.m_end_center = end_center
+    this.m_end_radius = end_radius
+
+# mark: SVGPatternPaintStyle ===================================================================
+
+## Ported from Libraries/LibWeb/Painting/PaintStyle.cpp:12 Web::Painting::SVGPatternPaintStyle::create.
+pub func svg_pattern_paint_style_create(tile_display_list: DisplayList*, tile_rect: gfx.FloatRect, pattern_transform: gfx.AffineTransform?) -> SvgPatternPaintStyle*:
+    let header = svg_paint_server_paint_style_header(&svg_pattern_paint_style_vtable, &svg_pattern_paint_style_class)
+    let this = new SvgPatternPaintStyle(svg_paint_server_paint_style_base = header, m_tile_display_list = tile_display_list) else trap("out of memory")
+    svg_pattern_paint_style_construct(this, tile_display_list, tile_rect, pattern_transform)
+    return this
+
+## Ported from Libraries/LibWeb/Painting/PaintStyle.cpp:17 Web::Painting::SVGPatternPaintStyle::SVGPatternPaintStyle.
+func svg_pattern_paint_style_construct(this: SvgPatternPaintStyle*, tile_display_list: DisplayList*, tile_rect: gfx.FloatRect, pattern_transform: gfx.AffineTransform?):
+    this.m_tile_display_list = tile_display_list
+    this.m_tile_rect = tile_rect
+    this.m_pattern_transform = pattern_transform
+
+## Ported from Libraries/LibWeb/Painting/PaintStyle.h:136 Web::Painting::SVGPatternPaintStyle::tile_display_list.
+pub func svg_pattern_paint_style_tile_display_list(this: const SvgPatternPaintStyle*) -> DisplayList*:
+    return this.m_tile_display_list
+
+## Ported from Libraries/LibWeb/Painting/PaintStyle.h:137 Web::Painting::SVGPatternPaintStyle::tile_rect.
+pub func svg_pattern_paint_style_tile_rect(this: const SvgPatternPaintStyle*) -> gfx.FloatRect:
+    return this.m_tile_rect
+
+## Ported from Libraries/LibWeb/Painting/PaintStyle.h:138 Web::Painting::SVGPatternPaintStyle::pattern_transform.
+pub func svg_pattern_paint_style_pattern_transform(this: const SvgPatternPaintStyle*) -> gfx.AffineTransform?:
+    return this.m_pattern_transform

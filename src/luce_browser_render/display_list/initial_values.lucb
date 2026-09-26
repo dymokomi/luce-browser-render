@@ -1,0 +1,29 @@
+#==============================================================================================
+#
+#   initial_values - the CSS initial values the display list reads
+#
+#   DESCRIPTION:
+#       CSS::ScrollbarColorData and CSS::InitialValues::scrollbar_color(), from
+#       Libraries/LibWeb/CSS/ComputedValues.h (lines 102-105 and 288-294), moved down into the
+#       display list (DESIGN.md §4.1.3): the player compares a scrollbar's thumb color with
+#       the initial one. The engine's CssScrollbarColorData and
+#       `css_initial_values_scrollbar_color` forward to these.
+#
+#       Copyright (c) 2018-2026, the Ladybird developers.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+## Web::CSS::ScrollbarColorData (Libraries/LibWeb/CSS/ComputedValues.h:102), moved into the
+## display list (DESIGN.md §4.1.3).
+pub struct ScrollbarColorData:
+    ## The thumb's color; C++ default Color::Transparent.
+    pub var thumb_color: gfx.Color
+    ## The track's color; C++ default Color::Transparent.
+    pub var track_color: gfx.Color
+
+## Ported from Libraries/LibWeb/CSS/ComputedValues.h:288 Web::CSS::InitialValues::scrollbar_color.
+pub func initial_values_scrollbar_color() -> ScrollbarColorData:
+    # Color(Color::NamedColor::DarkGray).with_alpha(192) and Color(Color::NamedColor::WarmGray).with_alpha(192):
+    # DarkGray is rgb(64, 64, 64), WarmGray rgb(212, 208, 200).
+    return ScrollbarColorData(thumb_color = gfx.Color(m_value = 0xc0404040), track_color = gfx.Color(m_value = 0xc0d4d0c8))

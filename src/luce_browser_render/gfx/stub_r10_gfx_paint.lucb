@@ -353,8 +353,8 @@ pub func calculate_gradient_length_f32[T](gradient_size: void*?, sin_angle: f32,
     trap("unported: Gfx::calculate_gradient_length")
 
 ## Ported from Libraries/LibGfx/Gradients.h:39 Gfx::calculate_gradient_length.
-# unmapped: Gfx::Size<T>
-pub func calculate_gradient_length[T](gradient_size: void*?, gradient_angle: f32) -> f32:
+# Signature fixed by region r51a: the instantiation the display list player uses, Size<float>.
+pub func calculate_gradient_length(gradient_size: FloatSize, gradient_angle: f32) -> f32:
     trap("unported: Gfx::calculate_gradient_length")
 
 ## Ported from Libraries/LibGfx/ImmutableBitmap.cpp:26 Gfx::export_format_name.
@@ -714,7 +714,8 @@ pub func painting_surface_read_into_bitmap(this: PaintingSurface*, bitmap: Bitma
     trap("unported: Gfx::PaintingSurface::read_into_bitmap")
 
 ## Ported from Libraries/LibGfx/PaintingSurface.cpp:174 Gfx::PaintingSurface::write_from_bitmap.
-pub func painting_surface_write_from_bitmap(this: PaintingSurface*, bitmap: Bitmap):
+# Signature fixed by region r51a: C++ takes `Bitmap const&`, not a copy.
+pub func painting_surface_write_from_bitmap(this: PaintingSurface*, bitmap: const Bitmap*):
     trap("unported: Gfx::PaintingSurface::write_from_bitmap")
 
 ## Ported from Libraries/LibGfx/PaintingSurface.cpp:205 Gfx::PaintingSurface::notify_content_will_change.
