@@ -107,11 +107,13 @@ func cpu_normalize_radii(rect: raster.Rect, radii0: CpuRadii) -> CpuRadii:
         cpu_rrect_adjust_radii(height, scale, &radii.y[3], &radii.y[0])
     return radii
 
-## The cubic Bézier constant for a quarter ellipse.
-let cpu_arc_kappa: f32 = 0.5522847498
+## SK_ScalarRoot2Over2: the conic weight of a quarter circle (or ellipse).
+let cpu_quarter_conic_weight: f32 = 0.707106781
 
-## The contour of the rounded rectangle `rect` with `radii` (SkPath::addRRect): a plain
-## rectangle when no corner is rounded.
+## The contour of the rounded rectangle `rect` with `radii` (SkPath::RRect, SkPathBuilder::
+## addRRect with the default clockwise direction and start index 6: from the bottom of the
+## lower-left corner, a line and a quarter conic per side); a plain rectangle when no corner is
+## rounded (SkPathPriv::SimplifyRRect).
 func cpu_rrect_path(rect: raster.Rect, radii0: CpuRadii) -> raster.Path:
     let radii = cpu_normalize_radii(rect, radii0)
     var any_radius = false
@@ -125,25 +127,18 @@ func cpu_rrect_path(rect: raster.Rect, radii0: CpuRadii) -> raster.Path:
     let t = rect.top()
     let r = rect.right()
     let b = rect.bottom()
-    let k = cpu_arc_kappa
+    let w = cpu_quarter_conic_weight
+    # SkPath_RRectPointIterator's points 6, 7, 0 .. 5 and the rectangle's corners between them.
     var builder = raster.PathBuilder.new_()
-    # Top edge, from the end of the top-left corner.
-    builder.move_to(l + radii.x[0], t)
-    builder.line_to(r - radii.x[1], t)
-    if radii.x[1] > 0.0:
-        builder.cubic_to(r - radii.x[1] + radii.x[1] * k, t, r, t + radii.y[1] - radii.y[1] * k, r, t + radii.y[1])
-    # Right edge.
-    builder.line_to(r, b - radii.y[2])
-    if radii.x[2] > 0.0:
-        builder.cubic_to(r, b - radii.y[2] + radii.y[2] * k, r - radii.x[2] + radii.x[2] * k, b, r - radii.x[2], b)
-    # Bottom edge.
-    builder.line_to(l + radii.x[3], b)
-    if radii.x[3] > 0.0:
-        builder.cubic_to(l + radii.x[3] - radii.x[3] * k, b, l, b - radii.y[3] + radii.y[3] * k, l, b - radii.y[3])
-    # Left edge.
+    builder.move_to(l, b - radii.y[3])
     builder.line_to(l, t + radii.y[0])
-    if radii.x[0] > 0.0:
-        builder.cubic_to(l, t + radii.y[0] - radii.y[0] * k, l + radii.x[0] - radii.x[0] * k, t, l + radii.x[0], t)
+    builder.conic_to(l, t, l + radii.x[0], t, w)
+    builder.line_to(r - radii.x[1], t)
+    builder.conic_to(r, t, r, t + radii.y[1], w)
+    builder.line_to(r, b - radii.y[2])
+    builder.conic_to(r, b, r - radii.x[2], b, w)
+    builder.line_to(l + radii.x[3], b)
+    builder.conic_to(l, b, l, b - radii.y[3], w)
     builder.close()
     return builder.finish() else raster.PathBuilder.from_rect(rect)
 

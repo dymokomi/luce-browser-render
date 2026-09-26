@@ -151,9 +151,8 @@ pub func path_impl_raster_to_svg_string(this: const PathImplRaster*) -> ak.Strin
 # mark: Raster =================================================================================
 
 ## The path for drawing with the raster module (replaces to_skia_path, SkiaUtils.cpp): the
-## SkPath's contours as a raster.Path, conics turned into quads with the tolerance Skia's
-## edge builder uses (1/4 pixel, SkEdgeBuilder), as tiny-skia's conic_to does. None for an
-## empty path or one without valid bounds. The caller releases the result (memory.heap).
+## SkPath's contours as a raster.Path, conics kept (the raster module draws them as Skia's
+## edge builder does). None for an empty path or one without valid bounds. The caller releases the result (memory.heap).
 pub func sk_path_to_raster_path(path: const SkPath*) -> raster.Path?:
     var builder = raster.PathBuilder.new_()
     var iterator = sk_path_raw_iter(path)
@@ -163,12 +162,7 @@ pub func sk_path_to_raster_path(path: const SkPath*) -> raster.Path?:
             .move: builder.move_to(pts[0].x, pts[0].y)
             .line: builder.line_to(pts[1].x, pts[1].y)
             .quad: builder.quad_to(pts[1].x, pts[1].y, pts[2].x, pts[2].y)
-            .conic:
-                let quadder = sk_auto_conic_to_quads(pts[0..<3], record.conic_weight, 0.25)
-                for i in 0..<(usize)quadder.quad_count:
-                    let control = quadder.points[i * 2 + 1]
-                    let end = quadder.points[i * 2 + 2]
-                    builder.quad_to(control.x, control.y, end.x, end.y)
+            .conic: builder.conic_to(pts[1].x, pts[1].y, pts[2].x, pts[2].y, record.conic_weight)
             .cubic: builder.cubic_to(pts[1].x, pts[1].y, pts[2].x, pts[2].y, pts[3].x, pts[3].y)
             .close: builder.close()
             _: trap("VERIFY_NOT_REACHED")

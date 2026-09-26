@@ -8,34 +8,18 @@ cd "$(dirname "$0")"
 # Every hand-written fragment is laid out as the pinned compiler's formatter lays it out.
 # (No fragment of this repository is generated output any more: the skeleton's types_*
 # fragments were edited by hand and are formatted too.)
-# FIXME: raster (src/luce_browser_render/raster, tests/raster) is left out until the
-#        port/raster-skia branch, which rewrites it, is merged and formatted.
 echo "== luce-base fmt --check"
-for file in $(git ls-files '*.lucb' | grep -v -e '/generated_' -e '_tables\.lucb$' -e '^src/luce_browser_render/raster/' -e '^tests/raster/'); do
+for file in $(git ls-files '*.lucb' | grep -v -e '/generated_' -e '_tables\.lucb$'); do
     luce-base fmt "$file" --check > /dev/null || { echo "$file is not formatted (luce-base fmt $file --write)"; exit 1; }
 done
 
-# raster's own warnings, which every module importing it repeats. FIXME: the five unused
-# functions below are the port/raster-skia branch's to remove; drop this list when it is merged.
-raster_known_warnings='unused function `f8_round_int`
-unused function `i8_to_f8`
-unused function `f8_to_i8_bitcast`
-unused function `highp_lerp`
-unused function `lowp_source_over_k`'
-
-# check MODULE [raster]: `luce-base check -W`, which reports warnings without failing, so any
-# output at all fails the run. The raster module's warnings are checked once, by `check raster`
-# (against raster_known_warnings); the other modules' checks leave them out.
+# check MODULE: `luce-base check -W`, which reports warnings without failing, so any output at
+# all fails the run.
 check() {
     echo "== luce-base check src/luce_browser_render/$1 -W"
     output=$(luce-base check "src/luce_browser_render/$1" -W 2>&1) || { echo "$output"; exit 1; }
-    if [ "$1" = raster ]; then
-        unknown=$(printf '%s\n' "$output" | grep -v -F "$raster_known_warnings" || true)
-    else
-        unknown=$(printf '%s\n' "$output" | grep -v '^luce-base: src/luce_browser_render/raster:[0-9]*:[0-9]*: warning: ' || true)
-    fi
-    if [ -n "$unknown" ]; then
-        echo "$unknown"
+    if [ -n "$output" ]; then
+        echo "$output"
         exit 1
     fi
 }

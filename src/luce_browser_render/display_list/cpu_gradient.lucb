@@ -11,8 +11,8 @@
 #       decal); colors are interpolated in the requested color space, premultiplied when
 #       asked (SkGradientShader::Interpolation::InPremul), with the hue of polar spaces
 #       adjusted by the hue method; degenerate geometry follows
-#       SkGradientBaseShader::MakeDegenerateGradient. Unlike Skia, gradients are not
-#       dithered.
+#       SkGradientBaseShader::MakeDegenerateGradient. The player's gradients are dithered as
+#       SkPaint::setDither makes the raster pipeline dither them (cpu_dither_value).
 #
 #       A gradient fill evaluates the shader once per device pixel of the shape's clipped
 #       bounds into a scratch pixmap, then fills the shape with that pixmap as a pattern
@@ -198,7 +198,7 @@ func cpu_gradient_color_at(prepared: const CpuPreparedGradient*, t: f32) -> CpuC
     return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f, a[3] + (b[3] - a[3]) * f]
 
 ## A color of the interpolation space as a premultiplied sRGB pixel.
-func cpu_gradient_to_pixel(prepared: const CpuPreparedGradient*, color0: CpuColor4) -> raster.PremultipliedColorU8:
+func cpu_gradient_to_pixel(prepared: const CpuPreparedGradient*, color0: CpuColor4, dither_at: (i32, i32)? = none) -> raster.PremultipliedColorU8:
     var color = color0
     let alpha = cpu_clamp_unit(color[3])
     if prepared.premul and color[3] > 0.0:
@@ -209,10 +209,27 @@ func cpu_gradient_to_pixel(prepared: const CpuPreparedGradient*, color0: CpuColo
     var srgb = cpu_color_to_srgb(prepared.space, color)
     if prepared.linear_to_srgb:
         srgb = [cpu_linear_to_srgb(cpu_clamp_unit(srgb[0])), cpu_linear_to_srgb(cpu_clamp_unit(srgb[1])), cpu_linear_to_srgb(cpu_clamp_unit(srgb[2])), srgb[3]]
-    let r = cpu_clamp_unit(srgb[0]) * alpha
-    let g = cpu_clamp_unit(srgb[1]) * alpha
-    let b = cpu_clamp_unit(srgb[2]) * alpha
+    var r = cpu_clamp_unit(srgb[0]) * alpha
+    var g = cpu_clamp_unit(srgb[1]) * alpha
+    var b = cpu_clamp_unit(srgb[2]) * alpha
+    if let at = dither_at:
+        let d = cpu_dither_value(at.0, at.1)
+        let rate: f32 = 1.0 / 255.0
+        r = cpu_max_f32(0.0, cpu_min_f32(math32.fma(d, rate, r), alpha))
+        g = cpu_max_f32(0.0, cpu_min_f32(math32.fma(d, rate, g), alpha))
+        b = cpu_max_f32(0.0, cpu_min_f32(math32.fma(d, rate, b), alpha))
     return raster.PremultipliedColorU8.from_rgba(cpu_unit_to_u8(r), cpu_unit_to_u8(g), cpu_unit_to_u8(b), cpu_unit_to_u8(alpha)) else raster.PremultipliedColorU8.transparent()
+
+## The raster pipeline's `dither` stage value at device pixel (x, y) (SkRasterPipeline_opts.h):
+## an 8x8 ordered dither matrix scaled to (-0.5, +0.5), which the stage multiplies by the
+## destination's rate (1/255 for 8888) and adds to the premultiplied color before clamping it
+## to [0, alpha] (SkPaint::setDither on a non-constant shader).
+func cpu_dither_value(x0: i32, y0: i32) -> f32:
+    let x = (u32)x0
+    # Only X and X^Y are needed, so Y is that.
+    let y = (u32)y0 ^ x
+    let m = (y & 1) << 5 | (x & 1) << 4 | (y & 2) << 2 | (x & 2) << 1 | (y & 4) >> 1 | (x & 4) >> 2
+    return math32.fma((f32)m, 2.0 / 128.0, -63.0 / 128.0)
 
 ## A [0, 1] value as a byte, rounded.
 func cpu_unit_to_u8(value: f32) -> u8:
@@ -323,7 +340,7 @@ func cpu_degenerate_color(prepared: const CpuPreparedGradient*, mode: CpuTileMod
 # mark: Filling ================================================================================
 
 ## Fills `path` (in the current transform) with `gradient` at `opacity`.
-func cpu_canvas_fill_path_with_gradient(canvas: CpuCanvas*, path: const raster.Path*, fill_rule: raster.FillRule, anti_alias: bool, gradient: const CpuGradient*, opacity: f32):
+func cpu_canvas_fill_path_with_gradient(canvas: CpuCanvas*, path: const raster.Path*, fill_rule: raster.FillRule, anti_alias: bool, gradient: const CpuGradient*, opacity: f32, dither: bool = false):
     if cpu_canvas_is_clip_empty(canvas) or ak.vector_is_empty(&gradient.stops):
         return
     let state = cpu_canvas_state(canvas)
@@ -362,7 +379,7 @@ func cpu_canvas_fill_path_with_gradient(canvas: CpuCanvas*, path: const raster.P
                     if let tiled = cpu_tile(t, gradient.tile_mode):
                         color = cpu_gradient_color_at(&prepared, tiled)
             if let c = color:
-                pixels[(usize)(y - y0) * row_width + (usize)(x - x0)] = cpu_gradient_to_pixel(&prepared, c)
+                pixels[(usize)(y - y0) * row_width + (usize)(x - x0)] = cpu_gradient_to_pixel(&prepared, c, (x, y) if dither else none)
 
     # The pattern's pixels sit on the device grid: pattern space -> device is a translation
     # by (x0, y0), so pattern -> user space is ctm^-1 * translate(x0, y0).

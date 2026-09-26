@@ -401,9 +401,9 @@ func display_list_player_cpu_paint_linear_gradient_impl(base: DisplayListPlayer*
     let draw_rect = cpu_float_rect(rect) else return
     var path = cpu_rect_path(draw_rect)
     defer path.release()
-    # paint.setDither(true): the CPU player does not dither.
     let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
-    cpu_canvas_fill_path_with_gradient(canvas, &path, raster.FillRule.winding, false, &gradient, 1.0)
+    # paint.setDither(true)
+    cpu_canvas_fill_path_with_gradient(canvas, &path, raster.FillRule.winding, false, &gradient, 1.0, true)
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:47 Web::Painting::DisplayListPlayerSkia::paint_radial_gradient (override).
 func display_list_player_cpu_paint_radial_gradient_impl(base: DisplayListPlayer*, command: PaintRadialGradient):
@@ -434,7 +434,7 @@ func display_list_player_cpu_paint_radial_gradient_impl(base: DisplayListPlayer*
     var path = cpu_rect_path(draw_rect)
     defer path.release()
     let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
-    cpu_canvas_fill_path_with_gradient(canvas, &path, raster.FillRule.winding, true, &gradient, 1.0)
+    cpu_canvas_fill_path_with_gradient(canvas, &path, raster.FillRule.winding, true, &gradient, 1.0, true)
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:48 Web::Painting::DisplayListPlayerSkia::paint_conic_gradient (override).
 func display_list_player_cpu_paint_conic_gradient_impl(base: DisplayListPlayer*, command: PaintConicGradient):
@@ -457,4 +457,4 @@ func display_list_player_cpu_paint_conic_gradient_impl(base: DisplayListPlayer*,
     var path = cpu_rect_path(draw_rect)
     defer path.release()
     let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
-    cpu_canvas_fill_path_with_gradient(canvas, &path, raster.FillRule.winding, true, &gradient, 1.0)
+    cpu_canvas_fill_path_with_gradient(canvas, &path, raster.FillRule.winding, true, &gradient, 1.0, true)

@@ -28,7 +28,7 @@ pub var tests_gfx_paint_r08_is_ported: bool = true
 ## Whether the raster module draws as the donor's Skia (m144) does: analytic anti-aliasing
 ## (SkScan_AAAPath, where tiny-skia supersamples 4x4) and the lowp pipeline's div255. The
 ## painter cases that depend on those keep the donor's pixels behind this gate.
-pub var tests_gfx_paint_raster_is_skia_m144: bool = false
+pub var tests_gfx_paint_raster_is_skia_m144: bool = true
 
 # mark: Helpers ================================================================================
 

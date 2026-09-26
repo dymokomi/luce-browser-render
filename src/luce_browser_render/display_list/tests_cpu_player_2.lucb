@@ -6,8 +6,7 @@
 #       Scenes that reach regions r10 (gfx.Path, gfx.Filter) and r09 (glyph outlines) through
 #       the player's seams, compared with DisplayListPlayerSkia's pixels
 #       (tests_skia_reference_data_2.lucb) under Ladybird's fuzzy reftest rule, as
-#       tests_cpu_player.lucb does. Anti-aliased edges differ by the rasterizer's coverage
-#       (Skia's analytic coverage against 4x4 supersampling), and glyphs by more: Skia draws
+#       tests_cpu_player.lucb does. Paths and layers match exactly; glyphs do not: Skia draws
 #       small glyphs from FreeType's hinted glyph masks (outlines snapped to the pixel grid,
 #       up to a pixel away), the player fills their unhinted outlines. The test
 #       bodies are `noinline` functions (# workaround: compiler-issues/ranges_facts_cubic).
@@ -69,7 +68,7 @@ noinline func test_cpu_player_fill_path_even_odd():
     let scene = test_scene_new(24, 24)
     defer test_scene_release(&scene)
     display_list_player_fill_path(test_scene_player(&scene), test_fill_path(test_star_path(), test_color(0, 0, 255, 255), gfx.WindingRule.even_odd, 1.0))
-    expect_like_skia(&scene, "fill_path_even_odd", skia_fill_path_even_odd, 48, 64)
+    expect_like_skia(&scene, "fill_path_even_odd", skia_fill_path_even_odd, 0, 0)
 
 test "cpu player 2: fill_path, nonzero":
     test_cpu_player_fill_path_nonzero()
@@ -78,7 +77,7 @@ noinline func test_cpu_player_fill_path_nonzero():
     let scene = test_scene_new(24, 24)
     defer test_scene_release(&scene)
     display_list_player_fill_path(test_scene_player(&scene), test_fill_path(test_star_path(), test_color(0, 128, 0, 255), gfx.WindingRule.nonzero, 1.0))
-    expect_like_skia(&scene, "fill_path_nonzero", skia_fill_path_nonzero, 48, 52)
+    expect_like_skia(&scene, "fill_path_nonzero", skia_fill_path_nonzero, 0, 0)
 
 test "cpu player 2: fill_path, curves (a color ignores the opacity)":
     test_cpu_player_fill_path_curves()
@@ -87,7 +86,7 @@ noinline func test_cpu_player_fill_path_curves():
     let scene = test_scene_new(24, 24)
     defer test_scene_release(&scene)
     display_list_player_fill_path(test_scene_player(&scene), test_fill_path(test_curves_path(), test_color(200, 30, 60, 255), gfx.WindingRule.nonzero, 0.75))
-    expect_like_skia(&scene, "fill_path_curves", skia_fill_path_curves, 40, 72)
+    expect_like_skia(&scene, "fill_path_curves", skia_fill_path_curves, 0, 0)
 
 test "cpu player 2: stroke_path, round caps and joins":
     test_cpu_player_stroke_path()
@@ -100,7 +99,7 @@ noinline func test_cpu_player_stroke_path():
     let command = StrokePath(cap_style = gfx.PathCapStyle.round, join_style = gfx.PathJoinStyle.round, miter_limit = 4.0, dash_array = ak.Vector[f32](), dash_offset = 0.0,
                              path_bounding_rect = bounds, path = path, opacity = 1.0, paint_style_or_color = .color(value = test_color(0, 0, 0, 255)), thickness = 2.5, should_anti_alias = ShouldAntiAlias.yes)
     display_list_player_stroke_path(test_scene_player(&scene), command)
-    expect_like_skia(&scene, "stroke_path", skia_stroke_path, 72, 136)
+    expect_like_skia(&scene, "stroke_path", skia_stroke_path, 0, 0)
 
 # mark: Layers =================================================================================
 
@@ -118,7 +117,7 @@ noinline func test_cpu_player_layer_in_rounded_clip():
     display_list_player_fill_rect(player, FillRect(rect = test_rect(0, 0, 16, 16), color = test_color(255, 0, 0, 255)))
     display_list_player_restore(player, Restore())
     display_list_player_restore(player, Restore())
-    expect_like_skia(&scene, "layer_in_rounded_clip", skia_layer_in_rounded_clip, 24, 132)
+    expect_like_skia(&scene, "layer_in_rounded_clip", skia_layer_in_rounded_clip, 0, 0)
 
 # mark: Glyph runs =============================================================================
 
@@ -142,4 +141,4 @@ noinline func test_cpu_player_glyph_run_scaled():
         defer test_scene_release(&scene)
         let run = test_glyph_run("AVo", test_font("tests/web_fonts/fonts/Lato-Bold.ttf", 15.0), 1.5)
         display_list_player_draw_glyph_run(test_scene_player(&scene), DrawGlyphRun(glyph_run = run, rect = test_rect(0, 0, 48, 32), translation = test_float_point(1.5, 25.25), color = test_color(20, 90, 200, 255), orientation = gfx.Orientation.horizontal))
-        expect_like_skia(&scene, "glyph_run_scaled", skia_glyph_run_scaled, 172, 320)
+        expect_like_skia(&scene, "glyph_run_scaled", skia_glyph_run_scaled, 150, 300)
