@@ -56,6 +56,8 @@ pub struct HbGlyphInfo:
     pub var combining_class: u8
     ## Whether the character is a non-spacing mark (general category Mn).
     pub var is_nonspacing_mark: bool
+    ## Whether the character continues the grapheme before it (UPROPS_MASK_CONTINUATION).
+    pub var is_continuation: bool
 
 ## hb_glyph_position_t, in the font's scale (pixel size × 64 for Gfx::Font), with the
 ## attachment HarfBuzz keeps in its private var field while positioning.
@@ -385,9 +387,12 @@ func hb_info_set_unicode_props(info: HbGlyphInfo*):
     info.is_zwnj = u == 0x200C
     info.combining_class = 0
     info.is_nonspacing_mark = false
+    # Marks, joiners, emoji modifiers and tags continue a grapheme.
+    info.is_continuation = u == 0x200D or u == 0x200C or (u >= 0x1F3FB and u <= 0x1F3FF) or (u >= 0xE0020 and u <= 0xE007F)
     if web_unicode.code_point_has_mark_general_category(u):
         info.combining_class = hb_modified_combining_class(u)
         info.is_nonspacing_mark = hb_is_nonspacing_mark(u)
+        info.is_continuation = true
 
 ## hb_form_clusters (HB_BUFFER_CLUSTER_LEVEL_MONOTONE_GRAPHEMES): a continuation character
 ## (a mark, a joiner, an emoji modifier or tag) joins the cluster before it.
@@ -396,11 +401,10 @@ func hb_form_clusters(buffer: HbBufferT*):
     var index: usize = 1
     while index < infos.length:
         let u = infos[index].character
-        # Marks, joiners, emoji modifiers and tags continue a grapheme, and so does an
-        # emoji after a zero width joiner (hb_set_unicode_props).
-        let after_zwj = infos[index - 1].character == 0x200D and web_unicode.code_point_has_emoji_property(u)
-        let continuation = web_unicode.code_point_has_mark_general_category(u) or u == 0x200D or u == 0x200C or (u >= 0x1F3FB and u <= 0x1F3FF) or (u >= 0xE0020 and u <= 0xE007F) or after_zwj
-        if continuation:
+        # An emoji after a zero width joiner continues the grapheme too (hb_set_unicode_props).
+        if infos[index - 1].character == 0x200D and web_unicode.code_point_has_emoji_property(u):
+            infos[index].is_continuation = true
+        if infos[index].is_continuation:
             infos[index].cluster = infos[index - 1].cluster
         index += 1
 

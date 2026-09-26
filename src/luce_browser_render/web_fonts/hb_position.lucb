@@ -11,7 +11,9 @@
 #         (extension), with the lookup flags, values scaled as hb_font_t scales them, and
 #         the propagation of mark attachments into offsets (position_finish_offsets);
 #       - the legacy 'kern' table (Microsoft format 0) when GPOS has no kern feature, applied
-#         as hb_kern_machine_t does.
+#         as hb_kern_machine_t does;
+#       - the AAT 'trak' table (tracking by point size), which HarfBuzz applies to any font
+#         that has one.
 #
 #       FIXME: cursive attachment (GPOS 3), device tables and the ligature-component
 #       bookkeeping of mark-to-ligature (a mark attaches to the last component) are not
@@ -27,6 +29,66 @@ func hb_layout_position(font: const HbFontT*, face: const SfntFace*, plan: const
         gpos_apply_lookup(font, face, planned, buffer)
     if plan.apply_kern_table:
         kern_table_apply(font, face, buffer)
+    if plan.apply_trak:
+        trak_apply(font, face, buffer)
+
+# mark: AAT tracking ============================================================================
+
+## TrackData::get_tracking (hb-aat-layout-trak-table.hh): the zero track's value at `ptem`,
+## interpolated between the table's sizes.
+func trak_get_tracking(trak: const u8[], track_data: usize, ptem: f32) -> i32:
+    let track_count = (usize)sfnt_u16(trak, track_data)
+    let sizes = (usize)sfnt_u16(trak, track_data + 2)
+    let size_table = (usize)sfnt_u32(trak, track_data + 4)
+    # Choose track: for now we only seek for track entries with zero tracking value.
+    var entry: usize? = none
+    for index in 0..<track_count:
+        let record = track_data + 8 + index * 8
+        if sfnt_i32(trak, record) == 0:
+            entry = record
+            break
+    let track = entry else return 0
+    let values = (usize)sfnt_u16(trak, track + 6)
+    # Choose size.
+    if sizes == 0:
+        return 0
+    if sizes == 1:
+        return (i32)sfnt_i16(trak, values)
+    var size_index: usize = 0
+    while size_index < sizes - 1:
+        if (f32)sfnt_i32(trak, size_table + size_index * 4) / 65536.0 >= ptem:
+            break
+        size_index += 1
+    # interpolate_at
+    let idx = size_index - 1 if size_index > 0 else 0
+    let s0 = (f32)sfnt_i32(trak, size_table + idx * 4) / 65536.0
+    let s1 = (f32)sfnt_i32(trak, size_table + (idx + 1) * 4) / 65536.0
+    let t: f32 = 0.0 if s0 == s1 else (ptem - s0) / (s1 - s0)
+    let value = t * (f32)sfnt_i16(trak, values + (idx + 1) * 2) + (1.0 - t) * (f32)sfnt_i16(trak, values + idx * 2)
+    return (i32)math32.round(value)
+
+## trak::apply for horizontal text: each grapheme's first glyph gets the tracking as advance
+## and half of it as offset.
+func trak_apply(font: const HbFontT*, face: const SfntFace*, buffer: HbBufferT*):
+    let trak = sfnt_face_table(face, sfnt_tag('t', 'r', 'a', 'k')) else return
+    let ptem = font.ptem
+    if ptem <= 0.0:
+        return
+    let horizontal = (usize)sfnt_u16(trak, 6)
+    if horizontal == 0:
+        return
+    let tracking = trak_get_tracking(trak, horizontal, ptem)
+    let x_multf = (f32)font.x_scale / (f32)hb_face_units_per_em(font.face)
+    let offset_to_add = (i32)math32.round((f32)(tracking // 2) * x_multf)
+    let advance_to_add = (i32)math32.round((f32)tracking * x_multf)
+    let infos = ak.vector_span_const(&buffer.infos)
+    let positions = ak.vector_span(&buffer.positions)
+    for index in 0..<infos.length:
+        # foreach_grapheme: the first glyph of each grapheme.
+        if index > 0 and infos[index].is_continuation:
+            continue
+        positions[index].x_advance += advance_to_add
+        positions[index].x_offset += offset_to_add
 
 func gpos_apply_lookup(font: const HbFontT*, face: const SfntFace*, planned: HbPlanLookup, buffer: HbBufferT*):
     let lookup = ot_lookup(face.gpos, planned.index, planned.auto_zwj, planned.auto_zwnj, true) else return

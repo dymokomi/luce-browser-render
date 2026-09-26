@@ -161,6 +161,7 @@ pub struct HbLayoutPlan:
     var gsub_stage_main: ak.Vector[HbPlanLookup]
     var gpos_lookups: ak.Vector[HbPlanLookup]
     var apply_kern_table: bool
+    var apply_trak: bool
 
 ## A feature the plan asks for.
 struct HbWantedFeature:
@@ -318,6 +319,13 @@ func hb_layout_plan(face: const SfntFace*, buffer: const HbBufferT*, features: c
         let kern_lookups = ot_collect_lookups(face.gpos, lang_sys, kern_only)
         gpos_has_kern = ak.vector_size(&kern_lookups) > 0
     plan.apply_kern_table = kern_enabled and not gpos_has_kern and face.kern.length > 0
+    # The AAT 'trak' table, which HarfBuzz applies through the default 'trak' feature.
+    var trak_enabled = true
+    for entry in wanted_span:
+        if entry.tag == sfnt_tag('t', 'r', 'a', 'k'):
+            trak_enabled = entry.value != 0
+    if let trak = sfnt_face_table(face, sfnt_tag('t', 'r', 'a', 'k')):
+        plan.apply_trak = trak_enabled and sfnt_u32(trak, 0) != 0
     return plan
 
 # mark: Lookups ==================================================================================
