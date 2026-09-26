@@ -1,0 +1,403 @@
+#==============================================================================================
+#
+#   sk_geometry - quad and cubic Bezier math from Skia's SkGeometry
+#
+#   DESCRIPTION:
+#       Port of the parts of Skia m144 src/core/SkGeometry.cpp (lines 30-200 roots and quad
+#       evaluation and chopping, 255-305 quad Y extrema, 390-715 cubic evaluation, chopping
+#       and Y extrema) and src/core/SkGeometry.h (SkQuadCoeff, SkCubicCoeff, lines 420-497)
+#       that the path model uses, plus SkCubicClipper::ChopMonoAtY
+#       (src/core/SkCubicClipper.cpp:26-105, the BISECTION variant Skia compiles). The conic
+#       half of SkGeometry is in sk_conic.
+#
+#       skvx::float2 arithmetic is written out lane by lane in the same operation order; Skia
+#       is compiled with -ffp-contract=off, as luce-base computes, so results are bit-exact.
+#
+#       Copyright 2006 The Android Open Source Project
+#       Copyright 2011+ Google Inc.
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-tiny-skia)
+#
+#==============================================================================================
+
+# mark: Helpers =================================================================================
+
+## Ported from src/core/SkGeometry.cpp:43 is_not_monotonic.
+func sk_geometry_is_not_monotonic(a: f32, b: f32, c_: f32) -> bool:
+    let ab = a - b
+    var bc = b - c_
+    if ab < 0.0:
+        bc = -bc
+    return ab == 0.0 or bc < 0.0
+
+## Ported from src/core/SkGeometry.cpp:54 valid_unit_divide: numer / denom when it is in
+## (0, 1), written to `ratio`; answers 1 when written, else 0.
+pub func sk_valid_unit_divide(numer0: f32, denom0: f32, ratio: f32*) -> i32:
+    var numer = numer0
+    var denom = denom0
+    if numer < 0.0:
+        numer = -numer
+        denom = -denom
+
+    if denom == 0.0 or numer == 0.0 or numer >= denom:
+        return 0
+
+    let r = numer / denom
+    if sk_is_nan(r):
+        return 0
+    if r == 0.0:  # catch underflow if numer <<<< denom
+        return 0
+    *ratio = r
+    return 1
+
+## Ported from src/core/SkGeometry.cpp:95 SkFindUnitQuadRoots: the roots of Ax^2 + Bx + C in
+## (0, 1), ascending, in `roots` (two slots); answers how many.
+##
+## From Numerical Recipes in C.
+##
+##     Q = -1/2 (B + sign(B) sqrt[B*B - 4*A*C])
+##     x1 = Q / A
+##     x2 = C / Q
+pub func sk_find_unit_quad_roots(a: f32, b: f32, c_: f32, roots: f32[]) -> i32:
+    if a == 0.0:
+        return sk_valid_unit_divide(-c_, b, &roots[0])
+
+    var r: usize = 0
+
+    # use doubles so we don't overflow temporarily trying to compute R
+    var dr = (f64)b * (f64)b - 4.0 * (f64)a * (f64)c_
+    if dr < 0.0:
+        return 0
+    dr = math.sqrt(dr)
+    let rr = (f32)dr
+    if not sk_is_finite(rr):
+        return 0
+
+    let q = -(b - rr) / 2.0 if b < 0.0 else -(b + rr) / 2.0
+    r += (usize)sk_valid_unit_divide(q, a, &roots[r])
+    r += (usize)sk_valid_unit_divide(c_, q, &roots[r])
+    if r == 2:
+        if roots[0] > roots[1]:
+            let swap = roots[0]
+            roots[0] = roots[1]
+            roots[1] = swap
+        elif roots[0] == roots[1]:  # nearly-equal?
+            r -= 1  # skip the double root
+    return (i32)r
+
+# mark: Quads ===================================================================================
+
+## Ported from src/core/SkGeometry.cpp:144 SkEvalQuadAt(src, t): SkQuadCoeff(src).eval(t).
+pub func sk_eval_quad_at(src: const SkPoint[], t: f32) -> SkPoint:
+    let cx = src[0].x
+    let cy = src[0].y
+    let bx = (src[1].x - cx) + (src[1].x - cx)
+    let by = (src[1].y - cy) + (src[1].y - cy)
+    let ax = (src[2].x - (src[1].x + src[1].x)) + cx
+    let ay = (src[2].y - (src[1].y + src[1].y)) + cy
+    return SkPoint(x = (ax * t + bx) * t + cx, y = (ay * t + by) * t + cy)
+
+## Ported from src/core/SkGeometry.cpp:148 SkEvalQuadTangentAt.
+pub func sk_eval_quad_tangent_at(src: const SkPoint[], t: f32) -> SkPoint:
+    # The derivative equation is 2(b - a +(a - 2b +c)t). This returns a
+    # zero tangent vector when t is 0 or 1, and the control point is equal
+    # to the end point. In this case, use the quad end points to compute the tangent.
+    if (t == 0.0 and sk_point_eq(src[0], src[1])) or (t == 1.0 and sk_point_eq(src[1], src[2])):
+        return sk_point_sub(src[2], src[0])
+
+    let bx = src[1].x - src[0].x
+    let by = src[1].y - src[0].y
+    let ax = src[2].x - src[1].x - bx
+    let ay = src[2].y - src[1].y - by
+    let tx = ax * t + bx
+    let ty = ay * t + by
+    return SkPoint(x = tx + tx, y = ty + ty)
+
+## Ported from src/core/SkGeometry.cpp:169 interp: v0 + (v1 - v0) * t.
+func sk_geometry_interp(v0: SkPoint, v1: SkPoint, t: f32) -> SkPoint:
+    return SkPoint(x = v0.x + (v1.x - v0.x) * t, y = v0.y + (v1.y - v0.y) * t)
+
+## Ported from src/core/SkGeometry.cpp:175 SkChopQuadAt: splits the quad `src` (3 points) at
+## `t` into `dst` (5 points).
+pub func sk_chop_quad_at(src: const SkPoint[], dst: SkPoint[], t: f32):
+    let p0 = src[0]
+    let p1 = src[1]
+    let p2 = src[2]
+
+    let p01 = sk_geometry_interp(p0, p1, t)
+    let p12 = sk_geometry_interp(p1, p2, t)
+
+    dst[0] = p0
+    dst[1] = p01
+    dst[2] = sk_geometry_interp(p01, p12, t)
+    dst[3] = p12
+    dst[4] = p2
+
+## Ported from src/core/SkGeometry.cpp:193 SkChopQuadAtHalf.
+pub func sk_chop_quad_at_half(src: const SkPoint[], dst: SkPoint[]):
+    sk_chop_quad_at(src, dst, 0.5)
+
+## Ported from src/core/SkGeometry.cpp:265 SkFindQuadExtrema.
+pub func sk_find_quad_extrema(a: f32, b: f32, c_: f32, t_value: f32*) -> i32:
+    #  At + B == 0
+    #  t = -B / A
+    return sk_valid_unit_divide(a - b, a - b - b + c_, t_value)
+
+## Ported from src/core/SkGeometry.cpp:279 SkChopQuadAtYExtrema: returns 0 for 1 quad, and 1
+## for two quads, either way the answer is stored in dst[] (5 points). Guarantees that the
+## 1/2 quads will be monotonic.
+pub func sk_chop_quad_at_y_extrema(src: const SkPoint[], dst: SkPoint[]) -> i32:
+    let a = src[0].y
+    var b = src[1].y
+    let c_ = src[2].y
+
+    if sk_geometry_is_not_monotonic(a, b, c_):
+        var t_value: f32 = 0.0
+        if sk_valid_unit_divide(a - b, a - b - b + c_, &t_value) != 0:
+            sk_chop_quad_at(src, dst, t_value)
+            # flatten_double_quad_extrema(&dst[0].fY)
+            dst[1].y = dst[2].y
+            dst[3].y = dst[2].y
+            return 1
+        # if we get here, we need to force dst to be monotonic, even though
+        # we couldn't compute a unit_divide value (probably underflow).
+        b = a if sk_scalar_abs(a - b) < sk_scalar_abs(b - c_) else c_
+    dst[0] = SkPoint(x = src[0].x, y = a)
+    dst[1] = SkPoint(x = src[1].x, y = b)
+    dst[2] = SkPoint(x = src[2].x, y = c_)
+    return 0
+
+# mark: Cubics ==================================================================================
+
+## Ported from src/core/SkGeometry.cpp:394 eval_cubic_derivative.
+func sk_geometry_eval_cubic_derivative(src: const SkPoint[], t: f32) -> SkPoint:
+    let ax = src[3].x + 3.0 * (src[1].x - src[2].x) - src[0].x
+    let ay = src[3].y + 3.0 * (src[1].y - src[2].y) - src[0].y
+    let bx0 = src[2].x - (src[1].x + src[1].x) + src[0].x
+    let by0 = src[2].y - (src[1].y + src[1].y) + src[0].y
+    let bx = bx0 + bx0
+    let by = by0 + by0
+    let cx = src[1].x - src[0].x
+    let cy = src[1].y - src[0].y
+    return SkPoint(x = (ax * t + bx) * t + cx, y = (ay * t + by) * t + cy)
+
+## Ported from src/core/SkGeometry.cpp:418 SkEvalCubicAt: the point (SkCubicCoeff(src).eval)
+## and the tangent of the cubic `src` (4 points) at `t`.
+pub func sk_eval_cubic_at(src: const SkPoint[], t: f32) -> (SkPoint, SkPoint):
+    let ax = src[3].x + 3.0 * (src[1].x - src[2].x) - src[0].x
+    let ay = src[3].y + 3.0 * (src[1].y - src[2].y) - src[0].y
+    let bx = 3.0 * (src[2].x - (src[1].x + src[1].x) + src[0].x)
+    let by = 3.0 * (src[2].y - (src[1].y + src[1].y) + src[0].y)
+    let cx = 3.0 * (src[1].x - src[0].x)
+    let cy = 3.0 * (src[1].y - src[0].y)
+    let loc = SkPoint(x = ((ax * t + bx) * t + cx) * t + src[0].x, y = ((ay * t + by) * t + cy) * t + src[0].y)
+
+    # The derivative equation returns a zero tangent vector when t is 0 or 1, and the
+    # adjacent control point is equal to the end point. In this case, use the
+    # next control point or the end points to compute the tangent.
+    var tangent: SkPoint
+    if (t == 0.0 and sk_point_eq(src[0], src[1])) or (t == 1.0 and sk_point_eq(src[2], src[3])):
+        if t == 0.0:
+            tangent = sk_point_sub(src[2], src[0])
+        else:
+            tangent = sk_point_sub(src[3], src[1])
+        if tangent.x == 0.0 and tangent.y == 0.0:
+            tangent = sk_point_sub(src[3], src[0])
+    else:
+        tangent = sk_geometry_eval_cubic_derivative(src, t)
+    return (loc, tangent)
+
+## Ported from src/core/SkGeometry.cpp:454 SkFindCubicExtrema: Cubic'(t) = At^2 + Bt + C,
+## where A = 3(-a + 3(b - c) + d), B = 6(a - 2b + c), C = 3(b - a). Solve for t, keeping only
+## those that fit between 0 < t < 1.
+pub func sk_find_cubic_extrema(a: f32, b: f32, c_: f32, d: f32, t_values: f32[]) -> i32:
+    # we divide A,B,C by 3 to simplify
+    let aa = d - a + 3.0 * (b - c_)
+    let bb = 2.0 * (a - b - b + c_)
+    let cc = b - a
+
+    return sk_find_unit_quad_roots(aa, bb, cc, t_values)
+
+## Ported from src/core/SkGeometry.cpp:468 unchecked_mix: (b - a) * t + a.
+func sk_geometry_mix(a: SkPoint, b: SkPoint, t: f32) -> SkPoint:
+    return SkPoint(x = (b.x - a.x) * t + a.x, y = (b.y - a.y) * t + a.y)
+
+## Ported from src/core/SkGeometry.cpp:473 SkChopCubicAt: splits the cubic `src` (4 points)
+## at `t` into `dst` (7 points).
+pub func sk_chop_cubic_at(src: const SkPoint[], dst: SkPoint[], t: f32):
+    if t == 1.0:
+        for i in 0..<4:
+            dst[i] = src[i]
+        dst[4] = src[3]
+        dst[5] = src[3]
+        dst[6] = src[3]
+        return
+
+    let p0 = src[0]
+    let p1 = src[1]
+    let p2 = src[2]
+    let p3 = src[3]
+
+    let ab = sk_geometry_mix(p0, p1, t)
+    let bc = sk_geometry_mix(p1, p2, t)
+    let cd = sk_geometry_mix(p2, p3, t)
+    let abc = sk_geometry_mix(ab, bc, t)
+    let bcd = sk_geometry_mix(bc, cd, t)
+    let abcd = sk_geometry_mix(abc, bcd, t)
+
+    dst[0] = p0
+    dst[1] = ab
+    dst[2] = abc
+    dst[3] = abcd
+    dst[4] = bcd
+    dst[5] = cd
+    dst[6] = p3
+
+## Ported from src/core/SkGeometry.cpp:504 SkChopCubicAt(src, dst, t0, t1): both chops at once
+## (the two SIMD halves), `dst` holding 10 points.
+pub func sk_chop_cubic_at2(src: const SkPoint[], dst: SkPoint[], t0: f32, t1: f32):
+    if t1 == 1.0:
+        sk_chop_cubic_at(src, dst, t0)
+        dst[7] = src[3]
+        dst[8] = src[3]
+        dst[9] = src[3]
+        return
+
+    # Perform both chops in parallel using 4-lane SIMD (lo = t0, hi = t1).
+    let ab_lo = sk_geometry_mix(src[0], src[1], t0)
+    let ab_hi = sk_geometry_mix(src[0], src[1], t1)
+    let bc_lo = sk_geometry_mix(src[1], src[2], t0)
+    let bc_hi = sk_geometry_mix(src[1], src[2], t1)
+    let cd_lo = sk_geometry_mix(src[2], src[3], t0)
+    let cd_hi = sk_geometry_mix(src[2], src[3], t1)
+    let abc_lo = sk_geometry_mix(ab_lo, bc_lo, t0)
+    let abc_hi = sk_geometry_mix(ab_hi, bc_hi, t1)
+    let bcd_lo = sk_geometry_mix(bc_lo, cd_lo, t0)
+    let bcd_hi = sk_geometry_mix(bc_hi, cd_hi, t1)
+    let abcd_lo = sk_geometry_mix(abc_lo, bcd_lo, t0)
+    let abcd_hi = sk_geometry_mix(abc_hi, bcd_hi, t1)
+    # middle = unchecked_mix(abc, bcd, shuffle<2,3,0,1>(T))
+    let middle_lo = sk_geometry_mix(abc_lo, bcd_lo, t1)
+    let middle_hi = sk_geometry_mix(abc_hi, bcd_hi, t0)
+
+    dst[0] = src[0]
+    dst[1] = ab_lo
+    dst[2] = abc_lo
+    dst[3] = abcd_lo
+    dst[4] = middle_lo
+    dst[5] = middle_hi
+    dst[6] = abcd_hi
+    dst[7] = bcd_hi
+    dst[8] = cd_hi
+    dst[9] = src[3]
+
+## Ported from src/core/SkGeometry.cpp:541 SkChopCubicAt(src, dst, tValues, tCount): chops at
+## every (sorted) t value; `dst` holds 3 * tCount + 4 points.
+pub func sk_chop_cubic_at_values(src0: const SkPoint[], dst0: SkPoint[], t_values: const f32[]):
+    let t_count = t_values.length
+    if t_count == 0:  # nothing to chop
+        for i in 0..<4:
+            dst0[i] = src0[i]
+        return
+    var src_offset: usize = 0
+    var use_dst_as_src = false
+    var i: usize = 0
+    while i + 1 < t_count:
+        # Do two chops at once.
+        var t0 = t_values[i]
+        var t1 = t_values[i + 1]
+        if i != 0:
+            let last_t = t_values[i - 1]
+            t0 = sk_max(0.0, sk_min((t0 - last_t) / (1.0 - last_t), 1.0))
+            t1 = sk_max(0.0, sk_min((t1 - last_t) / (1.0 - last_t), 1.0))
+        var source: SkPoint[4]
+        for k: usize in 0..<4:
+            source[k] = dst0[src_offset + k] if use_dst_as_src else src0[k]
+        sk_chop_cubic_at2(source[0..], dst0[src_offset..], t0, t1)
+        src_offset += 6
+        use_dst_as_src = true
+        i += 2
+    if i < t_count:
+        # Chop the final cubic if there was an odd number of chops.
+        var t = t_values[i]
+        if i != 0:
+            let last_t = t_values[i - 1]
+            t = sk_max(0.0, sk_min((t - last_t) / (1.0 - last_t), 1.0))
+        var source: SkPoint[4]
+        for k: usize in 0..<4:
+            source[k] = dst0[src_offset + k] if use_dst_as_src else src0[k]
+        sk_chop_cubic_at(source[0..], dst0[src_offset..], t)
+
+## Ported from src/core/SkGeometry.cpp:575 SkChopCubicAtHalf.
+pub func sk_chop_cubic_at_half(src: const SkPoint[], dst: SkPoint[]):
+    sk_chop_cubic_at(src, dst, 0.5)
+
+## Ported from src/core/SkGeometry.cpp:698 SkChopCubicAtYExtrema: given 4 points on a cubic
+## bezier, chop it into 1, 2, 3 beziers such that the resulting beziers are monotonic in Y.
+## Depending on what is returned, dst[] (10 points) is treated as follows:
+##     0   dst[0..3] is the original cubic
+##     1   dst[0..3] and dst[3..6] are the two new cubics
+##     2   dst[0..3], dst[3..6], dst[6..9] are the three new cubics
+pub func sk_chop_cubic_at_y_extrema(src: const SkPoint[], dst: SkPoint[]) -> i32:
+    var t_values: f32[2] = [0.0, 0.0]
+    let roots = sk_find_cubic_extrema(src[0].y, src[1].y, src[2].y, src[3].y, t_values[0..])
+
+    sk_chop_cubic_at_values(src, dst, t_values[..<(usize)roots])
+    if roots > 0:
+        # we do some cleanup to ensure our Y extrema are flat
+        # flatten_double_cubic_extrema(&dst[0].fY)
+        dst[2].y = dst[3].y
+        dst[4].y = dst[3].y
+        if roots == 2:
+            dst[5].y = dst[6].y
+            dst[7].y = dst[6].y
+    return roots
+
+# mark: SkCubicClipper ==========================================================================
+
+## Ported from src/core/SkCubicClipper.cpp:26 SkCubicClipper::ChopMonoAtY (the BISECTION
+## variant): the t at which the Y-monotonic cubic `pts` crosses `y`.
+pub func sk_cubic_clipper_chop_mono_at_y(pts: const SkPoint[], y: f32, t: f32*) -> bool:
+    let ycrv0 = pts[0].y - y
+    let ycrv1 = pts[1].y - y
+    let ycrv2 = pts[2].y - y
+    let ycrv3 = pts[3].y - y
+
+    # Check that the endpoints straddle zero.
+    var t_neg: f32  # Negative and positive function parameters.
+    var t_pos: f32
+    if ycrv0 < 0.0:
+        if ycrv3 < 0.0:
+            return false
+        t_neg = 0.0
+        t_pos = 1.0
+    elif ycrv0 > 0.0:
+        if ycrv3 > 0.0:
+            return false
+        t_neg = 1.0
+        t_pos = 0.0
+    else:
+        *t = 0.0
+        return true
+
+    let tol: f32 = 1.0 / 65536.0  # 1 for fixed, 1e-5 for float.
+    while true:
+        let t_mid = (t_pos + t_neg) / 2.0
+        let y01 = sk_scalar_interp(ycrv0, ycrv1, t_mid)
+        let y12 = sk_scalar_interp(ycrv1, ycrv2, t_mid)
+        let y23 = sk_scalar_interp(ycrv2, ycrv3, t_mid)
+        let y012 = sk_scalar_interp(y01, y12, t_mid)
+        let y123 = sk_scalar_interp(y12, y23, t_mid)
+        let y0123 = sk_scalar_interp(y012, y123, t_mid)
+        if y0123 == 0.0:
+            *t = t_mid
+            return true
+        if y0123 < 0.0:
+            t_neg = t_mid
+        else:
+            t_pos = t_mid
+        if sk_scalar_abs(t_pos - t_neg) <= tol:  # Nan-safe
+            break
+
+    *t = (t_neg + t_pos) / 2.0
+    return true

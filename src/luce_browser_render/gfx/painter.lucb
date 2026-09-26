@@ -1,0 +1,77 @@
+#==============================================================================================
+#
+#   painter - Painter: the abstract 2D painter (Canvas 2D and friends)
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Painter.cpp (lines 1-22) and the pure virtual members of
+#       Libraries/LibGfx/Painter.h (lines 1-50). The struct, its vtable and the dispatchers
+#       are in types_painter. Painter::create answers the one implementation, PainterRaster
+#       (painter_raster), which replaces PainterSkia. The virtual destructor has nothing to
+#       port.
+#
+#==============================================================================================
+
+## Ported from Libraries/LibGfx/Painter.cpp:16 Gfx::Painter::create.
+pub func painter_create(target_bitmap: Bitmap*) -> Painter*:
+    let painting_surface = painting_surface_wrap_bitmap(target_bitmap)
+    return painter_raster_create(painting_surface).painter()
+
+## Ported from Libraries/LibGfx/Painter.h:26 Gfx::Painter::clear_rect (pure virtual).
+pub func painter_clear_rect_impl(this: Painter*, arg0: FloatRect, arg1: Color):
+    trap("pure virtual: Gfx::Painter::clear_rect")
+
+## Ported from Libraries/LibGfx/Painter.h:27 Gfx::Painter::fill_rect (pure virtual).
+pub func painter_fill_rect_impl(this: Painter*, arg0: FloatRect, arg1: Color):
+    trap("pure virtual: Gfx::Painter::fill_rect")
+
+## Ported from Libraries/LibGfx/Painter.h:29 Gfx::Painter::draw_bitmap (pure virtual).
+pub func painter_draw_bitmap_impl(this: Painter*, dst_rect: FloatRect, src_bitmap: ImmutableBitmap, src_rect: DevicePixelRect, arg3: ScalingMode, filters: Filter?, global_alpha: f32, compositing_and_blending_operator: CompositingAndBlendingOperator):
+    trap("pure virtual: Gfx::Painter::draw_bitmap")
+
+## Ported from Libraries/LibGfx/Painter.h:31 Gfx::Painter::stroke_path (pure virtual).
+pub func painter_stroke_path_color_f32_impl(this: Painter*, arg0: Path, arg1: Color, thickness: f32):
+    trap("pure virtual: Gfx::Painter::stroke_path")
+
+## Ported from Libraries/LibGfx/Painter.h:32 Gfx::Painter::stroke_path (pure virtual).
+pub func painter_stroke_path_color_f32_f32_impl(this: Painter*, arg0: Path, arg1: Color, thickness: f32, blur_radius: f32, compositing_and_blending_operator: CompositingAndBlendingOperator, arg5: PathCapStyle, arg6: PathJoinStyle, miter_limit: f32, dash_array: ak.Vector[f32], dash_offset: f32):
+    trap("pure virtual: Gfx::Painter::stroke_path")
+
+## Ported from Libraries/LibGfx/Painter.h:33 Gfx::Painter::stroke_path (pure virtual).
+pub func painter_stroke_path_paint_style_optional_filter_f32_f32_compositing_and_blending_opera_impl(this: Painter*, arg0: Path, arg1: PaintStyle*, arg2: Filter?, thickness: f32, global_alpha: f32, compositing_and_blending_operator: CompositingAndBlendingOperator):
+    trap("pure virtual: Gfx::Painter::stroke_path")
+
+## Ported from Libraries/LibGfx/Painter.h:34 Gfx::Painter::stroke_path (pure virtual).
+pub func painter_stroke_path_paint_style_optional_filter_f32_f32_compositing_and_blending_opera_path_cap_style_impl(this: Painter*, arg0: Path, arg1: PaintStyle*, arg2: Filter?, thickness: f32, global_alpha: f32, compositing_and_blending_operator: CompositingAndBlendingOperator, arg6: PathCapStyle, arg7: PathJoinStyle, miter_limit: f32, arg9: ak.Vector[f32], dash_offset: f32):
+    trap("pure virtual: Gfx::Painter::stroke_path")
+
+## Ported from Libraries/LibGfx/Painter.h:36 Gfx::Painter::fill_path (pure virtual).
+pub func painter_fill_path_color_winding_rule_impl(this: Painter*, arg0: Path, arg1: Color, arg2: WindingRule):
+    trap("pure virtual: Gfx::Painter::fill_path")
+
+## Ported from Libraries/LibGfx/Painter.h:37 Gfx::Painter::fill_path (pure virtual).
+pub func painter_fill_path_color_winding_rule_f32_impl(this: Painter*, arg0: Path, arg1: Color, arg2: WindingRule, blur_radius: f32, compositing_and_blending_operator: CompositingAndBlendingOperator):
+    trap("pure virtual: Gfx::Painter::fill_path")
+
+## Ported from Libraries/LibGfx/Painter.h:38 Gfx::Painter::fill_path (pure virtual).
+pub func painter_fill_path_paint_style_impl(this: Painter*, arg0: Path, arg1: PaintStyle*, arg2: Filter?, global_alpha: f32, compositing_and_blending_operator: CompositingAndBlendingOperator, arg5: WindingRule):
+    trap("pure virtual: Gfx::Painter::fill_path")
+
+## Ported from Libraries/LibGfx/Painter.h:40 Gfx::Painter::set_transform (pure virtual).
+pub func painter_set_transform_impl(this: Painter*, arg0: AffineTransform):
+    trap("pure virtual: Gfx::Painter::set_transform")
+
+## Ported from Libraries/LibGfx/Painter.h:42 Gfx::Painter::save (pure virtual).
+pub func painter_save_impl(this: Painter*):
+    trap("pure virtual: Gfx::Painter::save")
+
+## Ported from Libraries/LibGfx/Painter.h:43 Gfx::Painter::restore (pure virtual).
+pub func painter_restore_impl(this: Painter*):
+    trap("pure virtual: Gfx::Painter::restore")
+
+## Ported from Libraries/LibGfx/Painter.h:45 Gfx::Painter::clip (pure virtual).
+pub func painter_clip_impl(this: Painter*, arg0: Path, arg1: WindingRule):
+    trap("pure virtual: Gfx::Painter::clip")
+
+## Ported from Libraries/LibGfx/Painter.h:47 Gfx::Painter::reset (pure virtual).
+pub func painter_reset_impl(this: Painter*):
+    trap("pure virtual: Gfx::Painter::reset")

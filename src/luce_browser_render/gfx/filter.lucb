@@ -1,0 +1,329 @@
+#==============================================================================================
+#
+#   filter - Filter: CSS and SVG filter effects as an image filter graph
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Filter.cpp (lines 1-342) and the inline members of
+#       Libraries/LibGfx/FilterImpl.h (lines 1-29).
+#
+#       Replaced: Skia. Each factory builds the same graph the donor builds out of
+#       SkImageFilters, as ImageFilter nodes (types_filter_impl): the factory it called and
+#       the arguments it passed, with the color matrices computed exactly as the donor
+#       computes them (SkColorMatrix::setSaturation is ported here). Evaluating the graph is
+#       the display-list player's job (DESIGN.md §7.3).
+#
+#       Filter's copy constructor and copy assignment clone the FilterImpl (sharing the
+#       filter graph, as the donor shares the sk_sp); a Luce copy of a Filter shares the
+#       FilterImpl, which is equivalent because a FilterImpl is never modified.
+#
+#==============================================================================================
+
+# mark: FilterImpl =============================================================================
+
+## Ported from Libraries/LibGfx/FilterImpl.h:18 Gfx::FilterImpl::create.
+pub func filter_impl_create(filter: ImageFilter*?) -> FilterImpl*:
+    return new FilterImpl(filter = filter) else trap("out of memory")
+
+## Ported from Libraries/LibGfx/FilterImpl.h:23 Gfx::FilterImpl::clone.
+pub func filter_impl_clone(this: const FilterImpl*) -> FilterImpl*:
+    return new FilterImpl(filter = this.filter) else trap("out of memory")
+
+# `sk_sp<SkImageFilter>` for a new graph node.
+func image_filter_create(node: ImageFilterNode) -> ImageFilter*:
+    return new ImageFilter(node = node) else trap("out of memory")
+
+# `sk_sp<SkColorFilter>` for a new color filter.
+func color_filter_create(node: ColorFilterNode) -> ColorFilter*:
+    return new ColorFilter(node = node) else trap("out of memory")
+
+# `input.has_value() ? input->m_impl->filter : nullptr`, the donor's idiom for an optional input.
+func filter_skia_or_null(input: const Filter*?) -> ImageFilter*?:
+    let filter = input else return none
+    return filter.m_impl.filter
+
+# mark: Filter =================================================================================
+
+## Ported from Libraries/LibGfx/Filter.cpp:37 Gfx::Filter::Filter.
+pub func filter_construct(this: Filter*, impl: FilterImpl*):
+    this.m_impl = filter_impl_clone(impl)
+
+# Filter(Impl::create(filter)): a Filter over a new graph node.
+func filter_from_node(node: ImageFilterNode) -> Filter:
+    var filter = Filter(m_impl = filter_impl_create(image_filter_create(node)))
+    filter_construct(&filter, filter.m_impl)
+    return filter
+
+## Ported from Libraries/LibGfx/Filter.cpp:42 Gfx::Filter::impl.
+pub func filter_impl(this: const Filter*) -> const FilterImpl*:
+    return this.m_impl
+
+## Ported from Libraries/LibGfx/Filter.cpp:47 Gfx::Filter::arithmetic.
+pub func filter_arithmetic(background: const Filter*?, foreground: const Filter*?, k1: f32, k2: f32, k3: f32, k4: f32) -> Filter:
+    let background_skia = filter_skia_or_null(background)
+    let foreground_skia = filter_skia_or_null(foreground)
+
+    return filter_from_node(.arithmetic(k1 = k1, k2 = k2, k3 = k3, k4 = k4, enforce_premultiplied_color = false, background = background_skia, foreground = foreground_skia))
+
+## Ported from Libraries/LibGfx/Filter.cpp:57 Gfx::Filter::compose.
+pub func filter_compose(outer: Filter, inner: Filter) -> Filter:
+    let inner_skia = inner.m_impl.filter
+    let outer_skia = outer.m_impl.filter
+
+    return filter_from_node(.compose(outer = outer_skia, inner = inner_skia))
+
+## Ported from Libraries/LibGfx/Filter.cpp:66 Gfx::Filter::blend.
+pub func filter_blend(background: const Filter*?, foreground: const Filter*?, mode: CompositingAndBlendingOperator) -> Filter:
+    let background_skia = filter_skia_or_null(background)
+    let foreground_skia = filter_skia_or_null(foreground)
+
+    return filter_from_node(.blend(mode = mode, background = background_skia, foreground = foreground_skia))
+
+## Ported from Libraries/LibGfx/Filter.cpp:75 Gfx::Filter::blur.
+pub func filter_blur(radius_x: f32, radius_y: f32, input: const Filter*? = none) -> Filter:
+    let input_skia = filter_skia_or_null(input)
+
+    return filter_from_node(.blur(sigma_x = radius_x, sigma_y = radius_y, input = input_skia))
+
+## Ported from Libraries/LibGfx/Filter.cpp:83 Gfx::Filter::flood.
+pub func filter_flood(color: Color, opacity: f32) -> Filter:
+    # to_skia_color(color), then SkColorSetA(color_skia, static_cast<u8>(opacity * 255))
+    let color_skia = color_with_alpha(&color, (u8)(opacity * 255.0))
+
+    return filter_from_node(.shader(shader = .color(color = color_skia)))
+
+## Ported from Libraries/LibGfx/Filter.cpp:91 Gfx::Filter::displacement_map.
+pub func filter_displacement_map(color: const Filter*?, displacement: const Filter*?, scale: f32, x_channel_selector: ChannelSelector, y_channel_selector: ChannelSelector) -> Filter:
+    let color_skia = filter_skia_or_null(color)
+    let displacement_skia = filter_skia_or_null(displacement)
+
+    # (convert_channel_selector maps each ChannelSelector to the SkColorChannel of the same
+    # name; the node keeps the ChannelSelector.)
+    return filter_from_node(.displacement_map(x_channel_selector = x_channel_selector, y_channel_selector = y_channel_selector, scale = scale, displacement = displacement_skia, color = color_skia))
+
+## Ported from Libraries/LibGfx/Filter.cpp:117 Gfx::Filter::drop_shadow.
+pub func filter_drop_shadow(offset_x: f32, offset_y: f32, radius: f32, color: Color, input: const Filter*? = none) -> Filter:
+    let input_skia = filter_skia_or_null(input)
+    let shadow_color = color
+
+    return filter_from_node(.drop_shadow(dx = offset_x, dy = offset_y, sigma_x = radius, sigma_y = radius, color = shadow_color, input = input_skia))
+
+# A row-major 4x5 color matrix from its twenty entries.
+func filter_color_matrix_values(m: f32[20], clamp: bool) -> ColorFilter*:
+    return color_filter_create(.matrix(values = m, clamp = clamp))
+
+## Ported from Libraries/LibGfx/Filter.cpp:127 Gfx::Filter::color.
+pub func filter_color(type_: ColorFilterType, amount: f32, input: const Filter*? = none) -> Filter:
+    let input_skia = filter_skia_or_null(input)
+
+    var color_filter: ColorFilter*? = none
+
+    # Matrices are taken from https://drafts.fxtf.org/filter-effects-1/#FilterPrimitiveRepresentation
+    let one: f32 = 1.0
+    match type_:
+        .grayscale:
+            let matrix: f32[20] = [
+                0.2126 + 0.7874 * (one - amount), 0.7152 - 0.7152 * (one - amount),
+                0.0722 - 0.0722 * (one - amount), 0.0, 0.0,
+                0.2126 - 0.2126 * (one - amount), 0.7152 + 0.2848 * (one - amount),
+                0.0722 - 0.0722 * (one - amount), 0.0, 0.0,
+                0.2126 - 0.2126 * (one - amount), 0.7152 - 0.7152 * (one - amount),
+                0.0722 + 0.9278 * (one - amount), 0.0, 0.0,
+                0.0, 0.0, 0.0, 1.0, 0.0,
+            ]
+            color_filter = filter_color_matrix_values(matrix, true)
+        .brightness:
+            let matrix: f32[20] = [
+                amount, 0.0, 0.0, 0.0, 0.0,
+                0.0, amount, 0.0, 0.0, 0.0,
+                0.0, 0.0, amount, 0.0, 0.0,
+                0.0, 0.0, 0.0, 1.0, 0.0,
+            ]
+            color_filter = filter_color_matrix_values(matrix, false)
+        .contrast:
+            let intercept: f32 = -(0.5 * amount) + 0.5
+            let matrix: f32[20] = [
+                amount, 0.0, 0.0, 0.0, intercept,
+                0.0, amount, 0.0, 0.0, intercept,
+                0.0, 0.0, amount, 0.0, intercept,
+                0.0, 0.0, 0.0, 1.0, 0.0,
+            ]
+            color_filter = filter_color_matrix_values(matrix, false)
+        .invert:
+            let matrix: f32[20] = [
+                one - 2.0 * amount, 0.0, 0.0, 0.0, amount,
+                0.0, one - 2.0 * amount, 0.0, 0.0, amount,
+                0.0, 0.0, one - 2.0 * amount, 0.0, amount,
+                0.0, 0.0, 0.0, 1.0, 0.0,
+            ]
+            color_filter = filter_color_matrix_values(matrix, true)
+        .opacity:
+            let matrix: f32[20] = [
+                1.0, 0.0, 0.0, 0.0, 0.0,
+                0.0, 1.0, 0.0, 0.0, 0.0,
+                0.0, 0.0, 1.0, 0.0, 0.0,
+                0.0, 0.0, 0.0, amount, 0.0,
+            ]
+            color_filter = filter_color_matrix_values(matrix, true)
+        .sepia:
+            let matrix: f32[20] = [
+                0.393 + 0.607 * (one - amount), 0.769 - 0.769 * (one - amount), 0.189 - 0.189 * (one - amount), 0.0,
+                0.0,
+                0.349 - 0.349 * (one - amount), 0.686 + 0.314 * (one - amount), 0.168 - 0.168 * (one - amount), 0.0,
+                0.0,
+                0.272 - 0.272 * (one - amount), 0.534 - 0.534 * (one - amount), 0.131 + 0.869 * (one - amount), 0.0,
+                0.0,
+                0.0, 0.0, 0.0, 1.0, 0.0,
+            ]
+            color_filter = filter_color_matrix_values(matrix, true)
+        .saturate:
+            let matrix: f32[20] = [
+                0.213 + 0.787 * amount, 0.715 - 0.715 * amount, 0.072 - 0.072 * amount, 0.0, 0.0,
+                0.213 - 0.213 * amount, 0.715 + 0.285 * amount, 0.072 - 0.072 * amount, 0.0, 0.0,
+                0.213 - 0.213 * amount, 0.715 - 0.715 * amount, 0.072 + 0.928 * amount, 0.0, 0.0,
+                0.0, 0.0, 0.0, 1.0, 0.0,
+            ]
+            color_filter = filter_color_matrix_values(matrix, false)
+        _: trap("VERIFY_NOT_REACHED")
+
+    return filter_from_node(.color_filter(filter = color_filter else trap("VERIFY_NOT_REACHED"), input = input_skia))
+
+## Ported from Libraries/LibGfx/Filter.cpp:219 Gfx::Filter::color_matrix.
+pub func filter_color_matrix(matrix: f32[20], input: const Filter*? = none) -> Filter:
+    let input_skia = filter_skia_or_null(input)
+
+    # SkColorFilters::Matrix(matrix): Clamp::kYes by default.
+    return filter_from_node(.color_filter(filter = filter_color_matrix_values(matrix, true), input = input_skia))
+
+# A 256-entry lookup table: the given one, or the identity where SkColorFilters::TableARGB
+# is passed a null table.
+func filter_color_table_or_identity(table: (const u8[])?) -> u8[256]:
+    var result: u8[256]
+    if let bytes = table:
+        for i in 0..<256:
+            result[i] = bytes[i]
+    else:
+        for i in 0..<256:
+            result[i] = (u8)i
+    return result
+
+## Ported from Libraries/LibGfx/Filter.cpp:226 Gfx::Filter::color_table.
+pub func filter_color_table(a: (const u8[])?, r: (const u8[])?, g: (const u8[])?, b: (const u8[])?, input: const Filter*? = none) -> Filter:
+    if let table = a: assert(table.length == 256)
+    if let table = r: assert(table.length == 256)
+    if let table = g: assert(table.length == 256)
+    if let table = b: assert(table.length == 256)
+
+    let input_skia = filter_skia_or_null(input)
+
+    let a_table = filter_color_table_or_identity(a)
+    let r_table = filter_color_table_or_identity(r)
+    let g_table = filter_color_table_or_identity(g)
+    let b_table = filter_color_table_or_identity(b)
+
+    # Color tables are applied in linear space by default, so we need to convert twice.
+    # FIXME: support sRGB space as well (i.e. don't perform these conversions).
+    let srgb_to_linear = image_filter_create(.color_filter(filter = color_filter_create(.srgb_to_linear_gamma), input = input_skia))
+    let color_table = image_filter_create(.color_filter(filter = color_filter_create(.table_argb(a = a_table, r = r_table, g = g_table, b = b_table)), input = srgb_to_linear))
+    return filter_from_node(.color_filter(filter = color_filter_create(.linear_to_srgb_gamma), input = color_table))
+
+# SkColorMatrix::setSaturation (Skia src/effects/SkColorMatrix.cpp:105), with its kHue
+# constants 0.213, 0.715 and 0.072.
+func filter_saturation_matrix(sat: f32) -> f32[20]:
+    var m: f32[20]
+    let one: f32 = 1.0
+    let r: f32 = 0.213 * (one - sat)
+    let g: f32 = 0.715 * (one - sat)
+    let b: f32 = 0.072 * (one - sat)
+
+    m[0] = r + sat
+    m[1] = g
+    m[2] = b
+    m[5] = r
+    m[6] = g + sat
+    m[7] = b
+    m[10] = r
+    m[11] = g
+    m[12] = b + sat
+    m[18] = 1.0     # kA_Scale
+    return m
+
+## Ported from Libraries/LibGfx/Filter.cpp:249 Gfx::Filter::saturate.
+pub func filter_saturate(value: f32, input: const Filter*? = none) -> Filter:
+    let input_skia = filter_skia_or_null(input)
+
+    let matrix = filter_saturation_matrix(value)
+
+    # SkColorFilters::Matrix(const SkColorMatrix&): Clamp::kYes by default.
+    return filter_from_node(.color_filter(filter = filter_color_matrix_values(matrix, true), input = input_skia))
+
+## Ported from Libraries/LibGfx/Filter.cpp:259 Gfx::Filter::hue_rotate.
+pub func filter_hue_rotate(angle_degrees: f32, input: const Filter*? = none) -> Filter:
+    let input_skia = filter_skia_or_null(input)
+
+    let radians = ak.to_radians_f32(angle_degrees)
+
+    let cos_a = math32.cos(radians)
+    let sin_a = math32.sin(radians)
+
+    let a00: f32 = 0.213 + cos_a * 0.787 - sin_a * 0.213
+    let a01: f32 = 0.715 - cos_a * 0.715 - sin_a * 0.715
+    let a02: f32 = 0.072 - cos_a * 0.072 + sin_a * 0.928
+    let a10: f32 = 0.213 - cos_a * 0.213 + sin_a * 0.143
+    let a11: f32 = 0.715 + cos_a * 0.285 + sin_a * 0.140
+    let a12: f32 = 0.072 - cos_a * 0.072 - sin_a * 0.283
+    let a20: f32 = 0.213 - cos_a * 0.213 - sin_a * 0.787
+    let a21: f32 = 0.715 - cos_a * 0.715 + sin_a * 0.715
+    let a22: f32 = 0.072 + cos_a * 0.928 + sin_a * 0.072
+
+    let matrix: f32[20] = [
+        a00, a01, a02, 0.0, 0.0,
+        a10, a11, a12, 0.0, 0.0,
+        a20, a21, a22, 0.0, 0.0,
+        0.0, 0.0, 0.0, 1.0, 0.0,
+    ]
+
+    let color_filter = filter_color_matrix_values(matrix, false)
+    return filter_from_node(.color_filter(filter = color_filter, input = input_skia))
+
+## Ported from Libraries/LibGfx/Filter.cpp:289 Gfx::Filter::image.
+pub func filter_image(bitmap: const ImmutableBitmap*, src_rect: DevicePixelRect, dest_rect: DevicePixelRect, scaling_mode: ScalingMode) -> Filter:
+    # (to_skia_rect and to_skia_sampling_options happen where the graph is evaluated.)
+    return filter_from_node(.image(bitmap = bitmap, src_rect = src_rect, dest_rect = dest_rect, scaling_mode = scaling_mode))
+
+## Ported from Libraries/LibGfx/Filter.cpp:298 Gfx::Filter::merge.
+pub func filter_merge(inputs: const ak.Vector[Filter?]*) -> Filter:
+    var skia_filters: ak.Vector[ImageFilter*?]
+    ak.vector_ensure_capacity(&skia_filters, ak.vector_size(inputs))
+    for filter in ak.vector_span_const(inputs):
+        if let present = filter:
+            ak.vector_unchecked_append_u(&skia_filters, present.m_impl.filter)
+        else:
+            ak.vector_unchecked_append_u(&skia_filters, none)
+
+    return filter_from_node(.merge(inputs = skia_filters))
+
+## Ported from Libraries/LibGfx/Filter.cpp:308 Gfx::Filter::erode.
+pub func filter_erode(radius_x: f32, radius_y: f32, input: Filter? = none) -> Filter:
+    var input_skia: ImageFilter*? = none
+    if let present = input:
+        input_skia = present.m_impl.filter
+    return filter_from_node(.erode(radius_x = radius_x, radius_y = radius_y, input = input_skia))
+
+## Ported from Libraries/LibGfx/Filter.cpp:314 Gfx::Filter::dilate.
+pub func filter_dilate(radius_x: f32, radius_y: f32, input: Filter? = none) -> Filter:
+    var input_skia: ImageFilter*? = none
+    if let present = input:
+        input_skia = present.m_impl.filter
+    return filter_from_node(.dilate(radius_x = radius_x, radius_y = radius_y, input = input_skia))
+
+## Ported from Libraries/LibGfx/Filter.cpp:320 Gfx::Filter::offset.
+pub func filter_offset(dx: f32, dy: f32, input: const Filter*? = none) -> Filter:
+    let input_skia = filter_skia_or_null(input)
+    return filter_from_node(.offset(dx = dx, dy = dy, input = input_skia))
+
+## Ported from Libraries/LibGfx/Filter.cpp:326 Gfx::Filter::turbulence.
+pub func filter_turbulence(turbulence_type: TurbulenceType, base_frequency_x: f32, base_frequency_y: f32, num_octaves: i32, seed: f32, tile_stitch_size: IntSize) -> Filter:
+    # SkShaders::MakeTurbulence or SkShaders::MakeFractalNoise, by turbulence_type.
+    let turbulence_shader = ImageFilterShader.turbulence(turbulence_type = turbulence_type, base_frequency_x = base_frequency_x, base_frequency_y = base_frequency_y, num_octaves = num_octaves, seed = seed, tile_stitch_size = tile_stitch_size)
+
+    return filter_from_node(.shader(shader = turbulence_shader))

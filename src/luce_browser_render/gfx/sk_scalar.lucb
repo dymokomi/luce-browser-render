@@ -1,0 +1,235 @@
+#==============================================================================================
+#
+#   sk_scalar - Skia's scalar, point and rect helpers that the path model needs
+#
+#   DESCRIPTION:
+#       Port of the pieces of Skia m144 (the version Ladybird 47c82b38d0 builds against) that
+#       gfx.Path's Skia replacement uses: include/core/SkScalar.h (nearly-zero tests, the
+#       sin/cos snapping), include/private/base/SkFloatingPoint.h (SkIsFinite),
+#       src/base/SkFloatBits.h (SkFloatAs2sCompliment), include/core/SkPoint.h,
+#       src/core/SkPointPriv.h and src/core/SkRect.cpp (SkRect::Bounds, lines 50-129).
+#
+#       Skia's gfx.Path replacement (DESIGN.md §7.2) keeps Skia's own path model, because
+#       Ladybird's Path API (to_svg_string, bounding_box, contains, SVG arcs, conics) is
+#       defined by Skia's behavior. Every name carries the `sk_`/`Sk` prefix, since module
+#       gfx is shared with the geometry region.
+#
+#       Copyright 2006 The Android Open Source Project
+#       Copyright 2011+ Google Inc.
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-tiny-skia)
+#
+#==============================================================================================
+
+# mark: SkScalar ================================================================================
+
+## SK_ScalarNearlyZero (include/core/SkScalar.h:99): 1 / 4096.
+pub let sk_scalar_nearly_zero: f32 = 1.0 / 4096.0
+
+## SK_ScalarSinCosNearlyZero (include/core/SkScalar.h:113): 1 / 65536.
+pub let sk_scalar_sin_cos_nearly_zero: f32 = 1.0 / 65536.0
+
+## SK_ScalarPI.
+pub let sk_scalar_pi: f32 = 3.14159265
+
+## Ported from include/private/base/SkFloatingPoint.h:50 SkIsFinite(x): x - x is 0 exactly
+## when x is finite, NaN otherwise.
+pub func sk_is_finite(x: f32) -> bool:
+    let prod = x - x
+    return prod == prod
+
+## Ported from include/private/base/SkFloatingPoint.h:50 SkIsFinite(x, y).
+pub func sk_is_finite2(a: f32, b: f32) -> bool:
+    var prod = a - a
+    prod = prod * b
+    return prod == prod
+
+## Ported from include/private/base/SkFloatingPoint.h:58 SkIsFinite(const T array[], int
+## count): the product stays 0 only when every value is finite.
+pub func sk_are_finite(values: const f32[]) -> bool:
+    let x = values[0]
+    var prod = x - x
+    for i in 1..<values.length:
+        prod = prod * values[i]
+    return prod == prod
+
+## std::fminf: the smaller value, ignoring a NaN operand.
+pub func sk_fminf(a: f32, b: f32) -> f32:
+    if a != a:
+        return b
+    if b != b:
+        return a
+    return a if a < b else b
+
+## std::fmaxf: the larger value, ignoring a NaN operand.
+pub func sk_fmaxf(a: f32, b: f32) -> f32:
+    if a != a:
+        return b
+    if b != b:
+        return a
+    return a if a > b else b
+
+## Ported from include/private/base/SkFloatingPoint.h SkIsNaN.
+pub func sk_is_nan(x: f32) -> bool:
+    return x != x
+
+## Ported from include/core/SkScalar.h:101 SkScalarNearlyZero.
+pub func sk_scalar_nearly_zero_tol(x: f32, tolerance: f32 = sk_scalar_nearly_zero) -> bool:
+    return sk_scalar_abs(x) <= tolerance
+
+## Ported from include/core/SkScalar.h:107 SkScalarNearlyEqual.
+pub func sk_scalar_nearly_equal(x: f32, y: f32, tolerance: f32 = sk_scalar_nearly_zero) -> bool:
+    return sk_scalar_abs(x - y) <= tolerance
+
+## SkScalarAbs (std::fabs).
+pub func sk_scalar_abs(x: f32) -> f32:
+    return f32.bits(x.bits() & 0x7fffffff)
+
+## Ported from include/core/SkScalar.h:115 SkScalarSinSnapToZero.
+pub func sk_scalar_sin_snap_to_zero(radians: f32) -> f32:
+    let v = math32.sin(radians)
+    return 0.0 if sk_scalar_nearly_zero_tol(v, sk_scalar_sin_cos_nearly_zero) else v
+
+## Ported from include/core/SkScalar.h:120 SkScalarCosSnapToZero.
+pub func sk_scalar_cos_snap_to_zero(radians: f32) -> f32:
+    let v = math32.cos(radians)
+    return 0.0 if sk_scalar_nearly_zero_tol(v, sk_scalar_sin_cos_nearly_zero) else v
+
+## Ported from include/core/SkScalar.h:131 SkScalarInterp.
+pub func sk_scalar_interp(a: f32, b: f32, t: f32) -> f32:
+    return a + (b - a) * t
+
+## Ported from include/core/SkScalar.h:90 SkScalarSignAsInt.
+pub func sk_scalar_sign_as_int(x: f32) -> i32:
+    if x < 0.0:
+        return -1
+    return 1 if x > 0.0 else 0
+
+## SkDegreesToRadians (include/core/SkScalar.h): degrees * (SK_ScalarPI / 180).
+pub func sk_degrees_to_radians(degrees: f32) -> f32:
+    return degrees * (sk_scalar_pi / 180.0)
+
+## Ported from src/base/SkFloatBits.h:58 SkFloatAs2sCompliment: the float's bits as a
+## two's-complement integer, so -0 and 0 compare equal.
+pub func sk_float_as_2s_compliment(x: f32) -> i32:
+    var bits = (i32)x.bits()
+    if bits < 0:
+        bits = bits & 0x7FFFFFFF
+        bits = -bits
+    return bits
+
+## std::min/std::max on floats as Skia writes them: `a < b ? a : b` keeps `b` when either is
+## NaN.
+pub func sk_min(a: f32, b: f32) -> f32:
+    return b if b < a else a
+
+## std::max for floats.
+pub func sk_max(a: f32, b: f32) -> f32:
+    return b if a < b else a
+
+# mark: SkPoint =================================================================================
+
+## SkPoint (include/core/SkPoint.h): a point or a vector of two floats.
+pub struct SkPoint:
+    pub var x: f32
+    pub var y: f32
+
+## SkPoint(x, y).
+pub func sk_point(x: f32, y: f32) -> SkPoint:
+    return SkPoint(x = x, y = y)
+
+## SkPoint::operator== (compares with float equality, so NaN points are never equal).
+pub func sk_point_eq(a: SkPoint, b: SkPoint) -> bool:
+    return a.x == b.x and a.y == b.y
+
+## SkPoint::operator-.
+pub func sk_point_sub(a: SkPoint, b: SkPoint) -> SkPoint:
+    return SkPoint(x = a.x - b.x, y = a.y - b.y)
+
+## SkPoint::operator+.
+pub func sk_point_add(a: SkPoint, b: SkPoint) -> SkPoint:
+    return SkPoint(x = a.x + b.x, y = a.y + b.y)
+
+## SkPoint::operator* (scalar).
+pub func sk_point_scale(a: SkPoint, s: f32) -> SkPoint:
+    return SkPoint(x = a.x * s, y = a.y * s)
+
+## SkPoint::dot.
+pub func sk_point_dot(a: SkPoint, b: SkPoint) -> f32:
+    return a.x * b.x + a.y * b.y
+
+## SkPoint::cross.
+pub func sk_point_cross(a: SkPoint, b: SkPoint) -> f32:
+    return a.x * b.y - a.y * b.x
+
+## SkPoint::isFinite.
+pub func sk_point_is_finite(p: SkPoint) -> bool:
+    return sk_is_finite2(p.x, p.y)
+
+## Ported from src/core/SkPointPriv.h:22 SkPointPriv::AreFinite.
+pub func sk_points_are_finite(points: const SkPoint[]) -> bool:
+    if points.length == 0:
+        return true
+    let x = points[0].x
+    var prod = x - x
+    prod = prod * points[0].y
+    for i in 1..<points.length:
+        prod = prod * points[i].x
+        prod = prod * points[i].y
+    return prod == prod
+
+## Ported from src/core/SkPointPriv.h:28 SkPointPriv::CanNormalize.
+pub func sk_point_can_normalize(dx: f32, dy: f32) -> bool:
+    return sk_is_finite2(dx, dy) and (dx != 0.0 or dy != 0.0)
+
+## Ported from src/core/SkPointPriv.h:54 SkPointPriv::EqualsWithinTolerance.
+pub func sk_point_equals_within_tolerance(p1: SkPoint, p2: SkPoint) -> bool:
+    return not sk_point_can_normalize(p1.x - p2.x, p1.y - p2.y)
+
+## Ported from src/core/SkPointPriv.h:63 SkPointPriv::LengthSqd.
+pub func sk_point_length_sqd(p: SkPoint) -> f32:
+    return sk_point_dot(p, p)
+
+# mark: SkRect ==================================================================================
+
+## SkRect (include/core/SkRect.h): left, top, right, bottom.
+pub struct SkRect:
+    pub var left: f32
+    pub var top: f32
+    pub var right: f32
+    pub var bottom: f32
+
+## Ported from src/core/SkRect.cpp:50 SkRect::Bounds: the bounds of the points, none when a
+## point is not finite (the 64-bit variant). An empty span gives the empty rect.
+pub func sk_rect_bounds(points: const SkPoint[]) -> SkRect?:
+    if points.length == 0:
+        return SkRect(left = 0.0, top = 0.0, right = 0.0, bottom = 0.0)
+    var l = points[0].x
+    var t = points[0].y
+    var r = points[0].x
+    var b = points[0].y
+    var nx: f32 = 0.0
+    var ny: f32 = 0.0
+    for p in points:
+        l = sk_fminf(p.x, l)
+        t = sk_fminf(p.y, t)
+        r = sk_fmaxf(p.x, r)
+        b = sk_fmaxf(p.y, b)
+
+        # we do this to look for infinities or nans
+        nx = nx * p.x
+        ny = ny * p.y
+
+    # if this is true, all our values were finite
+    if nx == 0.0 and ny == 0.0:
+        return SkRect(left = l, top = t, right = r, bottom = b)
+    return none
+
+## Ported from src/core/SkRect.cpp:121 SkRect::setBoundsCheck: the bounds, or the empty rect
+## when a point is not finite. Answers whether the points were all finite.
+pub func sk_rect_set_bounds_check(this: SkRect*, points: const SkPoint[]) -> bool:
+    if let bounds = sk_rect_bounds(points):
+        *this = bounds
+        return true
+    *this = SkRect(left = 0.0, top = 0.0, right = 0.0, bottom = 0.0)
+    return false

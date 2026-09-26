@@ -26,10 +26,12 @@ pub enum ExportFormat as u8:
 
 # mark: ImmutableBitmapImpl =====================================================================
 
-## Gfx::ImmutableBitmapImpl (Libraries/LibGfx/ImmutableBitmap.cpp:38).
+## Gfx::ImmutableBitmapImpl (Libraries/LibGfx/ImmutableBitmap.cpp:38). Region r10: Skia is replaced
+## (DESIGN.md §7.3), so `bitmap` always holds the pixels (the donor's sk_image is made from it,
+## or read back into it); `sk_image` and `sk_bitmap` stay empty.
 pub struct ImmutableBitmapImpl:
     pub var context: SkiaBackendContext*?
-    pub var sk_image: void*?  # unmapped: sk_sp<SkImage>
+    pub var sk_image: void*?  # sk_sp<SkImage>: unused (Skia is replaced)
     pub var sk_bitmap: SkBitmap
     pub var bitmap: const Bitmap*?
     pub var color_space: ColorSpace
@@ -39,6 +41,12 @@ pub struct ImmutableBitmapImpl:
 ## Gfx::ExportFlags (Libraries/LibGfx/ImmutableBitmap.h:43).
 pub struct ExportFlags:
     pub var empty_: u8
+
+## Gfx::ExportFlags::PremultiplyAlpha (the anonymous enum of ExportFlags, ImmutableBitmap.h:44).
+pub let export_flags_premultiply_alpha: i32 = 1 << 0
+
+## Gfx::ExportFlags::FlipY (the anonymous enum of ExportFlags, ImmutableBitmap.h:45).
+pub let export_flags_flip_y: i32 = 1 << 1
 
 # mark: ImmutableBitmap =========================================================================
 

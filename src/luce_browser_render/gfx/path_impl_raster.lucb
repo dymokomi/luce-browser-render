@@ -1,0 +1,177 @@
+#==============================================================================================
+#
+#   path_impl_raster - PathImplRaster: the path implementation (replaces PathImplSkia)
+#
+#   DESCRIPTION:
+#       Replaces Libraries/LibGfx/PathSkia.{h,cpp} (lines 1-264), the only PathImpl the donor
+#       has (PathImpl::create answers a PathImplSkia). DESIGN.md §7.2: "Path: port the
+#       interface; implement on the rasterizer's path type". The rasterizer's path (tiny-skia's)
+#       has no conics, no SVG arcs, no hit testing and no SVG serialization, and Ladybird's
+#       results depend on Skia's (to_svg_string output is part of dumps; arcs become conics;
+#       bounds include control points), so the implementation keeps an SkPath, ported as far
+#       as PathImplSkia uses it (sk_path, sk_matrix, sk_geometry, sk_path_contains,
+#       sk_parse_path), and hands the raster module a raster.Path when a path is drawn
+#       (path_to_raster_path). Each function follows the PathImplSkia member it replaces,
+#       in that file's order.
+#
+#       The virtual PathImpl interface (web_fonts' PathImpl, which names Font and GlyphRun)
+#       is flattened: gfx.Path calls these functions directly, since PathImplSkia is the only
+#       implementation. The text members (text, glyph_run, place_text_along) need fonts and
+#       live in web_fonts (path.lucb there), over path_sk_path.
+#
+#       Not supported: intersect (SkPathOps's Op(..., kIntersect_SkPathOp), a path-boolean
+#       engine the port does not have; LibWeb never calls Path::intersect).
+#
+#==============================================================================================
+
+# mark: PathImplRaster =========================================================================
+
+## The path implementation behind gfx.Path (PathImplSkia in the donor): an SkPath and the
+## point of the last move_to, which close() returns to.
+pub struct PathImplRaster:
+    pub var m_last_move_to: FloatPoint
+    pub var m_path: SkPath
+
+## Replaces PathSkia.cpp:25 Gfx::PathImplSkia::create (PathImpl::create, Path.cpp:12).
+pub func path_impl_raster_create() -> PathImplRaster*:
+    return new PathImplRaster(m_path = sk_path_create()) else trap("out of memory")
+
+## Replaces PathSkia.cpp:35 Gfx::PathImplSkia::PathImplSkia(PathImplSkia const&): a copy with
+## its own SkPath.
+pub func path_impl_raster_clone(this: const PathImplRaster*) -> PathImplRaster*:
+    return new PathImplRaster(m_last_move_to = this.m_last_move_to, m_path = sk_path_clone(&this.m_path)) else trap("out of memory")
+
+## Replaces PathSkia.cpp:43 Gfx::PathImplSkia::clear.
+pub func path_impl_raster_clear(this: PathImplRaster*):
+    sk_path_reset(&this.m_path)
+
+## Replaces PathSkia.cpp:48 Gfx::PathImplSkia::move_to.
+pub func path_impl_raster_move_to(this: PathImplRaster*, point: FloatPoint):
+    this.m_last_move_to = point
+    sk_path_move_to(&this.m_path, float_point_x(&point), float_point_y(&point))
+
+## Replaces PathSkia.cpp:54 Gfx::PathImplSkia::line_to.
+pub func path_impl_raster_line_to(this: PathImplRaster*, point: FloatPoint):
+    sk_path_line_to(&this.m_path, float_point_x(&point), float_point_y(&point))
+
+## Replaces PathSkia.cpp:59 Gfx::PathImplSkia::close.
+pub func path_impl_raster_close(this: PathImplRaster*):
+    sk_path_close(&this.m_path)
+    sk_path_move_to(&this.m_path, float_point_x(&this.m_last_move_to), float_point_y(&this.m_last_move_to))
+
+# sk_float_radians_to_degrees (Skia include/private/base/SkFloatingPoint.h): radians * (180 / SK_FloatPI).
+func path_impl_raster_radians_to_degrees(radians: f32) -> f32:
+    return radians * (180.0 / sk_scalar_pi)
+
+## Replaces PathSkia.cpp:65 Gfx::PathImplSkia::elliptical_arc_to.
+pub func path_impl_raster_elliptical_arc_to(this: PathImplRaster*, point: FloatPoint, radii: FloatSize, x_axis_rotation: f32, large_arc: bool, sweep: bool):
+    let sk_width = float_size_width(&radii)
+    let sk_height = float_size_height(&radii)
+    let sk_x_rotation = path_impl_raster_radians_to_degrees(x_axis_rotation)
+    let sk_large_arc = SkPathArcSize.large if large_arc else SkPathArcSize.small
+    let sk_sweep = SkPathDirection.cw if sweep else SkPathDirection.ccw
+    sk_path_arc_to_rotated(&this.m_path, sk_width, sk_height, sk_x_rotation, sk_large_arc, sk_sweep, float_point_x(&point), float_point_y(&point))
+
+## Replaces PathSkia.cpp:76 Gfx::PathImplSkia::arc_to.
+pub func path_impl_raster_arc_to(this: PathImplRaster*, point: FloatPoint, radius: f32, large_arc: bool, sweep: bool):
+    let sk_large_arc = SkPathArcSize.large if large_arc else SkPathArcSize.small
+    let sk_sweep = SkPathDirection.cw if sweep else SkPathDirection.ccw
+    sk_path_arc_to_rotated(&this.m_path, radius, radius, 0.0, sk_large_arc, sk_sweep, float_point_x(&point), float_point_y(&point))
+
+## Replaces PathSkia.cpp:85 Gfx::PathImplSkia::quadratic_bezier_curve_to.
+pub func path_impl_raster_quadratic_bezier_curve_to(this: PathImplRaster*, through: FloatPoint, point: FloatPoint):
+    sk_path_quad_to(&this.m_path, float_point_x(&through), float_point_y(&through), float_point_x(&point), float_point_y(&point))
+
+## Replaces PathSkia.cpp:90 Gfx::PathImplSkia::cubic_bezier_curve_to.
+pub func path_impl_raster_cubic_bezier_curve_to(this: PathImplRaster*, c1: FloatPoint, c2: FloatPoint, p2: FloatPoint):
+    sk_path_cubic_to(&this.m_path, float_point_x(&c1), float_point_y(&c1), float_point_x(&c2), float_point_y(&c2), float_point_x(&p2), float_point_y(&p2))
+
+## Replaces PathSkia.cpp:131 Gfx::PathImplSkia::offset.
+pub func path_impl_raster_offset(this: PathImplRaster*, offset: FloatPoint):
+    sk_path_offset(&this.m_path, float_point_x(&offset), float_point_y(&offset))
+
+## Replaces PathSkia.cpp:207 Gfx::PathImplSkia::append_path: SkPath::addPath(other) in
+## kAppend_AddPathMode with the identity matrix.
+pub func path_impl_raster_append_path(this: PathImplRaster*, other: const SkPath*):
+    var identity = sk_matrix_identity()
+    sk_path_add_path(&this.m_path, other, &identity, SkPathAddPathMode.append)
+
+## Replaces PathSkia.cpp:212 Gfx::PathImplSkia::intersect. Not supported: see the header.
+pub func path_impl_raster_intersect(this: PathImplRaster*, other: const SkPath*):
+    discard(this)
+    discard(other)
+    trap("unsupported: Path::intersect (Skia's SkPathOps is not ported)")
+
+## Replaces PathSkia.cpp:217 Gfx::PathImplSkia::is_empty.
+pub func path_impl_raster_is_empty(this: const PathImplRaster*) -> bool:
+    return sk_path_is_empty(&this.m_path)
+
+## Replaces PathSkia.cpp:222 Gfx::PathImplSkia::last_point.
+pub func path_impl_raster_last_point(this: const PathImplRaster*) -> FloatPoint:
+    let last = sk_path_get_last_pt(&this.m_path) else return FloatPoint(m_x = 0.0, m_y = 0.0)
+    return FloatPoint(m_x = last.x, m_y = last.y)
+
+## Replaces PathSkia.cpp:230 Gfx::PathImplSkia::bounding_box.
+pub func path_impl_raster_bounding_box(this: const PathImplRaster*) -> FloatRect:
+    let bounds = sk_path_get_bounds(&this.m_path)
+    return FloatRect(m_location = FloatPoint(m_x = bounds.left, m_y = bounds.top), m_size = FloatSize(m_width = bounds.right - bounds.left, m_height = bounds.bottom - bounds.top))
+
+# to_skia_path_fill_type (SkiaUtils.h).
+func path_impl_raster_fill_type(winding_rule: WindingRule) -> SkPathFillType:
+    match winding_rule:
+        .nonzero: return SkPathFillType.winding
+        .even_odd: return SkPathFillType.even_odd
+        _: trap("VERIFY_NOT_REACHED")
+
+## Replaces PathSkia.cpp:236 Gfx::PathImplSkia::contains.
+pub func path_impl_raster_contains(this: const PathImplRaster*, point: FloatPoint, winding_rule: WindingRule) -> bool:
+    # SkPath temp_path = *m_path: SkPath copies share their points; only the fill type differs.
+    var temp_path = this.m_path
+    sk_path_set_fill_type(&temp_path, path_impl_raster_fill_type(winding_rule))
+    return sk_path_contains(&temp_path, float_point_x(&point), float_point_y(&point))
+
+## Replaces PathSkia.cpp:243 Gfx::PathImplSkia::set_fill_type.
+pub func path_impl_raster_set_fill_type(this: PathImplRaster*, winding_rule: WindingRule):
+    sk_path_set_fill_type(&this.m_path, path_impl_raster_fill_type(winding_rule))
+
+## Replaces PathSkia.cpp:253 Gfx::PathImplSkia::copy_transformed.
+pub func path_impl_raster_copy_transformed(this: const PathImplRaster*, transform: AffineTransform) -> PathImplRaster*:
+    let new_path = path_impl_raster_clone(this)
+    let matrix = sk_matrix_make_all(
+        affine_transform_a(&transform), affine_transform_c(&transform), affine_transform_e(&transform),
+        affine_transform_b(&transform), affine_transform_d(&transform), affine_transform_f(&transform),
+        0.0, 0.0, 1.0)
+    sk_path_transform(&new_path.m_path, &matrix)
+    return new_path
+
+## Replaces PathSkia.cpp:259 Gfx::PathImplSkia::to_svg_string.
+pub func path_impl_raster_to_svg_string(this: const PathImplRaster*) -> ak.String:
+    return sk_parse_path_to_svg_string(&this.m_path)
+
+# mark: Raster =================================================================================
+
+## The path for drawing with the raster module (replaces to_skia_path, SkiaUtils.cpp): the
+## SkPath's contours as a raster.Path, conics turned into quads with the tolerance Skia's
+## edge builder uses (1/4 pixel, SkEdgeBuilder), as tiny-skia's conic_to does. None for an
+## empty path or one without valid bounds. The caller releases the result (memory.heap).
+pub func sk_path_to_raster_path(path: const SkPath*) -> raster.Path?:
+    var builder = raster.PathBuilder.new_()
+    var iterator = sk_path_raw_iter(path)
+    while let record = sk_path_raw_iter_next(&iterator):
+        let pts = record.pts
+        match record.verb:
+            .move: builder.move_to(pts[0].x, pts[0].y)
+            .line: builder.line_to(pts[1].x, pts[1].y)
+            .quad: builder.quad_to(pts[1].x, pts[1].y, pts[2].x, pts[2].y)
+            .conic:
+                let quadder = sk_auto_conic_to_quads(pts[0..<3], record.conic_weight, 0.25)
+                for i in 0..<(usize)quadder.quad_count:
+                    let control = quadder.points[i * 2 + 1]
+                    let end = quadder.points[i * 2 + 2]
+                    builder.quad_to(control.x, control.y, end.x, end.y)
+            .cubic: builder.cubic_to(pts[1].x, pts[1].y, pts[2].x, pts[2].y, pts[3].x, pts[3].y)
+            .close: builder.close()
+            _: trap("VERIFY_NOT_REACHED")
+    let result = builder.finish()
+    builder.release()
+    return result

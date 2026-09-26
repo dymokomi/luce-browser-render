@@ -1,0 +1,440 @@
+#==============================================================================================
+#
+#   sk_path_contains - SkPath::contains: point-in-path by winding numbers
+#
+#   DESCRIPTION:
+#       Port of Skia m144 src/core/SkPathPriv.cpp lines 884-1370 (poly_eval, between,
+#       eval_cubic_pts, find_minmax, checkOnCurve, the winding_* counters for lines, quads,
+#       conics and cubics, the tangent_* collectors and SkPathPriv::Contains) and
+#       src/core/SkPath.cpp:547 (SkPath::contains, which needs a finite path). Points on the
+#       path's edges count as inside, with coincident edges cancelled by their tangents.
+#
+#       Copyright 2006 The Android Open Source Project
+#       Copyright 2011+ Google Inc.
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-tiny-skia)
+#
+#==============================================================================================
+
+# mark: Helpers =================================================================================
+
+## Ported from src/core/SkPathPriv.cpp:884 poly_eval(A, B, C, t).
+func sk_contains_poly_eval3(a: f32, b: f32, c_: f32, t: f32) -> f32:
+    return (a * t + b) * t + c_
+
+## Ported from src/core/SkPathPriv.cpp:888 poly_eval(A, B, C, D, t).
+func sk_contains_poly_eval4(a: f32, b: f32, c_: f32, d: f32, t: f32) -> f32:
+    return ((a * t + b) * t + c_) * t + d
+
+## Ported from src/core/SkPathPriv.cpp:893 between: (a <= b <= c) || (a >= b >= c).
+func sk_contains_between(a: f32, b: f32, c_: f32) -> bool:
+    return (a - b) * (c_ - b) <= 0.0
+
+## Ported from src/core/SkPathPriv.cpp:899 eval_cubic_pts.
+func sk_contains_eval_cubic_pts(c0: f32, c1: f32, c2: f32, c3: f32, t: f32) -> f32:
+    let a = c3 + 3.0 * (c1 - c2) - c0
+    let b = 3.0 * (c2 - c1 - c1 + c0)
+    let c_ = 3.0 * (c1 - c0)
+    let d = c0
+    return sk_contains_poly_eval4(a, b, c_, d, t)
+
+## Ported from src/core/SkPathPriv.cpp:908 find_minmax<N> (over the x coordinates).
+func sk_contains_find_minmax(pts: const SkPoint[]) -> (f32, f32):
+    var min = pts[0].x
+    var max = pts[0].x
+    for i in 1..<pts.length:
+        min = sk_min(min, pts[i].x)
+        max = sk_max(max, pts[i].x)
+    return (min, max)
+
+## Ported from src/core/SkPathPriv.cpp:920 checkOnCurve.
+func sk_contains_check_on_curve(x: f32, y: f32, start: SkPoint, end: SkPoint) -> bool:
+    if start.y == end.y:
+        return sk_contains_between(start.x, x, end.x) and x != end.x
+    return x == start.x and y == start.y
+
+# mark: Winding =================================================================================
+
+## Ported from src/core/SkPathPriv.cpp:928 winding_mono_cubic.
+func sk_contains_winding_mono_cubic(pts: const SkPoint[], x: f32, y: f32, on_curve_count: i32*) -> i32:
+    var y0 = pts[0].y
+    var y3 = pts[3].y
+
+    var dir: i32 = 1
+    if y0 > y3:
+        let swap = y0
+        y0 = y3
+        y3 = swap
+        dir = -1
+    if y < y0 or y > y3:
+        return 0
+    if sk_contains_check_on_curve(x, y, pts[0], pts[3]):
+        *on_curve_count += 1
+        return 0
+    if y == y3:
+        return 0
+
+    # quickreject or quickaccept
+    let (min, max) = sk_contains_find_minmax(pts[..<4])
+    if x < min:
+        return 0
+    if x > max:
+        return dir
+
+    # compute the actual x(t) value
+    var t: f32 = 0.0
+    if not sk_cubic_clipper_chop_mono_at_y(pts, y, &t):
+        return 0
+    let xt = sk_contains_eval_cubic_pts(pts[0].x, pts[1].x, pts[2].x, pts[3].x, t)
+    if sk_scalar_nearly_equal(xt, x):
+        if x != pts[3].x or y != pts[3].y:  # don't test end points; they're start points
+            *on_curve_count += 1
+            return 0
+    return dir if xt < x else 0
+
+## Ported from src/core/SkPathPriv.cpp:974 winding_cubic.
+func sk_contains_winding_cubic(pts: const SkPoint[], x: f32, y: f32, on_curve_count: i32*) -> i32:
+    var dst: SkPoint[10]
+    let n = sk_chop_cubic_at_y_extrema(pts, dst[0..])
+    var w: i32 = 0
+    for i in 0..=(usize)n:
+        w += sk_contains_winding_mono_cubic(dst[i * 3..], x, y, on_curve_count)
+    return w
+
+## Ported from src/core/SkPathPriv.cpp:984 conic_eval_numerator (`offset` 0 for x, 1 for y).
+func sk_contains_conic_eval_numerator(pts: const SkPoint[], offset: usize, w: f32, t: f32) -> f64:
+    let s0 = pts[0].x if offset == 0 else pts[0].y
+    let s2 = pts[1].x if offset == 0 else pts[1].y
+    let s4 = pts[2].x if offset == 0 else pts[2].y
+    let src2w = s2 * w
+    let c_ = s0
+    let a = s4 - 2.0 * src2w + c_
+    let b = 2.0 * (src2w - c_)
+    return (f64)sk_contains_poly_eval3(a, b, c_, t)
+
+## Ported from src/core/SkPathPriv.cpp:995 conic_eval_denominator.
+func sk_contains_conic_eval_denominator(w: f32, t: f32) -> f64:
+    let b = 2.0 * (w - 1.0)
+    let c_: f32 = 1.0
+    let a = -b
+    return (f64)sk_contains_poly_eval3(a, b, c_, t)
+
+## Ported from src/core/SkPathPriv.cpp:1002 winding_mono_conic.
+func sk_contains_winding_mono_conic(conic: const SkConic*, x: f32, y: f32, on_curve_count: i32*) -> i32:
+    let pts: const SkPoint[] = conic.pts
+    var y0 = pts[0].y
+    var y2 = pts[2].y
+
+    var dir: i32 = 1
+    if y0 > y2:
+        let swap = y0
+        y0 = y2
+        y2 = swap
+        dir = -1
+    if y < y0 or y > y2:
+        return 0
+    if sk_contains_check_on_curve(x, y, pts[0], pts[2]):
+        *on_curve_count += 1
+        return 0
+    if y == y2:
+        return 0
+
+    var roots: f32[2] = [0.0, 0.0]
+    var a = pts[2].y
+    var b = pts[1].y * conic.w - y * conic.w + y
+    var c_ = pts[0].y
+    a += c_ - 2.0 * b  # A = a + c - 2*(b*w - yCept*w + yCept)
+    b -= c_  # B = b*w - w * yCept + yCept - a
+    c_ -= y
+    let n = sk_find_unit_quad_roots(a, 2.0 * b, c_, roots[0..])
+    var xt: f32
+    if 0 == n:
+        # zero roots are returned only when y0 == y
+        # Need [0] if dir == 1
+        # and  [2] if dir == -1
+        xt = pts[(usize)(1 - dir)].x
+    else:
+        let t = roots[0]
+        xt = (f32)(sk_contains_conic_eval_numerator(pts, 0, conic.w, t) / sk_contains_conic_eval_denominator(conic.w, t))
+    if sk_scalar_nearly_equal(xt, x):
+        if x != pts[2].x or y != pts[2].y:  # don't test end points; they're start points
+            *on_curve_count += 1
+            return 0
+    return dir if xt < x else 0
+
+## Ported from src/core/SkPathPriv.cpp:1052 is_mono_quad.
+func sk_contains_is_mono_quad(y0: f32, y1: f32, y2: f32) -> bool:
+    #    return SkScalarSignAsInt(y0 - y1) + SkScalarSignAsInt(y1 - y2) != 0;
+    if y0 == y1:
+        return true
+    if y0 < y1:
+        return y1 <= y2
+    return y1 >= y2
+
+## Ported from src/core/SkPathPriv.cpp:1064 winding_conic.
+func sk_contains_winding_conic(pts: const SkPoint[], x: f32, y: f32, weight: f32, on_curve_count: i32*) -> i32:
+    let conic = sk_conic_from_points(pts, weight)
+    var chopped: SkConic[2]
+    # If the data points are very large, the conic may not be monotonic but may also
+    # fail to chop. Then, the chopper does not split the original conic in two.
+    let is_mono = sk_contains_is_mono_quad(pts[0].y, pts[1].y, pts[2].y) or not sk_conic_chop_at_y_extrema(&conic, chopped[0..])
+    if is_mono:
+        return sk_contains_winding_mono_conic(&conic, x, y, on_curve_count)
+    var w = sk_contains_winding_mono_conic(&chopped[0], x, y, on_curve_count)
+    if not is_mono:
+        w += sk_contains_winding_mono_conic(&chopped[1], x, y, on_curve_count)
+    return w
+
+## Ported from src/core/SkPathPriv.cpp:1078 winding_mono_quad.
+func sk_contains_winding_mono_quad(pts: const SkPoint[], x: f32, y: f32, on_curve_count: i32*) -> i32:
+    var y0 = pts[0].y
+    var y2 = pts[2].y
+
+    var dir: i32 = 1
+    if y0 > y2:
+        let swap = y0
+        y0 = y2
+        y2 = swap
+        dir = -1
+    if y < y0 or y > y2:
+        return 0
+    if sk_contains_check_on_curve(x, y, pts[0], pts[2]):
+        *on_curve_count += 1
+        return 0
+    if y == y2:
+        return 0
+
+    var roots: f32[2] = [0.0, 0.0]
+    let n = sk_find_unit_quad_roots(pts[0].y - 2.0 * pts[1].y + pts[2].y,
+        2.0 * (pts[1].y - pts[0].y),
+        pts[0].y - y,
+        roots[0..])
+    var xt: f32
+    if 0 == n:
+        # zero roots are returned only when y0 == y
+        # Need [0] if dir == 1
+        # and  [2] if dir == -1
+        xt = pts[(usize)(1 - dir)].x
+    else:
+        let t = roots[0]
+        let c_ = pts[0].x
+        let a = pts[2].x - 2.0 * pts[1].x + c_
+        let b = 2.0 * (pts[1].x - c_)
+        xt = sk_contains_poly_eval3(a, b, c_, t)
+    if sk_scalar_nearly_equal(xt, x):
+        if x != pts[2].x or y != pts[2].y:  # don't test end points; they're start points
+            *on_curve_count += 1
+            return 0
+    return dir if xt < x else 0
+
+## Ported from src/core/SkPathPriv.cpp:1133 winding_quad.
+func sk_contains_winding_quad(pts: const SkPoint[], x: f32, y: f32, on_curve_count: i32*) -> i32:
+    var span_storage: SkPoint[5]
+    var n: i32 = 0
+
+    var span = pts
+    if not sk_contains_is_mono_quad(pts[0].y, pts[1].y, pts[2].y):
+        n = sk_chop_quad_at_y_extrema(pts, span_storage[0..])
+        span = span_storage[0..]
+    var w = sk_contains_winding_mono_quad(span, x, y, on_curve_count)
+    if n > 0:
+        w += sk_contains_winding_mono_quad(span[2..], x, y, on_curve_count)
+    return w
+
+## Ported from src/core/SkPathPriv.cpp:1149 winding_line.
+func sk_contains_winding_line(pts: const SkPoint[], x: f32, y: f32, on_curve_count: i32*) -> i32:
+    let x0 = pts[0].x
+    var y0 = pts[0].y
+    let x1 = pts[1].x
+    var y1 = pts[1].y
+
+    let dy = y1 - y0
+
+    var dir: i32 = 1
+    if y0 > y1:
+        let swap = y0
+        y0 = y1
+        y1 = swap
+        dir = -1
+    if y < y0 or y > y1:
+        return 0
+    if sk_contains_check_on_curve(x, y, pts[0], pts[1]):
+        *on_curve_count += 1
+        return 0
+    if y == y1:
+        return 0
+    let cross = (x1 - x0) * (y - pts[0].y) - dy * (x - x0)
+
+    if cross == 0.0:
+        # zero cross means the point is on the line, and since the case where
+        # y of the query point is at the end point is handled above, we can be
+        # sure that we're on the line (excluding the end point) here
+        if x != x1 or y != pts[1].y:
+            *on_curve_count += 1
+        dir = 0
+    elif sk_scalar_sign_as_int(cross) == dir:
+        dir = 0
+    return dir
+
+# mark: Tangents ================================================================================
+
+## Ported from src/core/SkPathPriv.cpp:1189 tangent_cubic.
+func sk_contains_tangent_cubic(pts: const SkPoint[], x: f32, y: f32, tangents: ak.Vector[SkPoint]*):
+    if not sk_contains_between(pts[0].y, y, pts[1].y) and not sk_contains_between(pts[1].y, y, pts[2].y) and not sk_contains_between(pts[2].y, y, pts[3].y):
+        return
+    if not sk_contains_between(pts[0].x, x, pts[1].x) and not sk_contains_between(pts[1].x, x, pts[2].x) and not sk_contains_between(pts[2].x, x, pts[3].x):
+        return
+    var dst: SkPoint[10]
+    let n = sk_chop_cubic_at_y_extrema(pts, dst[0..])
+    for i in 0..=(usize)n:
+        let c_ = dst[i * 3..]
+        var t: f32 = 0.0
+        if not sk_cubic_clipper_chop_mono_at_y(c_, y, &t):
+            continue
+        let xt = sk_contains_eval_cubic_pts(c_[0].x, c_[1].x, c_[2].x, c_[3].x, t)
+        if not sk_scalar_nearly_equal(x, xt):
+            continue
+        let (_loc, tangent) = sk_eval_cubic_at(c_, t)
+        ak.vector_append_t(tangents, tangent)
+
+## Ported from src/core/SkPathPriv.cpp:1217 tangent_conic.
+func sk_contains_tangent_conic(pts: const SkPoint[], x: f32, y: f32, w: f32, tangents: ak.Vector[SkPoint]*):
+    if not sk_contains_between(pts[0].y, y, pts[1].y) and not sk_contains_between(pts[1].y, y, pts[2].y):
+        return
+    if not sk_contains_between(pts[0].x, x, pts[1].x) and not sk_contains_between(pts[1].x, x, pts[2].x):
+        return
+    var roots: f32[2] = [0.0, 0.0]
+    var a = pts[2].y
+    var b = pts[1].y * w - y * w + y
+    var c_ = pts[0].y
+    a += c_ - 2.0 * b  # A = a + c - 2*(b*w - yCept*w + yCept)
+    b -= c_  # B = b*w - w * yCept + yCept - a
+    c_ -= y
+    let n = sk_find_unit_quad_roots(a, 2.0 * b, c_, roots[0..])
+    for index in 0..<(usize)n:
+        let t = roots[index]
+        let xt = (f32)(sk_contains_conic_eval_numerator(pts, 0, w, t) / sk_contains_conic_eval_denominator(w, t))
+        if not sk_scalar_nearly_equal(x, xt):
+            continue
+        let conic = sk_conic_from_points(pts, w)
+        ak.vector_append_t(tangents, sk_conic_eval_tangent_at(&conic, t))
+
+## Ported from src/core/SkPathPriv.cpp:1244 tangent_quad.
+func sk_contains_tangent_quad(pts: const SkPoint[], x: f32, y: f32, tangents: ak.Vector[SkPoint]*):
+    if not sk_contains_between(pts[0].y, y, pts[1].y) and not sk_contains_between(pts[1].y, y, pts[2].y):
+        return
+    if not sk_contains_between(pts[0].x, x, pts[1].x) and not sk_contains_between(pts[1].x, x, pts[2].x):
+        return
+    var roots: f32[2] = [0.0, 0.0]
+    let n = sk_find_unit_quad_roots(pts[0].y - 2.0 * pts[1].y + pts[2].y,
+        2.0 * (pts[1].y - pts[0].y),
+        pts[0].y - y,
+        roots[0..])
+    for index in 0..<(usize)n:
+        let t = roots[index]
+        let c_ = pts[0].x
+        let a = pts[2].x - 2.0 * pts[1].x + c_
+        let b = 2.0 * (pts[1].x - c_)
+        let xt = sk_contains_poly_eval3(a, b, c_, t)
+        if not sk_scalar_nearly_equal(x, xt):
+            continue
+        ak.vector_append_t(tangents, sk_eval_quad_tangent_at(pts, t))
+
+## Ported from src/core/SkPathPriv.cpp:1270 tangent_line.
+func sk_contains_tangent_line(pts: const SkPoint[], x: f32, y: f32, tangents: ak.Vector[SkPoint]*):
+    let y0 = pts[0].y
+    let y1 = pts[1].y
+    if not sk_contains_between(y0, y, y1):
+        return
+    let x0 = pts[0].x
+    let x1 = pts[1].x
+    if not sk_contains_between(x0, x, x1):
+        return
+    let dx = x1 - x0
+    let dy = y1 - y0
+    if not sk_scalar_nearly_equal((x - x0) * dy, dx * (y - y0)):
+        return
+    ak.vector_append_t(tangents, SkPoint(x = dx, y = dy))
+
+## Ported from src/core/SkPathPriv.cpp:1292 contains_inclusive.
+func sk_contains_inclusive(r: SkRect, x: f32, y: f32) -> bool:
+    return r.left <= x and x <= r.right and r.top <= y and y <= r.bottom
+
+# mark: Contains ================================================================================
+
+## Ported from src/core/SkPath.cpp:547 SkPath::contains and src/core/SkPathPriv.cpp:1296
+## SkPathPriv::Contains: whether (x, y) is inside the path under its fill type. A path with a
+## non-finite point contains nothing.
+pub func sk_path_contains(this: const SkPath*, x: f32, y: f32) -> bool:
+    # SkPathPriv::Raw answers none for a path that is not finite.
+    var bounds: SkRect
+    if not sk_rect_set_bounds_check(&bounds, sk_path_points(this)):
+        return false
+
+    let ft = this.m_fill_type
+    let is_inverse = ft == SkPathFillType.inverse_winding or ft == SkPathFillType.inverse_even_odd
+    if sk_path_is_empty(this):
+        return is_inverse
+
+    if not sk_contains_inclusive(bounds, x, y):
+        return is_inverse
+
+    var w: i32 = 0
+    var on_curve_count: i32 = 0
+
+    var iter = sk_path_edge_iter(this)
+    while let rec = sk_path_edge_iter_next(&iter):
+        match rec.edge:
+            .line:
+                w += sk_contains_winding_line(rec.pts[..<2], x, y, &on_curve_count)
+            .quad:
+                w += sk_contains_winding_quad(rec.pts[..<3], x, y, &on_curve_count)
+            .conic:
+                w += sk_contains_winding_conic(rec.pts[..<3], x, y, sk_path_edge_iter_conic_weight(&iter), &on_curve_count)
+            .cubic:
+                w += sk_contains_winding_cubic(rec.pts[..<4], x, y, &on_curve_count)
+            _:
+                trap("VERIFY_NOT_REACHED")
+    let even_odd_fill = SkPathFillType.even_odd == ft or SkPathFillType.inverse_even_odd == ft
+    if even_odd_fill:
+        w &= 1
+    if w != 0:
+        return not is_inverse
+    if on_curve_count <= 1:
+        return (on_curve_count != 0) != is_inverse
+    if (on_curve_count & 1) != 0 or even_odd_fill:
+        return ((on_curve_count & 1) != 0) != is_inverse
+    # If the point touches an even number of curves, and the fill is winding, check for
+    # coincidence. Count coincidence as places where the on curve points have identical tangents.
+    var tangents = ak.vector_create_atomic[SkPoint]()
+    var tangent_iter = sk_path_edge_iter(this)
+    while let rec = sk_path_edge_iter_next(&tangent_iter):
+        let old_count = ak.vector_size(&tangents)
+        match rec.edge:
+            .line:
+                sk_contains_tangent_line(rec.pts[..<2], x, y, &tangents)
+            .quad:
+                sk_contains_tangent_quad(rec.pts[..<3], x, y, &tangents)
+            .conic:
+                sk_contains_tangent_conic(rec.pts[..<3], x, y, sk_path_edge_iter_conic_weight(&tangent_iter), &tangents)
+            .cubic:
+                sk_contains_tangent_cubic(rec.pts[..<4], x, y, &tangents)
+            _:
+                trap("VERIFY_NOT_REACHED")
+        if ak.vector_size(&tangents) > old_count:
+            let last = ak.vector_size(&tangents) - 1
+            let tangent = *ak.vector_at(&tangents, last)
+            if sk_scalar_nearly_zero_tol(sk_point_length_sqd(tangent)):
+                ak.vector_remove(&tangents, last)
+            else:
+                for index in 0..<last:
+                    let probe = *ak.vector_at(&tangents, index)
+                    if sk_scalar_nearly_zero_tol(sk_point_cross(probe, tangent)) and sk_scalar_sign_as_int(tangent.x * probe.x) <= 0 and sk_scalar_sign_as_int(tangent.y * probe.y) <= 0:
+                        ak.vector_remove(&tangents, last)
+                        # removeShuffle: the last element moves into the removed slot
+                        let size = ak.vector_size(&tangents)
+                        if index != size - 1:
+                            *ak.vector_at(&tangents, index) = *ak.vector_at(&tangents, size - 1)
+                        ak.vector_remove(&tangents, size - 1)
+                        break
+    return (ak.vector_size(&tangents) != 0) != is_inverse

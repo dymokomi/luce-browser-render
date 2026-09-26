@@ -1,0 +1,302 @@
+#==============================================================================================
+#
+#   sk_path_iter - walking an SkPath: SkPath::Iter, SkPath::RawIter and SkPathEdgeIter
+#
+#   DESCRIPTION:
+#       Port of Skia m144 src/core/SkPath.cpp (lines 295-470: SkPath::Iter, which closes
+#       contours with a line back to their start; 470-545: SkPath::RawIter over
+#       SkPathPriv::Iterate, which yields the stored verbs with the previous point first),
+#       include/core/SkPath.h:1710-1770 (RangeIter) and src/core/SkPathPriv.h:475-570 with
+#       src/core/SkPath.cpp:911-927 (SkPathEdgeIter: only the edges, with the closing lines).
+#
+#       Copyright 2006 The Android Open Source Project
+#       Copyright 2011+ Google Inc.
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-tiny-skia)
+#
+#==============================================================================================
+
+# mark: Records =================================================================================
+
+## SkPath::IterRec: a verb, its points (the previous point first, `count` of them: move 1,
+## line 2, quad and conic 3, cubic 4, close 0 or 1) and the conic weight (1 otherwise).
+pub struct SkPathIterRec:
+    pub var verb: SkPathVerb
+    pub var pts: SkPoint[4]
+    pub var count: usize
+    pub var conic_weight: f32
+
+## Ported from src/core/SkPath.cpp:449 SkPathIterPointsPerVerb.
+pub func sk_path_iter_points_per_verb(verb: SkPathVerb) -> usize:
+    match verb:
+        .move: return 1
+        .line: return 2
+        .quad: return 3
+        .conic: return 3
+        .cubic: return 4
+        .close: return 0
+        _: trap("VERIFY_NOT_REACHED")
+
+# mark: SkPath::Iter ============================================================================
+
+## SkPath::Iter: iterates a path's contours, emitting a closing line before each close (and,
+## when `force_close`, before each open contour ends).
+pub struct SkPathIter:
+    var m_pts: const SkPoint[]
+    var m_verbs: const SkPathVerb[]
+    var m_weights: const f32[]
+    var m_pt_index: usize
+    var m_verb_index: usize
+    ## fConicWeights: begins one behind the first weight.
+    var m_weight_index: isize
+    var m_move_to: SkPoint
+    var m_last_pt: SkPoint
+    var m_force_close: bool
+    var m_need_close: bool
+    var m_close_line: bool
+
+    ## The next record, none when done.
+    mutating func next() -> SkPathIterRec?:
+        return sk_path_iter_next(&self)
+
+## Ported from src/core/SkPath.cpp:308 SkPath::Iter::Iter(path, forceClose) (setPath). The
+## iterator views the path's storage: do not edit the path while iterating.
+pub func sk_path_iter(path: const SkPath*, force_close: bool) -> SkPathIter:
+    return SkPathIter(m_pts = sk_path_points(path), m_verbs = sk_path_verbs(path),
+        m_weights = sk_path_conic_weights(path), m_pt_index = 0, m_verb_index = 0,
+        m_weight_index = -1, m_move_to = SkPoint(x = 0.0, y = 0.0),
+        m_last_pt = SkPoint(x = 0.0, y = 0.0), m_force_close = force_close,
+        m_need_close = false, m_close_line = false)
+
+## Ported from src/core/SkPath.cpp:354 SkPath::Iter::autoClose.
+func sk_path_iter_auto_close(this: SkPathIter*, pts: SkPoint[]) -> SkPathVerb:
+    if not sk_point_eq(this.m_last_pt, this.m_move_to):
+        # A special case: if both points are NaN, SkPoint::operation== returns
+        # false, but the iterator expects that they are treated as the same.
+        # (consider SkPoint is a 2-dimension float point).
+        if sk_is_nan(this.m_last_pt.x) or sk_is_nan(this.m_last_pt.y) or sk_is_nan(this.m_move_to.x) or sk_is_nan(this.m_move_to.y):
+            return .close
+
+        pts[0] = this.m_last_pt
+        pts[1] = this.m_move_to
+        this.m_last_pt = this.m_move_to
+        this.m_close_line = true
+        return .line
+    pts[0] = this.m_move_to
+    return .close
+
+## Ported from src/core/SkPath.cpp:375 SkPath::Iter::next(SkPoint[4]): the next verb (none
+## is kDone_Verb) with its points in `pts`.
+func sk_path_iter_next_verb(this: SkPathIter*, pts: SkPoint[]) -> SkPathVerb?:
+    if this.m_verb_index == this.m_verbs.length:
+        # Close the curve if requested and if there is some curve to close
+        if this.m_need_close:
+            if SkPathVerb.line == sk_path_iter_auto_close(this, pts):
+                return .line
+            this.m_need_close = false
+            return .close
+        return none
+
+    var verb = this.m_verbs[this.m_verb_index]
+    this.m_verb_index += 1
+    var src = this.m_pt_index
+
+    match verb:
+        .move:
+            if this.m_need_close:
+                this.m_verb_index -= 1  # move back one verb
+                verb = sk_path_iter_auto_close(this, pts)
+                if verb == SkPathVerb.close:
+                    this.m_need_close = false
+                return verb
+            if this.m_verb_index == this.m_verbs.length:  # might be a trailing moveto
+                return none
+            this.m_move_to = this.m_pts[src]
+            pts[0] = this.m_pts[src]
+            src += 1
+            this.m_last_pt = this.m_move_to
+            this.m_need_close = this.m_force_close
+        .line:
+            pts[0] = this.m_last_pt
+            pts[1] = this.m_pts[src]
+            this.m_last_pt = this.m_pts[src]
+            this.m_close_line = false
+            src += 1
+        .conic, .quad:
+            if verb == SkPathVerb.conic:
+                this.m_weight_index += 1
+            pts[0] = this.m_last_pt
+            pts[1] = this.m_pts[src]
+            pts[2] = this.m_pts[src + 1]
+            this.m_last_pt = this.m_pts[src + 1]
+            src += 2
+        .cubic:
+            pts[0] = this.m_last_pt
+            pts[1] = this.m_pts[src]
+            pts[2] = this.m_pts[src + 1]
+            pts[3] = this.m_pts[src + 2]
+            this.m_last_pt = this.m_pts[src + 2]
+            src += 3
+        .close:
+            verb = sk_path_iter_auto_close(this, pts)
+            if verb == SkPathVerb.line:
+                this.m_verb_index -= 1  # move back one verb
+            else:
+                this.m_need_close = false
+            this.m_last_pt = this.m_move_to
+        _:
+            trap("VERIFY_NOT_REACHED")
+    this.m_pt_index = src
+    return verb
+
+## Ported from src/core/SkPath.cpp:455 SkPath::Iter::next(): the next record, none when done.
+pub func sk_path_iter_next(this: SkPathIter*) -> SkPathIterRec?:
+    var rec = SkPathIterRec(verb = .move, pts = [SkPoint(x = 0.0, y = 0.0), SkPoint(x = 0.0, y = 0.0),
+        SkPoint(x = 0.0, y = 0.0), SkPoint(x = 0.0, y = 0.0)], count = 0, conic_weight = 1.0)
+    let verb = sk_path_iter_next_verb(this, rec.pts[0..]) else return none
+    rec.verb = verb
+    rec.count = sk_path_iter_points_per_verb(verb)
+    if verb == SkPathVerb.conic:
+        rec.conic_weight = this.m_weights[(usize)this.m_weight_index]
+    return rec
+
+# mark: SkPath::RawIter =========================================================================
+
+## SkPath::RawIter (SkPathPriv::Iterate): the stored verbs as they are, each with the previous
+## point first (a move has only its own point).
+pub struct SkPathRawIter:
+    var m_pts: const SkPoint[]
+    var m_verbs: const SkPathVerb[]
+    var m_weights: const f32[]
+    var m_pt_index: usize
+    var m_verb_index: usize
+    var m_weight_index: usize
+
+    ## The next record, none when done.
+    mutating func next() -> SkPathIterRec?:
+        return sk_path_raw_iter_next(&self)
+
+## Ported from src/core/SkPath.cpp:470 SkPath::RawIter::setPath. The iterator views the
+## path's storage: do not edit the path while iterating.
+pub func sk_path_raw_iter(path: const SkPath*) -> SkPathRawIter:
+    return SkPathRawIter(m_pts = sk_path_points(path), m_verbs = sk_path_verbs(path),
+        m_weights = sk_path_conic_weights(path), m_pt_index = 0, m_verb_index = 0, m_weight_index = 0)
+
+## Ported from src/core/SkPath.cpp:519 SkPath::RawIter::next() (RangeIter's operator* and
+## operator++, include/core/SkPath.h:1723-1770).
+pub func sk_path_raw_iter_next(this: SkPathRawIter*) -> SkPathIterRec?:
+    if this.m_verb_index == this.m_verbs.length:
+        return none
+    let verb = this.m_verbs[this.m_verb_index]
+    var rec = SkPathIterRec(verb = verb, pts = [SkPoint(x = 0.0, y = 0.0), SkPoint(x = 0.0, y = 0.0),
+        SkPoint(x = 0.0, y = 0.0), SkPoint(x = 0.0, y = 0.0)], count = sk_path_iter_points_per_verb(verb),
+        conic_weight = 1.0)
+    # pts_backset_for_verb: a move starts at its own point, the others at the previous one.
+    let first = this.m_pt_index if verb == SkPathVerb.move else this.m_pt_index - 1
+    var advance: usize = 0
+    match verb:
+        .move: advance = 1
+        .line: advance = 1
+        .quad: advance = 2
+        .conic: advance = 2
+        .cubic: advance = 3
+        .close: advance = 0
+        _: trap("VERIFY_NOT_REACHED")
+    for i in 0..<rec.count:
+        rec.pts[i] = this.m_pts[first + i]
+    if verb == SkPathVerb.conic:
+        rec.conic_weight = this.m_weights[this.m_weight_index]
+        this.m_weight_index += 1
+    this.m_verb_index += 1
+    this.m_pt_index += advance
+    return rec
+
+# mark: SkPathEdgeIter ==========================================================================
+
+## SkPathEdgeIter::Edge.
+pub enum SkPathEdge as u8:
+    line = 1
+    quad = 2
+    conic = 3
+    cubic = 4
+
+## SkPathEdgeIter::Result: an edge's points (2 to 4) and whether it starts a contour.
+pub struct SkPathEdgeRec:
+    pub var edge: SkPathEdge
+    pub var pts: SkPoint[4]
+    pub var is_new_contour: bool
+
+## SkPathEdgeIter (src/core/SkPathPriv.h:475): the edges of a path, with a closing line
+## after each contour that has edges.
+pub struct SkPathEdgeIter:
+    var m_pts: const SkPoint[]
+    var m_verbs: const SkPathVerb[]
+    var m_weights: const f32[]
+    var m_verb_index: usize
+    var m_pt_index: usize
+    var m_move_to_index: usize
+    ## fConicWeights: begins one behind the first weight.
+    var m_weight_index: isize
+    var m_needs_close_line: bool
+    var m_next_is_new_contour: bool
+
+## Ported from src/core/SkPath.cpp:911 SkPathEdgeIter::SkPathEdgeIter(const SkPathRaw&).
+pub func sk_path_edge_iter(path: const SkPath*) -> SkPathEdgeIter:
+    return SkPathEdgeIter(m_pts = sk_path_points(path), m_verbs = sk_path_verbs(path),
+        m_weights = sk_path_conic_weights(path), m_verb_index = 0, m_pt_index = 0,
+        m_move_to_index = 0, m_weight_index = -1, m_needs_close_line = false,
+        m_next_is_new_contour = false)
+
+## SkPathEdgeIter::conicWeight: the weight of the conic edge just returned.
+pub func sk_path_edge_iter_conic_weight(this: const SkPathEdgeIter*) -> f32:
+    return this.m_weights[(usize)this.m_weight_index]
+
+# The closeline lambda of SkPathEdgeIter::next.
+func sk_path_edge_iter_close_line(this: SkPathEdgeIter*) -> SkPathEdgeRec:
+    var rec = SkPathEdgeRec(edge = .line, pts = [this.m_pts[this.m_pt_index - 1], this.m_pts[this.m_move_to_index],
+        SkPoint(x = 0.0, y = 0.0), SkPoint(x = 0.0, y = 0.0)], is_new_contour = false)
+    this.m_needs_close_line = false
+    this.m_next_is_new_contour = true
+    return rec
+
+## Ported from src/core/SkPathPriv.h:517 SkPathEdgeIter::next: the next edge, none when done.
+pub func sk_path_edge_iter_next(this: SkPathEdgeIter*) -> SkPathEdgeRec?:
+    while true:
+        if this.m_verb_index == this.m_verbs.length:
+            if this.m_needs_close_line:
+                return sk_path_edge_iter_close_line(this)
+            return none
+
+        let verb = this.m_verbs[this.m_verb_index]
+        this.m_verb_index += 1
+        match verb:
+            .move:
+                if this.m_needs_close_line:
+                    let res = sk_path_edge_iter_close_line(this)
+                    this.m_move_to_index = this.m_pt_index
+                    this.m_pt_index += 1
+                    return res
+                this.m_move_to_index = this.m_pt_index
+                this.m_pt_index += 1
+                this.m_next_is_new_contour = true
+            .close:
+                if this.m_needs_close_line:
+                    return sk_path_edge_iter_close_line(this)
+            _:
+                let v = (usize)verb
+                # Actual edge.
+                let pts_count = (v + 2) // 2
+                let cws_count = (v & (v - 1)) // 2
+
+                this.m_needs_close_line = true
+                this.m_pt_index += pts_count
+                this.m_weight_index += (isize)cws_count
+
+                let is_new_contour = this.m_next_is_new_contour
+                this.m_next_is_new_contour = false
+                var rec = SkPathEdgeRec(edge = (SkPathEdge)(u8)verb, pts = [SkPoint(x = 0.0, y = 0.0), SkPoint(x = 0.0, y = 0.0),
+                    SkPoint(x = 0.0, y = 0.0), SkPoint(x = 0.0, y = 0.0)], is_new_contour = is_new_contour)
+                let first = this.m_pt_index - (pts_count + 1)
+                for i in 0..<pts_count + 1:
+                    rec.pts[i] = this.m_pts[first + i]
+                return rec

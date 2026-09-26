@@ -9,7 +9,7 @@ for module in gfx web_fonts display_list; do
     luce-base check "src/luce_browser_render/$module"
 done
 
-# gfx: the region tests (geometry, CSSPixels, color, transforms).
+# gfx: the region tests (geometry, CSSPixels, color, transforms; bitmaps, paths, painter, filters).
 echo "== luce-base test src/luce_browser_render/gfx"
 luce-base test src/luce_browser_render/gfx
 

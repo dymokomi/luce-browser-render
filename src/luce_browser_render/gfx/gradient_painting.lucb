@@ -1,0 +1,80 @@
+#==============================================================================================
+#
+#   gradient_painting - color stop interpolation and gradient geometry helpers
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/GradientPainting.cpp (lines 1-57) with the inline functions
+#       of Libraries/LibGfx/Gradients.h (lines 1-47). ColorStop itself is in types_gradients.
+#
+#       Note (from the donor): this file implements the CSS/Canvas gradients for LibWeb
+#       according to the spec. Please do not make ad-hoc changes that may break spec
+#       compliance!
+#
+#       `calculate_gradient_length` is a template over Size<T> in C++; its only instantiation
+#       (DisplayListPlayerSkia, Size<float>) is the one ported, on FloatSize.
+#
+#==============================================================================================
+
+# mark: Gradients.h ============================================================================
+
+## Ported from Libraries/LibGfx/Gradients.h:25 Gfx::normalized_gradient_angle_radians.
+pub func normalized_gradient_angle_radians(gradient_angle: f32) -> f32:
+    # Adjust angle so 0 degrees is bottom
+    let real_angle: f32 = 90.0 - gradient_angle
+    return ak.to_radians_f32(real_angle)
+
+## Ported from Libraries/LibGfx/Gradients.h:33 Gfx::calculate_gradient_length (Size<float>).
+pub func calculate_gradient_length_f32(gradient_size: FloatSize, sin_angle: f32, cos_angle: f32) -> f32:
+    return ak.fabs_f32(float_size_height(&gradient_size) * sin_angle) + ak.fabs_f32(float_size_width(&gradient_size) * cos_angle)
+
+## Ported from Libraries/LibGfx/Gradients.h:39 Gfx::calculate_gradient_length (Size<float>).
+pub func calculate_gradient_length(gradient_size: FloatSize, gradient_angle: f32) -> f32:
+    let angle = normalized_gradient_angle_radians(gradient_angle)
+    var sin_angle: f32 = 0.0
+    var cos_angle: f32 = 0.0
+    ak.trigonometry_sincos_f32(angle, &sin_angle, &cos_angle)
+    return calculate_gradient_length_f32(gradient_size, sin_angle, cos_angle)
+
+# mark: GradientPainting.cpp ===================================================================
+
+## Ported from Libraries/LibGfx/GradientPainting.cpp:16 Gfx::color_stop_step.
+pub func color_stop_step(previous_stop: ColorStop, next_stop: ColorStop, position: f32) -> f32:
+    if position < previous_stop.position:
+        return 0.0
+    if position > next_stop.position:
+        return 1.0
+    # For any given point between the two color stops,
+    # determine the point’s location as a percentage of the distance between the two color stops.
+    # Let this percentage be P.
+    let stop_length = next_stop.position - previous_stop.position
+    # FIXME: Avoids NaNs... Still not quite correct?
+    if stop_length <= 0.0:
+        return 1.0
+    let p = (position - previous_stop.position) / stop_length
+    let transition_hint = next_stop.transition_hint else return p
+    if transition_hint >= 1.0:
+        return 0.0
+    if transition_hint <= 0.0:
+        return 1.0
+    # Let C, the color weighting at that point, be equal to P^(logH(.5)).
+    let c = ak.pow_f32(p, ak.exponentials_log_f32(0.5) / ak.exponentials_log_f32(transition_hint))
+    # The color at that point is then a linear blend between the colors of the two color stops,
+    # blending (1 - C) of the first stop and C of the second stop.
+    return c
+
+## Ported from Libraries/LibGfx/GradientPainting.cpp:43 Gfx::SVGGradientPaintStyle::set_gradient_transform.
+pub func svg_gradient_paint_style_set_gradient_transform(this: SvgGradientPaintStyle*, transform: AffineTransform):
+    # Note: The scaling is removed so enough points on the gradient line are generated.
+    # Otherwise, if you scale a tiny path the gradient looks pixelated.
+    this.m_scale = 1.0
+    if let inverse = affine_transform_inverse(&transform):
+        let transform_scale = affine_transform_scale(&transform)
+        let scale_x = float_point_x(&transform_scale)
+        let scale_y = float_point_y(&transform_scale)
+        this.m_scale = scale_y if scale_x < scale_y else scale_x      # max(x, y)
+        var scale_adjusted: AffineTransform
+        affine_transform_construct(&scale_adjusted)
+        discard(affine_transform_multiply(affine_transform_scale_f32(&scale_adjusted, this.m_scale, this.m_scale), inverse))
+        this.m_inverse_transform = scale_adjusted
+    else:
+        this.m_inverse_transform = none

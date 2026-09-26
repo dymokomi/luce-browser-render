@@ -1,0 +1,207 @@
+#==============================================================================================
+#
+#   tests_sk_path - tests of the SkPath port (sk_scalar ... sk_parse_path)
+#
+#   DESCRIPTION:
+#       Skia's own tests are not part of the donor; these tests are pinned to the donor
+#       instead. The path cases (tests_sk_path_cases) replay Gfx::Path calls on SkPath the way
+#       PathImplSkia makes them (close() then moveTo(the last move), elliptical_arc_to's
+#       rotation converted from radians to degrees, copy_transformed's MakeAll(a, c, e, b, d,
+#       f)) and compare SVG strings, bounds and last points bit for bit, and contains() under
+#       both fill rules, with the values Ladybird's Gfx::Path (built at Build/release)
+#       printed. The helpers below mirror those Gfx::Path functions.
+#
+#       Each test's body is a noinline function the test block calls (# workaround:
+#       compiler-issues/ranges_facts_cubic).
+#
+#==============================================================================================
+
+# mark: Gfx::Path as PathImplSkia drives SkPath =================================================
+
+# A path with the m_last_move_to that PathImplSkia keeps beside its SkPath.
+struct TestSkGfxPath:
+    var path: SkPath
+    var last_move_to: SkPoint
+
+func test_sk_gfx_path() -> TestSkGfxPath:
+    return TestSkGfxPath(path = sk_path_create(), last_move_to = SkPoint(x = 0.0, y = 0.0))
+
+# PathImplSkia::move_to.
+func test_sk_move_to(this: TestSkGfxPath*, x: f32, y: f32):
+    this.last_move_to = SkPoint(x = x, y = y)
+    sk_path_move_to(&this.path, x, y)
+
+# PathImplSkia::close.
+func test_sk_close(this: TestSkGfxPath*):
+    sk_path_close(&this.path)
+    sk_path_move_to(&this.path, this.last_move_to.x, this.last_move_to.y)
+
+# PathImplSkia::last_point.
+func test_sk_last_point(this: const TestSkGfxPath*) -> SkPoint:
+    return sk_path_get_last_pt(&this.path) else SkPoint(x = 0.0, y = 0.0)
+
+# Path::horizontal_line_to.
+func test_sk_horizontal_line_to(this: TestSkGfxPath*, x: f32):
+    let last = test_sk_last_point(this)
+    sk_path_line_to(&this.path, x, last.y)
+
+# Path::vertical_line_to.
+func test_sk_vertical_line_to(this: TestSkGfxPath*, y: f32):
+    let last = test_sk_last_point(this)
+    sk_path_line_to(&this.path, last.x, y)
+
+# PathImplSkia::elliptical_arc_to (arc_to is the same with rx = ry = radius, rotation 0).
+func test_sk_elliptical_arc_to(this: TestSkGfxPath*, x: f32, y: f32, rx: f32, ry: f32, x_axis_rotation: f32,
+        large_arc: bool, sweep: bool):
+    let degrees = x_axis_rotation * (180.0 / sk_scalar_pi)
+    sk_path_arc_to_rotated(&this.path, rx, ry, degrees, SkPathArcSize.large if large_arc else SkPathArcSize.small,
+        SkPathDirection.cw if sweep else SkPathDirection.ccw, x, y)
+
+# PathImplSkia::copy_transformed with AffineTransform(a, b, c, d, e, f).
+func test_sk_transform(this: TestSkGfxPath*, a: f32, b: f32, c_: f32, d: f32, e: f32, f: f32):
+    let matrix = sk_matrix_make_all(a, c_, e, b, d, f, 0.0, 0.0, 1.0)
+    sk_path_transform(&this.path, &matrix)
+
+# PathImplSkia::append_path.
+func test_sk_append(this: SkPath*, other: const SkPath*):
+    let identity = sk_matrix_identity()
+    sk_path_add_path(this, other, &identity, SkPathAddPathMode.append)
+
+func test_sk_text(string: const ak.String*) -> str:
+    return ak.string_view_text(ak.string_bytes_as_string_view(string))
+
+func test_sk_check_svg(this: const TestSkGfxPath*, expected: str):
+    let svg = sk_parse_path_to_svg_string(&this.path)
+    let text = test_sk_text(&svg)
+    if text != expected:
+        print(f"svg: {text}")
+        print(f"expected: {expected}")
+    assert(text == expected)
+
+# PathImplSkia::bounding_box: x, y, width, height as bits.
+func test_sk_check_bounds(this: const TestSkGfxPath*, x: u32, y: u32, width: u32, height: u32):
+    let bounds = sk_path_get_bounds(&this.path)
+    assert(bounds.left.bits() == x)
+    assert(bounds.top.bits() == y)
+    assert((bounds.right - bounds.left).bits() == width)
+    assert((bounds.bottom - bounds.top).bits() == height)
+
+func test_sk_check_last_point(this: const TestSkGfxPath*, x: u32, y: u32):
+    let last = test_sk_last_point(this)
+    assert(last.x.bits() == x)
+    assert(last.y.bits() == y)
+
+# PathImplSkia::contains under nonzero and even-odd.
+func test_sk_check_contains(this: const TestSkGfxPath*, x: f32, y: f32, nonzero: bool, even_odd: bool):
+    var copy = sk_path_clone(&this.path)
+    sk_path_set_fill_type(&copy, .winding)
+    assert(sk_path_contains(&copy, x, y) == nonzero)
+    sk_path_set_fill_type(&copy, .even_odd)
+    assert(sk_path_contains(&copy, x, y) == even_odd)
+
+# mark: Scalars and matrices ====================================================================
+
+func test_sk_scalar_text(value: f32) -> str:
+    var builder: ak.StringBuilder
+    ak.string_builder_construct(&builder)
+    sk_append_scalar(&builder, value)
+    let string = ak.string_builder_to_string_without_validation(&builder)
+    return test_sk_text(&string)
+
+test "sk scalar: SkStrAppendScalar":
+    test_sk_append_scalar()
+
+noinline func test_sk_append_scalar():
+    assert(test_sk_scalar_text(0.0) == "0")
+    assert(test_sk_scalar_text(-0.0) == "-0")
+    assert(test_sk_scalar_text(1234567.25) == "1234567.2")
+    assert(test_sk_scalar_text(0.1) == "0.1")
+    assert(test_sk_scalar_text(1e20) == "1e+20")
+    assert(test_sk_scalar_text(math32.nan) == "nan")
+    assert(test_sk_scalar_text(-math32.nan) == "nan")
+    assert(test_sk_scalar_text(math32.infinity) == "inf")
+    assert(test_sk_scalar_text(-math32.infinity) == "-inf")
+
+test "sk matrix: type masks and concatenation":
+    test_sk_matrix_types()
+
+noinline func test_sk_matrix_types():
+    var m = sk_matrix_identity()
+    assert(sk_matrix_is_identity(&m))
+    sk_matrix_set_translate(&m, 1.0, 0.0)
+    assert(sk_matrix_get_type(&m) == sk_matrix_translate_mask)
+    sk_matrix_set_scale(&m, 2.0, 3.0)
+    assert(sk_matrix_get_type(&m) == sk_matrix_scale_mask)
+    sk_matrix_pre_scale(&m, 0.5, 1.0 / 3.0)
+    assert(m.mat[0] == 1.0)
+    sk_matrix_set_rotate(&m, 90.0)
+    assert(sk_matrix_get_type(&m) == (sk_matrix_affine_mask | sk_matrix_scale_mask))
+    assert(m.mat[0] == 0.0 and m.mat[1] == -1.0 and m.mat[3] == 1.0 and m.mat[4] == 0.0)
+    let p = sk_matrix_map_point(&m, SkPoint(x = 2.0, y = 3.0))
+    assert(p.x == -3.0 and p.y == 2.0)
+    var t = sk_matrix_identity()
+    sk_matrix_set_translate(&t, 10.0, 20.0)
+    sk_matrix_pre_concat(&m, &t)
+    let q = sk_matrix_map_point(&m, SkPoint(x = 0.0, y = 0.0))
+    assert(q.x == -20.0 and q.y == 10.0)
+    var persp = sk_matrix_make_all(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.5, 1.0)
+    assert(sk_matrix_has_perspective(&persp))
+    let r = sk_matrix_map_point(&persp, SkPoint(x = 2.0, y = 2.0))
+    assert(r.x == 1.0 and r.y == 1.0)
+
+# mark: Geometry ================================================================================
+
+test "sk geometry: quad roots and chops":
+    test_sk_geometry()
+
+noinline func test_sk_geometry():
+    var roots: f32[2] = [0.0, 0.0]
+    # (t - 0.25)(t - 0.75) = t^2 - t + 0.1875
+    assert(sk_find_unit_quad_roots(1.0, -1.0, 0.1875, roots[0..]) == 2)
+    assert(roots[0] == 0.25 and roots[1] == 0.75)
+    assert(sk_find_unit_quad_roots(0.0, 2.0, -1.0, roots[0..]) == 1)
+    assert(roots[0] == 0.5)
+    assert(sk_find_unit_quad_roots(1.0, 0.0, 1.0, roots[0..]) == 0)
+
+    let quad = [SkPoint(x = 0.0, y = 0.0), SkPoint(x = 50.0, y = 100.0), SkPoint(x = 100.0, y = 0.0)]
+    var dst: SkPoint[5]
+    assert(sk_chop_quad_at_y_extrema(quad[0..], dst[0..]) == 1)
+    assert(dst[2].x == 50.0 and dst[2].y == 50.0)
+    assert(dst[1].y == 50.0 and dst[3].y == 50.0)
+    let mid = sk_eval_quad_at(quad[0..], 0.5)
+    assert(mid.x == 50.0 and mid.y == 50.0)
+
+    let cubic = [SkPoint(x = 0.0, y = 0.0), SkPoint(x = 0.0, y = 30.0), SkPoint(x = 30.0, y = 30.0), SkPoint(x = 30.0, y = 0.0)]
+    var cdst: SkPoint[10]
+    assert(sk_chop_cubic_at_y_extrema(cubic[0..], cdst[0..]) == 1)
+    assert(cdst[3].x == 15.0 and cdst[3].y == 22.5)
+    let (loc, tangent) = sk_eval_cubic_at(cubic[0..], 0.0)
+    assert(loc.x == 0.0 and loc.y == 0.0 and tangent.x == 0.0 and tangent.y == 30.0)
+    var t: f32 = 0.0
+    assert(sk_cubic_clipper_chop_mono_at_y(cdst[0..], 11.25, &t))
+
+test "sk conic: quads":
+    test_sk_conic_quads()
+
+noinline func test_sk_conic_quads():
+    # A quarter circle of radius 10: weight sqrt(2)/2.
+    let pts = [SkPoint(x = 10.0, y = 0.0), SkPoint(x = 10.0, y = 10.0), SkPoint(x = 0.0, y = 10.0)]
+    let conic = sk_conic_from_points(pts[0..], 0.70710677)
+    assert(sk_conic_compute_quad_pow2(&conic, 0.25) == 1)
+    let quads = sk_auto_conic_to_quads(pts[0..], 0.70710677, 0.25)
+    assert(quads.quad_count == 2)
+    assert(quads.points[4].x == 0.0 and quads.points[4].y == 10.0)
+    let bad = sk_conic_from_points(pts[0..], -1.0)
+    assert(bad.w == 1.0)
+
+# mark: Path measure ============================================================================
+
+# SkPathMeasure::getPosTan(distance) against the donor's answer (all as bits).
+func test_sk_check_pos_tan(m: const SkPathMeasure*, distance: u32, ok: bool, px: u32, py: u32, tx: u32, ty: u32):
+    if let result = sk_path_measure_get_pos_tan(m, f32.bits(distance)):
+        let (pos, tangent) = result
+        assert(ok)
+        assert(pos.x.bits() == px and pos.y.bits() == py)
+        assert(tangent.x.bits() == tx and tangent.y.bits() == ty)
+    else:
+        assert(not ok)

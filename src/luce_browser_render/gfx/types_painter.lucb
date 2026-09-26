@@ -106,7 +106,8 @@ pub func painter_reset(this: Painter*):
 pub let painter_vtable: PainterVTable = PainterVTable(class_info = &painter_class)
 
 ## Class information of Gfx::Painter: name, class-id range (pre-order), size, vtable.
-pub let painter_class: ak.ClassInfo = ak.ClassInfo(name = "Painter", first_id = 0, last_id = 0, size = sizeof(Painter), vtable = (const void*)&painter_vtable)
+## (Region r10: last_id 1 covers PainterRaster, the replacement of PainterSkia, in painter_raster.)
+pub let painter_class: ak.ClassInfo = ak.ClassInfo(name = "Painter", first_id = 0, last_id = 1, size = sizeof(Painter), vtable = (const void*)&painter_vtable)
 
 ## is<Gfx::Painter>: the class-id range test.
 pub func is_painter[P: IsPainter](p: P*) -> bool:

@@ -1,0 +1,400 @@
+#==============================================================================================
+#
+#   tests_gfx_paint - tests of region r10: bitmaps, filters, gradients, paint styles, FourCC
+#
+#   DESCRIPTION:
+#       Tests of the ported LibGfx paint model. The donor has no unit tests for these files
+#       except Tests/LibGfx/TestImmutableBitmap.cpp (ported in tests_gfx_paint_export); the
+#       expected values below were produced by the donor (Ladybird 47c82b38d0 built with
+#       Skia m144, -ffp-contract=off) through small local C++ programs: Gfx::color_stop_step,
+#       the Gradients.h helpers, SVGGradientPaintStyle::set_gradient_transform, Skia's
+#       SkPixmap::readPixels between the alpha types, and Bitmap set/get/crop/diff/strip.
+#
+#       Region r08 (geometry and Color) is ported in parallel: the tests that go through its
+#       functions return early until `tests_gfx_paint_r08_is_ported` is set at integration
+#       (they were run against local implementations of those functions while porting).
+#
+#       Each test's body is a noinline function the test block calls (# workaround:
+#       compiler-issues/ranges_facts_cubic).
+#
+#==============================================================================================
+
+# mark: Gate ===================================================================================
+
+## Whether region r08 (Color, geometry) is ported; the tests that call its functions run only
+## then. Set to true when r08 and r10 are integrated.
+pub var tests_gfx_paint_r08_is_ported: bool = true
+
+## Whether the raster module draws as the donor's Skia (m144) does: analytic anti-aliasing
+## (SkScan_AAAPath, where tiny-skia supersamples 4x4) and the lowp pipeline's div255. The
+## painter cases that depend on those keep the donor's pixels behind this gate.
+pub var tests_gfx_paint_raster_is_skia_m144: bool = false
+
+# mark: Helpers ================================================================================
+
+# The raw 32-bit pixels of a bitmap, row by row.
+func test_gfx_paint_pixels(bitmap: const Bitmap*) -> ak.Vector[u32]:
+    var pixels: ak.Vector[u32] = ak.vector_create_atomic[u32]()
+    for y in 0..<bitmap_height(bitmap):
+        let row = bitmap_scanline_const(bitmap, y) else trap("no data")
+        for x in 0..<(usize)bitmap_width(bitmap):
+            ak.vector_append_t(&pixels, row[x])
+    return pixels
+
+# Asserts that a bitmap's raw pixels are `expected`.
+func test_gfx_paint_expect_pixels(bitmap: const Bitmap*, expected: const u32[]):
+    let pixels = test_gfx_paint_pixels(bitmap)
+    assert(ak.vector_size(&pixels) == expected.length)
+    for i in 0..<expected.length:
+        let actual = *ak.vector_at_const(&pixels, i)
+        if actual != expected[i]:
+            print(f"pixel {i}: expected {hex(expected[i])}, got {hex(actual)}")
+        assert(actual == expected[i])
+
+# A premultiplied bitmap of `format` with the given BGRA pixels, through set_pixel.
+func test_gfx_paint_bitmap(format_: BitmapFormat, width: i32, height: i32, bgra: const u32[]) -> Bitmap*:
+    let bitmap = bitmap_create_alpha_type(format_, AlphaType.premultiplied, IntSize(m_width = width, m_height = height)) else trap("create")
+    for i in 0..<bgra.length:
+        bitmap_set_pixel(bitmap, (i32)i % width, (i32)i // width, color_from_bgra(bgra[i]))
+    return bitmap
+
+# mark: FourCC =================================================================================
+
+test "gfx paint: four_cc":
+    test_gfx_paint_four_cc()
+
+noinline func test_gfx_paint_four_cc():
+    var png: FourCc
+    four_cc_construct(&png, [0x89, 'P', 'N', 'G'])
+    assert(four_cc_to_u32(&png) == 0x89504e47)
+    let same = four_cc_from_u32(0x89504e47)
+    assert(same == png)
+    assert(same.cc[1] == 'P')
+    let smaller = four_cc_from_u32(0x49484452)
+    assert(four_cc_lt(&smaller, png))
+    assert(not four_cc_lt(&png, smaller))
+    let traits = FourCcTraits(empty_ = 0)
+    assert(traits.hash_of(&png) == 0x89504e47)
+    assert(traits.equals(&png, &same))
+    assert(not traits.equals(&png, &smaller))
+
+# mark: Gradients ==============================================================================
+
+# A color stop with a position and an optional transition hint.
+func test_gfx_paint_stop(position: f32, hint: f32?) -> ColorStop:
+    return ColorStop(color = Color(m_value = 0xff000000), position = position, transition_hint = hint)
+
+test "gfx paint: color_stop_step":
+    test_gfx_paint_color_stop_step()
+
+noinline func test_gfx_paint_color_stop_step():
+    # previous, next, hint, position, expected bits (Gfx::color_stop_step in the donor)
+    let hint_none: f32? = none
+    assert(color_stop_step(test_gfx_paint_stop(0.2, hint_none), test_gfx_paint_stop(0.8, hint_none), 0.1).bits() == 0x00000000)
+    assert(color_stop_step(test_gfx_paint_stop(0.2, hint_none), test_gfx_paint_stop(0.8, hint_none), 0.9).bits() == 0x3f800000)
+    assert(color_stop_step(test_gfx_paint_stop(0.2, hint_none), test_gfx_paint_stop(0.8, hint_none), 0.5).bits() == 0x3f000000)
+    assert(color_stop_step(test_gfx_paint_stop(0.2, hint_none), test_gfx_paint_stop(0.2, hint_none), 0.2).bits() == 0x3f800000)
+    assert(color_stop_step(test_gfx_paint_stop(0.2, hint_none), test_gfx_paint_stop(0.8, 0.3), 0.5).bits() == 0x3f2bc392)
+    assert(color_stop_step(test_gfx_paint_stop(0.2, hint_none), test_gfx_paint_stop(0.8, 0.7), 0.35).bits() == 0x3d8a74ba)
+    assert(color_stop_step(test_gfx_paint_stop(0.0, hint_none), test_gfx_paint_stop(1.0, 1.0), 0.5).bits() == 0x00000000)
+    assert(color_stop_step(test_gfx_paint_stop(0.0, hint_none), test_gfx_paint_stop(1.0, 0.0), 0.5).bits() == 0x3f800000)
+    assert(color_stop_step(test_gfx_paint_stop(0.1, hint_none), test_gfx_paint_stop(0.9, 0.123), 0.77).bits() == 0x3f716a77)
+
+test "gfx paint: gradient angles and lengths":
+    test_gfx_paint_gradient_angles()
+
+noinline func test_gfx_paint_gradient_angles():
+    let angles: f32[6] = [0.0, 45.0, 90.0, 123.5, -30.0, 400.0]
+    let radians: u32[6] = [0x3fc90fdb, 0x3f490fdb, 0x00000000, 0xbf15adf0, 0x40060a92, 0xc0ad22fc]
+    let lengths: u32[6] = [0x42050001, 0x42d96f72, 0x42f10000, 0x42edab98, 0x42b21738, 0x42cdda8f]
+    for i in 0..<6:
+        assert(normalized_gradient_angle_radians(angles[i]).bits() == radians[i])
+    if not tests_gfx_paint_r08_is_ported:
+        return
+    let size = FloatSize(m_width = 120.5, m_height = 33.25)
+    for i in 0..<6:
+        assert(calculate_gradient_length(size, angles[i]).bits() == lengths[i])
+
+test "gfx paint: svg gradient transform":
+    test_gfx_paint_svg_gradient_transform()
+
+noinline func test_gfx_paint_svg_gradient_transform():
+    if not tests_gfx_paint_r08_is_ported:
+        return
+    let style = svg_linear_gradient_paint_style_create(FloatPoint(m_x = 0.0, m_y = 0.0), FloatPoint(m_x = 1.0, m_y = 1.0)) else trap("create")
+    let base = style.svg_gradient_paint_style()
+    assert(svg_gradient_paint_style_gradient_transform_scale(base) == 1.0)
+
+    svg_gradient_paint_style_set_gradient_transform(base, AffineTransform(m_values = [2.0, 0.0, 0.0, 3.0, 5.0, 7.0]))
+    assert(svg_gradient_paint_style_gradient_transform_scale(base).bits() == 0x40400000)
+    let first = svg_gradient_paint_style_scale_adjusted_inverse_gradient_transform(base) else trap("inverse")
+    let first_bits: u32[6] = [0x3fc00000, 0x00000000, 0x00000000, 0x3f800000, 0xc0f00000, 0xc0e00000]
+    for i in 0..<6:
+        assert(first.m_values[i].bits() == first_bits[i])
+
+    svg_gradient_paint_style_set_gradient_transform(base, AffineTransform(m_values = [0.5, 0.25, -0.75, 1.5, 10.0, -4.0]))
+    assert(svg_gradient_paint_style_gradient_transform_scale(base).bits() == 0x3fd6a99b)
+    let second = svg_gradient_paint_style_scale_adjusted_inverse_gradient_transform(base) else trap("inverse")
+    let second_bits: u32[6] = [0x402bbae3, 0xbee4f92f, 0x3fabbae3, 0x3f64f92f, 0xc1abbae3, 0x4100cc2a]
+    for i in 0..<6:
+        assert(second.m_values[i].bits() == second_bits[i])
+
+    # A singular transform: scale 1 and no inverse.
+    svg_gradient_paint_style_set_gradient_transform(base, AffineTransform(m_values = [1.0, 2.0, 2.0, 4.0, 0.0, 0.0]))
+    assert(svg_gradient_paint_style_gradient_transform_scale(base).bits() == 0x3f800000)
+    assert(svg_gradient_paint_style_scale_adjusted_inverse_gradient_transform(base) == none)
+
+# mark: Paint styles ===========================================================================
+
+test "gfx paint: paint style classes and color stops":
+    test_gfx_paint_paint_styles()
+
+noinline func test_gfx_paint_paint_styles():
+    let solid = solid_color_paint_style_create(Color(m_value = 0x80112233)) else trap("create")
+    assert(is_solid_color_paint_style(solid.paint_style()))
+    assert(not is_gradient_paint_style(solid.paint_style()))
+    assert(solid_color_paint_style_color(solid).m_value == 0x80112233)
+
+    let linear = canvas_linear_gradient_paint_style_create(FloatPoint(m_x = 1.0, m_y = 2.0), FloatPoint(m_x = 3.0, m_y = 4.0)) else trap("create")
+    let style = linear.paint_style()
+    assert(is_gradient_paint_style(style))
+    assert(is_canvas_linear_gradient_paint_style(style))
+    assert(not is_canvas_radial_gradient_paint_style(style))
+    assert(as_if_canvas_linear_gradient_paint_style(style) != none)
+    assert(canvas_linear_gradient_paint_style_end_point(linear).m_y == 4.0)
+
+    # add_color_stop keeps the stops sorted by position (quick_sort, as the donor sorts).
+    let gradient = linear.gradient_paint_style()
+    gradient_paint_style_add_color_stop_f32(gradient, 0.75, Color(m_value = 0xff0000ff)) else trap("add")
+    gradient_paint_style_add_color_stop_f32(gradient, 0.25, Color(m_value = 0x00ff0000), 0.5) else trap("add")
+    gradient_paint_style_add_color_stop_f32(gradient, 0.5, Color(m_value = 0xff00ff00)) else trap("add")
+    let stops = gradient_paint_style_color_stops(gradient)
+    assert(stops.length == 3)
+    assert(stops[0].position == 0.25 and stops[1].position == 0.5 and stops[2].position == 0.75)
+    assert(stops[0].transition_hint == 0.5)
+    assert(stops[1].color.m_value == 0xff00ff00)
+    # Unsorted when asked.
+    gradient_paint_style_add_color_stop_color_stop(gradient, ColorStop(color = Color(m_value = 0), position = 0.1, transition_hint = none), false) else trap("add")
+    assert(gradient_paint_style_color_stops(gradient)[3].position == 0.1)
+
+    gradient_paint_style_set_repeat_length(gradient, 2.5)
+    assert(gradient_paint_style_repeat_length(gradient) == 2.5)
+
+    let conic = canvas_conic_gradient_paint_style_create(FloatPoint(m_x = 5.0, m_y = 6.0)) else trap("create")
+    assert(canvas_conic_gradient_paint_style_start_angle(conic) == 0.0)
+    assert(is_canvas_conic_gradient_paint_style(conic.paint_style()))
+
+    let radial = svg_radial_gradient_paint_style_create(FloatPoint(m_x = 0.0, m_y = 0.0), 1.0, FloatPoint(m_x = 2.0, m_y = 2.0), 3.0) else trap("create")
+    assert(is_svg_gradient_paint_style(radial.paint_style()))
+    assert(svg_gradient_paint_style_gradient_transform_scale(radial.svg_gradient_paint_style()) == 1.0)
+    assert(svg_gradient_paint_style_spread_method(radial.svg_gradient_paint_style()) == SvgGradientPaintStyleSpreadMethod.pad_)
+    svg_gradient_paint_style_set_spread_method(radial.svg_gradient_paint_style(), SvgGradientPaintStyleSpreadMethod.reflect)
+    assert(svg_gradient_paint_style_spread_method(radial.svg_gradient_paint_style()) == SvgGradientPaintStyleSpreadMethod.reflect)
+
+    let pattern = canvas_pattern_paint_style_create(none, CanvasPatternPaintStyleRepetition.repeat_y) else trap("create")
+    assert(canvas_pattern_paint_style_image(pattern) == none)
+    assert(canvas_pattern_paint_style_repetition(pattern) == CanvasPatternPaintStyleRepetition.repeat_y)
+    assert(canvas_pattern_paint_style_transform(pattern) == none)
+
+    if not tests_gfx_paint_r08_is_ported:
+        return
+    # is_visible: a solid color with alpha, a gradient with a visible stop.
+    assert(paint_style_is_visible(solid.paint_style()))
+    let invisible = solid_color_paint_style_create(Color(m_value = 0x00ffffff)) else trap("create")
+    assert(not paint_style_is_visible(invisible.paint_style()))
+    assert(paint_style_is_visible(style))
+    let empty = canvas_radial_gradient_paint_style_create(FloatPoint(m_x = 0.0, m_y = 0.0), 1.0, FloatPoint(m_x = 0.0, m_y = 0.0), 2.0) else trap("create")
+    assert(not paint_style_is_visible(empty.paint_style()))
+    assert(paint_style_is_visible(pattern.paint_style()))
+
+# mark: Premultiplication ======================================================================
+
+test "gfx paint: premultiply and unpremultiply as Skia":
+    test_gfx_paint_premultiply()
+
+noinline func test_gfx_paint_premultiply():
+    # pixel, Skia's premultiplied, Skia's unpremultiplied (readPixels between the alpha types)
+    let cases: u32[30] = [
+        0x00000000, 0x00000000, 0x00000000,
+        0xff123456, 0xff123456, 0xff123456,
+        0x80ff8040, 0x80804020, 0x80ffff80,
+        0x01ffffff, 0x01010101, 0x01ffffff,
+        0x7f7f7f7f, 0x7f3f3f3f, 0x7fffffff,
+        0x33112233, 0x3303070a, 0x3355aaff,
+        0xcc4488cc, 0xcc366da3, 0xcc55aaff,
+        0x02010101, 0x02000000, 0x02808080,
+        0xfe808080, 0xfe7f7f7f, 0xfe818181,
+        0x55aa5500, 0x55391c00, 0x55ffff00,
+    ]
+    var i: usize = 0
+    while i < cases.length:
+        var row: u32[1] = [cases[i]]
+        raster_premultiply_row(row)
+        assert(row[0] == cases[i + 1])
+        row[0] = cases[i]
+        raster_unpremultiply_row(row)
+        assert(row[0] == cases[i + 2])
+        i += 3
+
+# mark: Bitmap =================================================================================
+
+test "gfx paint: bitmap formats":
+    test_gfx_paint_bitmap_formats()
+
+noinline func test_gfx_paint_bitmap_formats():
+    assert(ak.string_view_text(bitmap_format_name(BitmapFormat.bg_rx8888)) == "BGRx8888")
+    assert(ak.string_view_text(bitmap_format_name(BitmapFormat.rgba8888)) == "RGBA8888")
+    assert(ak.string_view_text(bitmap_format_name(BitmapFormat.invalid)) == "Invalid")
+    assert(is_valid_bitmap_format(0) and is_valid_bitmap_format(4))
+    assert(not is_valid_bitmap_format(5))
+    assert(bitmap_minimum_pitch(7, BitmapFormat.rgba8888) == 28)
+    assert(bitmap_size_in_bytes_usize(28, 3) == 84)
+
+test "gfx paint: bitmap pixels in every format":
+    test_gfx_paint_bitmap_set_get()
+
+noinline func test_gfx_paint_bitmap_set_get():
+    if not tests_gfx_paint_r08_is_ported:
+        return
+    let values: u32[6] = [0xff102030, 0x80402010, 0x00000000, 0xffffffff, 0x40404040, 0xc0806040]
+    let bgra = test_gfx_paint_bitmap(BitmapFormat.bgra8888, 3, 2, values)
+    test_gfx_paint_expect_pixels(bgra, values)
+    assert(bitmap_width(bgra) == 3 and bitmap_height(bgra) == 2 and bitmap_pitch(bgra) == 12)
+    assert(bitmap_size_in_bytes(bgra) == 24 and bitmap_data_size(bgra) == 24)
+    assert(bitmap_has_alpha_channel(bgra))
+
+    let bgrx = test_gfx_paint_bitmap(BitmapFormat.bg_rx8888, 3, 2, values)
+    test_gfx_paint_expect_pixels(bgrx, [0xff102030, 0xff402010, 0xff000000, 0xffffffff, 0xff404040, 0xff806040])
+    assert(not bitmap_has_alpha_channel(bgrx))
+
+    let rgba = test_gfx_paint_bitmap(BitmapFormat.rgba8888, 3, 2, values)
+    test_gfx_paint_expect_pixels(rgba, [0xff302010, 0x80102040, 0x00000000, 0xffffffff, 0x40404040, 0xc0406080])
+    for i in 0..<6:
+        let color = bitmap_get_pixel(rgba, (i32)i % 3, (i32)i // 3)
+        assert(color_value(&color) == values[i])
+
+    let rgbx = test_gfx_paint_bitmap(BitmapFormat.rg_bx8888, 3, 2, values)
+    test_gfx_paint_expect_pixels(rgbx, [0xff302010, 0xff102040, 0xff000000, 0xffffffff, 0xff404040, 0xff406080])
+    let rgbx_back: u32[6] = [0xff102030, 0xff402010, 0xff000000, 0xffffffff, 0xff404040, 0xff806040]
+    for i in 0..<6:
+        let color = bitmap_get_pixel(rgbx, (i32)i % 3, (i32)i // 3)
+        assert(color_value(&color) == rgbx_back[i])
+
+test "gfx paint: bitmap creation errors":
+    test_gfx_paint_bitmap_errors()
+
+# Whether creating a bitmap of `size` fails with an AK error.
+func test_gfx_paint_create_fails(size: IntSize) -> bool:
+    discard(bitmap_create_int_size(BitmapFormat.bgra8888, size) catch failure:
+        return failure.code == ak.ak_error)
+    return false
+
+# Whether wrapping memory as a bitmap of `size` fails with an AK error.
+func test_gfx_paint_wrap_fails(size: IntSize) -> bool:
+    let noop = ak.Function0[unit](call = none, context = none)
+    discard(bitmap_create_wrapper(BitmapFormat.bgra8888, AlphaType.premultiplied, size, 16, none, noop) catch failure:
+        return failure.code == ak.ak_error)
+    return false
+
+noinline func test_gfx_paint_bitmap_errors():
+    if not tests_gfx_paint_r08_is_ported:
+        return
+    assert(test_gfx_paint_create_fails(IntSize(m_width = 0, m_height = 4)))
+    assert(test_gfx_paint_create_fails(IntSize(m_width = 32767, m_height = 4)))
+    assert(not test_gfx_paint_create_fails(IntSize(m_width = 32766, m_height = 1)))
+    assert(test_gfx_paint_wrap_fails(IntSize(m_width = -1, m_height = 4)))
+    let raw: u8[8] = [1, 2, 3, 4, 5, 6, 7, 8]
+    let from_raw = bitmap_create_with_raw_data(BitmapFormat.rgba8888, AlphaType.unpremultiplied, raw, IntSize(m_width = 2, m_height = 1)) else trap("create")
+    test_gfx_paint_expect_pixels(from_raw, [0x04030201, 0x08070605])
+    assert(bitmap_alpha_type(from_raw) == AlphaType.unpremultiplied)
+
+test "gfx paint: shareable bitmaps and anonymous buffers":
+    test_gfx_paint_shareable_bitmaps()
+
+# Bitmap::create_shareable and to_bitmap_backed_by_anonymous_buffer over r08's
+# Core::AnonymousBuffer: the buffer is the pixels, rounded up to PAGE_SIZE (4096 here).
+noinline func test_gfx_paint_shareable_bitmaps():
+    let size = IntSize(m_width = 3, m_height = 2)
+    let shareable = bitmap_create_shareable(BitmapFormat.bgra8888, AlphaType.premultiplied, size) else trap("create_shareable")
+    assert(core_anonymous_buffer_is_valid(&shareable.m_buffer))
+    assert(core_anonymous_buffer_size(&shareable.m_buffer) == 4096)
+    assert(bitmap_pitch(shareable) == 12)
+    assert((void*?)bitmap_scanline_const(shareable, 0) == core_anonymous_buffer_data(&shareable.m_buffer))
+    bitmap_set_pixel(shareable, 2, 1, color_new_u8_u8_u8_u8(1, 2, 3, 4))
+    let same = bitmap_to_bitmap_backed_by_anonymous_buffer(shareable) else trap("backed")
+    assert(same == shareable)
+    let plain = bitmap_create_int_size(BitmapFormat.bgra8888, size) else trap("create")
+    bitmap_set_pixel(plain, 1, 1, color_new_u8_u8_u8_u8(5, 6, 7, 8))
+    let copy = bitmap_to_bitmap_backed_by_anonymous_buffer(plain) else trap("copy")
+    assert(copy != plain)
+    assert(core_anonymous_buffer_is_valid(&copy.m_buffer))
+    assert(bitmap_get_pixel(copy, 1, 1) == color_new_u8_u8_u8_u8(5, 6, 7, 8))
+    assert(not test_gfx_paint_create_fails(size))
+    discard(bitmap_create_shareable(BitmapFormat.bgra8888, AlphaType.premultiplied, IntSize(m_width = 32767, m_height = 4)) catch failure:
+        assert(failure.code == ak.ak_error)
+        return)
+    trap("create_shareable should fail")
+
+test "gfx paint: bitmap clone, crop, diff, strip":
+    test_gfx_paint_bitmap_copies()
+
+noinline func test_gfx_paint_bitmap_copies():
+    if not tests_gfx_paint_r08_is_ported:
+        return
+    let values: u32[6] = [0xff102030, 0x80402010, 0x00000000, 0xffffffff, 0x40404040, 0xc0806040]
+    let bitmap = test_gfx_paint_bitmap(BitmapFormat.bgra8888, 3, 2, values)
+
+    let crop = bitmap_cropped(bitmap, DevicePixelRect(m_location = IntPoint(m_x = -1, m_y = 1), m_size = IntSize(m_width = 3, m_height = 2)), color_from_bgra(0xffaa0000)) else trap("crop")
+    test_gfx_paint_expect_pixels(crop, [0xffaa0000, 0xffffffff, 0x40404040, 0xffaa0000, 0xffaa0000, 0xffaa0000])
+    let whole = bitmap_cropped(bitmap, bitmap_rect(bitmap), color_from_bgra(0)) else trap("crop")
+    test_gfx_paint_expect_pixels(whole, values)
+
+    let other = bitmap_clone(bitmap) else trap("clone")
+    test_gfx_paint_expect_pixels(other, values)
+    bitmap_set_pixel(other, 1, 0, color_from_bgra(0x70452113))
+    bitmap_set_pixel(other, 2, 1, color_from_bgra(0xc0906010))
+    test_gfx_paint_expect_pixels(bitmap, values)
+
+    let identical = bitmap_diff(bitmap, bitmap)
+    assert(identical.identical and identical.pixel_error_count == 0 and identical.total_error == 0)
+    let diff = bitmap_diff(bitmap, other)
+    assert(not diff.identical)
+    assert(diff.total_red_error == 21 and diff.total_green_error == 1 and diff.total_blue_error == 51)
+    assert(diff.total_alpha_error == 16 and diff.total_error == 89)
+    assert(diff.maximum_red_error == 16 and diff.maximum_green_error == 1 and diff.maximum_blue_error == 48)
+    assert(diff.maximum_alpha_error == 16 and diff.maximum_error == 48 and diff.pixel_error_count == 2)
+
+    bitmap_strip_alpha_channel(other)
+    assert(bitmap_format(other) == BitmapFormat.bg_rx8888)
+    test_gfx_paint_expect_pixels(other, [0xff102030, 0xff452113, 0xff000000, 0xffffffff, 0xff404040, 0xff906010])
+
+    let shareable = bitmap_to_shareable_bitmap(bitmap)
+    assert(shareable_bitmap_is_valid(&shareable))
+    test_gfx_paint_expect_pixels(shareable_bitmap_bitmap_const(&shareable) else trap("bitmap"), values)
+    var invalid: ShareableBitmap
+    shareable_bitmap_construct(&invalid)
+    assert(not shareable_bitmap_is_valid(&invalid))
+
+    let metadata = get_metadata(bitmap)
+    assert(metadata.format == BitmapFormat.bgra8888 and metadata.size_in_bytes == 24)
+
+test "gfx paint: bitmap alpha type conversion":
+    test_gfx_paint_bitmap_alpha_type()
+
+noinline func test_gfx_paint_bitmap_alpha_type():
+    if not tests_gfx_paint_r08_is_ported:
+        return
+    let values: u32[4] = [0x80ff8040, 0x7f7f7f7f, 0x33112233, 0x55aa5500]
+    let bitmap = bitmap_create_alpha_type(BitmapFormat.rgba8888, AlphaType.unpremultiplied, IntSize(m_width = 2, m_height = 2)) else trap("create")
+    for i in 0..<4:
+        bitmap_set_pixel(bitmap, (i32)i % 2, (i32)i // 2, color_from_rgba(values[i]))
+    test_gfx_paint_expect_pixels(bitmap, values)
+    bitmap_set_alpha_type_destructive(bitmap, AlphaType.premultiplied)
+    assert(bitmap_alpha_type(bitmap) == AlphaType.premultiplied)
+    test_gfx_paint_expect_pixels(bitmap, [0x80804020, 0x7f3f3f3f, 0x3303070a, 0x55391c00])
+    bitmap_set_alpha_type_destructive(bitmap, AlphaType.unpremultiplied)
+    test_gfx_paint_expect_pixels(bitmap, [0x80ff8040, 0x7f7e7e7e, 0x330f2332, 0x55ab5400])
+    # Opaque formats only change the tag.
+    let opaque = test_gfx_paint_bitmap(BitmapFormat.bg_rx8888, 1, 1, [0x80102030])
+    bitmap_set_alpha_type_destructive(opaque, AlphaType.unpremultiplied)
+    test_gfx_paint_expect_pixels(opaque, [0xff102030])

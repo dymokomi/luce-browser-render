@@ -1,0 +1,172 @@
+#==============================================================================================
+#
+#   tests_sk_path_measure - SkPathMeasure cases pinned to Skia (generated)
+#
+#   DESCRIPTION:
+#       getLength and getPosTan at nine distances for paths of every verb, closed and empty
+#       first contours and a degenerate path, with the values Skia m144 (the library Ladybird
+#       47c82b38d0 links) printed, all as bits. Generated test vectors; each test body is a
+#       noinline function (# workaround: compiler-issues/ranges_facts_cubic).
+#
+#==============================================================================================
+
+test "sk path measure: lines":
+    test_sk_measure_lines()
+
+noinline func test_sk_measure_lines():
+    var p = sk_path_create()
+    sk_path_move_to(&p, 0.0, 0.0)
+    sk_path_line_to(&p, 30.0, 40.0)
+    sk_path_line_to(&p, 30.0, 100.0)
+    let m = sk_path_measure(&p)
+    assert(sk_path_measure_get_length(&m).bits() == 0x42dc0000)
+    test_sk_check_pos_tan(&m, 0x0, true, 0x0, 0x0, 0x3f19999a, 0x3f4ccccd)
+    test_sk_check_pos_tan(&m, 0x41dc0000, true, 0x41840000, 0x41b00000, 0x3f19999a, 0x3f4ccccd)
+    test_sk_check_pos_tan(&m, 0x425c0000, true, 0x41f00000, 0x42340000, 0x0, 0x3f800000)
+    test_sk_check_pos_tan(&m, 0x429a0000, true, 0x41f00000, 0x42860000, 0x0, 0x3f800000)
+    test_sk_check_pos_tan(&m, 0x42dc0000, true, 0x41f00000, 0x42c80000, 0x0, 0x3f800000)
+    test_sk_check_pos_tan(&m, 0x42e60000, true, 0x41f00000, 0x42c80000, 0x0, 0x3f800000)
+    test_sk_check_pos_tan(&m, 0xc0400000, true, 0x0, 0x0, 0x3f19999a, 0x3f4ccccd)
+    test_sk_check_pos_tan(&m, 0x3f800000, true, 0x3f199999, 0x3f4ccccc, 0x3f19999a, 0x3f4ccccd)
+    test_sk_check_pos_tan(&m, 0x41200000, true, 0x40c00000, 0x41000000, 0x3f19999a, 0x3f4ccccd)
+
+test "sk path measure: quad":
+    test_sk_measure_quad()
+
+noinline func test_sk_measure_quad():
+    var p = sk_path_create()
+    sk_path_move_to(&p, 0.0, 0.0)
+    sk_path_quad_to(&p, 50.0, 100.0, 100.0, 0.0)
+    let m = sk_path_measure(&p)
+    assert(sk_path_measure_get_length(&m).bits() == 0x4313c71e)
+    test_sk_check_pos_tan(&m, 0x0, true, 0x0, 0x0, 0x3ee4f92e, 0x3f64f92e)
+    test_sk_check_pos_tan(&m, 0x4213c71e, true, 0x419be8b8, 0x41fb0c8e, 0x3f223fd8, 0x3f46049d)
+    test_sk_check_pos_tan(&m, 0x4293c71e, true, 0x42480002, 0x42480000, 0x3f800000, 0xb4a3d70a)
+    test_sk_check_pos_tan(&m, 0x42cee390, true, 0x42973476, 0x42138fa5, 0x3f32d9fb, 0xbf37295a)
+    test_sk_check_pos_tan(&m, 0x4313c71e, true, 0x42c80000, 0x0, 0x3ee4f92e, 0xbf64f92e)
+    test_sk_check_pos_tan(&m, 0x4318c71e, true, 0x42c80000, 0x0, 0x3ee4f92e, 0xbf64f92e)
+    test_sk_check_pos_tan(&m, 0xc0400000, true, 0x0, 0x0, 0x3ee4f92e, 0x3f64f92e)
+    test_sk_check_pos_tan(&m, 0x3f800000, true, 0x3ef0f0f0, 0x3f6fcead, 0x3ee6b575, 0x3f648996)
+    test_sk_check_pos_tan(&m, 0x41200000, true, 0x40969697, 0x410f8072, 0x3ef7699d, 0x3f60206d)
+
+test "sk path measure: cubic":
+    test_sk_measure_cubic()
+
+noinline func test_sk_measure_cubic():
+    var p = sk_path_create()
+    sk_path_move_to(&p, 10.0, 10.0)
+    sk_path_cubic_to(&p, 100.0, 0.0, -50.0, 120.0, 60.0, 80.0)
+    let m = sk_path_measure(&p)
+    assert(sk_path_measure_get_length(&m).bits() == 0x4313e29e)
+    test_sk_check_pos_tan(&m, 0x0, true, 0x41200000, 0x41200000, 0x3f7e6f2a, 0xbde229ed)
+    test_sk_check_pos_tan(&m, 0x4213e29e, true, 0x42213bb2, 0x41b1d860, 0x3d257644, 0x3f7fca82)
+    test_sk_check_pos_tan(&m, 0x4293e29e, true, 0x41dac623, 0x42622a39, 0xbeee6308, 0x3f628f13)
+    test_sk_check_pos_tan(&m, 0x42cf0a10, true, 0x41920c58, 0x42a84989, 0x3ec8027b, 0x3f6ba8a2)
+    test_sk_check_pos_tan(&m, 0x4313e29e, true, 0x42700000, 0x42a00000, 0x3f70964d, 0xbeaef8f2)
+    test_sk_check_pos_tan(&m, 0x4318e29e, true, 0x42700000, 0x42a00000, 0x3f70964d, 0xbeaef8f2)
+    test_sk_check_pos_tan(&m, 0xc0400000, true, 0x41200000, 0x41200000, 0x3f7e6f2a, 0xbde229ed)
+    test_sk_check_pos_tan(&m, 0x3f800000, true, 0x4131302c, 0x411e2b91, 0x3f7eaf94, 0xbdcf3f7b)
+    test_sk_check_pos_tan(&m, 0x41200000, true, 0x41a0fbf5, 0x4116814f, 0x3f7ffecf, 0x3bc5999f)
+
+test "sk path measure: conic":
+    test_sk_measure_conic()
+
+noinline func test_sk_measure_conic():
+    var p = sk_path_create()
+    sk_path_move_to(&p, 0.0, 50.0)
+    sk_path_arc_to_rotated(&p, 50.0, 50.0, 0.0, .small, .cw, 100.0, 50.0)
+    let m = sk_path_measure(&p)
+    assert(sk_path_measure_get_length(&m).bits() == 0x431cd36c)
+    test_sk_check_pos_tan(&m, 0x0, true, 0x0, 0x42480000, 0x0, 0xbf800000)
+    test_sk_check_pos_tan(&m, 0x421cd36c, true, 0x416a5089, 0x416a5089, 0x3f3504f3, 0xbf3504f3)
+    test_sk_check_pos_tan(&m, 0x429cd36c, true, 0x4247fffd, 0x0, 0x3f800000, 0xb467b46c)
+    test_sk_check_pos_tan(&m, 0x42db8e64, true, 0x429ec1ed, 0x4118aa17, 0x3f4f25bb, 0x3f166b56)
+    test_sk_check_pos_tan(&m, 0x431cd36c, true, 0x42c80000, 0x42480000, 0x0, 0x3f800000)
+    test_sk_check_pos_tan(&m, 0x4321d36c, true, 0x42c80000, 0x42480000, 0x0, 0x3f800000)
+    test_sk_check_pos_tan(&m, 0xc0400000, true, 0x0, 0x42480000, 0x0, 0xbf800000)
+    test_sk_check_pos_tan(&m, 0x3f800000, true, 0x3c1a9085, 0x42441d75, 0x3c9f2091, 0xbf7ff3a3)
+    test_sk_check_pos_tan(&m, 0x41200000, true, 0x3f7ed223, 0x42204a96, 0x3e4b4eef, 0xbf7ae751)
+
+test "sk path measure: closed_first":
+    test_sk_measure_closed_first()
+
+noinline func test_sk_measure_closed_first():
+    var p = sk_path_create()
+    sk_path_move_to(&p, 0.0, 0.0)
+    sk_path_line_to(&p, 10.0, 0.0)
+    sk_path_line_to(&p, 10.0, 10.0)
+    sk_path_close(&p)
+    sk_path_move_to(&p, 100.0, 100.0)
+    sk_path_line_to(&p, 200.0, 100.0)
+    let m = sk_path_measure(&p)
+    assert(sk_path_measure_get_length(&m).bits() == 0x4208918c)
+    test_sk_check_pos_tan(&m, 0x0, true, 0x0, 0x0, 0x3f800000, 0x0)
+    test_sk_check_pos_tan(&m, 0x4108918c, true, 0x4108918c, 0x0, 0x3f800000, 0x0)
+    test_sk_check_pos_tan(&m, 0x4188918c, true, 0x41200000, 0x40e24630, 0x0, 0x3f800000)
+    test_sk_check_pos_tan(&m, 0x41bf322a, true, 0x40e7c3b8, 0x40e7c3b8, 0xbf3504f3, 0xbf3504f3)
+    test_sk_check_pos_tan(&m, 0x4208918c, true, 0x0, 0x0, 0xbf3504f3, 0xbf3504f3)
+    test_sk_check_pos_tan(&m, 0x421c918c, true, 0x0, 0x0, 0xbf3504f3, 0xbf3504f3)
+    test_sk_check_pos_tan(&m, 0xc0400000, true, 0x0, 0x0, 0x3f800000, 0x0)
+    test_sk_check_pos_tan(&m, 0x3f800000, true, 0x3f800000, 0x0, 0x3f800000, 0x0)
+    test_sk_check_pos_tan(&m, 0x41200000, true, 0x41200000, 0x0, 0x3f800000, 0x0)
+
+test "sk path measure: empty_first":
+    test_sk_measure_empty_first()
+
+noinline func test_sk_measure_empty_first():
+    var p = sk_path_create()
+    sk_path_move_to(&p, 5.0, 5.0)
+    sk_path_move_to(&p, 6.0, 6.0)
+    sk_path_line_to(&p, 6.0, 6.0)
+    sk_path_move_to(&p, 0.0, 0.0)
+    sk_path_line_to(&p, 3.0, 4.0)
+    let m = sk_path_measure(&p)
+    assert(sk_path_measure_get_length(&m).bits() == 0x40a00000)
+    test_sk_check_pos_tan(&m, 0x0, true, 0x0, 0x0, 0x3f19999a, 0x3f4ccccd)
+    test_sk_check_pos_tan(&m, 0x3fa00000, true, 0x3f400000, 0x3f800000, 0x3f19999a, 0x3f4ccccd)
+    test_sk_check_pos_tan(&m, 0x40200000, true, 0x3fc00000, 0x40000000, 0x3f19999a, 0x3f4ccccd)
+    test_sk_check_pos_tan(&m, 0x40600000, true, 0x40066666, 0x40333333, 0x3f19999a, 0x3f4ccccd)
+    test_sk_check_pos_tan(&m, 0x40a00000, true, 0x40400000, 0x40800000, 0x3f19999a, 0x3f4ccccd)
+    test_sk_check_pos_tan(&m, 0x41200000, true, 0x40400000, 0x40800000, 0x3f19999a, 0x3f4ccccd)
+    test_sk_check_pos_tan(&m, 0xc0400000, true, 0x0, 0x0, 0x3f19999a, 0x3f4ccccd)
+    test_sk_check_pos_tan(&m, 0x3f800000, true, 0x3f19999a, 0x3f4ccccd, 0x3f19999a, 0x3f4ccccd)
+    test_sk_check_pos_tan(&m, 0x41200000, true, 0x40400000, 0x40800000, 0x3f19999a, 0x3f4ccccd)
+
+test "sk path measure: degenerate":
+    test_sk_measure_degenerate()
+
+noinline func test_sk_measure_degenerate():
+    var p = sk_path_create()
+    sk_path_move_to(&p, 1.0, 2.0)
+    sk_path_quad_to(&p, 1.0, 2.0, 1.0, 2.0)
+    let m = sk_path_measure(&p)
+    assert(sk_path_measure_get_length(&m).bits() == 0x0)
+    test_sk_check_pos_tan(&m, 0x0, false, 0x0, 0x0, 0x0, 0x0)
+    test_sk_check_pos_tan(&m, 0x0, false, 0x0, 0x0, 0x0, 0x0)
+    test_sk_check_pos_tan(&m, 0x0, false, 0x0, 0x0, 0x0, 0x0)
+    test_sk_check_pos_tan(&m, 0x0, false, 0x0, 0x0, 0x0, 0x0)
+    test_sk_check_pos_tan(&m, 0x0, false, 0x0, 0x0, 0x0, 0x0)
+    test_sk_check_pos_tan(&m, 0x40a00000, false, 0x0, 0x0, 0x0, 0x0)
+    test_sk_check_pos_tan(&m, 0xc0400000, false, 0x0, 0x0, 0x0, 0x0)
+    test_sk_check_pos_tan(&m, 0x3f800000, false, 0x0, 0x0, 0x0, 0x0)
+    test_sk_check_pos_tan(&m, 0x41200000, false, 0x0, 0x0, 0x0, 0x0)
+
+test "sk path measure: mixed":
+    test_sk_measure_mixed()
+
+noinline func test_sk_measure_mixed():
+    var p = sk_path_create()
+    sk_path_line_to(&p, 3.5, -7.25)
+    sk_path_cubic_to(&p, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0)
+    sk_path_quad_to(&p, 4.0, 0.0, 7.5, 1.0)
+    let m = sk_path_measure(&p)
+    assert(sk_path_measure_get_length(&m).bits() == 0x41c1bbb3)
+    test_sk_check_pos_tan(&m, 0x0, true, 0x0, 0x0, 0x3ede976e, 0xbf668a8d)
+    test_sk_check_pos_tan(&m, 0x40c1bbb3, true, 0x4028735e, 0xc0ae777d, 0x3ede976e, 0xbf668a8d)
+    test_sk_check_pos_tan(&m, 0x4141bbb3, true, 0x40196020, 0xc0487942, 0xbe5c80ce, 0x3f79fe8a)
+    test_sk_check_pos_tan(&m, 0x41879cfd, true, 0x4005385c, 0x3fc9ac70, 0x3e89d62e, 0x3f768c78)
+    test_sk_check_pos_tan(&m, 0x41c1bbb3, true, 0x40f00000, 0x3f800000, 0x3f76266f, 0x3e8ca83f)
+    test_sk_check_pos_tan(&m, 0x41e9bbb3, true, 0x40f00000, 0x3f800000, 0x3f76266f, 0x3e8ca83f)
+    test_sk_check_pos_tan(&m, 0xc0400000, true, 0x0, 0x0, 0x3ede976e, 0xbf668a8d)
+    test_sk_check_pos_tan(&m, 0x3f800000, true, 0x3ede976e, 0xbf668a8e, 0x3ede976e, 0xbf668a8d)
+    test_sk_check_pos_tan(&m, 0x41200000, true, 0x40381798, 0xc0a281bb, 0xbe84ecc2, 0x3f7738d9)
