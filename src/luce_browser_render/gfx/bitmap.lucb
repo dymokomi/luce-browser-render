@@ -1,0 +1,449 @@
+#==============================================================================================
+#
+#   bitmap - Bitmap: a 32-bit pixel buffer in one of four channel orders
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Bitmap.cpp (lines 1-370) with the inline members of
+#       Libraries/LibGfx/Bitmap.h (lines 1-270). The struct is in types_bitmap.
+#
+#       Memory (DESIGN.md §3.3): a Bitmap is a managed allocation and its pixels are atomic
+#       storage (ak.kmalloc_atomic), so no destructor frees them: the C++ destructor's
+#       kfree(data) callback and ~Bitmap are not ported, and `m_destruction_callback` is only
+#       kept for wrappers, where the C++ destructor would run it (the port never does).
+#
+#       Replaced: Core::AnonymousBuffer (LibCore is not ported; the port is one process).
+#       create_shareable allocates an ordinary backing store, create_with_anonymous_buffer
+#       traps, and to_bitmap_backed_by_anonymous_buffer copies the pixels into a new
+#       bitmap (the C++ result for a bitmap that has no anonymous buffer).
+#
+#       Replaced: Skia. scaled() draws through the raster module (raster_utils), and
+#       set_alpha_type_destructive (un)premultiplies as Skia's SkConvertPixels does, the
+#       donor's non-macOS path (the macOS build uses vImage instead).
+#
+#==============================================================================================
+
+# mark: BitmapFormat ===========================================================================
+
+## Ported from Libraries/LibGfx/Bitmap.cpp:34 Gfx::bitmap_format_name.
+pub func bitmap_format_name(format_: BitmapFormat) -> ak.StringView:
+    match format_:
+        .invalid: return ak.sv("Invalid")
+        .bg_rx8888: return ak.sv("BGRx8888")
+        .bgra8888: return ak.sv("BGRA8888")
+        .rg_bx8888: return ak.sv("RGBx8888")
+        .rgba8888: return ak.sv("RGBA8888")
+        _: trap("VERIFY_NOT_REACHED")
+
+## Ported from Libraries/LibGfx/Bitmap.h:38 Gfx::is_valid_bitmap_format.
+pub func is_valid_bitmap_format(format_: u32) -> bool:
+    match format_:
+        0, 1, 2, 3, 4: return true      # Invalid, BGRx8888, BGRA8888, RGBx8888, RGBA8888
+        _: return false
+
+## Ported from Libraries/LibGfx/Bitmap.cpp:46 Gfx::Bitmap::minimum_pitch.
+pub func bitmap_minimum_pitch(width: usize, format_: BitmapFormat) -> usize:
+    var element_size: usize
+    match format_:
+        .bg_rx8888, .bgra8888, .rg_bx8888, .rgba8888:
+            element_size = 4
+        _: trap("VERIFY_NOT_REACHED")
+    return width * element_size
+
+## Ported from Libraries/LibGfx/Bitmap.cpp:63 Gfx::size_would_overflow.
+func size_would_overflow(format_: BitmapFormat, size: IntSize) -> bool:
+    if int_size_width(&size) < 0 or int_size_height(&size) < 0:
+        return true
+    # This check is a bit arbitrary, but should protect us from most shenanigans:
+    if int_size_width(&size) >= 32767 or int_size_height(&size) >= 32767:     # INT16_MAX
+        return true
+    # In contrast, this check is absolutely necessary:
+    let pitch = bitmap_minimum_pitch((usize)int_size_width(&size), format_)
+    return (pitch *? (usize)int_size_height(&size)) == none     # Checked<size_t>::multiplication_would_overflow
+
+# mark: Creation ===============================================================================
+
+## Ported from Libraries/LibGfx/Bitmap.cpp:75 Gfx::Bitmap::create.
+pub func bitmap_create_int_size(format_: BitmapFormat, size: IntSize) -> Bitmap*!:
+    # For backwards compatibility, premultiplied alpha is assumed
+    return try bitmap_create_alpha_type(format_, AlphaType.premultiplied, size)
+
+## Ported from Libraries/LibGfx/Bitmap.cpp:81 Gfx::Bitmap::create.
+pub func bitmap_create_alpha_type(format_: BitmapFormat, alpha_type: AlphaType, size: IntSize) -> Bitmap*!:
+    let backing_store = try bitmap_allocate_backing_store(format_, size)
+    let this = try new Bitmap
+    bitmap_construct_int_size_backing_store(this, format_, alpha_type, size, backing_store)
+    return this
+
+## Ported from Libraries/LibGfx/Bitmap.cpp:87 Gfx::Bitmap::create_shareable.
+## Replaced: Core::AnonymousBuffer is not ported, so the bitmap gets an ordinary backing store.
+pub func bitmap_create_shareable(format_: BitmapFormat, alpha_type: AlphaType, size: IntSize) -> Bitmap*!:
+    if size_would_overflow(format_, size):
+        error(ak.ak_error, "Gfx::Bitmap::create_shareable size overflow")
+    return try bitmap_create_alpha_type(format_, alpha_type, size)
+
+## Ported from Libraries/LibGfx/Bitmap.cpp:100 Gfx::Bitmap::Bitmap.
+pub func bitmap_construct_int_size_backing_store(this: Bitmap*, format_: BitmapFormat, alpha_type: AlphaType, size: IntSize, backing_store: BackingStore):
+    this.m_size = size
+    this.m_data = backing_store.data
+    this.m_pitch = backing_store.pitch
+    this.m_format = format_
+    this.m_alpha_type = alpha_type
+    assert(not int_size_is_empty(&this.m_size))
+    assert(not size_would_overflow(format_, size))
+    assert(this.m_data != none)
+    assert(backing_store.size_in_bytes == bitmap_size_in_bytes(this))
+    # m_destruction_callback = [data] { kfree(data); }: the pixels are managed (see the header).
+
+## Ported from Libraries/LibGfx/Bitmap.cpp:116 Gfx::Bitmap::create_wrapper.
+pub func bitmap_create_wrapper(format_: BitmapFormat, alpha_type: AlphaType, size: IntSize, pitch: usize, data: void*?, destruction_callback: ak.Function0[unit]) -> Bitmap*!:
+    if size_would_overflow(format_, size):
+        error(ak.ak_error, "Gfx::Bitmap::create_wrapper size overflow")
+    let this = new Bitmap else trap("out of memory")
+    bitmap_construct_int_size_usize(this, format_, alpha_type, size, pitch, data, destruction_callback)
+    return this
+
+## Ported from Libraries/LibGfx/Bitmap.cpp:123 Gfx::Bitmap::Bitmap.
+pub func bitmap_construct_int_size_usize(this: Bitmap*, format_: BitmapFormat, alpha_type: AlphaType, size: IntSize, pitch: usize, data: void*?, destruction_callback: ak.Function0[unit]):
+    this.m_size = size
+    this.m_data = data
+    this.m_pitch = pitch
+    this.m_format = format_
+    this.m_alpha_type = alpha_type
+    this.m_destruction_callback = destruction_callback
+    assert(pitch >= bitmap_minimum_pitch((usize)int_size_width(&size), format_))
+    assert(not size_would_overflow(format_, size))
+    # FIXME: assert that `data` is actually long enough!
+
+## Ported from Libraries/LibGfx/Bitmap.cpp:136 Gfx::Bitmap::create_with_anonymous_buffer.
+## Replaced: Core::AnonymousBuffer is not ported; no caller can hold one, so this traps.
+pub func bitmap_create_with_anonymous_buffer(format_: BitmapFormat, alpha_type: AlphaType, buffer: CoreAnonymousBuffer, size: IntSize) -> Bitmap*!:
+    if size_would_overflow(format_, size):
+        error(ak.ak_error, "Gfx::Bitmap::create_with_anonymous_buffer size overflow")
+    discard(alpha_type)
+    discard(buffer)
+    trap("unsupported: Core::AnonymousBuffer (LibCore is not ported)")
+
+## Ported from Libraries/LibGfx/Bitmap.cpp:144 Gfx::Bitmap::create_with_raw_data.
+pub func bitmap_create_with_raw_data(format_: BitmapFormat, alpha_type: AlphaType, raw_data: const u8[], size: IntSize) -> Bitmap*!:
+    if size_would_overflow(format_, size):
+        error(ak.ak_error, "Gfx::Bitmap::create_with_raw_data size overflow")
+    let backing_store = try bitmap_allocate_backing_store(format_, size, BitmapInitializeBackingStore.no)
+    # raw_data.copy_to(Bytes { backing_store.data, backing_store.size_in_bytes })
+    let target = u8[]((u8*)(backing_store.data else trap("VERIFY: backing store")), backing_store.size_in_bytes)
+    assert(target.length >= raw_data.length)
+    memory.copy(target, raw_data, raw_data.length)
+    let this = try new Bitmap
+    bitmap_construct_int_size_backing_store(this, format_, alpha_type, size, backing_store)
+    return this
+
+## Ported from Libraries/LibGfx/Bitmap.cpp:154 Gfx::Bitmap::Bitmap.
+## Replaced: Core::AnonymousBuffer is not ported; see bitmap_create_with_anonymous_buffer.
+pub func bitmap_construct_core_anonymous_buffer(this: Bitmap*, format_: BitmapFormat, alpha_type: AlphaType, buffer: CoreAnonymousBuffer, size: IntSize):
+    discard(this)
+    discard(format_)
+    discard(alpha_type)
+    discard(buffer)
+    discard(size)
+    trap("unsupported: Core::AnonymousBuffer (LibCore is not ported)")
+
+# mark: Copies =================================================================================
+
+## Ported from Libraries/LibGfx/Bitmap.cpp:165 Gfx::Bitmap::clone.
+pub func bitmap_clone(this: const Bitmap*) -> Bitmap*!:
+    let new_bitmap = try bitmap_create_alpha_type(bitmap_format(this), bitmap_alpha_type(this), bitmap_size(this))
+
+    assert(bitmap_size_in_bytes(this) == bitmap_size_in_bytes(new_bitmap))
+    let count = bitmap_size_in_bytes(this)
+    memory.copy(u8[]((u8*)(bitmap_scanline(new_bitmap, 0) else trap("VERIFY")), count), u8[]((u8*)(bitmap_scanline_const(this, 0) else trap("VERIFY")), count), count)
+
+    return new_bitmap
+
+## Ported from Libraries/LibGfx/Bitmap.cpp:175 Gfx::Bitmap::cropped.
+pub func bitmap_cropped(this: const Bitmap*, crop: DevicePixelRect, outside_color: Color) -> Bitmap*!:
+    # OPTIMIZATION: Skip slow manual copying for NO-OP crops
+    if crop == bitmap_rect(this):
+        return try bitmap_clone(this)
+
+    let crop_width = device_pixel_rect_width(&crop)
+    let crop_height = device_pixel_rect_height(&crop)
+    let new_bitmap = try bitmap_create_alpha_type(bitmap_format(this), bitmap_alpha_type(this), IntSize(m_width = crop_width, m_height = crop_height))
+
+    for y in 0..<crop_height:
+        for x in 0..<crop_width:
+            let global_x = x + device_pixel_rect_left(&crop)
+            let global_y = y + device_pixel_rect_top(&crop)
+            if global_x >= bitmap_width(this) or global_y >= bitmap_height(this) or global_x < 0 or global_y < 0:
+                bitmap_set_pixel(new_bitmap, x, y, outside_color)
+            else:
+                bitmap_set_pixel(new_bitmap, x, y, bitmap_get_pixel(this, global_x, global_y))
+    return new_bitmap
+
+## Ported from Libraries/LibGfx/Bitmap.cpp:197 Gfx::Bitmap::scaled.
+## Replaced: SkImage::scalePixels becomes a raster draw of the pixels (raster_utils).
+pub func bitmap_scaled(this: const Bitmap*, width: i32, height: i32, scaling_mode: ScalingMode) -> Bitmap*!:
+    let scaled_bitmap = try bitmap_create_alpha_type(bitmap_format(this), bitmap_alpha_type(this), IntSize(m_width = width, m_height = height))
+    if not raster_scale_pixels(this, scaled_bitmap, scaling_mode):
+        error(ak.ak_error, "Unable to scale pixels for bitmap")
+    return scaled_bitmap
+
+## Ported from Libraries/LibGfx/Bitmap.cpp:215 Gfx::Bitmap::to_bitmap_backed_by_anonymous_buffer.
+## Replaced: without Core::AnonymousBuffer the copy is an ordinary bitmap (see the header).
+pub func bitmap_to_bitmap_backed_by_anonymous_buffer(this: const Bitmap*) -> Bitmap*!:
+    # (m_buffer is never valid in the port: the donor's early `return *this` cannot happen.)
+    let bitmap = try bitmap_create_alpha_type(bitmap_format(this), bitmap_alpha_type(this), bitmap_size(this))
+    let count = bitmap_size_in_bytes(this)
+    memory.copy(u8[]((u8*)(bitmap_scanline(bitmap, 0) else trap("VERIFY")), count), u8[]((u8*)(bitmap_scanline_const(this, 0) else trap("VERIFY")), count), count)
+    return bitmap
+
+## Ported from Libraries/LibGfx/Bitmap.cpp:234 Gfx::Bitmap::strip_alpha_channel.
+pub func bitmap_strip_alpha_channel(this: Bitmap*):
+    assert(this.m_format == BitmapFormat.bgra8888 or this.m_format == BitmapFormat.bg_rx8888)
+    let pixels = bitmap_pixels(this)
+    for i in 0..<pixels.length:
+        pixels[i] = 0xff000000 | (pixels[i] & 0xffffff)
+    this.m_format = BitmapFormat.bg_rx8888
+
+## Ported from Libraries/LibGfx/Bitmap.cpp:242 Gfx::Bitmap::to_shareable_bitmap.
+pub func bitmap_to_shareable_bitmap(this: const Bitmap*) -> ShareableBitmap:
+    let bitmap = bitmap_to_bitmap_backed_by_anonymous_buffer(this) catch:
+        var invalid: ShareableBitmap
+        shareable_bitmap_construct(&invalid)
+        return invalid
+    var shareable: ShareableBitmap
+    shareable_bitmap_construct_bitmap(&shareable, bitmap, ShareableBitmapTag.construct_with_known_good_bitmap)
+    return shareable
+
+## Ported from Libraries/LibGfx/Bitmap.cpp:250 Gfx::Bitmap::allocate_backing_store.
+pub func bitmap_allocate_backing_store(format_: BitmapFormat, size: IntSize, initialize_backing_store: BitmapInitializeBackingStore = BitmapInitializeBackingStore.yes) -> BackingStore!:
+    if int_size_is_empty(&size):
+        error(ak.ak_error, "Gfx::Bitmap backing store size is empty")
+
+    if size_would_overflow(format_, size):
+        error(ak.ak_error, "Gfx::Bitmap backing store size overflow")
+
+    let pitch = bitmap_minimum_pitch((usize)int_size_width(&size), format_)
+    let data_size_in_bytes = bitmap_size_in_bytes_usize(pitch, int_size_height(&size))
+
+    # kcalloc / kmalloc: pixels are atomic storage (DESIGN.md §3.3 rule 5).
+    let data = ak.kmalloc_atomic(data_size_in_bytes) else error(ak.ak_errno_error, "ENOMEM")
+    if initialize_backing_store == BitmapInitializeBackingStore.yes:
+        memory.set(u8[]((u8*)data, data_size_in_bytes), 0)
+    return BackingStore(data = data, pitch = pitch, size_in_bytes = data_size_in_bytes)
+
+# mark: Scanlines ==============================================================================
+
+## Ported from Libraries/LibGfx/Bitmap.h:160 Gfx::Bitmap::unchecked_scanline_u8.
+pub func bitmap_unchecked_scanline_u8(this: Bitmap*, y: i32) -> u8*?:
+    let data = this.m_data else return none
+    return (u8*)data + (usize)y * this.m_pitch
+
+## Ported from Libraries/LibGfx/Bitmap.h:165 Gfx::Bitmap::unchecked_scanline_u8.
+pub func bitmap_unchecked_scanline_u8_const(this: const Bitmap*, y: i32) -> const u8*?:
+    let data = this.m_data else return none
+    return (const u8*)data + (usize)y * this.m_pitch
+
+## Ported from Libraries/LibGfx/Bitmap.h:170 Gfx::Bitmap::unchecked_scanline.
+pub func bitmap_unchecked_scanline(this: Bitmap*, y: i32) -> u32*?:
+    return (u32*?)bitmap_unchecked_scanline_u8(this, y)
+
+## Ported from Libraries/LibGfx/Bitmap.h:175 Gfx::Bitmap::unchecked_scanline.
+pub func bitmap_unchecked_scanline_const(this: const Bitmap*, y: i32) -> const u32*?:
+    return (const u32*?)bitmap_unchecked_scanline_u8_const(this, y)
+
+## Ported from Libraries/LibGfx/Bitmap.h:180 Gfx::Bitmap::scanline_u8.
+pub func bitmap_scanline_u8(this: Bitmap*, y: i32) -> u8*?:
+    assert(y >= 0)
+    assert(y < bitmap_height(this))
+    return bitmap_unchecked_scanline_u8(this, y)
+
+## Ported from Libraries/LibGfx/Bitmap.h:187 Gfx::Bitmap::scanline_u8.
+pub func bitmap_scanline_u8_const(this: const Bitmap*, y: i32) -> const u8*?:
+    assert(y >= 0)
+    assert(y < bitmap_height(this))
+    return bitmap_unchecked_scanline_u8_const(this, y)
+
+## Ported from Libraries/LibGfx/Bitmap.h:194 Gfx::Bitmap::scanline.
+pub func bitmap_scanline(this: Bitmap*, y: i32) -> u32*?:
+    return (u32*?)bitmap_scanline_u8(this, y)
+
+## Ported from Libraries/LibGfx/Bitmap.h:199 Gfx::Bitmap::scanline.
+pub func bitmap_scanline_const(this: const Bitmap*, y: i32) -> const u32*?:
+    return (const u32*?)bitmap_scanline_u8_const(this, y)
+
+## Ported from Libraries/LibGfx/Bitmap.h:204 Gfx::Bitmap::begin.
+pub func bitmap_begin(this: Bitmap*) -> u32*?:
+    return bitmap_scanline(this, 0)
+
+## Ported from Libraries/LibGfx/Bitmap.h:209 Gfx::Bitmap::begin.
+pub func bitmap_begin_const(this: const Bitmap*) -> const u32*?:
+    return bitmap_scanline_const(this, 0)
+
+## Ported from Libraries/LibGfx/Bitmap.h:214 Gfx::Bitmap::end.
+pub func bitmap_end(this: Bitmap*) -> u32*?:
+    let data = this.m_data else return none
+    return (u32*)((u8*)data + bitmap_data_size(this))
+
+## Ported from Libraries/LibGfx/Bitmap.h:219 Gfx::Bitmap::end.
+pub func bitmap_end_const(this: const Bitmap*) -> const u32*?:
+    let data = this.m_data else return none
+    return (const u32*)((const u8*)data + bitmap_data_size(this))
+
+## Ported from Libraries/LibGfx/Bitmap.h:224 Gfx::Bitmap::data_size.
+pub func bitmap_data_size(this: const Bitmap*) -> usize:
+    return (usize)int_size_height(&this.m_size) * this.m_pitch
+
+## The pixels from begin() to end() as a span: the range C++'s `for (auto& pixel : *this)` walks.
+pub func bitmap_pixels(this: Bitmap*) -> u32[]:
+    let begin = bitmap_begin(this) else trap("VERIFY: bitmap data")
+    return u32[](begin, bitmap_data_size(this) // 4)
+
+## The pixels from begin() to end() as a read-only span.
+pub func bitmap_pixels_const(this: const Bitmap*) -> const u32[]:
+    let begin = bitmap_begin_const(this) else trap("VERIFY: bitmap data")
+    return u32[]((u32*)begin, bitmap_data_size(this) // 4)
+
+# mark: Accessors ==============================================================================
+
+## Ported from Libraries/LibGfx/Bitmap.h:90 Gfx::Bitmap::rect.
+pub func bitmap_rect(this: const Bitmap*) -> DevicePixelRect:
+    return DevicePixelRect(m_location = IntPoint(m_x = 0, m_y = 0), m_size = this.m_size)
+
+## Ported from Libraries/LibGfx/Bitmap.h:91 Gfx::Bitmap::size.
+pub func bitmap_size(this: const Bitmap*) -> IntSize:
+    return this.m_size
+
+## Ported from Libraries/LibGfx/Bitmap.h:92 Gfx::Bitmap::width.
+pub func bitmap_width(this: const Bitmap*) -> i32:
+    return int_size_width(&this.m_size)
+
+## Ported from Libraries/LibGfx/Bitmap.h:93 Gfx::Bitmap::height.
+pub func bitmap_height(this: const Bitmap*) -> i32:
+    return int_size_height(&this.m_size)
+
+## Ported from Libraries/LibGfx/Bitmap.h:95 Gfx::Bitmap::pitch.
+pub func bitmap_pitch(this: const Bitmap*) -> usize:
+    return this.m_pitch
+
+## Ported from Libraries/LibGfx/Bitmap.h:99 Gfx::Bitmap::has_alpha_channel.
+pub func bitmap_has_alpha_channel(this: const Bitmap*) -> bool:
+    return this.m_format == BitmapFormat.bgra8888 or this.m_format == BitmapFormat.rgba8888
+
+## Ported from Libraries/LibGfx/Bitmap.h:100 Gfx::Bitmap::format.
+pub func bitmap_format(this: const Bitmap*) -> BitmapFormat:
+    return this.m_format
+
+## Ported from Libraries/LibGfx/Bitmap.h:105 Gfx::Bitmap::size_in_bytes.
+pub func bitmap_size_in_bytes_usize(pitch: usize, height: i32) -> usize:
+    return pitch * (usize)height
+
+## Ported from Libraries/LibGfx/Bitmap.h:106 Gfx::Bitmap::size_in_bytes.
+pub func bitmap_size_in_bytes(this: const Bitmap*) -> usize:
+    return bitmap_size_in_bytes_usize(this.m_pitch, bitmap_height(this))
+
+## Ported from Libraries/LibGfx/Bitmap.h:111 Gfx::Bitmap::anonymous_buffer.
+pub func bitmap_anonymous_buffer(this: Bitmap*) -> CoreAnonymousBuffer*:
+    return &this.m_buffer
+
+## Ported from Libraries/LibGfx/Bitmap.h:112 Gfx::Bitmap::anonymous_buffer.
+pub func bitmap_anonymous_buffer_const(this: const Bitmap*) -> CoreAnonymousBuffer:
+    return this.m_buffer
+
+## Ported from Libraries/LibGfx/Bitmap.h:137 Gfx::Bitmap::alpha_type.
+pub func bitmap_alpha_type(this: const Bitmap*) -> AlphaType:
+    return this.m_alpha_type
+
+# mark: Pixels =================================================================================
+
+## Ported from Libraries/LibGfx/Bitmap.h:229 Gfx::Bitmap::get_pixel.
+pub func bitmap_get_pixel(this: const Bitmap*, x: i32, y: i32) -> Color:
+    assert(x >= 0)
+    assert(x < bitmap_width(this))
+    let row = bitmap_scanline_const(this, y) else trap("VERIFY: bitmap data")
+    let pixel = row[(usize)x]
+    match this.m_format:
+        .bg_rx8888: return color_from_bgrx(pixel)
+        .bgra8888: return color_from_bgra(pixel)
+        .rgba8888: return color_from_rgba(pixel)
+        .rg_bx8888: return color_from_rgbx(pixel)
+        .invalid: trap("VERIFY_NOT_REACHED")
+        _: trap("VERIFY_NOT_REACHED")
+
+## Ported from Libraries/LibGfx/Bitmap.h:249 Gfx::Bitmap::set_pixel.
+pub func bitmap_set_pixel(this: Bitmap*, x: i32, y: i32, color: Color):
+    let row = bitmap_scanline(this, y) else trap("VERIFY: bitmap data")
+    match this.m_format:
+        .bgra8888:
+            row[(usize)x] = color_value(&color)
+        .bg_rx8888:
+            row[(usize)x] = color_value(&color) | ((u32)0xFF << 24)
+        .rgba8888:
+            row[(usize)x] = ((u32)color_alpha(&color) << 24) | ((u32)color_blue(&color) << 16) | ((u32)color_green(&color) << 8) | (u32)color_red(&color)
+        .rg_bx8888:
+            row[(usize)x] = ((u32)0xFF << 24) | ((u32)color_blue(&color) << 16) | ((u32)color_green(&color) << 8) | (u32)color_red(&color)
+        .invalid: trap("VERIFY_NOT_REACHED")
+        _: trap("VERIFY_NOT_REACHED")
+
+# The absolute difference of two channel values, as `abs(static_cast<int>(a) - b)`.
+func bitmap_channel_error(a: u8, b: u8) -> u8:
+    return a - b if a > b else b - a
+
+## Ported from Libraries/LibGfx/Bitmap.cpp:271 Gfx::Bitmap::diff.
+pub func bitmap_diff(this: const Bitmap*, other: const Bitmap*) -> BitmapDiffResult:
+    let own_width = bitmap_width(this)
+    let own_height = bitmap_height(this)
+    assert(own_width == bitmap_width(other) and own_height == bitmap_height(other))
+
+    var result: BitmapDiffResult
+    for y in 0..<own_height:
+        for x in 0..<own_width:
+            let own_pixel = bitmap_get_pixel(this, x, y)
+            let other_pixel = bitmap_get_pixel(other, x, y)
+            if color_eq(&own_pixel, other_pixel):
+                continue
+
+            result.pixel_error_count += 1
+
+            let red_error = bitmap_channel_error(color_red(&own_pixel), color_red(&other_pixel))
+            let green_error = bitmap_channel_error(color_green(&own_pixel), color_green(&other_pixel))
+            let blue_error = bitmap_channel_error(color_blue(&own_pixel), color_blue(&other_pixel))
+            let alpha_error = bitmap_channel_error(color_alpha(&own_pixel), color_alpha(&other_pixel))
+
+            result.total_red_error += red_error
+            result.total_green_error += green_error
+            result.total_blue_error += blue_error
+            result.total_alpha_error += alpha_error
+
+            if red_error > result.maximum_red_error: result.maximum_red_error = red_error
+            if green_error > result.maximum_green_error: result.maximum_green_error = green_error
+            if blue_error > result.maximum_blue_error: result.maximum_blue_error = blue_error
+            if alpha_error > result.maximum_alpha_error: result.maximum_alpha_error = alpha_error
+
+    result.identical = result.pixel_error_count == 0
+    result.total_error = result.total_red_error + result.total_green_error + result.total_blue_error + result.total_alpha_error
+
+    let maximum_red_green_error = result.maximum_green_error if result.maximum_red_error < result.maximum_green_error else result.maximum_red_error
+    let maximum_blue_alpha_error = result.maximum_alpha_error if result.maximum_blue_error < result.maximum_alpha_error else result.maximum_blue_error
+    result.maximum_error = maximum_blue_alpha_error if maximum_red_green_error < maximum_blue_alpha_error else maximum_red_green_error
+
+    return result
+
+## Ported from Libraries/LibGfx/Bitmap.cpp:314 Gfx::Bitmap::set_alpha_type_destructive (the
+## non-macOS branch: Skia's SkPixmap::readPixels between the two alpha types, which is
+## SkOpts::RGBA_to_rgbA / rgbA_to_RGBA on 8888 pixels).
+pub func bitmap_set_alpha_type_destructive(this: Bitmap*, alpha_type: AlphaType):
+    if alpha_type == this.m_alpha_type:
+        return
+
+    if this.m_format == BitmapFormat.bg_rx8888 or this.m_format == BitmapFormat.rg_bx8888:
+        this.m_alpha_type = alpha_type
+        return
+
+    # The channel order does not matter: alpha is the top byte of both BGRA8888 and RGBA8888.
+    assert(this.m_format == BitmapFormat.bgra8888 or this.m_format == BitmapFormat.rgba8888)
+    for y in 0..<bitmap_height(this):
+        let row = u32[](bitmap_scanline(this, y) else trap("VERIFY"), (usize)bitmap_width(this))
+        if this.m_alpha_type == AlphaType.unpremultiplied:
+            raster_premultiply_row(row)
+        else:
+            raster_unpremultiply_row(row)
+    this.m_alpha_type = alpha_type

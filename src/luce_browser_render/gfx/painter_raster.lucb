@@ -1,0 +1,438 @@
+#==============================================================================================
+#
+#   painter_raster - PainterRaster: the Painter on the raster module (replaces PainterSkia)
+#
+#   DESCRIPTION:
+#       Replaces Libraries/LibGfx/PainterSkia.{h,cpp} (lines 1-356), the only Painter the
+#       donor has (Painter::create answers a PainterSkia), following it member by member in
+#       that file's order (DESIGN.md §7.3). Where PainterSkia draws on the painting
+#       surface's SkCanvas, PainterRaster draws with the raster module into the surface's
+#       pixels (painting_surface_begin_raster / _end_raster, what `with_canvas` brackets).
+#
+#       The SkCanvas state PainterSkia relies on is kept here: the matrix (setMatrix) and the
+#       clip (clipRect / clipPath, a coverage mask the size of the surface; none while
+#       nothing is clipped), saved and restored as SkCanvas::save/restore do. SkCanvas's
+#       state belongs to the surface in Skia; here it belongs to the painter (painters do not
+#       share a surface in LibWeb).
+#
+#       Differences (FIXMEs until the raster module has these, DESIGN.md §7.3 r11d): blur
+#       mask filters (the blur_radius overloads draw without blur), image filters on paints
+#       (ignored), conic gradients (PainterSkia has none either: "Unsupported PaintStyle"),
+#       and pattern repetition other than repeat-both (the raster module's patterns spread
+#       both axes alike and have no decal mode).
+#
+#==============================================================================================
+
+# mark: Types ==================================================================================
+
+## The part of SkCanvas's state a PainterRaster keeps: the matrix and the clip.
+pub struct PainterRasterState:
+    pub var matrix: raster.Transform
+    ## Clip coverage, one byte per surface pixel (managed storage); none: not clipped.
+    pub var clip: (u8[])?
+
+## PainterSkia (Libraries/LibGfx/PainterSkia.h:17), on the raster module.
+pub struct PainterRaster: IsPainter:
+    pub var painter_base: Painter  # primary base
+    pub var m_painting_surface: PaintingSurface*
+    pub var m_state: PainterRasterState
+    pub var m_saved_states: ak.Vector[PainterRasterState]
+    pub var m_initial_save_count: i32
+
+    func painter() -> Painter*: return (Painter*)&self
+
+## The vtable of PainterRaster.
+pub let painter_raster_vtable: PainterVTable = PainterVTable(
+    class_info = &painter_raster_class,
+    clear_rect = painter_raster_clear_rect_impl,
+    fill_rect = painter_raster_fill_rect_impl,
+    draw_bitmap = painter_raster_draw_bitmap_impl,
+    stroke_path_color_f32 = painter_raster_stroke_path_color_impl,
+    stroke_path_color_f32_f32 = painter_raster_stroke_path_color_styled_impl,
+    stroke_path_paint_style_optional_filter_f32_f32_compositing_and_blending_opera = painter_raster_stroke_path_paint_style_impl,
+    stroke_path_paint_style_optional_filter_f32_f32_compositing_and_blending_opera_path_cap_style = painter_raster_stroke_path_paint_style_styled_impl,
+    fill_path_color_winding_rule = painter_raster_fill_path_color_impl,
+    fill_path_color_winding_rule_f32 = painter_raster_fill_path_color_blurred_impl,
+    fill_path_paint_style = painter_raster_fill_path_paint_style_impl,
+    set_transform = painter_raster_set_transform_impl,
+    save = painter_raster_save_impl,
+    restore = painter_raster_restore_impl,
+    clip = painter_raster_clip_impl,
+    reset = painter_raster_reset_impl)
+
+## Class information of PainterRaster (a subclass of Gfx::Painter).
+pub let painter_raster_class: ak.ClassInfo = ak.ClassInfo(name = "PainterRaster", first_id = 1, last_id = 1, size = sizeof(PainterRaster), vtable = (const void*)&painter_raster_vtable)
+
+# mark: Canvas =================================================================================
+
+# Impl::with_canvas: the surface's pixels as a raster pixmap for the duration of one draw.
+# (painting_surface->lock_context(), callback(canvas), painting_surface->unlock_context().)
+func painter_raster_begin(this: PainterRaster*) -> raster.PixmapMut:
+    painting_surface_lock_context(this.m_painting_surface)
+    return painting_surface_begin_raster(this.m_painting_surface)
+
+# The end of with_canvas.
+func painter_raster_end(this: PainterRaster*):
+    painting_surface_end_raster(this.m_painting_surface)
+    painting_surface_unlock_context(this.m_painting_surface)
+
+# The clip as a raster mask over the surface, or none.
+func painter_raster_clip_mask(this: const PainterRaster*) -> raster.Mask?:
+    let clip = this.m_state.clip else return none
+    let size = painting_surface_size(this.m_painting_surface)
+    let mask_size = raster.IntSize.from_wh((u32)int_size_width(&size), (u32)int_size_height(&size)) else return none
+    return raster.Mask.from_vec(clip, mask_size)
+
+# canvas.drawPath(path, paint) for a fill: fills with the matrix and the clip.
+func painter_raster_draw_fill(this: PainterRaster*, path: const Path*, paint: const raster.Paint*, winding_rule: WindingRule):
+    var raster_path = path_to_raster_path(path) else return
+    defer raster_path.release()
+    var pixmap = painter_raster_begin(this)
+    let mask = painter_raster_clip_mask(this)
+    if let clip = mask:
+        pixmap.fill_path(&raster_path, paint, to_raster_fill_rule(winding_rule), this.m_state.matrix, &clip)
+    else:
+        pixmap.fill_path(&raster_path, paint, to_raster_fill_rule(winding_rule), this.m_state.matrix, none)
+    painter_raster_end(this)
+
+# canvas.drawPath(path, paint) for a stroke: strokes with the matrix and the clip.
+func painter_raster_draw_stroke(this: PainterRaster*, path: const Path*, paint: const raster.Paint*, stroke: const raster.Stroke*):
+    var raster_path = path_to_raster_path(path) else return
+    defer raster_path.release()
+    var pixmap = painter_raster_begin(this)
+    let mask = painter_raster_clip_mask(this)
+    if let clip = mask:
+        pixmap.stroke_path(&raster_path, paint, stroke, this.m_state.matrix, &clip)
+    else:
+        pixmap.stroke_path(&raster_path, paint, stroke, this.m_state.matrix, none)
+    painter_raster_end(this)
+
+# A path of one rectangle (for drawRect and clipRect).
+func painter_raster_rect_path(rect: FloatRect) -> Path:
+    var path: Path
+    let x = float_rect_x(&rect)
+    let y = float_rect_y(&rect)
+    let right = x + float_rect_width(&rect)
+    let bottom = y + float_rect_height(&rect)
+    path_move_to(&path, FloatPoint(m_x = x, m_y = y))
+    path_line_to(&path, FloatPoint(m_x = right, m_y = y))
+    path_line_to(&path, FloatPoint(m_x = right, m_y = bottom))
+    path_line_to(&path, FloatPoint(m_x = x, m_y = bottom))
+    path_close(&path)
+    return path
+
+# SkMaskFilter::MakeBlur(kNormal_SkBlurStyle, blur_radius / 2): nothing for a zero sigma, and
+# not yet drawable otherwise.
+func painter_raster_blur_mask_filter(blur_radius: f32):
+    if blur_radius / 2.0 > 0.0:
+        ak.dbgln("FIXME: PainterRaster: blur mask filters are not supported by the raster module yet")
+
+# paint.setImageFilter(to_skia_image_filter(filter)).
+func painter_raster_apply_filter(filter: Filter?):
+    if filter != none:
+        ak.dbgln("FIXME: PainterRaster: image filters on paints are not supported yet")
+
+# mark: Paint styles ===========================================================================
+
+# The stops of a gradient as raster stops (colors, positions), in the stops' order.
+func painter_raster_gradient_stops(color_stops: const ColorStop[]) -> ak.Vector[raster.GradientStop]:
+    var stops: ak.Vector[raster.GradientStop]
+    ak.vector_ensure_capacity(&stops, color_stops.length)
+    for color_stop in color_stops:
+        ak.vector_append_t(&stops, raster.GradientStop.new_(color_stop.position, to_raster_color(color_stop.color)))
+    return stops
+
+# Loads an ImmutableBitmap's pixels as a premultiplied RGBA raster pixmap (managed storage).
+func painter_raster_pixmap_of(image: const ImmutableBitmap*) -> raster.PixmapRef?:
+    let bitmap = immutable_bitmap_bitmap(image) else return none
+    let bytes = ak.alloc_atomic((usize)bitmap_width(bitmap) * (usize)bitmap_height(bitmap) * 4)
+    raster_load_bitmap(bitmap, bytes)
+    return raster.PixmapRef.from_bytes(bytes, (u32)bitmap_width(bitmap), (u32)bitmap_height(bitmap))
+
+# Replaces PainterSkia.cpp:52 apply_paint_style.
+func painter_raster_apply_paint_style(paint: raster.Paint*, style: PaintStyle*):
+    if let solid_color = as_if_solid_color_paint_style(style):
+        paint.set_color(to_raster_color(solid_color_paint_style_color(solid_color)))
+    elif let linear_gradient = as_if_canvas_linear_gradient_paint_style(style):
+        let stops = painter_raster_gradient_stops(gradient_paint_style_color_stops(linear_gradient.gradient_paint_style()))
+        let start = canvas_linear_gradient_paint_style_start_point(linear_gradient)
+        let end = canvas_linear_gradient_paint_style_end_point(linear_gradient)
+        # SkGradientShader::MakeLinear(points, colors, positions, count, SkTileMode::kClamp, 0, &identity)
+        if let shader = raster.LinearGradient.new_(raster.Point.from_xy(float_point_x(&start), float_point_y(&start)), raster.Point.from_xy(float_point_x(&end), float_point_y(&end)), ak.vector_span_const(&stops), raster.SpreadMode.pad_, raster.Transform.identity()):
+            paint.shader = shader
+    elif let radial_gradient = as_if_canvas_radial_gradient_paint_style(style):
+        let stops = painter_raster_gradient_stops(gradient_paint_style_color_stops(radial_gradient.gradient_paint_style()))
+        let start_center = canvas_radial_gradient_paint_style_start_center(radial_gradient)
+        let end_center = canvas_radial_gradient_paint_style_end_center(radial_gradient)
+        let start_radius = canvas_radial_gradient_paint_style_start_radius(radial_gradient)
+        let end_radius = canvas_radial_gradient_paint_style_end_radius(radial_gradient)
+        # SkGradientShader::MakeTwoPointConical(start, start_radius, end, end_radius, ..., kClamp, 0, &identity)
+        if let shader = raster.RadialGradient.new_(raster.Point.from_xy(float_point_x(&start_center), float_point_y(&start_center)), start_radius, raster.Point.from_xy(float_point_x(&end_center), float_point_y(&end_center)), end_radius, ak.vector_span_const(&stops), raster.SpreadMode.pad_, raster.Transform.identity()):
+            paint.shader = shader
+    elif let canvas_pattern = as_if_canvas_pattern_paint_style(style):
+        let image = canvas_pattern_paint_style_image(canvas_pattern) else return
+        let pixmap = painter_raster_pixmap_of(image) else return
+
+        let repetition = canvas_pattern_paint_style_repetition(canvas_pattern)
+        let repeat_x = repetition == CanvasPatternPaintStyleRepetition.repeat or repetition == CanvasPatternPaintStyleRepetition.repeat_x
+        let repeat_y = repetition == CanvasPatternPaintStyleRepetition.repeat or repetition == CanvasPatternPaintStyleRepetition.repeat_y
+        if repeat_x != repeat_y or not repeat_x:
+            ak.dbgln("FIXME: PainterRaster: pattern repetition other than repeat (the raster module has no decal tiling)")
+
+        # FIXME: Implement sampling configuration.
+        var transformation_matrix = raster.Transform.identity()
+        if let transform = canvas_pattern_paint_style_transform(canvas_pattern):
+            transformation_matrix = to_raster_transform(transform)
+        let spread = raster.SpreadMode.repeat if repeat_x and repeat_y else raster.SpreadMode.pad_
+        paint.shader = raster.Pattern.new_(pixmap, spread, raster.FilterQuality.bilinear, 1.0, transformation_matrix)
+    else:
+        ak.dbgln("FIXME: Unsupported PaintStyle")
+
+# Replaces PainterSkia.cpp:141 to_skia_paint: a paint of the style (and the filter).
+func painter_raster_paint_of(style: PaintStyle*, filter: Filter?) -> raster.Paint:
+    var paint = raster.Paint()
+    painter_raster_apply_paint_style(&paint, style)
+    painter_raster_apply_filter(filter)
+    return paint
+
+# paint.setAlphaf(paint.getAlphaf() * global_alpha): the paint's alpha scales its color or its
+# shader.
+func painter_raster_multiply_alpha(paint: raster.Paint*, global_alpha: f32):
+    paint.shader.apply_opacity(global_alpha)
+
+# A raster stroke: width, cap, join, miter limit and SkDashPathEffect::Make(dash_array,
+# dash_offset) (none, like Skia's nullptr, for an odd or short array).
+func painter_raster_stroke(thickness: f32, cap_style: PathCapStyle, join_style: PathJoinStyle, miter_limit: f32, dash_array: const ak.Vector[f32]*, dash_offset: f32) -> raster.Stroke:
+    var stroke = raster.Stroke()
+    stroke.width = thickness
+    stroke.line_cap = to_raster_cap(cap_style)
+    stroke.line_join = to_raster_join(join_style)
+    stroke.miter_limit = miter_limit
+    stroke.dash = raster.StrokeDash.new_(ak.vector_span_const(dash_array), dash_offset)
+    return stroke
+
+# Frees what a raster stroke allocated (its dash intervals).
+func painter_raster_release_stroke(stroke: raster.Stroke*):
+    if let dash = stroke.dash:
+        var owned = dash
+        owned.release()
+        stroke.dash = none
+
+# mark: PainterSkia ============================================================================
+
+## Replaces PainterSkia.cpp:152 Gfx::PainterSkia::PainterSkia (with Painter::create's
+## make<PainterSkia>).
+pub func painter_raster_create(painting_surface: PaintingSurface*) -> PainterRaster*:
+    let this = new PainterRaster(painter_base = Painter(vtable = &painter_raster_vtable, class_id = painter_raster_class.first_id), m_painting_surface = painting_surface, m_state = PainterRasterState(matrix = raster.Transform.identity(), clip = none)) else trap("out of memory")
+    # m_initial_save_count = canvas.save(): SkCanvas::save answers the count before saving.
+    this.m_initial_save_count = painter_raster_save_count(this)
+    painter_raster_save_impl(this.painter())
+    return this
+
+# SkCanvas::getSaveCount: 1 plus the saved states.
+func painter_raster_save_count(this: const PainterRaster*) -> i32:
+    return (i32)ak.vector_size(&this.m_saved_states) + 1
+
+## Replaces PainterSkia.cpp:162 Gfx::PainterSkia::clear_rect.
+pub func painter_raster_clear_rect_impl(base: Painter*, rect: FloatRect, color: Color):
+    let this = (PainterRaster*)base
+    # canvas.save(); canvas.clipRect(rect); canvas.clear(color); canvas.restore(): the rect
+    # (not anti-aliased) within the clip, replaced with the color.
+    var paint = raster.Paint()
+    paint.set_color(to_raster_color(color))
+    paint.blend_mode = raster.BlendMode.source
+    paint.anti_alias = false
+    let path = painter_raster_rect_path(rect)
+    painter_raster_draw_fill(this, &path, &paint, WindingRule.nonzero)
+
+## Replaces PainterSkia.cpp:172 Gfx::PainterSkia::fill_rect.
+pub func painter_raster_fill_rect_impl(base: Painter*, rect: FloatRect, color: Color):
+    let this = (PainterRaster*)base
+    var paint = raster.Paint()
+    paint.set_color(to_raster_color(color))
+    # SkPaint's default: no anti-aliasing.
+    paint.anti_alias = false
+    let path = painter_raster_rect_path(rect)
+    painter_raster_draw_fill(this, &path, &paint, WindingRule.nonzero)
+
+## Replaces PainterSkia.cpp:181 Gfx::PainterSkia::draw_bitmap.
+pub func painter_raster_draw_bitmap_impl(base: Painter*, dst_rect: FloatRect, src_bitmap: ImmutableBitmap, src_rect: DevicePixelRect, scaling_mode: ScalingMode, filter: Filter?, global_alpha: f32, compositing_and_blending_operator: CompositingAndBlendingOperator):
+    let this = (PainterRaster*)base
+    painter_raster_apply_filter(filter)
+
+    let bitmap = immutable_bitmap_bitmap(&src_bitmap) else return
+    # SkCanvas::kStrict_SrcRectConstraint: sample only inside src_rect, so the pattern is the
+    # src_rect part of the image.
+    let left = device_pixel_rect_x(&src_rect)
+    let top = device_pixel_rect_y(&src_rect)
+    let width = device_pixel_rect_width(&src_rect)
+    let height = device_pixel_rect_height(&src_rect)
+    if width <= 0 or height <= 0:
+        return
+    let whole = ak.alloc_atomic((usize)bitmap_width(bitmap) * (usize)bitmap_height(bitmap) * 4)
+    raster_load_bitmap(bitmap, whole)
+    let part = ak.alloc_atomic((usize)width * (usize)height * 4)
+    memory.set(part, 0)
+    for y in 0..<height:
+        for x in 0..<width:
+            let source_x = left + x
+            let source_y = top + y
+            if source_x < 0 or source_y < 0 or source_x >= bitmap_width(bitmap) or source_y >= bitmap_height(bitmap):
+                continue
+            let source_offset = ((usize)source_y * (usize)bitmap_width(bitmap) + (usize)source_x) * 4
+            let target_offset = ((usize)y * (usize)width + (usize)x) * 4
+            memory.copy(part[target_offset..<target_offset + 4], whole[source_offset..<source_offset + 4], 4)
+    let pixmap = raster.PixmapRef.from_bytes(part, (u32)width, (u32)height) else return
+
+    # The rect-to-rect mapping of src_rect onto dst_rect, in the pattern's space.
+    let scale_x = float_rect_width(&dst_rect) / (f32)width
+    let scale_y = float_rect_height(&dst_rect) / (f32)height
+    let pattern_transform = raster.Transform.from_row(scale_x, 0.0, 0.0, scale_y, float_rect_x(&dst_rect), float_rect_y(&dst_rect))
+
+    var paint = raster.Paint()
+    # paint.setAlpha(static_cast<u8>(global_alpha * 255))
+    let alpha = (u8)(global_alpha * 255.0)
+    paint.shader = raster.Pattern.new_(pixmap, raster.SpreadMode.pad_, to_raster_filter_quality(scaling_mode), (f32)alpha / 255.0, pattern_transform)
+    paint.blend_mode = to_raster_blend_mode(compositing_and_blending_operator)
+    paint.anti_alias = false
+    let path = painter_raster_rect_path(dst_rect)
+    painter_raster_draw_fill(this, &path, &paint, WindingRule.nonzero)
+
+## Replaces PainterSkia.cpp:205 Gfx::PainterSkia::set_transform.
+pub func painter_raster_set_transform_impl(base: Painter*, transform: AffineTransform):
+    let this = (PainterRaster*)base
+    # canvas.setMatrix(SkMatrix::MakeAll(a, c, e, b, d, f, 0, 0, 1))
+    this.m_state.matrix = to_raster_transform(transform)
+
+## Replaces PainterSkia.cpp:217 Gfx::PainterSkia::stroke_path (color, thickness).
+pub func painter_raster_stroke_path_color_impl(base: Painter*, path: Path, color: Color, thickness: f32):
+    let this = (PainterRaster*)base
+    # Skia treats zero thickness as a special case and will draw a hairline, while we want to draw nothing.
+    if thickness <= 0.0:
+        return
+
+    var paint = raster.Paint()
+    paint.anti_alias = true
+    paint.set_color(to_raster_color(color))
+    var stroke = raster.Stroke()
+    stroke.width = thickness
+    painter_raster_draw_stroke(this, &path, &paint, &stroke)
+
+## Replaces PainterSkia.cpp:233 Gfx::PainterSkia::stroke_path (color, blur, cap, join, dashes).
+pub func painter_raster_stroke_path_color_styled_impl(base: Painter*, path: Path, color: Color, thickness: f32, blur_radius: f32, compositing_and_blending_operator: CompositingAndBlendingOperator, cap_style: PathCapStyle, join_style: PathJoinStyle, miter_limit: f32, dash_array: ak.Vector[f32], dash_offset: f32):
+    let this = (PainterRaster*)base
+    # Skia treats zero thickness as a special case and will draw a hairline, while we want to draw nothing.
+    if thickness <= 0.0:
+        return
+
+    var paint = raster.Paint()
+    paint.anti_alias = true
+    painter_raster_blur_mask_filter(blur_radius)
+    paint.set_color(to_raster_color(color))
+    var stroke = painter_raster_stroke(thickness, cap_style, join_style, miter_limit, &dash_array, dash_offset)
+    defer painter_raster_release_stroke(&stroke)
+    paint.blend_mode = to_raster_blend_mode(compositing_and_blending_operator)
+    painter_raster_draw_stroke(this, &path, &paint, &stroke)
+
+## Replaces PainterSkia.cpp:257 Gfx::PainterSkia::stroke_path (paint style).
+pub func painter_raster_stroke_path_paint_style_impl(base: Painter*, path: Path, paint_style: PaintStyle*, filter: Filter?, thickness: f32, global_alpha: f32, compositing_and_blending_operator: CompositingAndBlendingOperator):
+    let this = (PainterRaster*)base
+    # Skia treats zero thickness as a special case and will draw a hairline, while we want to draw nothing.
+    if thickness <= 0.0:
+        return
+
+    var paint = painter_raster_paint_of(paint_style, filter)
+    defer paint.release()
+    paint.anti_alias = true
+    painter_raster_multiply_alpha(&paint, global_alpha)
+    var stroke = raster.Stroke()
+    stroke.width = thickness
+    paint.blend_mode = to_raster_blend_mode(compositing_and_blending_operator)
+    painter_raster_draw_stroke(this, &path, &paint, &stroke)
+
+## Replaces PainterSkia.cpp:276 Gfx::PainterSkia::stroke_path (paint style, cap, join, dashes).
+pub func painter_raster_stroke_path_paint_style_styled_impl(base: Painter*, path: Path, paint_style: PaintStyle*, filter: Filter?, thickness: f32, global_alpha: f32, compositing_and_blending_operator: CompositingAndBlendingOperator, cap_style: PathCapStyle, join_style: PathJoinStyle, miter_limit: f32, dash_array: ak.Vector[f32], dash_offset: f32):
+    let this = (PainterRaster*)base
+    # Skia treats zero thickness as a special case and will draw a hairline, while we want to draw nothing.
+    if thickness <= 0.0:
+        return
+
+    var paint = painter_raster_paint_of(paint_style, filter)
+    defer paint.release()
+    paint.anti_alias = true
+    painter_raster_multiply_alpha(&paint, global_alpha)
+    var stroke = painter_raster_stroke(thickness, cap_style, join_style, miter_limit, &dash_array, dash_offset)
+    defer painter_raster_release_stroke(&stroke)
+    paint.blend_mode = to_raster_blend_mode(compositing_and_blending_operator)
+    painter_raster_draw_stroke(this, &path, &paint, &stroke)
+
+## Replaces PainterSkia.cpp:299 Gfx::PainterSkia::fill_path (color).
+pub func painter_raster_fill_path_color_impl(base: Painter*, path: Path, color: Color, winding_rule: WindingRule):
+    let this = (PainterRaster*)base
+    var paint = raster.Paint()
+    paint.anti_alias = true
+    paint.set_color(to_raster_color(color))
+    painter_raster_draw_fill(this, &path, &paint, winding_rule)
+
+## Replaces PainterSkia.cpp:311 Gfx::PainterSkia::fill_path (color, blur).
+pub func painter_raster_fill_path_color_blurred_impl(base: Painter*, path: Path, color: Color, winding_rule: WindingRule, blur_radius: f32, compositing_and_blending_operator: CompositingAndBlendingOperator):
+    let this = (PainterRaster*)base
+    var paint = raster.Paint()
+    paint.anti_alias = true
+    painter_raster_blur_mask_filter(blur_radius)
+    paint.set_color(to_raster_color(color))
+    paint.blend_mode = to_raster_blend_mode(compositing_and_blending_operator)
+    painter_raster_draw_fill(this, &path, &paint, winding_rule)
+
+## Replaces PainterSkia.cpp:325 Gfx::PainterSkia::fill_path (paint style).
+pub func painter_raster_fill_path_paint_style_impl(base: Painter*, path: Path, paint_style: PaintStyle*, filter: Filter?, global_alpha: f32, compositing_and_blending_operator: CompositingAndBlendingOperator, winding_rule: WindingRule):
+    let this = (PainterRaster*)base
+    var paint = painter_raster_paint_of(paint_style, filter)
+    defer paint.release()
+    paint.anti_alias = true
+    painter_raster_multiply_alpha(&paint, global_alpha)
+    paint.blend_mode = to_raster_blend_mode(compositing_and_blending_operator)
+    painter_raster_draw_fill(this, &path, &paint, winding_rule)
+
+## Replaces PainterSkia.cpp:339 Gfx::PainterSkia::save.
+pub func painter_raster_save_impl(base: Painter*):
+    let this = (PainterRaster*)base
+    ak.vector_append_t(&this.m_saved_states, this.m_state)
+
+## Replaces PainterSkia.cpp:346 Gfx::PainterSkia::restore.
+pub func painter_raster_restore_impl(base: Painter*):
+    let this = (PainterRaster*)base
+    # SkCanvas::restore does nothing when nothing is saved.
+    if ak.vector_is_empty(&this.m_saved_states):
+        return
+    this.m_state = ak.vector_take_last(&this.m_saved_states)
+
+## Replaces PainterSkia.cpp:353 Gfx::PainterSkia::clip.
+pub func painter_raster_clip_impl(base: Painter*, path: Path, winding_rule: WindingRule):
+    let this = (PainterRaster*)base
+    # canvas.clipPath(path, SkClipOp::kIntersect, /* doAntiAlias */ true)
+    let size = painting_surface_size(this.m_painting_surface)
+    let width = (u32)int_size_width(&size)
+    let height = (u32)int_size_height(&size)
+    let mask_size = raster.IntSize.from_wh(width, height) else return
+    # The saved states keep their own clip: the new clip is new storage.
+    let clip = ak.alloc_atomic((usize)width * (usize)height)
+    memory.set(clip, 0)
+    if let found = path_to_raster_path(&path):
+        var raster_path = found
+        defer raster_path.release()
+        var mask = raster.Mask.from_vec(clip, mask_size) else trap("VERIFY: clip mask")
+        if let current = this.m_state.clip:
+            memory.copy(clip, current, clip.length)
+            mask.intersect_path(&raster_path, to_raster_fill_rule(winding_rule), true, this.m_state.matrix)
+        else:
+            mask.fill_path(&raster_path, to_raster_fill_rule(winding_rule), true, this.m_state.matrix)
+    # (An empty path clips everything away: the clip stays all zero.)
+    this.m_state.clip = clip
+
+## Replaces PainterSkia.cpp:365 Gfx::PainterSkia::reset.
+pub func painter_raster_reset_impl(base: Painter*):
+    let this = (PainterRaster*)base
+    # canvas.restoreToCount(m_initial_save_count)
+    while painter_raster_save_count(this) > this.m_initial_save_count:
+        painter_raster_restore_impl(base)

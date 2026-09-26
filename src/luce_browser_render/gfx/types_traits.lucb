@@ -20,9 +20,9 @@ pub struct CssPixelsTraits: ak.Traits[CssPixels]:
 pub struct FourCcTraits: ak.Traits[FourCc]:
     var empty_: u8
 
-    func hash_of(key: const FourCc*) -> u32: trap("unported: AK::Traits<FourCc>::hash")
+    func hash_of(key: const FourCc*) -> u32: return four_cc_to_u32(key)
 
-    func equals(a: const FourCc*, b: const FourCc*) -> bool: trap("unported: AK::Traits<FourCc>::equals")
+    func equals(a: const FourCc*, b: const FourCc*) -> bool: return *a == *b
 
 ## AK::Traits<IntSize>: AK's hash and equality for the key type.
 pub struct IntSizeTraits: ak.Traits[IntSize]:

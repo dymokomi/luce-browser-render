@@ -8,10 +8,78 @@
 #       (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the generator
 #       could not map.
 #
+#       Filled in by region r10: FilterImpl holds an sk_sp<SkImageFilter> in the donor. Skia
+#       is replaced (DESIGN.md §7.3), so the filter is an ImageFilter: an immutable node of a
+#       filter graph that records, for each SkImageFilters factory LibGfx calls, the factory
+#       and its arguments. The raster side (the display-list player) evaluates the graph.
+#
 #==============================================================================================
 
 # mark: FilterImpl ==============================================================================
 
 ## Gfx::FilterImpl (Libraries/LibGfx/FilterImpl.h:15).
 pub struct FilterImpl:
-    pub var filter: void*?  # unmapped: sk_sp<SkImageFilter>
+    pub var filter: ImageFilter*?  # sk_sp<SkImageFilter> (none is Skia's nullptr: the source image)
+
+# mark: ImageFilter =============================================================================
+
+## One SkImageFilter of a filter graph (the replacement for Skia's SkImageFilter, made by the
+## Filter factories in filter.lucb). An input that is none is the image being filtered, as a
+## null sk_sp<SkImageFilter> input is in Skia.
+pub struct ImageFilter:
+    pub var node: ImageFilterNode
+
+## The SkImageFilters factory an ImageFilter was made with, and its arguments.
+pub enum ImageFilterNode:
+    ## SkImageFilters::Arithmetic(k1, k2, k3, k4, enforcePMColor, background, foreground).
+    arithmetic(k1: f32, k2: f32, k3: f32, k4: f32, enforce_premultiplied_color: bool, background: ImageFilter*?, foreground: ImageFilter*?)
+    ## SkImageFilters::Compose(outer, inner).
+    compose(outer: ImageFilter*?, inner: ImageFilter*?)
+    ## SkImageFilters::Blend(to_skia_blender(mode), background, foreground).
+    blend(mode: CompositingAndBlendingOperator, background: ImageFilter*?, foreground: ImageFilter*?)
+    ## SkImageFilters::Blur(sigmaX, sigmaY, input).
+    blur(sigma_x: f32, sigma_y: f32, input: ImageFilter*?)
+    ## SkImageFilters::Shader(shader).
+    shader(shader: ImageFilterShader)
+    ## SkImageFilters::DisplacementMap(xChannelSelector, yChannelSelector, scale, displacement, color).
+    displacement_map(x_channel_selector: ChannelSelector, y_channel_selector: ChannelSelector, scale: f32, displacement: ImageFilter*?, color: ImageFilter*?)
+    ## SkImageFilters::DropShadow(dx, dy, sigmaX, sigmaY, color, input).
+    drop_shadow(dx: f32, dy: f32, sigma_x: f32, sigma_y: f32, color: Color, input: ImageFilter*?)
+    ## SkImageFilters::ColorFilter(colorFilter, input).
+    color_filter(filter: ColorFilter*, input: ImageFilter*?)
+    ## SkImageFilters::Image(image, srcRect, dstRect, sampling).
+    image(bitmap: const ImmutableBitmap*, src_rect: DevicePixelRect, dest_rect: DevicePixelRect, scaling_mode: ScalingMode)
+    ## SkImageFilters::Merge(filters, count).
+    merge(inputs: ak.Vector[ImageFilter*?])
+    ## SkImageFilters::Offset(dx, dy, input).
+    offset(dx: f32, dy: f32, input: ImageFilter*?)
+    ## SkImageFilters::Erode(radiusX, radiusY, input).
+    erode(radius_x: f32, radius_y: f32, input: ImageFilter*?)
+    ## SkImageFilters::Dilate(radiusX, radiusY, input).
+    dilate(radius_x: f32, radius_y: f32, input: ImageFilter*?)
+
+## The SkShader of an ImageFilterNode.shader.
+pub enum ImageFilterShader:
+    ## SkShaders::Color(color).
+    color(color: Color)
+    ## SkShaders::MakeTurbulence / MakeFractalNoise(baseFrequencyX, baseFrequencyY,
+    ## numOctaves, seed, &tileSize).
+    turbulence(turbulence_type: TurbulenceType, base_frequency_x: f32, base_frequency_y: f32, num_octaves: i32, seed: f32, tile_stitch_size: IntSize)
+
+# mark: ColorFilter =============================================================================
+
+## One SkColorFilter (the replacement for Skia's SkColorFilter).
+pub struct ColorFilter:
+    pub var node: ColorFilterNode
+
+## The SkColorFilters factory a ColorFilter was made with, and its arguments.
+pub enum ColorFilterNode:
+    ## SkColorFilters::Matrix(rowMajor, clamp): a 4x5 row-major matrix over unpremultiplied
+    ## RGBA in [0, 1]; `clamp` clamps the result to [0, 1].
+    matrix(values: f32[20], clamp: bool)
+    ## SkColorFilters::TableARGB(a, r, g, b): a null table is the identity.
+    table_argb(a: u8[256], r: u8[256], g: u8[256], b: u8[256])
+    ## SkColorFilters::SRGBToLinearGamma().
+    srgb_to_linear_gamma
+    ## SkColorFilters::LinearToSRGBGamma().
+    linear_to_srgb_gamma

@@ -1,0 +1,95 @@
+#==============================================================================================
+#
+#   sk_parse_path - SkParsePath::ToSVGString: an SkPath as SVG path data
+#
+#   DESCRIPTION:
+#       Port of Skia m144 src/utils/SkParsePath.cpp (ToSVGString, absolute encoding) and
+#       src/core/SkString.cpp:164-189 (SkStrAppendScalar, as SkWStream::writeScalarAsText
+#       writes numbers: "%.8g", with nan, inf and -inf spelled out). The number is formatted
+#       by the C library's snprintf, as Skia formats it. Conics are written as the quads
+#       SkAutoConicToQuads gives within 1/1024.
+#
+#       Copyright 2006 The Android Open Source Project
+#       Copyright 2011+ Google Inc.
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-tiny-skia)
+#
+#==============================================================================================
+
+extern func sk_c_snprintf as "snprintf"(buffer: libc.char*?, size: usize, format: libc.str, ...) -> i32
+
+# mark: Scalars =================================================================================
+
+## Ported from src/core/SkString.cpp:164 SkStrAppendScalar: `value` as "%.8g" (since floats
+## have at most 8 significant digits), with infinity and NaN handled here for consistent
+## cross-platform results.
+pub func sk_append_scalar(builder: ak.StringBuilder*, value: f32):
+    # Handle infinity and NaN ourselves to ensure consistent cross-platform results.
+    # (e.g.: `inf` versus `1.#INF00`, `nan` versus `-nan` for high-bit-set NaNs)
+    if sk_is_nan(value):
+        ak.string_builder_append(builder, "nan")
+        return
+    if not sk_is_finite(value):
+        if value > 0.0:
+            ak.string_builder_append(builder, "inf")
+        else:
+            ak.string_builder_append(builder, "-inf")
+        return
+
+    # since floats have at most 8 significant digits, we limit our %g to that.
+    var buffer: u8[32]
+    let len = sk_c_snprintf((libc.char*?)&buffer[0], 32, "%.8g", (f64)value)
+    assert(len > 0 and len < 32)
+    ak.string_builder_append_ascii_without_validation(builder, buffer[..<(usize)len])
+
+# mark: ToSVGString =============================================================================
+
+# The append_command lambda of SkParsePath::ToSVGString, with the absolute encoding: the
+# points are written relative to `current_point`, which is then the last point times 0 (so it
+# stays the origin, but picks up a NaN from a non-finite point, as in Skia).
+func sk_parse_path_append_command(builder: ak.StringBuilder*, cmd: u8, pts: const SkPoint[], current_point: SkPoint*):
+    let rel_selector: f32 = 0.0
+    # Use lower case cmds for relative encoding.
+    ak.string_builder_append_u8(builder, cmd)
+
+    for i in 0..<pts.length:
+        let pt = sk_point_sub(pts[i], *current_point)
+        if i > 0:
+            ak.string_builder_append_u8(builder, ' ')
+        sk_append_scalar(builder, pt.x)
+        ak.string_builder_append_u8(builder, ' ')
+        sk_append_scalar(builder, pt.y)
+
+    # For relative encoding, track the current point (otherwise == origin).
+    *current_point = sk_point_scale(pts[pts.length - 1], rel_selector)
+
+## Ported from src/utils/SkParsePath.cpp SkParsePath::ToSVGString(path, kAbsolute).
+pub func sk_parse_path_to_svg_string(path: const SkPath*) -> ak.String:
+    var builder: ak.StringBuilder
+    ak.string_builder_construct(&builder)
+
+    var current_point = SkPoint(x = 0.0, y = 0.0)
+
+    var iter = sk_path_iter(path, false)
+    while let rec = sk_path_iter_next(&iter):
+        let pts: const SkPoint[] = rec.pts
+        match rec.verb:
+            .conic:
+                let tol: f32 = 1.0 / 1024.0  # how close to a quad
+                let quadder = sk_auto_conic_to_quads(pts[..<3], rec.conic_weight, tol)
+                for i in 0..<(usize)quadder.quad_count:
+                    sk_parse_path_append_command(&builder, 'Q', quadder.points[i * 2 + 1..<i * 2 + 3], &current_point)
+            .move:
+                sk_parse_path_append_command(&builder, 'M', pts[0..<1], &current_point)
+            .line:
+                sk_parse_path_append_command(&builder, 'L', pts[1..<2], &current_point)
+            .quad:
+                sk_parse_path_append_command(&builder, 'Q', pts[1..<3], &current_point)
+            .cubic:
+                sk_parse_path_append_command(&builder, 'C', pts[1..<4], &current_point)
+            .close:
+                ak.string_builder_append_u8(&builder, 'Z')
+            _:
+                trap("VERIFY_NOT_REACHED")
+
+    return ak.string_builder_to_string_without_validation(&builder)

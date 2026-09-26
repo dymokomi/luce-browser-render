@@ -1,0 +1,15 @@
+#==============================================================================================
+#
+#   bitmap_sequence - BitmapSequence and BitmapMetadata
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/BitmapSequence.cpp (lines 1-144). Only get_metadata belongs
+#       to Gfx; the IPC encode/decode specializations that use it are not ported (LibIPC is
+#       not part of the port). The structs are in types_bitmap_sequence.
+#
+#==============================================================================================
+
+## Ported from Libraries/LibGfx/BitmapSequence.cpp:17 Gfx::get_metadata. Internal linkage in C++;
+## public here because its callers, the IPC encoders, are not ported.
+pub func get_metadata(bitmap: const Bitmap*) -> BitmapMetadata:
+    return BitmapMetadata(format = bitmap_format(bitmap), alpha_type = bitmap_alpha_type(bitmap), size = bitmap_size(bitmap), size_in_bytes = bitmap_size_in_bytes(bitmap))

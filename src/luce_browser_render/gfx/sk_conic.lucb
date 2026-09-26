@@ -1,0 +1,318 @@
+#==============================================================================================
+#
+#   sk_conic - Skia's rational quadratic (conic) segments and their conversion to quads
+#
+#   DESCRIPTION:
+#       Port of SkConic from Skia m144 src/core/SkGeometry.h (lines 323-360 and 447-560:
+#       SkConic's setters, SkConicCoeff, SkAutoConicToQuads) and src/core/SkGeometry.cpp
+#       (lines 1250-1690: extrema, chopAt, evaluation, chop, the quad-error estimate,
+#       computeQuadPOW2, subdivide, chopIntoQuadsPOW2, chopAtYExtrema). The chop is the
+#       current one (SK_SUPPORT_LEGACY_CONIC_CHOP is not defined in Ladybird's Skia build).
+#
+#       Copyright 2006 The Android Open Source Project
+#       Copyright 2011+ Google Inc.
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-tiny-skia)
+#
+#==============================================================================================
+
+# mark: SkConic =================================================================================
+
+## kMaxConicToQuadPOW2 (src/core/SkGeometry.cpp): at most 2^5 quads per conic.
+pub let sk_max_conic_to_quad_pow2: i32 = 5
+
+## SkConic (src/core/SkGeometry.h:323): three points and a weight.
+pub struct SkConic:
+    pub var pts: SkPoint[3]
+    pub var w: f32
+
+## Ported from src/core/SkGeometry.h:336 SkConic::set (with setW: guard against bad weights
+## by forcing them to 1).
+pub func sk_conic(p0: SkPoint, p1: SkPoint, p2: SkPoint, w: f32) -> SkConic:
+    return SkConic(pts = [p0, p1, p2], w = w if (w > 0.0 and sk_is_finite(w)) else 1.0)
+
+## SkConic(const SkPoint pts[3], SkScalar w).
+pub func sk_conic_from_points(pts: const SkPoint[], w: f32) -> SkConic:
+    return sk_conic(pts[0], pts[1], pts[2], w)
+
+# The coordinates of a conic's points as SkConic lays them out in memory: x0 y0 x1 y1 x2 y2.
+func sk_conic_coord(this: const SkConic*, index: usize) -> f32:
+    let p = this.pts[index // 2]
+    return p.x if index % 2 == 0 else p.y
+
+## Ported from src/core/SkGeometry.cpp:1251 conic_deriv_coeff (`offset` 0 for x, 1 for y: the
+## C++ passes &fPts[0].fX or &fPts[0].fY and strides by 2).
+func sk_conic_deriv_coeff(this: const SkConic*, offset: usize, coeff: f32[]):
+    let w = this.w
+    let p20 = sk_conic_coord(this, 4 + offset) - sk_conic_coord(this, offset)
+    let p10 = sk_conic_coord(this, 2 + offset) - sk_conic_coord(this, offset)
+    let wp10 = w * p10
+    coeff[0] = w * p20 - p20
+    coeff[1] = p20 - 2.0 * wp10
+    coeff[2] = wp10
+
+## Ported from src/core/SkGeometry.cpp:1262 conic_find_extrema.
+func sk_conic_find_extrema(this: const SkConic*, offset: usize, t: f32*) -> bool:
+    var coeff: f32[3] = [0.0, 0.0, 0.0]
+    sk_conic_deriv_coeff(this, offset, coeff[0..])
+
+    var t_values: f32[2] = [0.0, 0.0]
+    let roots = sk_find_unit_quad_roots(coeff[0], coeff[1], coeff[2], t_values[0..])
+
+    if 1 == roots:
+        *t = t_values[0]
+        return true
+    return false
+
+## SkPoint3.
+struct SkPoint3:
+    var x: f32
+    var y: f32
+    var z: f32
+
+## Ported from src/core/SkGeometry.cpp:1297 SkConic::chopAt(t, dst): false if infinity or NaN
+## is generated; caller must check.
+pub func sk_conic_chop_at(this: const SkConic*, t: f32, dst: SkConic[]) -> bool:
+    # ratquad_mapTo3D
+    let w = this.w
+    let tmp0 = SkPoint3(x = this.pts[0].x * 1.0, y = this.pts[0].y * 1.0, z = 1.0)
+    let tmp1 = SkPoint3(x = this.pts[1].x * w, y = this.pts[1].y * w, z = w)
+    let tmp2 = SkPoint3(x = this.pts[2].x * 1.0, y = this.pts[2].y * 1.0, z = 1.0)
+
+    # p3d_interp on x, y and z: ab, interp(ab, bc), bc
+    let abx = sk_scalar_interp(tmp0.x, tmp1.x, t)
+    let bcx = sk_scalar_interp(tmp1.x, tmp2.x, t)
+    let aby = sk_scalar_interp(tmp0.y, tmp1.y, t)
+    let bcy = sk_scalar_interp(tmp1.y, tmp2.y, t)
+    let abz = sk_scalar_interp(tmp0.z, tmp1.z, t)
+    let bcz = sk_scalar_interp(tmp1.z, tmp2.z, t)
+    let r0 = SkPoint3(x = abx, y = aby, z = abz)
+    let r1 = SkPoint3(x = sk_scalar_interp(abx, bcx, t), y = sk_scalar_interp(aby, bcy, t), z = sk_scalar_interp(abz, bcz, t))
+    let r2 = SkPoint3(x = bcx, y = bcy, z = bcz)
+
+    # project_down
+    let d01 = SkPoint(x = r0.x / r0.z, y = r0.y / r0.z)
+    let d02 = SkPoint(x = r1.x / r1.z, y = r1.y / r1.z)
+    let d11 = SkPoint(x = r2.x / r2.z, y = r2.y / r2.z)
+
+    # to put in "standard form", where w0 and w2 are both 1, we compute the
+    # new w1 as sqrt(w1*w1/w0*w2)
+    # or
+    # w1 /= sqrt(w0*w2)
+    #
+    # However, in our case, we know that for dst[0]:
+    #     w0 == 1, and for dst[1], w2 == 1
+    #
+    let root = math32.sqrt(r1.z)
+    dst[0] = SkConic(pts = [this.pts[0], d01, d02], w = r0.z / root)
+    dst[1] = SkConic(pts = [d02, d11, this.pts[2]], w = r2.z / root)
+    var values: f32[14]
+    for i: usize in 0..<2:
+        for k: usize in 0..<3:
+            values[i * 7 + k * 2] = dst[i].pts[k].x
+            values[i * 7 + k * 2 + 1] = dst[i].pts[k].y
+        values[i * 7 + 6] = dst[i].w
+    return sk_are_finite(values[0..])
+
+## Ported from src/core/SkGeometry.h:447 SkConicCoeff and :464 SkConicCoeff::eval, as used by
+## src/core/SkGeometry.cpp:1360 SkConic::evalAt.
+pub func sk_conic_eval_at(this: const SkConic*, t: f32) -> SkPoint:
+    let ww = this.w
+    let p0 = this.pts[0]
+    let p1 = this.pts[1]
+    let p2 = this.pts[2]
+    let p1wx = p1.x * ww
+    let p1wy = p1.y * ww
+    let nax = p2.x - (p1wx + p1wx) + p0.x
+    let nay = p2.y - (p1wy + p1wy) + p0.y
+    let nbx = (p1wx - p0.x) + (p1wx - p0.x)
+    let nby = (p1wy - p0.y) + (p1wy - p0.y)
+    let dc: f32 = 1.0
+    let db = (ww - dc) + (ww - dc)
+    let da = 0.0 - db
+    let numer_x = (nax * t + nbx) * t + p0.x
+    let numer_y = (nay * t + nby) * t + p0.y
+    let denom = (da * t + db) * t + dc
+    return SkPoint(x = numer_x / denom, y = numer_y / denom)
+
+## Ported from src/core/SkGeometry.cpp:1364 SkConic::evalTangentAt.
+pub func sk_conic_eval_tangent_at(this: const SkConic*, t: f32) -> SkPoint:
+    # The derivative equation returns a zero tangent vector when t is 0 or 1,
+    # and the control point is equal to the end point.
+    # In this case, use the conic endpoints to compute the tangent.
+    if (t == 0.0 and sk_point_eq(this.pts[0], this.pts[1])) or (t == 1.0 and sk_point_eq(this.pts[1], this.pts[2])):
+        return sk_point_sub(this.pts[2], this.pts[0])
+    let ww = this.w
+    let p20 = sk_point_sub(this.pts[2], this.pts[0])
+    let p10 = sk_point_sub(this.pts[1], this.pts[0])
+
+    let cx = ww * p10.x
+    let cy = ww * p10.y
+    let ax = ww * p20.x - p20.x
+    let ay = ww * p20.y - p20.y
+    let bx = p20.x - cx - cx
+    let by = p20.y - cy - cy
+
+    return SkPoint(x = (ax * t + bx) * t + cx, y = (ay * t + by) * t + cy)
+
+## Ported from src/core/SkGeometry.cpp:1397 subdivide_w_value.
+func sk_conic_subdivide_w_value(w: f32) -> f32:
+    return math32.sqrt(0.5 + w * 0.5)
+
+## Ported from src/core/SkGeometry.cpp:1430 SkConic::chop: splits the conic in half.
+pub func sk_conic_chop(this: const SkConic*, dst: SkConic[]):
+    # Observe that scale will always be smaller than 1 because fW > 0.
+    let scale = 1.0 / (1.0 + this.w)
+
+    # The subdivided control points below are the sums of the following three terms. Because the
+    # terms are multiplied by something <1, and the resulting control points lie within the
+    # control points of the original then the terms and the sums below will not overflow. Note
+    # that fW * scale approaches 1 as fW becomes very large.
+    let ws = this.w * scale
+    let t0 = SkPoint(x = this.pts[0].x * scale, y = this.pts[0].y * scale)
+    let t1 = SkPoint(x = this.pts[1].x * ws, y = this.pts[1].y * ws)
+    let t2 = SkPoint(x = this.pts[2].x * scale, y = this.pts[2].y * scale)
+
+    # Calculate the subdivided control points
+    let p1 = SkPoint(x = t0.x + t1.x, y = t0.y + t1.y)
+    let p3 = SkPoint(x = t1.x + t2.x, y = t1.y + t2.y)
+
+    # p2 = (t0 + 2*t1 + t2) / 2. Divide the terms by 2 before the sum to keep the sum for p2
+    # from overflowing.
+    let p2 = SkPoint(x = 0.5 * t0.x + t1.x + 0.5 * t2.x, y = 0.5 * t0.y + t1.y + 0.5 * t2.y)
+
+    # Update w.
+    let new_w = sk_conic_subdivide_w_value(this.w)
+    dst[0] = SkConic(pts = [this.pts[0], p1, p2], w = new_w)
+    dst[1] = SkConic(pts = [p2, p3, this.pts[2]], w = new_w)
+
+## Ported from src/core/SkGeometry.cpp:1488 bad_conic_w.
+func sk_conic_bad_w(w: f32) -> bool:
+    return w < 0.0 or not sk_is_finite(w)
+
+## Ported from src/core/SkGeometry.cpp:1492 SkConic::computeQuadPOW2: how many times (as a
+## power of two) the conic must be halved for its quads to be within `tol` ("High order
+## approximation of conic sections by quadratic splines" by Michael Floater, 1993).
+pub func sk_conic_compute_quad_pow2(this: const SkConic*, tol: f32) -> i32:
+    if tol < 0.0 or not sk_is_finite(tol) or not sk_points_are_finite(this.pts[0..]) or sk_conic_bad_w(this.w):
+        return 0
+
+    # AS_QUAD_ERROR_SETUP
+    let a = this.w - 1.0
+    let k = a / (4.0 * (2.0 + a))
+    let x = k * (this.pts[0].x - 2.0 * this.pts[1].x + this.pts[2].x)
+    let y = k * (this.pts[0].y - 2.0 * this.pts[1].y + this.pts[2].y)
+
+    var quad_error = math32.sqrt(x * x + y * y)
+    var pow2: i32 = 0
+    while pow2 < sk_max_conic_to_quad_pow2:
+        if quad_error <= tol:
+            break
+        quad_error *= 0.25
+        pow2 += 1
+    return pow2
+
+## Ported from src/core/SkGeometry.cpp:1529 between: (a <= b <= c) || (a >= b >= c).
+func sk_conic_between(a: f32, b: f32, c_: f32) -> bool:
+    return (a - b) * (c_ - b) <= 0.0
+
+## Ported from src/core/SkGeometry.cpp:1533 subdivide: writes the quads' control and end
+## points of `src` halved `level` times into `pts` from `at`; answers the next index.
+func sk_conic_subdivide(src: const SkConic*, pts: SkPoint[], at: usize, level: i32) -> usize:
+    if 0 == level:
+        pts[at] = src.pts[1]
+        pts[at + 1] = src.pts[2]
+        return at + 2
+    var dst: SkConic[2]
+    sk_conic_chop(src, dst[0..])
+    let start_y = src.pts[0].y
+    let end_y = src.pts[2].y
+    if sk_conic_between(start_y, src.pts[1].y, end_y):
+        # If the input is monotonic and the output is not, the scan converter hangs.
+        # Ensure that the chopped conics maintain their y-order.
+        let mid_y = dst[0].pts[2].y
+        if not sk_conic_between(start_y, mid_y, end_y):
+            # If the computed midpoint is outside the ends, move it to the closer one.
+            let closer_y = start_y if sk_scalar_abs(mid_y - start_y) < sk_scalar_abs(mid_y - end_y) else end_y
+            dst[0].pts[2].y = closer_y
+            dst[1].pts[0].y = closer_y
+        if not sk_conic_between(start_y, dst[0].pts[1].y, dst[0].pts[2].y):
+            # If the 1st control is not between the start and end, put it at the start.
+            # This also reduces the quad to a line.
+            dst[0].pts[1].y = start_y
+        if not sk_conic_between(dst[1].pts[0].y, dst[1].pts[1].y, end_y):
+            # If the 2nd control is not between the start and end, put it at the end.
+            # This also reduces the quad to a line.
+            dst[1].pts[1].y = end_y
+    let next = sk_conic_subdivide(&dst[0], pts, at, level - 1)
+    return sk_conic_subdivide(&dst[1], pts, next, level - 1)
+
+## Ported from src/core/SkGeometry.cpp:1574 SkConic::chopIntoQuadsPOW2: writes the 2^pow2
+## quads sharing end points (2 * 2^pow2 + 1 points) into `pts`; answers the quad count.
+pub func sk_conic_chop_into_quads_pow2(this: const SkConic*, pts: SkPoint[], pow2_in: i32) -> i32:
+    var pow2 = pow2_in
+    if sk_conic_bad_w(this.w):
+        pow2 = 0
+
+    pts[0] = this.pts[0]
+    var lines = false
+    if pow2 == sk_max_conic_to_quad_pow2:  # If an extreme weight generates many quads ...
+        var dst: SkConic[2]
+        sk_conic_chop(this, dst[0..])
+        # check to see if the first chop generates a pair of lines
+        if sk_point_equals_within_tolerance(dst[0].pts[1], dst[0].pts[2]) and sk_point_equals_within_tolerance(dst[1].pts[0], dst[1].pts[1]):
+            pts[1] = dst[0].pts[1]  # set ctrl == end to make lines
+            pts[2] = dst[0].pts[1]
+            pts[3] = dst[0].pts[1]
+            pts[4] = dst[1].pts[2]
+            pow2 = 1
+            lines = true
+    if not lines:
+        discard(sk_conic_subdivide(this, pts, 1, pow2))
+    # commonFinitePtCheck:
+    let quad_count = 1 << (u32)pow2
+    let pt_count = (usize)(2 * quad_count + 1)
+    if not sk_points_are_finite(pts[..<pt_count]):
+        # if we generated a non-finite, pin ourselves to the middle of the hull,
+        # as our first and last are already on the first/last pts of the hull.
+        for i in 1..<pt_count - 1:
+            pts[i] = this.pts[1]
+    return 1 << (u32)pow2
+
+## Ported from src/core/SkGeometry.cpp:1652 SkConic::findYExtrema.
+pub func sk_conic_find_y_extrema(this: const SkConic*, t: f32*) -> bool:
+    return sk_conic_find_extrema(this, 1, t)
+
+## Ported from src/core/SkGeometry.cpp:1674 SkConic::chopAtYExtrema.
+pub func sk_conic_chop_at_y_extrema(this: const SkConic*, dst: SkConic[]) -> bool:
+    var t: f32 = 0.0
+    if sk_conic_find_y_extrema(this, &t):
+        if not sk_conic_chop_at(this, t, dst):
+            # if chop can't return finite values, don't chop
+            return false
+        # now clean-up the middle, since we know t was meant to be at
+        # an Y-extrema
+        let value = dst[0].pts[2].y
+        dst[0].pts[1].y = value
+        dst[1].pts[0].y = value
+        dst[1].pts[1].y = value
+        return true
+    return false
+
+# mark: SkAutoConicToQuads ======================================================================
+
+## SkAutoConicToQuads (src/core/SkGeometry.h:505): the quads approximating a conic. The quads
+## share end points: quad[i] is points[2i .. 2i + 2].
+pub struct SkAutoConicToQuads:
+    pub var points: SkPoint[65]
+    pub var quad_count: i32
+
+## Ported from src/core/SkGeometry.h:521 SkAutoConicToQuads::computeQuads(pts, weight, tol):
+## the conic through `pts` (3 points) with `weight` (SkConic::set guards the weight) as quads
+## within `tol`.
+pub func sk_auto_conic_to_quads(pts: const SkPoint[], weight: f32, tol: f32) -> SkAutoConicToQuads:
+    let conic = sk_conic_from_points(pts, weight)
+    var result: SkAutoConicToQuads
+    let pow2 = sk_conic_compute_quad_pow2(&conic, tol)
+    result.quad_count = sk_conic_chop_into_quads_pow2(&conic, result.points[0..], pow2)
+    return result

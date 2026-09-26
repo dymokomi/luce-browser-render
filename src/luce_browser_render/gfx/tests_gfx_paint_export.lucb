@@ -1,0 +1,96 @@
+#==============================================================================================
+#
+#   tests_gfx_paint_export - ImmutableBitmap::export_to_byte_buffer
+#
+#   DESCRIPTION:
+#       Port of Tests/LibGfx/TestImmutableBitmap.cpp (lines 1-248): every subtest of its table,
+#       run over the same source formats, flip flags and alpha cases, with the donor's
+#       expected bytes. `Premultiplied::Yes` is `true` below. Goes through region r08's Color
+#       and geometry functions, so it runs once tests_gfx_paint_r08_is_ported is set.
+#
+#       Each test's body is a noinline function the test block calls (# workaround:
+#       compiler-issues/ranges_facts_cubic).
+#
+#==============================================================================================
+
+# The body of TestImmutableBitmap's loop for one subtest: for each source format, flip flag,
+# source alpha case and target alpha case, a 2x2 bitmap is filled (upside down when flipping)
+# and exported, and the bytes must be `expected`.
+func test_gfx_paint_export_subtest(source_formats: const BitmapFormat[], source_alpha_cases: const bool[], source_pixels: u32[4], export_format: ExportFormat, target_alpha_cases: const bool[], expected: const u8[]):
+    let flip_flags: i32[2] = [0, export_flags_flip_y]
+    for source_format in source_formats:
+        for maybe_flip_y_flag in flip_flags:
+            for source_premultiplied in source_alpha_cases:
+                for target_premultiplied in target_alpha_cases:
+                    var export_flags: i32 = 0
+                    export_flags |= maybe_flip_y_flag
+                    export_flags |= export_flags_premultiply_alpha if target_premultiplied else 0
+
+                    let source_alpha_type = AlphaType.premultiplied if source_premultiplied else AlphaType.unpremultiplied
+                    let bitmap = bitmap_create_alpha_type(source_format, source_alpha_type, IntSize(m_width = 2, m_height = 2)) else trap("MUST: Bitmap::create")
+                    let logical_y0: i32 = 1 if maybe_flip_y_flag != 0 else 0
+                    let logical_y1: i32 = 0 if maybe_flip_y_flag != 0 else 1
+                    bitmap_set_pixel(bitmap, 0, logical_y0, color_from_bgra(source_pixels[0]))
+                    bitmap_set_pixel(bitmap, 1, logical_y0, color_from_bgra(source_pixels[1]))
+                    bitmap_set_pixel(bitmap, 0, logical_y1, color_from_bgra(source_pixels[2]))
+                    bitmap_set_pixel(bitmap, 1, logical_y1, color_from_bgra(source_pixels[3]))
+
+                    var color_space: ColorSpace = ---
+                    color_space_construct(&color_space)
+                    let immutable_bitmap = immutable_bitmap_create_color_space(bitmap, color_space)
+                    let result = immutable_bitmap_export_to_byte_buffer(immutable_bitmap, export_format, export_flags, 2, 2) else trap("MUST: export_to_byte_buffer")
+
+                    assert(result.width == 2)
+                    assert(result.height == 2)
+                    let bytes = ak.byte_buffer_bytes_const(&result.buffer)
+                    if bytes.length != expected.length:
+                        print(f"subtest {ak.string_view_text(bitmap_format_name(source_format))} -> {ak.string_view_text(export_format_name(export_format))}: {bytes.length} bytes")
+                    assert(bytes.length == expected.length)
+                    for i in 0..<expected.length:
+                        if bytes[i] != expected[i]:
+                            print(f"subtest {ak.string_view_text(bitmap_format_name(source_format))} -> {ak.string_view_text(export_format_name(export_format))} flip {maybe_flip_y_flag} premultiplied {source_premultiplied} -> {target_premultiplied}: byte {i} is {hex(bytes[i])}, expected {hex(expected[i])}")
+                        assert(bytes[i] == expected[i])
+
+test "gfx paint: export_to_byte_buffer":
+    test_gfx_paint_export_to_byte_buffer()
+
+noinline func test_gfx_paint_export_to_byte_buffer():
+    if not tests_gfx_paint_r08_is_ported:
+        return
+    let all_bitmap_formats: BitmapFormat[4] = [BitmapFormat.bg_rx8888, BitmapFormat.bgra8888, BitmapFormat.rg_bx8888, BitmapFormat.rgba8888]
+    let alpha_bitmap_formats: BitmapFormat[2] = [BitmapFormat.bgra8888, BitmapFormat.rgba8888]
+    let non_alpha_bitmap_formats: BitmapFormat[2] = [BitmapFormat.bg_rx8888, BitmapFormat.rg_bx8888]
+    let no: bool[1] = [false]
+    let yes: bool[1] = [true]
+    let both: bool[2] = [false, true]
+
+    # FIXME (from the donor): Some of these test cases seem suspect, particularly with regard to
+    # alpha-(un)premultiplication. We should validate whether these actually have the correct behavior.
+    test_gfx_paint_export_subtest(alpha_bitmap_formats, no, [0x00FFFFFF, 0x55FFFFFF, 0xAAFFFFFF, 0xFFFFFFFF], ExportFormat.gray8, both, [0x00, 0x55, 0xAA, 0xFF])
+    test_gfx_paint_export_subtest(non_alpha_bitmap_formats, no, [0x00000000, 0x55555555, 0xAAAAAAAA, 0xFFFFFFFF], ExportFormat.gray8, both, [0x00, 0x55, 0xAA, 0xFF])
+    test_gfx_paint_export_subtest(all_bitmap_formats, yes, [0x00000000, 0x55555555, 0xAAAAAAAA, 0xFFFFFFFF], ExportFormat.gray8, both, [0x00, 0x55, 0xAA, 0xFF])
+    test_gfx_paint_export_subtest(alpha_bitmap_formats, both, [0x00112233, 0x44556677, 0x8899AABB, 0xCCDDEEFF], ExportFormat.alpha8, both, [0x00, 0x44, 0x88, 0xCC])
+    test_gfx_paint_export_subtest(non_alpha_bitmap_formats, both, [0x00112233, 0x44556677, 0x8899AABB, 0xCCDDEEFF], ExportFormat.alpha8, both, [0xFF, 0xFF, 0xFF, 0xFF])
+    test_gfx_paint_export_subtest(non_alpha_bitmap_formats, both, [0xFFFF0000, 0xFF00FF00, 0xFF0000FF, 0xFFFF00FF], ExportFormat.rgb565, both, [0x00, 0xF8, 0xE0, 0x07, 0x1F, 0x00, 0x1F, 0xF8])
+    test_gfx_paint_export_subtest(alpha_bitmap_formats, no, [0x33FFFFFF, 0x66FFFFFF, 0x99FFFFFF, 0xCCFFFFFF], ExportFormat.rgb565, both, [0xA6, 0x31, 0x2C, 0x63, 0xD3, 0x9C, 0x59, 0xCE])
+    test_gfx_paint_export_subtest(alpha_bitmap_formats, yes, [0x33FF0000, 0x6600FF00, 0x990000FF, 0xCCFF00FF], ExportFormat.rgb565, both, [0x00, 0xF8, 0xE0, 0x07, 0x1F, 0x00, 0x1F, 0xF8])
+    test_gfx_paint_export_subtest(non_alpha_bitmap_formats, both, [0x00112233, 0x44556677, 0x8899AABB, 0xCCDDEEFF], ExportFormat.rgba4444, both, [0x3f, 0x12, 0x7f, 0x56, 0xBF, 0x9A, 0xFF, 0xDE])
+    test_gfx_paint_export_subtest(alpha_bitmap_formats, no, [0x33001122, 0x77445566, 0xBB8899AA, 0xFFCCDDEE], ExportFormat.rgba4444, no, [0x23, 0x01, 0x67, 0x45, 0xAB, 0x89, 0xEF, 0xCD])
+    test_gfx_paint_export_subtest(alpha_bitmap_formats, no, [0x3355AAFF, 0x6655AAFF, 0x9955AAFF, 0xCC55AAFF], ExportFormat.rgba4444, yes, [0x33, 0x12, 0x66, 0x24, 0x99, 0x36, 0xCC, 0x48])
+    test_gfx_paint_export_subtest(alpha_bitmap_formats, yes, [0x33112233, 0x66224466, 0x99336699, 0xCC4488CC], ExportFormat.rgba4444, no, [0xF3, 0x5A, 0xF6, 0x5A, 0xF9, 0x5A, 0xFC, 0x5A])
+    test_gfx_paint_export_subtest(alpha_bitmap_formats, yes, [0x33001122, 0x77445566, 0xBB8899AA, 0xFFCCDDEE], ExportFormat.rgba4444, yes, [0x23, 0x01, 0x67, 0x45, 0xAB, 0x89, 0xEF, 0xCD])
+    test_gfx_paint_export_subtest(all_bitmap_formats, both, [0x00112233, 0x44556677, 0x8899AABB, 0xCCDDEEFF], ExportFormat.rgb888, both, [0x11, 0x22, 0x33, 0x55, 0x66, 0x77, 0x99, 0xAA, 0xBB, 0xDD, 0xEE, 0xFF])
+    test_gfx_paint_export_subtest(alpha_bitmap_formats, no, [0x33001122, 0x77445566, 0xBB8899AA, 0xFFCCDDEE], ExportFormat.rgba8888, no, [0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF])
+    test_gfx_paint_export_subtest(alpha_bitmap_formats, no, [0x3355AAFF, 0x6655AAFF, 0x9955AAFF, 0xCC55AAFF], ExportFormat.rgba8888, yes, [0x11, 0x22, 0x33, 0x33, 0x22, 0x44, 0x66, 0x66, 0x33, 0x66, 0x99, 0x99, 0x44, 0x88, 0xCC, 0xCC])
+    test_gfx_paint_export_subtest(alpha_bitmap_formats, yes, [0x33112233, 0x66224466, 0x99336699, 0xCC4488CC], ExportFormat.rgba8888, no, [0x55, 0xAA, 0xFF, 0x33, 0x55, 0xAA, 0xFF, 0x66, 0x55, 0xAA, 0xFF, 0x99, 0x55, 0xAA, 0xFF, 0xCC])
+    test_gfx_paint_export_subtest(alpha_bitmap_formats, yes, [0x33001122, 0x77445566, 0xBB8899AA, 0xFFCCDDEE], ExportFormat.rgba8888, yes, [0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF])
+    test_gfx_paint_export_subtest(non_alpha_bitmap_formats, both, [0x00112233, 0x44556677, 0x8899AABB, 0xCCDDEEFF], ExportFormat.rgba8888, both, [0x11, 0x22, 0x33, 0xFF, 0x55, 0x66, 0x77, 0xFF, 0x99, 0xAA, 0xBB, 0xFF, 0xDD, 0xEE, 0xFF, 0xFF])
+
+test "gfx paint: export names and sizes":
+    test_gfx_paint_export_names()
+
+noinline func test_gfx_paint_export_names():
+    assert(ak.string_view_text(export_format_name(ExportFormat.rgba5551)) == "RGBA5551")
+    assert(ak.string_view_text(export_format_name(ExportFormat.gray8)) == "Gray8")
+    assert(bytes_per_pixel_for_export_format(ExportFormat.rgb888) == 3)
+    assert(bytes_per_pixel_for_export_format(ExportFormat.rgb565) == 2)

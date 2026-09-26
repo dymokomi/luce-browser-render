@@ -1,0 +1,483 @@
+#==============================================================================================
+#
+#   sk_path - Skia's SkPath: verbs, points and conic weights, and their editing
+#
+#   DESCRIPTION:
+#       Port of the SkPath model gfx.Path is defined by: Skia m144 with SkPathRef storage
+#       (SK_HIDE_PATH_EDIT_METHODS is not defined in Ladybird's build).
+#       - src/core/SkPath_pathref.cpp (lines 46-150 construction, reset, bounds; 283-340
+#         offset and transform);
+#       - src/core/SkPath_editing.cpp (lines 62-230 moveTo ... close; 540-640 the SVG arcTo;
+#         770-870 addPath; 925-960 setLastPt);
+#       - src/core/SkPath.cpp (lines 149-175 isEmpty, 252-260 getLastPt);
+#       - src/core/SkPathRef.cpp (lines 150-200 CreateTransformedCopy, 302-325
+#         growForVerbsInPath).
+#       The SkPathRef is folded into the path (ak.Vector storage, atomic: no pointers inside);
+#       bounds are computed on demand as SkPathRef::computeBounds does. Convexity, generation
+#       ids, isOval/isRRect tracking and volatility do not affect gfx.Path and are dropped.
+#       A C++ copy of an SkPath is sk_path_clone (DESIGN.md §3.3 rule 2).
+#
+#       Copyright 2006 The Android Open Source Project
+#       Copyright 2011+ Google Inc.
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-tiny-skia)
+#
+#==============================================================================================
+
+# mark: Types ===================================================================================
+
+## SkPathVerb (include/core/SkPathTypes.h).
+pub enum SkPathVerb as u8:
+    move = 0
+    line = 1
+    quad = 2
+    conic = 3
+    cubic = 4
+    close = 5
+
+## SkPathFillType (include/core/SkPathTypes.h).
+pub enum SkPathFillType as u8:
+    winding = 0
+    even_odd = 1
+    inverse_winding = 2
+    inverse_even_odd = 3
+
+## SkPathDirection (include/core/SkPathTypes.h).
+pub enum SkPathDirection as u8:
+    cw = 0
+    ccw = 1
+
+## SkPath::ArcSize.
+pub enum SkPathArcSize as u8:
+    small = 0
+    large = 1
+
+## SkPath::AddPathMode.
+pub enum SkPathAddPathMode as u8:
+    append = 0
+    extend = 1
+
+## SkPath (include/core/SkPath.h) with its SkPathRef folded in. Create it with
+## sk_path_create: a zeroed SkPath has the wrong last-move-to index.
+pub struct SkPath:
+    pub var m_points: ak.Vector[SkPoint]
+    pub var m_verbs: ak.Vector[SkPathVerb]
+    pub var m_conic_weights: ak.Vector[f32]
+    ## fLastMoveToIndex: the index of the last move's point, or its complement after a close
+    ## (so that the next segment injects a move there).
+    pub var m_last_move_to_index: i32
+    pub var m_fill_type: SkPathFillType
+
+## INITIAL_LASTMOVETOINDEX_VALUE (src/core/SkPath_pathref.cpp:46).
+let sk_path_initial_last_move_to_index: i32 = ~0
+
+# mark: Construction ============================================================================
+
+## Ported from src/core/SkPath_pathref.cpp:55 SkPath::SkPath(SkPathFillType): an empty path
+## with the default (winding) fill.
+pub func sk_path_create() -> SkPath:
+    return SkPath(m_points = ak.vector_create_atomic[SkPoint](),
+        m_verbs = ak.vector_create_atomic[SkPathVerb](),
+        m_conic_weights = ak.vector_create_atomic[f32](),
+        m_last_move_to_index = sk_path_initial_last_move_to_index,
+        m_fill_type = SkPathFillType.winding)
+
+## Ported from src/core/SkPath_pathref.cpp:70 SkPath::SkPath(const SkPath&): a copy with its
+## own storage.
+pub func sk_path_clone(this: const SkPath*) -> SkPath:
+    return SkPath(m_points = ak.vector_clone(&this.m_points),
+        m_verbs = ak.vector_clone(&this.m_verbs),
+        m_conic_weights = ak.vector_clone(&this.m_conic_weights),
+        m_last_move_to_index = this.m_last_move_to_index,
+        m_fill_type = this.m_fill_type)
+
+## Ported from src/core/SkPath_pathref.cpp:131 SkPath::reset (with resetFields).
+pub func sk_path_reset(this: SkPath*):
+    ak.vector_clear(&this.m_points)
+    ak.vector_clear(&this.m_verbs)
+    ak.vector_clear(&this.m_conic_weights)
+    this.m_last_move_to_index = sk_path_initial_last_move_to_index
+    this.m_fill_type = SkPathFillType.winding
+
+# mark: Accessors ===============================================================================
+
+## The stored points.
+pub func sk_path_points(this: const SkPath*) -> const SkPoint[]:
+    return ak.vector_span_const(&this.m_points)
+
+## The stored verbs.
+pub func sk_path_verbs(this: const SkPath*) -> const SkPathVerb[]:
+    return ak.vector_span_const(&this.m_verbs)
+
+## The stored conic weights.
+pub func sk_path_conic_weights(this: const SkPath*) -> const f32[]:
+    return ak.vector_span_const(&this.m_conic_weights)
+
+## SkPath::countPoints.
+pub func sk_path_count_points(this: const SkPath*) -> i32:
+    return (i32)ak.vector_size(&this.m_points)
+
+## SkPath::countVerbs.
+pub func sk_path_count_verbs(this: const SkPath*) -> i32:
+    return (i32)ak.vector_size(&this.m_verbs)
+
+## SkPath::getFillType.
+pub func sk_path_get_fill_type(this: const SkPath*) -> SkPathFillType:
+    return this.m_fill_type
+
+## SkPath::setFillType.
+pub func sk_path_set_fill_type(this: SkPath*, fill_type: SkPathFillType):
+    this.m_fill_type = fill_type
+
+## Ported from src/core/SkPath.cpp:169 SkPath::isEmpty: no verbs.
+pub func sk_path_is_empty(this: const SkPath*) -> bool:
+    return ak.vector_is_empty(&this.m_verbs)
+
+## Ported from src/core/SkPath.cpp:252 SkPath::getLastPt.
+pub func sk_path_get_last_pt(this: const SkPath*) -> SkPoint?:
+    let pts = sk_path_points(this)
+    if pts.length > 0:
+        return pts[pts.length - 1]
+    return none
+
+## Ported from src/core/SkPath_pathref.cpp:148 SkPath::getBounds (SkPathRef::computeBounds:
+## SkRect::setBoundsCheck over the points): empty when a point is not finite.
+pub func sk_path_get_bounds(this: const SkPath*) -> SkRect:
+    var bounds: SkRect
+    discard(sk_rect_set_bounds_check(&bounds, sk_path_points(this)))
+    return bounds
+
+## Ported from src/core/SkPath_pathref.cpp:143 SkPath::isFinite: every point is finite.
+pub func sk_path_is_finite(this: const SkPath*) -> bool:
+    var bounds: SkRect
+    return sk_rect_set_bounds_check(&bounds, sk_path_points(this))
+
+# mark: Editing =================================================================================
+
+# Appends `verb` and its points (SkPathRef::Editor::growForVerb).
+func sk_path_grow_for_verb(this: SkPath*, verb: SkPathVerb, points: const SkPoint[]):
+    ak.vector_append_t(&this.m_verbs, verb)
+    for p in points:
+        ak.vector_append_t(&this.m_points, p)
+
+## Ported from src/core/SkPath_editing.cpp:82 SkPath::moveTo. A move right after a move
+## replaces it.
+pub func sk_path_move_to(this: SkPath*, x: f32, y: f32):
+    let verbs = sk_path_verbs(this)
+    if verbs.length > 0 and verbs[verbs.length - 1] == SkPathVerb.move:
+        *ak.vector_last(&this.m_points) = SkPoint(x = x, y = y)
+    else:
+        # remember our index
+        this.m_last_move_to_index = sk_path_count_points(this)
+
+        sk_path_grow_for_verb(this, .move, [SkPoint(x = x, y = y)])
+
+## Ported from src/core/SkPath_editing.cpp:112 SkPath::injectMoveToIfNeeded.
+func sk_path_inject_move_to_if_needed(this: SkPath*):
+    if this.m_last_move_to_index < 0:
+        var x: f32 = 0.0
+        var y: f32 = 0.0
+        if sk_path_count_verbs(this) != 0:
+            let pt = sk_path_points(this)[(usize)(~this.m_last_move_to_index)]
+            x = pt.x
+            y = pt.y
+        sk_path_move_to(this, x, y)
+
+## Ported from src/core/SkPath_editing.cpp:126 SkPath::lineTo.
+pub func sk_path_line_to(this: SkPath*, x: f32, y: f32):
+    sk_path_inject_move_to_if_needed(this)
+
+    sk_path_grow_for_verb(this, .line, [SkPoint(x = x, y = y)])
+
+## Ported from src/core/SkPath_editing.cpp:143 SkPath::quadTo.
+pub func sk_path_quad_to(this: SkPath*, x1: f32, y1: f32, x2: f32, y2: f32):
+    sk_path_inject_move_to_if_needed(this)
+
+    sk_path_grow_for_verb(this, .quad, [SkPoint(x = x1, y = y1), SkPoint(x = x2, y = y2)])
+
+## Ported from src/core/SkPath_editing.cpp:162 SkPath::conicTo.
+pub func sk_path_conic_to(this: SkPath*, x1: f32, y1: f32, x2: f32, y2: f32, w: f32):
+    # check for <= 0 or NaN with this test
+    if not (w > 0.0):
+        sk_path_line_to(this, x2, y2)
+    elif not sk_is_finite(w):
+        sk_path_line_to(this, x1, y1)
+        sk_path_line_to(this, x2, y2)
+    elif 1.0 == w:
+        sk_path_quad_to(this, x1, y1, x2, y2)
+    else:
+        sk_path_inject_move_to_if_needed(this)
+
+        sk_path_grow_for_verb(this, .conic, [SkPoint(x = x1, y = y1), SkPoint(x = x2, y = y2)])
+        ak.vector_append_t(&this.m_conic_weights, w)
+
+## Ported from src/core/SkPath_editing.cpp:194 SkPath::cubicTo.
+pub func sk_path_cubic_to(this: SkPath*, x1: f32, y1: f32, x2: f32, y2: f32, x3: f32, y3: f32):
+    sk_path_inject_move_to_if_needed(this)
+
+    sk_path_grow_for_verb(this, .cubic, [SkPoint(x = x1, y = y1), SkPoint(x = x2, y = y2), SkPoint(x = x3, y = y3)])
+
+## Ported from src/core/SkPath_editing.cpp:218 SkPath::close.
+pub func sk_path_close(this: SkPath*):
+    let verbs = sk_path_verbs(this)
+    # kLine, kQuad, kConic, kCubic and kMove get a close; don't add a close if it's the
+    # first verb or a repeat
+    if verbs.length > 0 and verbs[verbs.length - 1] != SkPathVerb.close:
+        ak.vector_append_t(&this.m_verbs, SkPathVerb.close)
+
+    # signal that we need a moveTo to follow us (unless we're done)
+    this.m_last_move_to_index = this.m_last_move_to_index ^ (~this.m_last_move_to_index >> 31)
+
+## Ported from src/core/SkPath_editing.cpp:952 SkPath::setLastPt.
+pub func sk_path_set_last_pt(this: SkPath*, x: f32, y: f32):
+    let count = sk_path_count_points(this)
+    if count == 0:
+        sk_path_move_to(this, x, y)
+    else:
+        *ak.vector_at(&this.m_points, (usize)(count - 1)) = SkPoint(x = x, y = y)
+
+# mark: SVG arcs ================================================================================
+
+## Ported from src/core/SkPath_editing.cpp:551 SkPath::arcTo(rx, ry, angle, arcLarge, arcSweep,
+## x, y): the SVG arc to (x, y), as conics.
+##
+## This converts the SVG arc to conics.
+## Partly adapted from Niko's code in kdelibs/kdecore/svgicons.
+## Then transcribed from webkit/chrome's SVGPathNormalizer::decomposeArcToCubic()
+## See also SVG implementation notes:
+## http://www.w3.org/TR/SVG/implnote.html#ArcConversionEndpointToCenter
+## Note that arcSweep bool value is flipped from the original implementation.
+pub func sk_path_arc_to_rotated(this: SkPath*, rx0: f32, ry0: f32, angle: f32, arc_large: SkPathArcSize,
+        arc_sweep: SkPathDirection, x: f32, y: f32):
+    sk_path_inject_move_to_if_needed(this)
+    var src_pts: SkPoint[2]
+    src_pts[0] = sk_path_get_last_pt(this) else trap("VERIFY: arcTo without a last point")
+    # If rx = 0 or ry = 0 then this arc is treated as a straight line segment (a "lineto")
+    # joining the endpoints.
+    # http://www.w3.org/TR/SVG/implnote.html#ArcOutOfRangeParameters
+    if rx0 == 0.0 or ry0 == 0.0:
+        sk_path_line_to(this, x, y)
+        return
+    # If the current point and target point for the arc are identical, it should be treated as a
+    # zero length path. This ensures continuity in animations.
+    src_pts[1] = SkPoint(x = x, y = y)
+    if sk_point_eq(src_pts[0], src_pts[1]):
+        sk_path_line_to(this, x, y)
+        return
+    var rx = sk_scalar_abs(rx0)
+    var ry = sk_scalar_abs(ry0)
+    var mid_point_distance = sk_point_sub(src_pts[0], src_pts[1])
+    mid_point_distance = sk_point_scale(mid_point_distance, 0.5)
+
+    var point_transform = sk_matrix_identity()
+    sk_matrix_set_rotate(&point_transform, -angle)
+
+    let transformed_mid_point = sk_matrix_map_point(&point_transform, mid_point_distance)
+    let square_rx = rx * rx
+    let square_ry = ry * ry
+    let square_x = transformed_mid_point.x * transformed_mid_point.x
+    let square_y = transformed_mid_point.y * transformed_mid_point.y
+
+    # Check if the radii are big enough to draw the arc, scale radii if not.
+    # http://www.w3.org/TR/SVG/implnote.html#ArcCorrectionOutOfRangeRadii
+    var radii_scale = square_x / square_rx + square_y / square_ry
+    if radii_scale > 1.0:
+        radii_scale = math32.sqrt(radii_scale)
+        rx *= radii_scale
+        ry *= radii_scale
+
+    sk_matrix_set_scale(&point_transform, 1.0 / rx, 1.0 / ry)
+    sk_matrix_pre_rotate(&point_transform, -angle)
+
+    var unit_pts: SkPoint[2]
+    sk_matrix_map_points(&point_transform, unit_pts[0..], src_pts[0..])
+    var delta = sk_point_sub(unit_pts[1], unit_pts[0])
+
+    let d = delta.x * delta.x + delta.y * delta.y
+    let scale_factor_squared = sk_max(1.0 / d - 0.25, 0.0)
+
+    var scale_factor = math32.sqrt(scale_factor_squared)
+    if (arc_sweep == SkPathDirection.ccw) != (arc_large == SkPathArcSize.large):  # flipped from the original implementation
+        scale_factor = -scale_factor
+    delta = sk_point_scale(delta, scale_factor)
+    var center_point = sk_point_add(unit_pts[0], unit_pts[1])
+    center_point = sk_point_scale(center_point, 0.5)
+    center_point.x += -delta.y
+    center_point.y += delta.x
+    unit_pts[0] = sk_point_sub(unit_pts[0], center_point)
+    unit_pts[1] = sk_point_sub(unit_pts[1], center_point)
+    let theta1 = math32.atan2(unit_pts[0].y, unit_pts[0].x)
+    let theta2 = math32.atan2(unit_pts[1].y, unit_pts[1].x)
+    var theta_arc = theta2 - theta1
+    if theta_arc < 0.0 and arc_sweep == SkPathDirection.cw:  # arcSweep flipped from the original implementation
+        theta_arc += sk_scalar_pi * 2.0
+    elif theta_arc > 0.0 and arc_sweep != SkPathDirection.cw:  # arcSweep flipped from the original implementation
+        theta_arc -= sk_scalar_pi * 2.0
+
+    # Very tiny angles cause our subsequent math to go wonky (skbug.com/40040578)
+    # so we do a quick check here. The precise tolerance amount is just made up.
+    # PI/million happens to fix the bug in 9272, but a larger value is probably
+    # ok too.
+    if sk_scalar_abs(theta_arc) < (sk_scalar_pi / (1000.0 * 1000.0)):
+        sk_path_line_to(this, x, y)
+        return
+
+    sk_matrix_set_rotate(&point_transform, angle)
+    sk_matrix_pre_scale(&point_transform, rx, ry)
+
+    # the arc may be slightly bigger than 1/4 circle, so allow up to 1/3rd
+    let segments = sk_float_ceil2int(sk_scalar_abs(theta_arc / (2.0 * sk_scalar_pi / 3.0)))
+    let theta_width = theta_arc / (f32)segments
+    let t = math32.tan(0.5 * theta_width)
+    if not sk_is_finite(t):
+        return
+    var start_theta = theta1
+    let w = math32.sqrt(0.5 + math32.cos(theta_width) * 0.5)
+    let expect_integers = (sk_scalar_nearly_zero_tol(sk_scalar_pi / 2.0 - sk_scalar_abs(theta_width)) and
+        sk_path_scalar_is_integer(rx) and sk_path_scalar_is_integer(ry) and
+        sk_path_scalar_is_integer(x) and sk_path_scalar_is_integer(y))
+
+    for _i in 0..<segments:
+        let end_theta = start_theta + theta_width
+        let sin_end_theta = sk_scalar_sin_snap_to_zero(end_theta)
+        let cos_end_theta = sk_scalar_cos_snap_to_zero(end_theta)
+
+        unit_pts[1] = SkPoint(x = cos_end_theta, y = sin_end_theta)
+        unit_pts[1] = sk_point_add(unit_pts[1], center_point)
+        unit_pts[0] = unit_pts[1]
+        unit_pts[0].x += t * sin_end_theta
+        unit_pts[0].y += -t * cos_end_theta
+        var mapped: SkPoint[2]
+        sk_matrix_map_points(&point_transform, mapped[0..], unit_pts[0..])
+        #
+        # Computing the arc width introduces rounding errors that cause arcs to start
+        # outside their marks. A round rect may lose convexity as a result. If the input
+        # values are on integers, place the conic on integers as well.
+        #
+        if expect_integers:
+            for k: usize in 0..<2:
+                mapped[k].x = sk_float_round(mapped[k].x)
+                mapped[k].y = sk_float_round(mapped[k].y)
+        sk_path_conic_to(this, mapped[0].x, mapped[0].y, mapped[1].x, mapped[1].y, w)
+        start_theta = end_theta
+
+    # The final point should match the input point (by definition); replace it to
+    # ensure that rounding errors in the above math don't cause any problems.
+    sk_path_set_last_pt(this, x, y)
+
+# The scalar_is_integer lambda of SkPath::arcTo.
+func sk_path_scalar_is_integer(scalar: f32) -> bool:
+    return scalar == math32.floor(scalar)
+
+## Ported from include/private/base/SkFloatingPoint.h:38 sk_float_round: floor(x + 0.5) in
+## double.
+pub func sk_float_round(x: f32) -> f32:
+    return (f32)math.floor((f64)x + 0.5)
+
+## Ported from include/private/base/SkFloatingPoint.h:120 sk_float_ceil2int
+## (sk_float_saturate2int(ceil(x))).
+pub func sk_float_ceil2int(x0: f32) -> i32:
+    var x = math32.ceil(x0)
+    let max_fits: f32 = 2147483520.0  # SK_MaxS32FitsInFloat
+    let min_fits: f32 = -2147483520.0  # SK_MinS32FitsInFloat
+    x = x if x < max_fits else max_fits
+    x = x if x > min_fits else min_fits
+    return (i32)x
+
+# mark: Adding paths ============================================================================
+
+## Ported from src/core/SkPath_editing.cpp:778 SkPath::addPath(srcPath, matrix, mode).
+pub func sk_path_add_path(this: SkPath*, src_path: const SkPath*, matrix0: const SkMatrix*, mode: SkPathAddPathMode):
+    if sk_path_is_empty(src_path):
+        return
+    var matrix = *matrix0
+
+    let can_replace_this = (mode == SkPathAddPathMode.append and sk_path_count_verbs(this) <= 1) or sk_path_count_verbs(this) == 0
+    if can_replace_this and sk_matrix_is_identity(&matrix):
+        let fill_type = this.m_fill_type
+        *this = sk_path_clone(src_path)
+        this.m_fill_type = fill_type
+        return
+
+    # Detect if we're trying to add ourself
+    var tmp: SkPath
+    var src = src_path
+    if (usize)this == (usize)src_path:
+        tmp = sk_path_clone(src_path)
+        src = &tmp
+
+    if SkPathAddPathMode.append == mode and not sk_matrix_has_perspective(&matrix):
+        if src.m_last_move_to_index >= 0:
+            this.m_last_move_to_index = src.m_last_move_to_index + sk_path_count_points(this)
+        else:
+            this.m_last_move_to_index = src.m_last_move_to_index - sk_path_count_points(this)
+        # SkPathRef::Editor::growForVerbsInPath
+        for verb in sk_path_verbs(src):
+            ak.vector_append_t(&this.m_verbs, verb)
+        let first_new = ak.vector_size(&this.m_points)
+        let n = ak.vector_size(&src.m_points)
+        for p in sk_path_points(src):
+            ak.vector_append_t(&this.m_points, p)
+        let new_pts = ak.vector_span(&this.m_points)[first_new..<first_new + n]
+        sk_matrix_map_points(&matrix, new_pts, sk_path_points(src))
+        for w in sk_path_conic_weights(src):
+            ak.vector_append_t(&this.m_conic_weights, w)
+        return
+
+    var first_verb = true
+    var iter = sk_path_raw_iter(src)
+    while let rec = sk_path_raw_iter_next(&iter):
+        var mapped_pts: SkPoint[3]
+        match rec.verb:
+            .move:
+                sk_matrix_map_points(&matrix, mapped_pts[0..<1], rec.pts[0..<1])
+                if first_verb and mode == SkPathAddPathMode.extend and not sk_path_is_empty(this):
+                    sk_path_inject_move_to_if_needed(this)  # In case last contour is closed
+                    let last_pt = sk_path_get_last_pt(this)
+                    # don't add lineTo if it is degenerate
+                    var degenerate = false
+                    if let last = last_pt:
+                        degenerate = sk_point_eq(last, mapped_pts[0])
+                    if not degenerate:
+                        sk_path_line_to(this, mapped_pts[0].x, mapped_pts[0].y)
+                else:
+                    sk_path_move_to(this, mapped_pts[0].x, mapped_pts[0].y)
+            .line:
+                sk_matrix_map_points(&matrix, mapped_pts[0..<1], rec.pts[1..<2])
+                sk_path_line_to(this, mapped_pts[0].x, mapped_pts[0].y)
+            .quad:
+                sk_matrix_map_points(&matrix, mapped_pts[0..<2], rec.pts[1..<3])
+                sk_path_quad_to(this, mapped_pts[0].x, mapped_pts[0].y, mapped_pts[1].x, mapped_pts[1].y)
+            .conic:
+                sk_matrix_map_points(&matrix, mapped_pts[0..<2], rec.pts[1..<3])
+                sk_path_conic_to(this, mapped_pts[0].x, mapped_pts[0].y, mapped_pts[1].x, mapped_pts[1].y, rec.conic_weight)
+            .cubic:
+                sk_matrix_map_points(&matrix, mapped_pts[0..<3], rec.pts[1..<4])
+                sk_path_cubic_to(this, mapped_pts[0].x, mapped_pts[0].y, mapped_pts[1].x, mapped_pts[1].y, mapped_pts[2].x, mapped_pts[2].y)
+            .close:
+                sk_path_close(this)
+            _:
+                trap("VERIFY_NOT_REACHED")
+        first_verb = false
+
+# mark: Transforming ============================================================================
+
+## Ported from src/core/SkPath_pathref.cpp:309 SkPath::transform(matrix) in place (the
+## non-perspective branch: SkPathRef::CreateTransformedCopy maps the points).
+pub func sk_path_transform(this: SkPath*, matrix0: const SkMatrix*):
+    var matrix = *matrix0
+    if sk_matrix_is_identity(&matrix):
+        return
+
+    if sk_matrix_has_perspective(&matrix):
+        trap("TODO: SkPath::transform with a perspective matrix")
+
+    let pts = ak.vector_span(&this.m_points)
+    sk_matrix_map_points(&matrix, pts, pts)
+
+## Ported from src/core/SkPath_pathref.cpp:289 SkPath::offset(dx, dy) in place.
+pub func sk_path_offset(this: SkPath*, dx: f32, dy: f32):
+    var matrix = sk_matrix_identity()
+
+    sk_matrix_set_translate(&matrix, dx, dy)
+    sk_path_transform(this, &matrix)

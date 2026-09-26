@@ -1,0 +1,270 @@
+#==============================================================================================
+#
+#   paint_style - PaintStyle and its solid, gradient and pattern subclasses
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/PaintStyle.cpp (lines 1-29) with the inline members of
+#       Libraries/LibGfx/PaintStyle.h (lines 1-279). The structs, vtables and ClassInfos are
+#       in types_paint_style. PaintStyle is RefCounted in C++; here a style is a managed
+#       allocation (DESIGN.md §3.3) whose header (vtable, class id) paint_style_allocate
+#       fills in, as the C++ vptr is set by `new`. `create` reports a failed allocation as
+#       an error, as adopt_nonnull_ref_or_enomem does.
+#
+#==============================================================================================
+
+# mark: Allocation =============================================================================
+
+# `new (nothrow) T(...)` for a class of the PaintStyle hierarchy: zeroed storage of the
+# class's size whose header names the class, ready for the class's constructor.
+func paint_style_allocate(class_info: const ak.ClassInfo*) -> PaintStyle*!:
+    let block = try alloc(class_info.size, 8)
+    memory.set(block, 0)
+    let style = (PaintStyle*)block.data
+    style.vtable = (const PaintStyleVTable*)class_info.vtable
+    style.class_id = class_info.first_id
+    return style
+
+# mark: PaintStyle =============================================================================
+
+## Ported from Libraries/LibGfx/PaintStyle.h:26 Gfx::PaintStyle::is_visible (virtual).
+pub func paint_style_is_visible_impl(this: PaintStyle*) -> bool:
+    return true
+
+# mark: SolidColorPaintStyle ===================================================================
+
+## Ported from Libraries/LibGfx/PaintStyle.h:31 Gfx::SolidColorPaintStyle::create.
+pub func solid_color_paint_style_create(color: Color) -> SolidColorPaintStyle*!:
+    let this = (SolidColorPaintStyle*)(try paint_style_allocate(&solid_color_paint_style_class))
+    solid_color_paint_style_construct(this, color)
+    return this
+
+## Ported from Libraries/LibGfx/PaintStyle.h:36 Gfx::SolidColorPaintStyle::is_visible (override).
+pub func solid_color_paint_style_is_visible_impl(base: PaintStyle*) -> bool:
+    let this = (SolidColorPaintStyle*)base
+    return color_alpha(&this.m_color) > 0
+
+## Ported from Libraries/LibGfx/PaintStyle.h:38 Gfx::SolidColorPaintStyle::color.
+pub func solid_color_paint_style_color(this: SolidColorPaintStyle*) -> Color:
+    return this.m_color
+
+## Ported from Libraries/LibGfx/PaintStyle.h:41 Gfx::SolidColorPaintStyle::SolidColorPaintStyle.
+pub func solid_color_paint_style_construct(this: SolidColorPaintStyle*, color: Color):
+    this.m_color = color
+
+# mark: GradientPaintStyle =====================================================================
+
+## Ported from Libraries/LibGfx/PaintStyle.h:51 Gfx::GradientPaintStyle::add_color_stop.
+pub func gradient_paint_style_add_color_stop_f32(this: GradientPaintStyle*, position: f32, color: Color, transition_hint: f32? = none) -> !:
+    try gradient_paint_style_add_color_stop_color_stop(this, ColorStop(color = color, position = position, transition_hint = transition_hint))
+
+# add_color_stop's sort comparator: [](auto& a, auto& b) { return a.position < b.position; }
+func gradient_paint_style_color_stop_less(context: void*?, a: const ColorStop*, b: const ColorStop*) -> bool:
+    discard(context)
+    return a.position < b.position
+
+## Ported from Libraries/LibGfx/PaintStyle.h:56 Gfx::GradientPaintStyle::add_color_stop.
+pub func gradient_paint_style_add_color_stop_color_stop(this: GradientPaintStyle*, stop: ColorStop, sort: bool = true) -> !:
+    try ak.vector_try_append_t(&this.m_color_stops, stop)
+    if sort:
+        let less = ak.Function2[const ColorStop*, const ColorStop*, bool](call = gradient_paint_style_color_stop_less, context = none)
+        ak.quick_sort_t_collection_t_less_than(ak.vector_span(&this.m_color_stops), less)
+
+## Ported from Libraries/LibGfx/PaintStyle.h:64 Gfx::GradientPaintStyle::set_repeat_length.
+pub func gradient_paint_style_set_repeat_length(this: GradientPaintStyle*, repeat_length: f32):
+    this.m_repeat_length = repeat_length
+
+## Ported from Libraries/LibGfx/PaintStyle.h:69 Gfx::GradientPaintStyle::color_stops.
+pub func gradient_paint_style_color_stops(this: GradientPaintStyle*) -> const ColorStop[]:
+    return ak.vector_span_const(&this.m_color_stops)
+
+## Ported from Libraries/LibGfx/PaintStyle.h:70 Gfx::GradientPaintStyle::set_color_stops.
+pub func gradient_paint_style_set_color_stops(this: GradientPaintStyle*, color_stops: ak.Vector[ColorStop]):
+    # Vector&& moved in: the storage is taken over, not copied.
+    this.m_color_stops = color_stops
+
+## Ported from Libraries/LibGfx/PaintStyle.h:72 Gfx::GradientPaintStyle::repeat_length.
+pub func gradient_paint_style_repeat_length(this: GradientPaintStyle*) -> f32?:
+    return this.m_repeat_length
+
+## Ported from Libraries/LibGfx/PaintStyle.h:74 Gfx::GradientPaintStyle::is_visible (override).
+pub func gradient_paint_style_is_visible_impl(base: PaintStyle*) -> bool:
+    let this = (GradientPaintStyle*)base
+    # any_of(m_color_stops, [](auto& stop) { return stop.color.alpha() > 0; })
+    for stop in ak.vector_span_const(&this.m_color_stops):
+        if color_alpha(&stop.color) > 0:
+            return true
+    return false
+
+# mark: CanvasPatternPaintStyle ================================================================
+
+## Ported from Libraries/LibGfx/PaintStyle.cpp:13 Gfx::CanvasPatternPaintStyle::CanvasPatternPaintStyle.
+pub func canvas_pattern_paint_style_construct(this: CanvasPatternPaintStyle*, image: ImmutableBitmap*?, repetition: CanvasPatternPaintStyleRepetition):
+    this.m_image = image
+    this.m_repetition = repetition
+
+## Ported from Libraries/LibGfx/PaintStyle.cpp:19 Gfx::CanvasPatternPaintStyle::create.
+pub func canvas_pattern_paint_style_create(image: ImmutableBitmap*?, repetition: CanvasPatternPaintStyleRepetition) -> CanvasPatternPaintStyle*!:
+    let this = (CanvasPatternPaintStyle*)(try paint_style_allocate(&canvas_pattern_paint_style_class))
+    canvas_pattern_paint_style_construct(this, image, repetition)
+    return this
+
+## Ported from Libraries/LibGfx/PaintStyle.cpp:24 Gfx::CanvasPatternPaintStyle::image.
+pub func canvas_pattern_paint_style_image(this: CanvasPatternPaintStyle*) -> ImmutableBitmap*?:
+    return this.m_image
+
+## Ported from Libraries/LibGfx/PaintStyle.h:96 Gfx::CanvasPatternPaintStyle::repetition.
+pub func canvas_pattern_paint_style_repetition(this: CanvasPatternPaintStyle*) -> CanvasPatternPaintStyleRepetition:
+    return this.m_repetition
+
+## Ported from Libraries/LibGfx/PaintStyle.h:97 Gfx::CanvasPatternPaintStyle::transform.
+pub func canvas_pattern_paint_style_transform(this: CanvasPatternPaintStyle*) -> AffineTransform?:
+    return this.m_transform
+
+## Ported from Libraries/LibGfx/PaintStyle.h:98 Gfx::CanvasPatternPaintStyle::set_transform.
+pub func canvas_pattern_paint_style_set_transform(this: CanvasPatternPaintStyle*, transform: AffineTransform):
+    this.m_transform = transform
+
+# mark: CanvasLinearGradientPaintStyle =========================================================
+
+## Ported from Libraries/LibGfx/PaintStyle.h:114 Gfx::CanvasLinearGradientPaintStyle::create.
+pub func canvas_linear_gradient_paint_style_create(p0: FloatPoint, p1: FloatPoint) -> CanvasLinearGradientPaintStyle*!:
+    let this = (CanvasLinearGradientPaintStyle*)(try paint_style_allocate(&canvas_linear_gradient_paint_style_class))
+    canvas_linear_gradient_paint_style_construct(this, p0, p1)
+    return this
+
+## Ported from Libraries/LibGfx/PaintStyle.h:119 Gfx::CanvasLinearGradientPaintStyle::start_point.
+pub func canvas_linear_gradient_paint_style_start_point(this: CanvasLinearGradientPaintStyle*) -> FloatPoint:
+    return this.m_p0
+
+## Ported from Libraries/LibGfx/PaintStyle.h:120 Gfx::CanvasLinearGradientPaintStyle::end_point.
+pub func canvas_linear_gradient_paint_style_end_point(this: CanvasLinearGradientPaintStyle*) -> FloatPoint:
+    return this.m_p1
+
+## Ported from Libraries/LibGfx/PaintStyle.h:123 Gfx::CanvasLinearGradientPaintStyle::CanvasLinearGradientPaintStyle.
+pub func canvas_linear_gradient_paint_style_construct(this: CanvasLinearGradientPaintStyle*, p0: FloatPoint, p1: FloatPoint):
+    this.m_p0 = p0
+    this.m_p1 = p1
+
+# mark: CanvasConicGradientPaintStyle ==========================================================
+
+## Ported from Libraries/LibGfx/PaintStyle.h:135 Gfx::CanvasConicGradientPaintStyle::create.
+pub func canvas_conic_gradient_paint_style_create(center: FloatPoint, start_angle: f32 = 0.0) -> CanvasConicGradientPaintStyle*!:
+    let this = (CanvasConicGradientPaintStyle*)(try paint_style_allocate(&canvas_conic_gradient_paint_style_class))
+    canvas_conic_gradient_paint_style_construct(this, center, start_angle)
+    return this
+
+## Ported from Libraries/LibGfx/PaintStyle.h:140 Gfx::CanvasConicGradientPaintStyle::center.
+pub func canvas_conic_gradient_paint_style_center(this: CanvasConicGradientPaintStyle*) -> FloatPoint:
+    return this.m_center
+
+## Ported from Libraries/LibGfx/PaintStyle.h:141 Gfx::CanvasConicGradientPaintStyle::start_angle.
+pub func canvas_conic_gradient_paint_style_start_angle(this: CanvasConicGradientPaintStyle*) -> f32:
+    return this.m_start_angle
+
+## Ported from Libraries/LibGfx/PaintStyle.h:144 Gfx::CanvasConicGradientPaintStyle::CanvasConicGradientPaintStyle.
+pub func canvas_conic_gradient_paint_style_construct(this: CanvasConicGradientPaintStyle*, center: FloatPoint, start_angle: f32):
+    this.m_center = center
+    this.m_start_angle = start_angle
+
+# mark: CanvasRadialGradientPaintStyle =========================================================
+
+## Ported from Libraries/LibGfx/PaintStyle.h:156 Gfx::CanvasRadialGradientPaintStyle::create.
+pub func canvas_radial_gradient_paint_style_create(start_center: FloatPoint, start_radius: f32, end_center: FloatPoint, end_radius: f32) -> CanvasRadialGradientPaintStyle*!:
+    let this = (CanvasRadialGradientPaintStyle*)(try paint_style_allocate(&canvas_radial_gradient_paint_style_class))
+    canvas_radial_gradient_paint_style_construct(this, start_center, start_radius, end_center, end_radius)
+    return this
+
+## Ported from Libraries/LibGfx/PaintStyle.h:161 Gfx::CanvasRadialGradientPaintStyle::start_center.
+pub func canvas_radial_gradient_paint_style_start_center(this: CanvasRadialGradientPaintStyle*) -> FloatPoint:
+    return this.m_start_center
+
+## Ported from Libraries/LibGfx/PaintStyle.h:162 Gfx::CanvasRadialGradientPaintStyle::start_radius.
+pub func canvas_radial_gradient_paint_style_start_radius(this: CanvasRadialGradientPaintStyle*) -> f32:
+    return this.m_start_radius
+
+## Ported from Libraries/LibGfx/PaintStyle.h:163 Gfx::CanvasRadialGradientPaintStyle::end_center.
+pub func canvas_radial_gradient_paint_style_end_center(this: CanvasRadialGradientPaintStyle*) -> FloatPoint:
+    return this.m_end_center
+
+## Ported from Libraries/LibGfx/PaintStyle.h:164 Gfx::CanvasRadialGradientPaintStyle::end_radius.
+pub func canvas_radial_gradient_paint_style_end_radius(this: CanvasRadialGradientPaintStyle*) -> f32:
+    return this.m_end_radius
+
+## Ported from Libraries/LibGfx/PaintStyle.h:167 Gfx::CanvasRadialGradientPaintStyle::CanvasRadialGradientPaintStyle.
+pub func canvas_radial_gradient_paint_style_construct(this: CanvasRadialGradientPaintStyle*, start_center: FloatPoint, start_radius: f32, end_center: FloatPoint, end_radius: f32):
+    this.m_start_center = start_center
+    this.m_start_radius = start_radius
+    this.m_end_center = end_center
+    this.m_end_radius = end_radius
+
+# mark: SVGGradientPaintStyle ==================================================================
+
+## Ported from Libraries/LibGfx/PaintStyle.h:193 Gfx::SVGGradientPaintStyle::set_spread_method.
+pub func svg_gradient_paint_style_set_spread_method(this: SvgGradientPaintStyle*, spread_method: SvgGradientPaintStyleSpreadMethod):
+    this.m_spread_method = spread_method
+
+## Ported from Libraries/LibGfx/PaintStyle.h:199 Gfx::SVGGradientPaintStyle::scale_adjusted_inverse_gradient_transform.
+pub func svg_gradient_paint_style_scale_adjusted_inverse_gradient_transform(this: SvgGradientPaintStyle*) -> AffineTransform?:
+    return this.m_inverse_transform
+
+## Ported from Libraries/LibGfx/PaintStyle.h:200 Gfx::SVGGradientPaintStyle::gradient_transform_scale.
+pub func svg_gradient_paint_style_gradient_transform_scale(this: SvgGradientPaintStyle*) -> f32:
+    return this.m_scale
+
+## Ported from Libraries/LibGfx/PaintStyle.h:201 Gfx::SVGGradientPaintStyle::spread_method.
+pub func svg_gradient_paint_style_spread_method(this: SvgGradientPaintStyle*) -> SvgGradientPaintStyleSpreadMethod:
+    return this.m_spread_method
+
+# mark: SVGLinearGradientPaintStyle ============================================================
+
+## Ported from Libraries/LibGfx/PaintStyle.h:211 Gfx::SVGLinearGradientPaintStyle::create.
+pub func svg_linear_gradient_paint_style_create(p0: FloatPoint, p1: FloatPoint) -> SvgLinearGradientPaintStyle*!:
+    let this = (SvgLinearGradientPaintStyle*)(try paint_style_allocate(&svg_linear_gradient_paint_style_class))
+    svg_linear_gradient_paint_style_construct(this, p0, p1)
+    return this
+
+## Ported from Libraries/LibGfx/PaintStyle.h:216 Gfx::SVGLinearGradientPaintStyle::set_start_point.
+pub func svg_linear_gradient_paint_style_set_start_point(this: SvgLinearGradientPaintStyle*, start_point: FloatPoint):
+    this.m_p0 = start_point
+
+## Ported from Libraries/LibGfx/PaintStyle.h:221 Gfx::SVGLinearGradientPaintStyle::set_end_point.
+pub func svg_linear_gradient_paint_style_set_end_point(this: SvgLinearGradientPaintStyle*, end_point: FloatPoint):
+    this.m_p1 = end_point
+
+## Ported from Libraries/LibGfx/PaintStyle.h:226 Gfx::SVGLinearGradientPaintStyle::SVGLinearGradientPaintStyle.
+pub func svg_linear_gradient_paint_style_construct(this: SvgLinearGradientPaintStyle*, p0: FloatPoint, p1: FloatPoint):
+    svg_gradient_paint_style_init_fields(this.svg_gradient_paint_style())
+    this.m_p0 = p0
+    this.m_p1 = p1
+
+# mark: SVGRadialGradientPaintStyle ============================================================
+
+## Ported from Libraries/LibGfx/PaintStyle.h:239 Gfx::SVGRadialGradientPaintStyle::create.
+pub func svg_radial_gradient_paint_style_create(start_center: FloatPoint, start_radius: f32, end_center: FloatPoint, end_radius: f32) -> SvgRadialGradientPaintStyle*!:
+    let this = (SvgRadialGradientPaintStyle*)(try paint_style_allocate(&svg_radial_gradient_paint_style_class))
+    svg_radial_gradient_paint_style_construct(this, start_center, start_radius, end_center, end_radius)
+    return this
+
+## Ported from Libraries/LibGfx/PaintStyle.h:244 Gfx::SVGRadialGradientPaintStyle::set_start_center.
+pub func svg_radial_gradient_paint_style_set_start_center(this: SvgRadialGradientPaintStyle*, start_center: FloatPoint):
+    this.m_start_center = start_center
+
+## Ported from Libraries/LibGfx/PaintStyle.h:249 Gfx::SVGRadialGradientPaintStyle::set_start_radius.
+pub func svg_radial_gradient_paint_style_set_start_radius(this: SvgRadialGradientPaintStyle*, start_radius: f32):
+    this.m_start_radius = start_radius
+
+## Ported from Libraries/LibGfx/PaintStyle.h:254 Gfx::SVGRadialGradientPaintStyle::set_end_center.
+pub func svg_radial_gradient_paint_style_set_end_center(this: SvgRadialGradientPaintStyle*, end_center: FloatPoint):
+    this.m_end_center = end_center
+
+## Ported from Libraries/LibGfx/PaintStyle.h:259 Gfx::SVGRadialGradientPaintStyle::set_end_radius.
+pub func svg_radial_gradient_paint_style_set_end_radius(this: SvgRadialGradientPaintStyle*, end_radius: f32):
+    this.m_end_radius = end_radius
+
+## Ported from Libraries/LibGfx/PaintStyle.h:264 Gfx::SVGRadialGradientPaintStyle::SVGRadialGradientPaintStyle.
+pub func svg_radial_gradient_paint_style_construct(this: SvgRadialGradientPaintStyle*, start_center: FloatPoint, start_radius: f32, end_center: FloatPoint, end_radius: f32):
+    svg_gradient_paint_style_init_fields(this.svg_gradient_paint_style())
+    this.m_start_center = start_center
+    this.m_start_radius = start_radius
+    this.m_end_center = end_center
+    this.m_end_radius = end_radius

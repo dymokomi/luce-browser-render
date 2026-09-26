@@ -1,0 +1,432 @@
+#==============================================================================================
+#
+#   tests_gfx_paint_draw - scaling, painting surfaces, the painter, gfx.Path and filters
+#
+#   DESCRIPTION:
+#       Tests pinned to the donor: the pixels of Bitmap::scaled and of PainterSkia drawing
+#       into bitmaps (fill_rect, clear_rect, fill_path, stroke_path, clip/save/restore/reset,
+#       draw_bitmap), PaintingSurface::read_into_bitmap and the surface snapshot, produced by
+#       local C++ programs over the donor build; gfx.Path through its C++ API
+#       (Gfx::Path::to_svg_string, bounding_box, contains, copy_transformed); and the Filter
+#       graphs, whose color matrices are the donor's expressions evaluated in C++.
+#
+#       These go through region r08's functions and run once tests_gfx_paint_r08_is_ported
+#       is set, except the filter graph tests.
+#
+#       Each test's body is a noinline function the test block calls (# workaround:
+#       compiler-issues/ranges_facts_cubic).
+#
+#==============================================================================================
+
+# mark: Helpers ================================================================================
+
+# A new 8x6 premultiplied bitmap and a painter over it.
+func test_gfx_paint_canvas(format_: BitmapFormat) -> (Bitmap*, Painter*):
+    let bitmap = bitmap_create_alpha_type(format_, AlphaType.premultiplied, IntSize(m_width = 8, m_height = 6)) else trap("create")
+    return (bitmap, painter_create(bitmap))
+
+func test_gfx_paint_rect(x: f32, y: f32, width: f32, height: f32) -> FloatRect:
+    return FloatRect(m_location = FloatPoint(m_x = x, m_y = y), m_size = FloatSize(m_width = width, m_height = height))
+
+func test_gfx_paint_point(x: f32, y: f32) -> FloatPoint:
+    return FloatPoint(m_x = x, m_y = y)
+
+# mark: Bitmap::scaled =========================================================================
+
+test "gfx paint: bitmap scaled":
+    test_gfx_paint_bitmap_scaled()
+
+noinline func test_gfx_paint_bitmap_scaled():
+    if not tests_gfx_paint_r08_is_ported:
+        return
+    let source = bitmap_create_alpha_type(BitmapFormat.bgra8888, AlphaType.premultiplied, IntSize(m_width = 4, m_height = 4)) else trap("create")
+    for y: i32 in 0..<4:
+        for x: i32 in 0..<4:
+            let value: u32 = 0xff000000 | ((u32)(x * 60) << 16) | ((u32)(y * 70) << 8) | (u32)((x + y) * 20)
+            bitmap_set_pixel(source, x, y, color_from_bgra(value))
+
+    let nearest_down = bitmap_scaled(source, 2, 2, ScalingMode.nearest_neighbor) else trap("scaled")
+    test_gfx_paint_expect_pixels(nearest_down, [0xff000000, 0xff780028, 0xff008c28, 0xff788c50])
+    let nearest_up = bitmap_scaled(source, 6, 5, ScalingMode.nearest_neighbor) else trap("scaled")
+    test_gfx_paint_expect_pixels(nearest_up, [
+        0xff000000, 0xff000000, 0xff3c0014, 0xff780028, 0xff780028, 0xffb4003c,
+        0xff004614, 0xff004614, 0xff3c4628, 0xff78463c, 0xff78463c, 0xffb44650,
+        0xff004614, 0xff004614, 0xff3c4628, 0xff78463c, 0xff78463c, 0xffb44650,
+        0xff008c28, 0xff008c28, 0xff3c8c3c, 0xff788c50, 0xff788c50, 0xffb48c64,
+        0xff00d23c, 0xff00d23c, 0xff3cd250, 0xff78d264, 0xff78d264, 0xffb4d278,
+    ])
+    let bilinear_down = bitmap_scaled(source, 2, 2, ScalingMode.bilinear) else trap("scaled")
+    test_gfx_paint_expect_pixels(bilinear_down, [0xff1e2314, 0xff96233c, 0xff1eaf3c, 0xff96af64])
+    let bilinear_up = bitmap_scaled(source, 6, 5, ScalingMode.bilinear) else trap("scaled")
+    test_gfx_paint_expect_pixels(bilinear_up, [
+        0xff000000, 0xff1e000a, 0xff460017, 0xff6e0025, 0xff960032, 0xffb4003c,
+        0xff00310e, 0xff1e3118, 0xff463125, 0xff6e3133, 0xff963140, 0xffb4314a,
+        0xff00691e, 0xff1e6928, 0xff466935, 0xff6e6943, 0xff966950, 0xffb4695a,
+        0xff00a12e, 0xff1ea138, 0xff46a145, 0xff6ea153, 0xff96a160, 0xffb4a16a,
+        0xff00d23c, 0xff1ed246, 0xff46d253, 0xff6ed261, 0xff96d26e, 0xffb4d278,
+    ])
+
+    # Unpremultiplied pixels scale without being premultiplied (SkPixmap::scalePixels).
+    let unpremultiplied = bitmap_create_alpha_type(BitmapFormat.rgba8888, AlphaType.unpremultiplied, IntSize(m_width = 2, m_height = 2)) else trap("create")
+    bitmap_set_pixel(unpremultiplied, 0, 0, color_from_bgra(0x80ff0000))
+    bitmap_set_pixel(unpremultiplied, 1, 0, color_from_bgra(0x2000ff00))
+    bitmap_set_pixel(unpremultiplied, 0, 1, color_from_bgra(0xff0000ff))
+    bitmap_set_pixel(unpremultiplied, 1, 1, color_from_bgra(0x00ffffff))
+    let unpremultiplied_up = bitmap_scaled(unpremultiplied, 3, 3, ScalingMode.bilinear) else trap("scaled")
+    assert(bitmap_alpha_type(unpremultiplied_up) == AlphaType.unpremultiplied)
+    test_gfx_paint_expect_pixels(unpremultiplied_up, [0x800000ff, 0x50008080, 0x2000ff00, 0xc0800080, 0x68808080, 0x1080ff80, 0xffff0000, 0x80ff8080, 0x00ffffff])
+
+# mark: Painter ================================================================================
+
+test "gfx paint: painter fill_rect and clear_rect":
+    test_gfx_paint_painter_rects()
+
+noinline func test_gfx_paint_painter_rects():
+    if not tests_gfx_paint_r08_is_ported:
+        return
+    # Opaque colors: no blending arithmetic.
+    let (opaque, opaque_painter) = test_gfx_paint_canvas(BitmapFormat.bgra8888)
+    painter_fill_rect(opaque_painter, test_gfx_paint_rect(1.0, 1.0, 3.0, 2.0), color_from_bgra(0xff336699))
+    painter_fill_rect(opaque_painter, test_gfx_paint_rect(2.0, 2.0, 4.0, 3.0), color_from_bgra(0xffff0000))
+    var square: Path
+    path_move_to(&square, test_gfx_paint_point(5.0, 0.0))
+    path_line_to(&square, test_gfx_paint_point(8.0, 0.0))
+    path_line_to(&square, test_gfx_paint_point(8.0, 2.0))
+    path_line_to(&square, test_gfx_paint_point(5.0, 2.0))
+    path_close(&square)
+    painter_fill_path_color_winding_rule(opaque_painter, square, color_from_bgra(0xff00ff00), WindingRule.even_odd)
+    let b: u32 = 0xff336699
+    let r: u32 = 0xffff0000
+    let g: u32 = 0xff00ff00
+    test_gfx_paint_expect_pixels(opaque, [
+        0, 0, 0, 0, 0, g, g, g,
+        0, b, b, b, 0, g, g, g,
+        0, b, r, r, r, r, 0, 0,
+        0, 0, r, r, r, r, 0, 0,
+        0, 0, r, r, r, r, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,
+    ])
+
+    # Blending a translucent color: the donor's Skia (lowp div255, see the gate).
+    if not tests_gfx_paint_raster_is_skia_m144:
+        return
+    let (bitmap, painter) = test_gfx_paint_canvas(BitmapFormat.bgra8888)
+    painter_fill_rect(painter, test_gfx_paint_rect(1.0, 1.0, 3.0, 2.0), color_from_bgra(0xff336699))
+    painter_fill_rect(painter, test_gfx_paint_rect(2.0, 2.0, 4.0, 3.0), color_from_bgra(0x80ff0000))
+    test_gfx_paint_expect_pixels(bitmap, [
+        0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+        0x00000000, 0xff336699, 0xff336699, 0xff336699, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+        0x00000000, 0xff336699, 0xff99334c, 0xff99334c, 0x80800000, 0x80800000, 0x00000000, 0x00000000,
+        0x00000000, 0x00000000, 0x80800000, 0x80800000, 0x80800000, 0x80800000, 0x00000000, 0x00000000,
+        0x00000000, 0x00000000, 0x80800000, 0x80800000, 0x80800000, 0x80800000, 0x00000000, 0x00000000,
+        0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    ])
+
+
+test "gfx paint: painter clear_rect":
+    test_gfx_paint_painter_clear_rect()
+
+noinline func test_gfx_paint_painter_clear_rect():
+    if not tests_gfx_paint_r08_is_ported:
+        return
+    let (cleared, clearing) = test_gfx_paint_canvas(BitmapFormat.bgra8888)
+    painter_fill_rect(clearing, test_gfx_paint_rect(0.0, 0.0, 8.0, 6.0), color_from_bgra(0xff00ff00))
+    painter_clear_rect(clearing, test_gfx_paint_rect(2.0, 1.0, 3.0, 3.0), color_from_bgra(0x40200000))
+    let g: u32 = 0xff00ff00
+    let c: u32 = 0x40080000
+    test_gfx_paint_expect_pixels(cleared, [
+        g, g, g, g, g, g, g, g,
+        g, g, c, c, c, g, g, g,
+        g, g, c, c, c, g, g, g,
+        g, g, c, c, c, g, g, g,
+        g, g, g, g, g, g, g, g,
+        g, g, g, g, g, g, g, g,
+    ])
+
+test "gfx paint: painter fill_path and stroke_path":
+    test_gfx_paint_painter_paths()
+
+noinline func test_gfx_paint_painter_paths():
+    if not tests_gfx_paint_r08_is_ported:
+        return
+    test_gfx_paint_painter_stroke()
+    # An anti-aliased triangle: the donor's Skia (analytic AA, see the gate).
+    if not tests_gfx_paint_raster_is_skia_m144:
+        return
+    let (bitmap, painter) = test_gfx_paint_canvas(BitmapFormat.bgra8888)
+    var triangle: Path
+    path_move_to(&triangle, test_gfx_paint_point(1.0, 1.0))
+    path_line_to(&triangle, test_gfx_paint_point(7.0, 2.0))
+    path_line_to(&triangle, test_gfx_paint_point(3.0, 5.5))
+    path_close(&triangle)
+    painter_fill_path_color_winding_rule(painter, triangle, color_from_bgra(0xff0000ff), WindingRule.nonzero)
+    test_gfx_paint_expect_pixels(bitmap, [
+        0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+        0x00000000, 0xb30000b3, 0xc00000c0, 0x95000095, 0x6a00006a, 0x40000040, 0x14000014, 0x00000000,
+        0x00000000, 0x58000058, 0xff0000ff, 0xff0000ff, 0xff0000ff, 0xfe0000fe, 0x70000070, 0x00000000,
+        0x00000000, 0x04000004, 0xe30000e3, 0xff0000ff, 0xf50000f5, 0x55000055, 0x00000000, 0x00000000,
+        0x00000000, 0x00000000, 0x78000078, 0xea0000ea, 0x34000034, 0x00000000, 0x00000000, 0x00000000,
+        0x00000000, 0x00000000, 0x10000010, 0x24000024, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    ])
+
+# stroke_path with a color and a thickness (square corners of a 2px stroke on pixel edges).
+func test_gfx_paint_painter_stroke():
+    let (stroked, stroking) = test_gfx_paint_canvas(BitmapFormat.bgra8888)
+    var polyline: Path
+    path_move_to(&polyline, test_gfx_paint_point(1.0, 1.0))
+    path_line_to(&polyline, test_gfx_paint_point(6.0, 1.0))
+    path_line_to(&polyline, test_gfx_paint_point(6.0, 4.0))
+    painter_stroke_path_color_f32(stroking, polyline, color_from_bgra(0xffff8000), 2.0)
+    # Zero thickness draws nothing (no hairline).
+    painter_stroke_path_color_f32(stroking, polyline, color_from_bgra(0xff0000ff), 0.0)
+    let o: u32 = 0xffff8000
+    test_gfx_paint_expect_pixels(stroked, [
+        0, o, o, o, o, o, o, 0,
+        0, o, o, o, o, o, o, 0,
+        0, 0, 0, 0, 0, o, o, 0,
+        0, 0, 0, 0, 0, o, o, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,
+    ])
+
+test "gfx paint: painter clip, save, restore, reset":
+    test_gfx_paint_painter_clip()
+
+noinline func test_gfx_paint_painter_clip():
+    if not tests_gfx_paint_r08_is_ported:
+        return
+    let (bitmap, painter) = test_gfx_paint_canvas(BitmapFormat.bgra8888)
+    painter_set_transform(painter, AffineTransform(m_values = [1.0, 0.0, 0.0, 1.0, 2.0, 1.0]))
+    var clip: Path
+    path_move_to(&clip, test_gfx_paint_point(0.0, 0.0))
+    path_line_to(&clip, test_gfx_paint_point(3.0, 0.0))
+    path_line_to(&clip, test_gfx_paint_point(3.0, 4.0))
+    path_line_to(&clip, test_gfx_paint_point(0.0, 4.0))
+    path_close(&clip)
+    painter_save(painter)
+    painter_clip(painter, clip, WindingRule.nonzero)
+    painter_fill_rect(painter, test_gfx_paint_rect(-1.0, -1.0, 10.0, 10.0), color_from_bgra(0xff804020))
+    painter_restore(painter)
+    painter_fill_rect(painter, test_gfx_paint_rect(4.0, 0.0, 1.0, 1.0), color_from_bgra(0xff0000ff))
+    painter_reset(painter)
+    painter_fill_rect(painter, test_gfx_paint_rect(0.0, 5.0, 1.0, 1.0), color_from_bgra(0xff00ff00))
+    let r: u32 = 0xff804020
+    test_gfx_paint_expect_pixels(bitmap, [
+        0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, r, r, r, 0, 0xff0000ff, 0,
+        0, 0, r, r, r, 0, 0, 0,
+        0, 0, r, r, r, 0, 0, 0,
+        0, 0, r, r, r, 0, 0, 0,
+        0xff00ff00, 0, 0, 0, 0, 0, 0, 0,
+    ])
+
+test "gfx paint: painter draw_bitmap":
+    test_gfx_paint_painter_draw_bitmap()
+
+noinline func test_gfx_paint_painter_draw_bitmap():
+    if not tests_gfx_paint_r08_is_ported:
+        return
+    let (bitmap, painter) = test_gfx_paint_canvas(BitmapFormat.bgra8888)
+    let source = test_gfx_paint_bitmap(BitmapFormat.bgra8888, 2, 2, [0xffff0000, 0xff00ff00, 0xff0000ff, 0x80808080])
+    var color_space: ColorSpace = ---
+    color_space_construct(&color_space)
+    let image = immutable_bitmap_create_color_space(source, color_space)
+    let whole = DevicePixelRect(m_location = IntPoint(m_x = 0, m_y = 0), m_size = IntSize(m_width = 2, m_height = 2))
+    painter_draw_bitmap(painter, test_gfx_paint_rect(1.0, 1.0, 4.0, 4.0), *image, whole, ScalingMode.nearest_neighbor, none, 1.0, CompositingAndBlendingOperator.source_over)
+    painter_draw_bitmap(painter, test_gfx_paint_rect(5.0, 0.0, 2.0, 2.0), *image, whole, ScalingMode.nearest_neighbor, none, 0.5, CompositingAndBlendingOperator.source_over)
+    test_gfx_paint_expect_pixels(bitmap, [
+        0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x7f7f0000, 0x7f007f00, 0x00000000,
+        0x00000000, 0xffff0000, 0xffff0000, 0xff00ff00, 0xff00ff00, 0x7f00007f, 0x40404040, 0x00000000,
+        0x00000000, 0xffff0000, 0xffff0000, 0xff00ff00, 0xff00ff00, 0x00000000, 0x00000000, 0x00000000,
+        0x00000000, 0xff0000ff, 0xff0000ff, 0x80808080, 0x80808080, 0x00000000, 0x00000000, 0x00000000,
+        0x00000000, 0xff0000ff, 0xff0000ff, 0x80808080, 0x80808080, 0x00000000, 0x00000000, 0x00000000,
+        0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    ])
+
+# mark: PaintingSurface ========================================================================
+
+test "gfx paint: painting surface read and snapshot":
+    test_gfx_paint_painting_surface()
+
+noinline func test_gfx_paint_painting_surface():
+    if not tests_gfx_paint_r08_is_ported:
+        return
+    let (bitmap, painter) = test_gfx_paint_canvas(BitmapFormat.rgba8888)
+    let surface = painting_surface_wrap_bitmap(bitmap)
+    painter_fill_rect(painter, test_gfx_paint_rect(1.0, 1.0, 2.0, 2.0), color_from_bgra(0xff112233))
+    let other = bitmap_create_alpha_type(BitmapFormat.bgra8888, AlphaType.unpremultiplied, IntSize(m_width = 8, m_height = 6)) else trap("create")
+    painting_surface_read_into_bitmap(surface, other)
+    let pixels = test_gfx_paint_pixels(other)
+    for i in 0..<ak.vector_size(&pixels):
+        let expected: u32 = 0xff112233 if (i == 9 or i == 10 or i == 17 or i == 18) else 0
+        assert(*ak.vector_at_const(&pixels, i) == expected)
+    let snapshot = immutable_bitmap_create_snapshot_from_painting_surface(surface)
+    assert(immutable_bitmap_width(snapshot) == 8 and immutable_bitmap_height(snapshot) == 6)
+    let pixel = immutable_bitmap_get_pixel(snapshot, 1, 1)
+    assert(color_value(&pixel) == 0xff112233)
+    let size = painting_surface_size(surface)
+    assert(size.m_width == 8 and size.m_height == 6)
+    assert(painting_surface_skia_backend_context(surface) == none)
+
+# mark: Path ===================================================================================
+
+test "gfx paint: path":
+    test_gfx_paint_path()
+
+noinline func test_gfx_paint_path():
+    if not tests_gfx_paint_r08_is_ported:
+        return
+    # A zero Path is the empty path PathImpl::create makes.
+    var empty: Path
+    assert(path_is_empty(&empty))
+    let empty_svg = path_to_svg_string(&empty)
+    assert(ak.string_eq_string_view(&empty_svg, ak.sv("")))
+    let origin = path_last_point(&empty)
+    assert(origin.m_x == 0.0 and origin.m_y == 0.0)
+
+    var path: Path
+    path_move_to(&path, test_gfx_paint_point(10.0, 20.0))
+    path_line_to(&path, test_gfx_paint_point(30.5, 40.25))
+    path_quadratic_bezier_curve_to(&path, test_gfx_paint_point(1.0, 2.0), test_gfx_paint_point(3.0, 4.0))
+    path_close(&path)
+    path_horizontal_line_to(&path, 12.0)
+    path_vertical_line_to(&path, 25.0)
+    assert(not path_is_empty(&path))
+    let svg = path_to_svg_string(&path)
+    assert(ak.string_eq_string_view(&svg, ak.sv("M10 20L30.5 40.25Q1 2 3 4L10 20ZM10 20L12 20L12 25")))
+    let bounds = path_bounding_box(&path)
+    assert(bounds.m_location.m_x == 1.0 and bounds.m_location.m_y == 2.0)
+    assert(bounds.m_size.m_width == 29.5 and bounds.m_size.m_height == 38.25)
+    assert(not path_contains(&path, test_gfx_paint_point(20.0, 30.0), WindingRule.nonzero))
+
+    # copy_transformed and clone leave the original alone; transform replaces it.
+    let moved = path_copy_transformed(&path, AffineTransform(m_values = [2.0, 0.0, 0.0, 2.0, 1.0, -1.0]))
+    let moved_last = path_last_point(&moved)
+    assert(moved_last.m_x == 25.0 and moved_last.m_y == 49.0)
+    let original_last = path_last_point(&path)
+    assert(original_last.m_x == 12.0 and original_last.m_y == 25.0)
+    var copy = path_clone(&path)
+    path_offset(&copy, test_gfx_paint_point(1.0, 1.0))
+    assert(path_last_point(&path).m_x == 12.0)
+    assert(path_last_point(&copy).m_x == 13.0)
+    path_append_path(&copy, &moved)
+    assert(path_last_point(&copy).m_x == 25.0)
+    path_transform(&path, AffineTransform(m_values = [1.0, 0.0, 0.0, 1.0, 5.0, 0.0]))
+    assert(path_last_point(&path).m_x == 17.0)
+    path_clear(&path)
+    assert(path_is_empty(&path))
+
+    # contains with each fill rule: a square inside a square, same direction.
+    var squares: Path
+    let insets: f32[2] = [0.0, 2.0]
+    for inset in insets:
+        let low: f32 = inset
+        let high: f32 = 10.0 - inset
+        path_move_to(&squares, test_gfx_paint_point(low, low))
+        path_line_to(&squares, test_gfx_paint_point(high, low))
+        path_line_to(&squares, test_gfx_paint_point(high, high))
+        path_line_to(&squares, test_gfx_paint_point(low, high))
+        path_close(&squares)
+    assert(path_contains(&squares, test_gfx_paint_point(5.0, 5.0), WindingRule.nonzero))
+    assert(not path_contains(&squares, test_gfx_paint_point(5.0, 5.0), WindingRule.even_odd))
+    assert(path_contains(&squares, test_gfx_paint_point(1.0, 5.0), WindingRule.even_odd))
+
+# mark: Filter =================================================================================
+
+# The color matrix of a Filter made by Filter::color / saturate / hue_rotate.
+func test_gfx_paint_filter_matrix(filter: Filter) -> (f32[20], bool):
+    let node = filter_impl(&filter).filter else trap("no filter")
+    match node.node:
+        .color_filter(color_filter, input):
+            assert(input == none)
+            match color_filter.node:
+                .matrix(values, clamp): return (values, clamp)
+                _: trap("not a matrix")
+        _: trap("not a color filter")
+
+test "gfx paint: filter graphs":
+    test_gfx_paint_filters()
+
+noinline func test_gfx_paint_filters():
+    # Filter::color(Saturate, 0.25): the donor's matrix, clamp off.
+    let (saturate, saturate_clamp) = test_gfx_paint_filter_matrix(filter_color(ColorFilterType.saturate, 0.25))
+    assert(not saturate_clamp)
+    assert(saturate[0].bits() == 0x3ed1cac0)
+    assert(saturate[1].bits() == 0x3f0947ae)
+    assert(saturate[18] == 1.0)
+
+    # Filter::saturate(0.25): SkColorMatrix::setSaturation, clamp on.
+    let (matrix, matrix_clamp) = test_gfx_paint_filter_matrix(filter_saturate(0.25))
+    assert(matrix_clamp)
+    assert(matrix[0].bits() == 0x3ed1cac0)
+    assert(matrix[12].bits() == 0x3e9ba5e3)
+    assert(matrix[4] == 0.0 and matrix[19] == 0.0)
+
+    # Filter::hue_rotate(30): cosf/sinf of the radians.
+    let (hue, hue_clamp) = test_gfx_paint_filter_matrix(filter_hue_rotate(30.0))
+    assert(not hue_clamp)
+    assert(hue[0].bits() == 0x3f49be6e)
+    assert(hue[6].bits() == 0x3f841296)
+    assert(hue[12].bits() == 0x3f69634e)
+
+    # Filter::color(Contrast, 1.5): the intercept.
+    let (contrast, _) = test_gfx_paint_filter_matrix(filter_color(ColorFilterType.contrast, 1.5))
+    assert(contrast[4] == -0.25 and contrast[0] == 1.5)
+
+    # A graph: blur of an offset of the source.
+    let offset = filter_offset(3.0, 4.0)
+    let blur = filter_blur(2.0, 5.0, &offset)
+    let node = filter_impl(&blur).filter else trap("no filter")
+    match node.node:
+        .blur(sigma_x, sigma_y, input):
+            assert(sigma_x == 2.0 and sigma_y == 5.0)
+            let inner = input else trap("no input")
+            match inner.node:
+                .offset(dx, dy, source):
+                    assert(dx == 3.0 and dy == 4.0 and source == none)
+                _: trap("not an offset")
+        _: trap("not a blur")
+
+    # The color table runs in linear space: sRGB-to-linear, the table, linear-to-sRGB.
+    let identity_table = filter_color_table(none, none, none, none)
+    let last = filter_impl(&identity_table).filter else trap("no filter")
+    match last.node:
+        .color_filter(outer, input):
+            match outer.node:
+                .linear_to_srgb_gamma: discard(0)
+                _: trap("not linear-to-sRGB")
+            let table = input else trap("no table")
+            match table.node:
+                .color_filter(table_filter, _):
+                    match table_filter.node:
+                        .table_argb(a, r, g, b):
+                            assert(a[200] == 200 and r[0] == 0 and g[255] == 255 and b[17] == 17)
+                        _: trap("not a table")
+                _: trap("not a color filter")
+        _: trap("not a color filter")
+
+    # A copy of a Filter shares its graph (FilterImpl::clone shares the sk_sp).
+    let merged_inputs: ak.Vector[Filter?] = ak.vector_create_atomic[Filter?]()
+    var inputs = merged_inputs
+    ak.vector_append_t(&inputs, offset)
+    ak.vector_append_t(&inputs, none)
+    let merged = filter_merge(&inputs)
+    let merged_node = filter_impl(&merged).filter else trap("no filter")
+    match merged_node.node:
+        .merge(filters):
+            assert(ak.vector_size(&filters) == 2)
+            assert(*ak.vector_at_const(&filters, 0) == filter_impl(&offset).filter)
+            assert(*ak.vector_at_const(&filters, 1) == none)
+        _: trap("not a merge")
+
+    if not tests_gfx_paint_r08_is_ported:
+        return
+    # Filter::flood: the color with its alpha replaced by opacity * 255.
+    let flood = filter_flood(Color(m_value = 0xff336699), 0.5)
+    let flood_node = filter_impl(&flood).filter else trap("no filter")
+    match flood_node.node:
+        .shader(shader):
+            match shader:
+                .color(color): assert(color.m_value == 0x7f336699)
+                _: trap("not a color")
+        _: trap("not a shader")

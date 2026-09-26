@@ -1,0 +1,146 @@
+#==============================================================================================
+#
+#   path - Path: a 2D vector path
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Path.h (lines 56-131, class Path) and Path.cpp (lines
+#       1-19). The struct is in types_path; the implementation is PathImplRaster
+#       (path_impl_raster), which replaces PathImplSkia.
+#
+#       C++ Path owns its PathImpl (NonnullOwnPtr, `m_impl { PathImpl::create() }`) and its
+#       copy constructor and copy assignment clone it. In Luce `m_impl` may be none, meaning
+#       the empty path PathImpl::create() would make: a zero Path is a valid empty path, and
+#       the first mutation creates the implementation. A C++ copy of a Path is path_clone;
+#       a Luce struct copy shares the implementation (DESIGN.md §3.3 rule 2).
+#
+#       The members that take a Font or a GlyphRun (text, glyph_run, place_text_along) are in
+#       web_fonts, which gfx cannot import (web_fonts/path.lucb).
+#
+#==============================================================================================
+
+# mark: Implementation =========================================================================
+
+# impl() for a mutating member: creates the implementation of a zero Path first.
+func path_impl_mut(this: Path*) -> PathImplRaster*:
+    if let impl = this.m_impl:
+        return impl
+    let impl = path_impl_raster_create()
+    this.m_impl = impl
+    return impl
+
+# impl() for a const member: the implementation, or a new empty one for a zero Path (not kept:
+# a module global is not scanned by the collector, DESIGN.md §3.3 rule 4).
+func path_impl_const_raster(this: const Path*) -> const PathImplRaster*:
+    if let impl = this.m_impl:
+        return impl
+    return path_impl_raster_create()
+
+## The SkPath of a path (PathImplSkia::sk_path()): for the members that live in web_fonts and
+## for drawing. Creates the implementation of a zero Path.
+pub func path_sk_path(this: Path*) -> SkPath*:
+    return &path_impl_mut(this).m_path
+
+## The SkPath of a path, read-only (PathImplSkia::sk_path() const). A zero Path gives an empty
+## SkPath.
+pub func path_sk_path_const(this: const Path*) -> const SkPath*:
+    return &path_impl_const_raster(this).m_path
+
+## The path for drawing with the raster module (to_skia_path): see sk_path_to_raster_path.
+## None for an empty path. The caller releases the result.
+pub func path_to_raster_path(this: const Path*) -> raster.Path?:
+    return sk_path_to_raster_path(path_sk_path_const(this))
+
+# mark: Path ===================================================================================
+
+## Ported from Libraries/LibGfx/Path.h:75 Gfx::Path::clear.
+pub func path_clear(this: Path*):
+    path_impl_raster_clear(path_impl_mut(this))
+
+## Ported from Libraries/LibGfx/Path.h:76 Gfx::Path::move_to.
+pub func path_move_to(this: Path*, point: FloatPoint):
+    path_impl_raster_move_to(path_impl_mut(this), point)
+
+## Ported from Libraries/LibGfx/Path.h:77 Gfx::Path::line_to.
+pub func path_line_to(this: Path*, point: FloatPoint):
+    path_impl_raster_line_to(path_impl_mut(this), point)
+
+## Ported from Libraries/LibGfx/Path.h:78 Gfx::Path::close.
+pub func path_close(this: Path*):
+    path_impl_raster_close(path_impl_mut(this))
+
+## Ported from Libraries/LibGfx/Path.h:92 Gfx::Path::elliptical_arc_to.
+pub func path_elliptical_arc_to(this: Path*, point: FloatPoint, radii: FloatSize, x_axis_rotation: f32, large_arc: bool, sweep: bool):
+    path_impl_raster_elliptical_arc_to(path_impl_mut(this), point, radii, x_axis_rotation, large_arc, sweep)
+
+## Ported from Libraries/LibGfx/Path.h:93 Gfx::Path::arc_to.
+pub func path_arc_to(this: Path*, point: FloatPoint, radius: f32, large_arc: bool, sweep: bool):
+    path_impl_raster_arc_to(path_impl_mut(this), point, radius, large_arc, sweep)
+
+## Ported from Libraries/LibGfx/Path.h:94 Gfx::Path::quadratic_bezier_curve_to.
+pub func path_quadratic_bezier_curve_to(this: Path*, through: FloatPoint, point: FloatPoint):
+    path_impl_raster_quadratic_bezier_curve_to(path_impl_mut(this), through, point)
+
+## Ported from Libraries/LibGfx/Path.h:95 Gfx::Path::cubic_bezier_curve_to.
+pub func path_cubic_bezier_curve_to(this: Path*, c1: FloatPoint, c2: FloatPoint, p2: FloatPoint):
+    path_impl_raster_cubic_bezier_curve_to(path_impl_mut(this), c1, c2, p2)
+
+## Ported from Libraries/LibGfx/Path.h:99 Gfx::Path::offset.
+pub func path_offset(this: Path*, offset: FloatPoint):
+    path_impl_raster_offset(path_impl_mut(this), offset)
+
+## Ported from Libraries/LibGfx/Path.h:101 Gfx::Path::horizontal_line_to.
+pub func path_horizontal_line_to(this: Path*, x: f32):
+    let last = path_last_point(this)
+    path_line_to(this, FloatPoint(m_x = x, m_y = float_point_y(&last)))
+
+## Ported from Libraries/LibGfx/Path.h:102 Gfx::Path::vertical_line_to.
+pub func path_vertical_line_to(this: Path*, y: f32):
+    let last = path_last_point(this)
+    path_line_to(this, FloatPoint(m_x = float_point_x(&last), m_y = y))
+
+## Ported from Libraries/LibGfx/Path.h:104 Gfx::Path::append_path.
+pub func path_append_path(this: Path*, other: const Path*):
+    # Read `other` first: appending a path to itself appends a snapshot of it, as SkPath does.
+    let other_path = path_sk_path_const(other)
+    path_impl_raster_append_path(path_impl_mut(this), other_path)
+
+## Ported from Libraries/LibGfx/Path.h:105 Gfx::Path::intersect.
+pub func path_intersect(this: Path*, other: const Path*):
+    path_impl_raster_intersect(path_impl_mut(this), path_sk_path_const(other))
+
+## Ported from Libraries/LibGfx/Path.h:107 Gfx::Path::is_empty.
+pub func path_is_empty(this: const Path*) -> bool:
+    return path_impl_raster_is_empty(path_impl_const_raster(this))
+
+## Ported from Libraries/LibGfx/Path.h:108 Gfx::Path::last_point.
+pub func path_last_point(this: const Path*) -> FloatPoint:
+    return path_impl_raster_last_point(path_impl_const_raster(this))
+
+## Ported from Libraries/LibGfx/Path.h:109 Gfx::Path::bounding_box.
+pub func path_bounding_box(this: const Path*) -> FloatRect:
+    return path_impl_raster_bounding_box(path_impl_const_raster(this))
+
+## Ported from Libraries/LibGfx/Path.h:110 Gfx::Path::contains.
+pub func path_contains(this: const Path*, point: FloatPoint, winding_rule: WindingRule) -> bool:
+    return path_impl_raster_contains(path_impl_const_raster(this), point, winding_rule)
+
+## Ported from Libraries/LibGfx/Path.h:111 Gfx::Path::set_fill_type.
+pub func path_set_fill_type(this: Path*, winding_rule: WindingRule):
+    path_impl_raster_set_fill_type(path_impl_mut(this), winding_rule)
+
+## Ported from Libraries/LibGfx/Path.h:113 Gfx::Path::clone. Also the C++ copy constructor and
+## copy assignment (Path(Path const&)): a path with its own copy of the implementation.
+pub func path_clone(this: const Path*) -> Path:
+    return Path(m_impl = path_impl_raster_clone(path_impl_const_raster(this)))
+
+## Ported from Libraries/LibGfx/Path.h:114 Gfx::Path::copy_transformed.
+pub func path_copy_transformed(this: const Path*, transform: AffineTransform) -> Path:
+    return Path(m_impl = path_impl_raster_copy_transformed(path_impl_const_raster(this), transform))
+
+## Ported from Libraries/LibGfx/Path.h:118 Gfx::Path::to_svg_string.
+pub func path_to_svg_string(this: const Path*) -> ak.String:
+    return path_impl_raster_to_svg_string(path_impl_const_raster(this))
+
+## Ported from Libraries/LibGfx/Path.h:120 Gfx::Path::transform.
+pub func path_transform(this: Path*, transform: AffineTransform):
+    this.m_impl = path_impl_raster_copy_transformed(path_impl_const_raster(this), transform)

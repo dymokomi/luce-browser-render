@@ -1,0 +1,467 @@
+#==============================================================================================
+#
+#   sk_path_measure - SkPathMeasure: lengths along a path, and points and tangents at them
+#
+#   DESCRIPTION:
+#       Port of Skia m144 src/core/SkPathMeasure.cpp (lines 22-60) and
+#       src/core/SkContourMeasure.cpp (lines 27-40 t values, 137-495 building a contour's
+#       segments, 460-500 compute_pos_tan, 500-630 the iterator, SkTKSearch,
+#       distanceToSegment and getPosTan), with SkPoint::Length, ::Distance and
+#       set_point_length from src/core/SkPoint.cpp:22-92. Gfx::Path::place_text_along measures
+#       the first contour of a path this way. getSegment and getMatrix are not ported (the
+#       port has no caller for them).
+#
+#       Copyright 2008 The Android Open Source Project
+#       Copyright 2018 Google Inc.
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-tiny-skia)
+#
+#==============================================================================================
+
+# mark: SkPoint lengths =========================================================================
+
+## Ported from src/core/SkPoint.cpp:79 SkPoint::Length.
+pub func sk_point_length(dx: f32, dy: f32) -> f32:
+    let mag2 = dx * dx + dy * dy
+    if sk_is_finite(mag2):
+        return math32.sqrt(mag2)
+    let xx = (f64)dx
+    let yy = (f64)dy
+    return (f32)math.sqrt(xx * xx + yy * yy)
+
+## Ported from include/private/base/SkPoint_impl.h:508 SkPoint::Distance.
+pub func sk_point_distance(a: SkPoint, b: SkPoint) -> f32:
+    return sk_point_length(a.x - b.x, a.y - b.y)
+
+## Ported from src/core/SkPoint.cpp:42 set_point_length<false> (SkPoint::setLength(x, y,
+## length)): (x, y) scaled to `length` in double; (0, 0) and false when that is not finite or
+## zero.
+pub func sk_point_set_length(pt: SkPoint*, x0: f32, y0: f32, length: f32) -> bool:
+    # our mag2 step overflowed to infinity, so use doubles instead.
+    # much slower, but needed when x or y are very large, other wise we
+    # divide by inf. and return (0,0) vector.
+    let xx = (f64)x0
+    let yy = (f64)y0
+    let dmag = math.sqrt(xx * xx + yy * yy)
+    let dscale = (f64)length / dmag
+    let x = (f32)((f64)x0 * dscale)
+    let y = (f32)((f64)y0 * dscale)
+    # check if we're not finite, or we're zero-length
+    if not sk_is_finite2(x, y) or (x == 0.0 and y == 0.0):
+        *pt = SkPoint(x = 0.0, y = 0.0)
+        return false
+    *pt = SkPoint(x = x, y = y)
+    return true
+
+# mark: Segments ================================================================================
+
+# kMaxTValue: t values are 30-bit fixed point.
+let sk_max_t_value: i32 = 0x3FFFFFFF
+
+# The segment types (src/core/SkPathMeasurePriv.h:18).
+let sk_seg_line: u8 = 0
+let sk_seg_quad: u8 = 1
+let sk_seg_cubic: u8 = 2
+let sk_seg_conic: u8 = 3
+
+## Ported from src/core/SkContourMeasure.cpp:29 tValue2Scalar.
+func sk_t_value_to_scalar(t: i32) -> f32:
+    # 1/kMaxTValue can't be represented as a float, but it's close and the limits work fine.
+    let max_t_reciprocal: f32 = 1.0 / (f32)sk_max_t_value
+    return (f32)t * max_t_reciprocal
+
+## SkContourMeasure::Segment: the distance at its end, the index of its first point, its t
+## value at the end and its type.
+pub struct SkContourMeasureSegment:
+    pub var distance: f32
+    pub var pt_index: u32
+    pub var t_value: i32
+    pub var kind: u8
+
+## Ported from src/core/SkContourMeasure.cpp:137 tspan_big_enough.
+func sk_measure_tspan_big_enough(tspan: i32) -> i32:
+    return tspan >> 10
+
+# CHEAP_DIST_LIMIT: just made this value up.
+let sk_cheap_dist_limit: f32 = 0.5
+
+## Ported from src/core/SkContourMeasure.cpp:148 quad_too_curvy.
+func sk_measure_quad_too_curvy(pts: const SkPoint[], tolerance: f32) -> bool:
+    # diff = (a/4 + b/2 + c/4) - (a/2 + c/2)
+    # diff = -a/4 + b/2 - c/4
+    let dx = pts[1].x * 0.5 - ((pts[0].x + pts[2].x) * 0.5) * 0.5
+    let dy = pts[1].y * 0.5 - ((pts[0].y + pts[2].y) * 0.5) * 0.5
+
+    let dist = sk_max(sk_scalar_abs(dx), sk_scalar_abs(dy))
+    return dist > tolerance
+
+## Ported from src/core/SkContourMeasure.cpp:161 conic_too_curvy.
+func sk_measure_conic_too_curvy(first_pt: SkPoint, mid_t_pt: SkPoint, last_pt: SkPoint, tolerance: f32) -> bool:
+    var mid_ends = sk_point_add(first_pt, last_pt)
+    mid_ends = sk_point_scale(mid_ends, 0.5)
+    let dxy = sk_point_sub(mid_t_pt, mid_ends)
+    let dist = sk_max(sk_scalar_abs(dxy.x), sk_scalar_abs(dxy.y))
+    return dist > tolerance
+
+## Ported from src/core/SkContourMeasure.cpp:170 cheap_dist_exceeds_limit.
+func sk_measure_cheap_dist_exceeds_limit(pt: SkPoint, x: f32, y: f32, tolerance: f32) -> bool:
+    let dist = sk_max(sk_scalar_abs(x - pt.x), sk_scalar_abs(y - pt.y))
+    # just made up the 1/2
+    return dist > tolerance
+
+## Ported from src/core/SkContourMeasure.cpp:177 cubic_too_curvy.
+func sk_measure_cubic_too_curvy(pts: const SkPoint[], tolerance: f32) -> bool:
+    let third: f32 = 1.0 / 3.0
+    let two_thirds: f32 = 1.0 * 2.0 / 3.0
+    return (sk_measure_cheap_dist_exceeds_limit(pts[1], sk_scalar_interp(pts[0].x, pts[3].x, third),
+            sk_scalar_interp(pts[0].y, pts[3].y, third), tolerance) or
+        sk_measure_cheap_dist_exceeds_limit(pts[2], sk_scalar_interp(pts[0].x, pts[3].x, two_thirds),
+            sk_scalar_interp(pts[0].y, pts[3].y, two_thirds), tolerance))
+
+# puts a cap on the total size of our output, since the client can pass in
+# arbitrarily large values for resScale.
+let sk_measure_max_recursion_depth: i32 = 8
+
+# mark: Building a contour ======================================================================
+
+## SkContourMeasure: one contour's segments, the points they use, its length and whether it
+## is closed.
+pub struct SkContourMeasure:
+    pub var segments: ak.Vector[SkContourMeasureSegment]
+    pub var pts: ak.Vector[SkPoint]
+    pub var length: f32
+    pub var is_closed: bool
+
+## SkContourMeasureIter::Impl: the path (a copy), the position in it, the tolerance and
+## whether contours are closed by force.
+pub struct SkContourMeasureIter:
+    var m_path: SkPath
+    var m_iter_verb: usize
+    var m_iter_point: usize
+    var m_iter_weight: usize
+    var m_tolerance: f32
+    var m_force_closed: bool
+    var m_valid: bool
+    # temporary
+    var m_segments: ak.Vector[SkContourMeasureSegment]
+    var m_pts: ak.Vector[SkPoint]  # Points used to define the segments
+
+# Appends a segment.
+func sk_measure_append_segment(this: SkContourMeasureIter*, distance: f32, pt_index: u32, kind: u8, t_value: i32):
+    ak.vector_append_t(&this.m_segments, SkContourMeasureSegment(distance = distance, pt_index = pt_index,
+        t_value = t_value, kind = kind))
+
+## Ported from src/core/SkContourMeasure.cpp:229 SkContourMeasureIter::Impl::compute_quad_segs.
+func sk_measure_compute_quad_segs(this: SkContourMeasureIter*, pts: const SkPoint[], distance0: f32, mint: i32,
+        maxt: i32, pt_index: u32, recursion_depth0: i32) -> f32:
+    var distance = distance0
+    var recursion_depth = recursion_depth0
+    if recursion_depth < sk_measure_max_recursion_depth and sk_measure_tspan_big_enough(maxt - mint) != 0 and sk_measure_quad_too_curvy(pts, this.m_tolerance):
+        var tmp: SkPoint[5]
+        let halft = (mint + maxt) >> 1
+
+        sk_chop_quad_at_half(pts, tmp[0..])
+        recursion_depth += 1
+        distance = sk_measure_compute_quad_segs(this, tmp[0..], distance, mint, halft, pt_index, recursion_depth)
+        distance = sk_measure_compute_quad_segs(this, tmp[2..], distance, halft, maxt, pt_index, recursion_depth)
+    else:
+        let d = sk_point_distance(pts[0], pts[2])
+        let prev_d = distance
+        distance += d
+        if distance > prev_d:
+            sk_measure_append_segment(this, distance, pt_index, sk_seg_quad, maxt)
+    return distance
+
+## Ported from src/core/SkContourMeasure.cpp:255 SkContourMeasureIter::Impl::compute_conic_segs.
+func sk_measure_compute_conic_segs(this: SkContourMeasureIter*, conic: const SkConic*, distance0: f32, mint: i32,
+        min_pt: SkPoint, maxt: i32, max_pt: SkPoint, pt_index: u32, recursion_depth0: i32) -> f32:
+    var distance = distance0
+    var recursion_depth = recursion_depth0
+    let halft = (mint + maxt) >> 1
+    let half_pt = sk_conic_eval_at(conic, sk_t_value_to_scalar(halft))
+    if not sk_point_is_finite(half_pt):
+        return distance
+    if recursion_depth < sk_measure_max_recursion_depth and sk_measure_tspan_big_enough(maxt - mint) != 0 and sk_measure_conic_too_curvy(min_pt, half_pt, max_pt, this.m_tolerance):
+        recursion_depth += 1
+        distance = sk_measure_compute_conic_segs(this, conic, distance, mint, min_pt, halft, half_pt, pt_index, recursion_depth)
+        distance = sk_measure_compute_conic_segs(this, conic, distance, halft, half_pt, maxt, max_pt, pt_index, recursion_depth)
+    else:
+        let d = sk_point_distance(min_pt, max_pt)
+        let prev_d = distance
+        distance += d
+        if distance > prev_d:
+            sk_measure_append_segment(this, distance, pt_index, sk_seg_conic, maxt)
+    return distance
+
+## Ported from src/core/SkContourMeasure.cpp:284 SkContourMeasureIter::Impl::compute_cubic_segs.
+func sk_measure_compute_cubic_segs(this: SkContourMeasureIter*, pts: const SkPoint[], distance0: f32, mint: i32,
+        maxt: i32, pt_index: u32, recursion_depth0: i32) -> f32:
+    var distance = distance0
+    var recursion_depth = recursion_depth0
+    if recursion_depth < sk_measure_max_recursion_depth and sk_measure_tspan_big_enough(maxt - mint) != 0 and sk_measure_cubic_too_curvy(pts, this.m_tolerance):
+        var tmp: SkPoint[7]
+        let halft = (mint + maxt) >> 1
+
+        sk_chop_cubic_at_half(pts, tmp[0..])
+        recursion_depth += 1
+        distance = sk_measure_compute_cubic_segs(this, tmp[0..], distance, mint, halft, pt_index, recursion_depth)
+        distance = sk_measure_compute_cubic_segs(this, tmp[3..], distance, halft, maxt, pt_index, recursion_depth)
+    else:
+        let d = sk_point_distance(pts[0], pts[3])
+        let prev_d = distance
+        distance += d
+        if distance > prev_d:
+            sk_measure_append_segment(this, distance, pt_index, sk_seg_cubic, maxt)
+    return distance
+
+## Ported from src/core/SkContourMeasure.cpp:312 SkContourMeasureIter::Impl::compute_line_seg.
+func sk_measure_compute_line_seg(this: SkContourMeasureIter*, p0: SkPoint, p1: SkPoint, distance0: f32, pt_index: u32) -> f32:
+    var distance = distance0
+    let d = sk_point_distance(p0, p1)
+    let prev_d = distance
+    distance += d
+    if distance > prev_d:
+        sk_measure_append_segment(this, distance, pt_index, sk_seg_line, sk_max_t_value)
+    return distance
+
+## Ported from src/core/SkContourMeasure.cpp:357 SkContourMeasureIter::Impl::buildSegments:
+## the next contour's measure, none when it has no length or is not finite.
+func sk_measure_build_segments(this: SkContourMeasureIter*) -> SkContourMeasure?:
+    var pt_index: i32 = -1
+    var distance: f32 = 0.0
+    var have_seen_close = this.m_force_closed
+    var have_seen_move_to = false
+
+    #  Note:
+    #  as we accumulate distance, we have to check that the result of +=
+    #  actually made it larger, since a very small delta might be > 0, but
+    #  still have no effect on distance (if distance >>> delta).
+    #
+    #  We do this check below, and in compute_quad_segs and compute_cubic_segs
+
+    this.m_segments = ak.vector_create_atomic[SkContourMeasureSegment]()
+    this.m_pts = ak.vector_create_atomic[SkPoint]()
+
+    var iter = sk_path_raw_iter(&this.m_path)
+    iter.m_verb_index = this.m_iter_verb
+    iter.m_pt_index = this.m_iter_point
+    iter.m_weight_index = this.m_iter_weight
+    while iter.m_verb_index < iter.m_verbs.length:
+        # the verb at fIter, without advancing past a following contour's move
+        if have_seen_move_to and iter.m_verbs[iter.m_verb_index] == SkPathVerb.move:
+            break
+        let rec = sk_path_raw_iter_next(&iter) else break
+        let pts: const SkPoint[] = rec.pts
+        match rec.verb:
+            .move:
+                pt_index += 1
+                ak.vector_append_t(&this.m_pts, pts[0])
+                have_seen_move_to = true
+            .line:
+                let prev_d = distance
+                distance = sk_measure_compute_line_seg(this, pts[0], pts[1], distance, (u32)pt_index)
+                if distance > prev_d:
+                    ak.vector_append_t(&this.m_pts, pts[1])
+                    pt_index += 1
+            .quad:
+                let prev_d = distance
+                distance = sk_measure_compute_quad_segs(this, pts[..<3], distance, 0, sk_max_t_value, (u32)pt_index, 0)
+                if distance > prev_d:
+                    ak.vector_append_t(&this.m_pts, pts[1])
+                    ak.vector_append_t(&this.m_pts, pts[2])
+                    pt_index += 2
+            .conic:
+                let conic = sk_conic_from_points(pts[..<3], rec.conic_weight)
+                let prev_d = distance
+                distance = sk_measure_compute_conic_segs(this, &conic, distance, 0, conic.pts[0], sk_max_t_value, conic.pts[2], (u32)pt_index, 0)
+                if distance > prev_d:
+                    # we store the conic weight in our next point, followed by the last 2 pts
+                    # thus to reconstitue a conic, you'd need to say
+                    # SkConic(pts[0], pts[2], pts[3], weight = pts[1].fX)
+                    ak.vector_append_t(&this.m_pts, SkPoint(x = conic.w, y = 0.0))
+                    ak.vector_append_t(&this.m_pts, pts[1])
+                    ak.vector_append_t(&this.m_pts, pts[2])
+                    pt_index += 3
+            .cubic:
+                let prev_d = distance
+                distance = sk_measure_compute_cubic_segs(this, pts[..<4], distance, 0, sk_max_t_value, (u32)pt_index, 0)
+                if distance > prev_d:
+                    ak.vector_append_t(&this.m_pts, pts[1])
+                    ak.vector_append_t(&this.m_pts, pts[2])
+                    ak.vector_append_t(&this.m_pts, pts[3])
+                    pt_index += 3
+            .close:
+                have_seen_close = true
+            _:
+                trap("VERIFY_NOT_REACHED")
+    this.m_iter_verb = iter.m_verb_index
+    this.m_iter_point = iter.m_pt_index
+    this.m_iter_weight = iter.m_weight_index
+
+    if not sk_is_finite(distance):
+        return none
+    if ak.vector_is_empty(&this.m_segments):
+        return none
+
+    if have_seen_close:
+        let prev_d = distance
+        let first_pt = *ak.vector_at(&this.m_pts, 0)
+        distance = sk_measure_compute_line_seg(this, *ak.vector_at(&this.m_pts, (usize)pt_index), first_pt, distance, (u32)pt_index)
+        if distance > prev_d:
+            ak.vector_append_t(&this.m_pts, first_pt)
+
+    return SkContourMeasure(segments = this.m_segments, pts = this.m_pts, length = distance, is_closed = have_seen_close)
+
+## Ported from src/core/SkContourMeasure.cpp:505 SkContourMeasureIter::SkContourMeasureIter
+## (reset): measures the contours of a copy of `path`; a path that is not finite has none.
+pub func sk_contour_measure_iter(path: const SkPath*, force_closed: bool, res_scale: f32 = 1.0) -> SkContourMeasureIter:
+    return SkContourMeasureIter(m_path = sk_path_clone(path), m_iter_verb = 0, m_iter_point = 0,
+        m_iter_weight = 0, m_tolerance = sk_cheap_dist_limit * (1.0 / res_scale),
+        m_force_closed = force_closed, m_valid = sk_path_is_finite(path),
+        m_segments = ak.vector_create_atomic[SkContourMeasureSegment](), m_pts = ak.vector_create_atomic[SkPoint]())
+
+## Ported from src/core/SkContourMeasure.cpp:525 SkContourMeasureIter::next: the next contour
+## with a length, none when there are no more.
+pub func sk_contour_measure_iter_next(this: SkContourMeasureIter*) -> SkContourMeasure?:
+    if not this.m_valid:
+        return none
+    while this.m_iter_verb < ak.vector_size(&this.m_path.m_verbs):
+        if let cm = sk_measure_build_segments(this):
+            return cm
+    return none
+
+# mark: Positions and tangents ==================================================================
+
+## Ported from src/core/SkContourMeasure.cpp:458 compute_pos_tan: the position and the
+## normalized tangent at `t` of the segment of type `seg_type` starting at `pts`.
+func sk_measure_compute_pos_tan(pts: const SkPoint[], seg_type: u8, t: f32) -> (SkPoint, SkPoint):
+    var pos = SkPoint(x = 0.0, y = 0.0)
+    var tangent = SkPoint(x = 0.0, y = 0.0)
+    if seg_type == sk_seg_line:
+        pos = SkPoint(x = sk_scalar_interp(pts[0].x, pts[1].x, t), y = sk_scalar_interp(pts[0].y, pts[1].y, t))
+        discard(sk_point_set_length(&tangent, pts[1].x - pts[0].x, pts[1].y - pts[0].y, 1.0))
+    elif seg_type == sk_seg_quad:
+        pos = sk_eval_quad_at(pts, t)
+        let raw = sk_eval_quad_tangent_at(pts, t)
+        discard(sk_point_set_length(&tangent, raw.x, raw.y, 1.0))
+    elif seg_type == sk_seg_conic:
+        let conic = sk_conic(pts[0], pts[2], pts[3], pts[1].x)
+        pos = sk_conic_eval_at(&conic, t)
+        let raw = sk_conic_eval_tangent_at(&conic, t)
+        discard(sk_point_set_length(&tangent, raw.x, raw.y, 1.0))
+    elif seg_type == sk_seg_cubic:
+        let (loc, raw) = sk_eval_cubic_at(pts, t)
+        pos = loc
+        discard(sk_point_set_length(&tangent, raw.x, raw.y, 1.0))
+    else:
+        trap("unknown segType")
+    return (pos, tangent)
+
+## Ported from src/core/SkContourMeasure.cpp:552 SkTKSearch over the segments' distances.
+func sk_measure_tk_search(base: const SkContourMeasureSegment[], key: f32) -> i32:
+    let count = base.length
+    if count == 0:
+        return ~0
+
+    var lo: u32 = 0
+    var hi = (u32)(count - 1)
+
+    while lo < hi:
+        let mid = (hi + lo) >> 1
+        if base[mid].distance < key:
+            lo = mid + 1
+        else:
+            hi = mid
+
+    if base[hi].distance < key:
+        hi += 1
+        return ~(i32)hi
+    elif key < base[hi].distance:
+        return ~(i32)hi
+    return (i32)hi
+
+## Ported from src/core/SkContourMeasure.cpp:579 SkContourMeasure::distanceToSegment: the
+## index of the segment at `distance` and the t there.
+func sk_contour_measure_distance_to_segment(this: const SkContourMeasure*, distance: f32) -> (usize, f32):
+    let segments = ak.vector_span_const(&this.segments)
+
+    var index = sk_measure_tk_search(segments, distance)
+    # don't care if we hit an exact match or not, so we xor index if it is negative
+    index = index ^ (index >> 31)
+    let seg = segments[(usize)index]
+
+    # now interpolate t-values with the prev segment (if possible)
+    var start_t: f32 = 0.0
+    var start_d: f32 = 0.0
+    # check if the prev segment is legal, and references the same set of points
+    if index > 0:
+        let prev = segments[(usize)index - 1]
+        start_d = prev.distance
+        if prev.pt_index == seg.pt_index:
+            start_t = sk_t_value_to_scalar(prev.t_value)
+
+    let t = start_t + (sk_t_value_to_scalar(seg.t_value) - start_t) * (distance - start_d) / (seg.distance - start_d)
+    return ((usize)index, t)
+
+## Ported from src/core/SkContourMeasure.cpp:609 SkContourMeasure::getPosTan: the position and
+## unit tangent at `distance` (pinned to the contour), none for a NaN distance or t.
+pub func sk_contour_measure_get_pos_tan(this: const SkContourMeasure*, distance0: f32) -> (SkPoint, SkPoint)?:
+    var distance = distance0
+    if sk_is_nan(distance):
+        return none
+
+    let length = this.length
+
+    # pin the distance to a legal range
+    if distance < 0.0:
+        distance = 0.0
+    elif distance > length:
+        distance = length
+
+    let (index, t) = sk_contour_measure_distance_to_segment(this, distance)
+    if sk_is_nan(t):
+        return none
+
+    let seg = *ak.vector_at_const(&this.segments, index)
+    let pts = ak.vector_span_const(&this.pts)
+    return sk_measure_compute_pos_tan(pts[(usize)seg.pt_index..], seg.kind, t)
+
+# mark: SkPathMeasure ===========================================================================
+
+## SkPathMeasure (include/core/SkPathMeasure.h): the current contour of a path.
+pub struct SkPathMeasure:
+    var m_iter: SkContourMeasureIter
+    var m_contour: SkContourMeasure?
+
+## Ported from src/core/SkPathMeasure.cpp:24 SkPathMeasure::SkPathMeasure(path, forceClosed,
+## resScale): measures the first contour.
+pub func sk_path_measure(path: const SkPath*, force_closed: bool = false, res_scale: f32 = 1.0) -> SkPathMeasure:
+    var measure = SkPathMeasure(m_iter = sk_contour_measure_iter(path, force_closed, res_scale), m_contour = none)
+    measure.m_contour = sk_contour_measure_iter_next(&measure.m_iter)
+    return measure
+
+## Ported from src/core/SkPathMeasure.cpp:37 SkPathMeasure::getLength.
+pub func sk_path_measure_get_length(this: const SkPathMeasure*) -> f32:
+    if let contour = this.m_contour:
+        return contour.length
+    return 0.0
+
+## Ported from src/core/SkPathMeasure.cpp:41 SkPathMeasure::getPosTan: the position and unit
+## tangent at `distance` along the current contour.
+pub func sk_path_measure_get_pos_tan(this: const SkPathMeasure*, distance: f32) -> (SkPoint, SkPoint)?:
+    if let contour = this.m_contour:
+        return sk_contour_measure_get_pos_tan(&contour, distance)
+    return none
+
+## Ported from src/core/SkPathMeasure.cpp:53 SkPathMeasure::isClosed.
+pub func sk_path_measure_is_closed(this: const SkPathMeasure*) -> bool:
+    if let contour = this.m_contour:
+        return contour.is_closed
+    return false
+
+## Ported from src/core/SkPathMeasure.cpp:57 SkPathMeasure::nextContour.
+pub func sk_path_measure_next_contour(this: SkPathMeasure*) -> bool:
+    this.m_contour = sk_contour_measure_iter_next(&this.m_iter)
+    if let _contour = this.m_contour:
+        return true
+    return false

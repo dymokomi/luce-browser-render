@@ -1,0 +1,297 @@
+#==============================================================================================
+#
+#   immutable_bitmap - ImmutableBitmap: a read-only image for painting
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/ImmutableBitmap.cpp (lines 1-358) with the declarations of
+#       Libraries/LibGfx/ImmutableBitmap.h (lines 1-85); the structs are in
+#       types_immutable_bitmap.
+#
+#       Replaced: Skia (DESIGN.md §7.3). The donor keeps an SkImage made from the bitmap (or
+#       from a surface snapshot, or YUV planes) and reads it back into a bitmap on demand; the
+#       port keeps the bitmap itself, so width, height and alpha type come from it and
+#       bitmap() never has to read pixels back. There is no GPU, so ensure_sk_image takes the
+#       donor's "no GPU" answer and the context lock is never taken. sk_image() traps.
+#       export_to_byte_buffer converts pixels as Skia's drawImageRect onto a surface of the
+#       export color type does (the raster pipeline's float math, see export_store_pixel);
+#       Tests/LibGfx/TestImmutableBitmap.cpp pins it. create_from_yuv is not supported
+#       (YUVData is Rust code in the donor; DESIGN.md §7.2 drops it).
+#
+#       The destructor only drops the SkImage under the context lock; nothing to port.
+#
+#==============================================================================================
+
+# mark: ExportFormat ===========================================================================
+
+## Ported from Libraries/LibGfx/ImmutableBitmap.cpp:26 Gfx::export_format_name.
+pub func export_format_name(format_: ExportFormat) -> ak.StringView:
+    match format_:
+        .gray8: return ak.sv("Gray8")
+        .alpha8: return ak.sv("Alpha8")
+        .rgb565: return ak.sv("RGB565")
+        .rgba5551: return ak.sv("RGBA5551")
+        .rgba4444: return ak.sv("RGBA4444")
+        .rgb888: return ak.sv("RGB888")
+        .rgba8888: return ak.sv("RGBA8888")
+        _: trap("VERIFY_NOT_REACHED")
+
+# mark: Accessors ==============================================================================
+
+## Ported from Libraries/LibGfx/ImmutableBitmap.cpp:46 Gfx::ImmutableBitmap::width.
+pub func immutable_bitmap_width(this: const ImmutableBitmap*) -> i32:
+    return bitmap_width(this.m_impl.bitmap else trap("VERIFY: ImmutableBitmap without pixels"))
+
+## Ported from Libraries/LibGfx/ImmutableBitmap.cpp:51 Gfx::ImmutableBitmap::height.
+pub func immutable_bitmap_height(this: const ImmutableBitmap*) -> i32:
+    return bitmap_height(this.m_impl.bitmap else trap("VERIFY: ImmutableBitmap without pixels"))
+
+## Ported from Libraries/LibGfx/ImmutableBitmap.cpp:56 Gfx::ImmutableBitmap::rect.
+pub func immutable_bitmap_rect(this: const ImmutableBitmap*) -> DevicePixelRect:
+    return DevicePixelRect(m_location = IntPoint(m_x = 0, m_y = 0), m_size = immutable_bitmap_size(this))
+
+## Ported from Libraries/LibGfx/ImmutableBitmap.cpp:61 Gfx::ImmutableBitmap::size.
+pub func immutable_bitmap_size(this: const ImmutableBitmap*) -> IntSize:
+    return IntSize(m_width = immutable_bitmap_width(this), m_height = immutable_bitmap_height(this))
+
+## Ported from Libraries/LibGfx/ImmutableBitmap.cpp:66 Gfx::ImmutableBitmap::alpha_type.
+pub func immutable_bitmap_alpha_type(this: const ImmutableBitmap*) -> AlphaType:
+    # We assume premultiplied alpha type for opaque surfaces since that is Skia's preferred alpha type and the
+    # effective pixel data is identical between premultiplied and unpremultiplied in that case.
+    # (The SkImage's alpha type is the bitmap's: see immutable_bitmap_create_color_space.)
+    let bitmap = this.m_impl.bitmap else trap("VERIFY: ImmutableBitmap without pixels")
+    return AlphaType.unpremultiplied if bitmap_alpha_type(bitmap) == AlphaType.unpremultiplied else AlphaType.premultiplied
+
+## Ported from Libraries/LibGfx/ImmutableBitmap.cpp:73 Gfx::ImmutableBitmap::sk_image.
+## Replaced: there is no SkImage; the pixels are immutable_bitmap_bitmap.
+pub func immutable_bitmap_sk_image(this: const ImmutableBitmap*) -> const SkImage*?:
+    discard(this)
+    trap("replaced: ImmutableBitmap::sk_image (use immutable_bitmap_bitmap)")
+
+## Ported from Libraries/LibGfx/ImmutableBitmap.cpp:188 Gfx::ImmutableBitmap::bitmap.
+pub func immutable_bitmap_bitmap(this: const ImmutableBitmap*) -> const Bitmap*?:
+    # The donor reads the SkImage back into a new BGRA8888 bitmap when it has none; the port
+    # always has the bitmap.
+    return this.m_impl.bitmap
+
+## Ported from Libraries/LibGfx/ImmutableBitmap.cpp:266 Gfx::ImmutableBitmap::get_pixel.
+pub func immutable_bitmap_get_pixel(this: const ImmutableBitmap*, x: i32, y: i32) -> Color:
+    return bitmap_get_pixel(this.m_impl.bitmap else trap("VERIFY: ImmutableBitmap without pixels"), x, y)
+
+## Ported from Libraries/LibGfx/ImmutableBitmap.cpp:241 Gfx::ImmutableBitmap::ensure_sk_image.
+pub func immutable_bitmap_ensure_sk_image(this: const ImmutableBitmap*, context: SkiaBackendContext*) -> bool:
+    if let existing = this.m_impl.context:
+        assert(existing == context)
+        return true
+    # No GPU, but raster image is still usable (the port has no GrDirectContext).
+    return true
+
+# mark: Export =================================================================================
+
+## Ported from Libraries/LibGfx/ImmutableBitmap.cpp:78 Gfx::bytes_per_pixel_for_export_format.
+func bytes_per_pixel_for_export_format(format_: ExportFormat) -> i32:
+    match format_:
+        .gray8, .alpha8: return 1
+        .rgb565, .rgba5551, .rgba4444: return 2
+        .rgb888: return 3
+        .rgba8888: return 4
+        _: trap("VERIFY_NOT_REACHED")
+
+# The raster pipeline's to_unorm(v, scale): round(min(max(0, v * scale), scale)), rounding to
+# even (SkRasterPipeline_opts.h, as store_8888/store_565/store_4444/store_a8 do).
+func export_to_unorm(v: f32, scale: f32) -> u32:
+    var scaled = v * scale
+    if not (scaled > 0.0):
+        scaled = 0.0
+    if scaled > scale:
+        scaled = scale
+    return (u32)ak.rounding_rint_f32(scaled)
+
+# The raster pipeline's `unpremul` stage's factor: 1/a where that is finite, else 0.
+func export_unpremul_scale(a: f32) -> f32:
+    let inverse: f32 = 1.0 / a
+    return inverse if inverse < math32.infinity else 0.0
+
+# One source pixel drawn with SrcOver onto a zeroed pixel of the export format, then stored:
+# the pixel loaded as floats (from_byte: byte * (1/255)), premultiplied if the image is
+# unpremultiplied, unpremultiplied again if the export is (Skia's `unpremul` stage), and
+# stored by the export color type's store stage. Writes `bytes_per_pixel` bytes to `target`.
+# Replaces the export's SkSurface + drawImageRect (ImmutableBitmap.cpp:176).
+func export_store_pixel(format_: ExportFormat, color: Color, source_unpremultiplied: bool, source_opaque: bool, target_premultiplied: bool, target: u8[]):
+    let k: f32 = 1.0 / 255.0
+    var r = (f32)color_red(&color) * k
+    var g = (f32)color_green(&color) * k
+    var b = (f32)color_blue(&color) * k
+    var a: f32 = 1.0 if source_opaque else (f32)color_alpha(&color) * k
+    if source_unpremultiplied:
+        r = r * a
+        g = g * a
+        b = b * a
+    # SrcOver onto transparent black leaves the source as it is.
+    match format_:
+        .gray8:
+            # kGray_8 is opaque: bt709_luminance_or_luma_to_alpha, then store_a8.
+            let luminance = r * 0.2126 + g * 0.7152 + b * 0.0722
+            target[0] = (u8)export_to_unorm(luminance, 255.0)
+        .alpha8:
+            target[0] = (u8)export_to_unorm(a, 255.0)
+        .rgb565:
+            # kRGB_565 is opaque: premultiplied channels are stored as they are.
+            let value = (export_to_unorm(r, 31.0) << 11) | (export_to_unorm(g, 63.0) << 5) | export_to_unorm(b, 31.0)
+            target[0] = (u8)value
+            target[1] = (u8)(value >> 8)
+        .rgba4444:
+            if not target_premultiplied:
+                let scale = export_unpremul_scale(a)
+                r = r * scale
+                g = g * scale
+                b = b * scale
+            let value = (export_to_unorm(r, 15.0) << 12) | (export_to_unorm(g, 15.0) << 8) | (export_to_unorm(b, 15.0) << 4) | export_to_unorm(a, 15.0)
+            target[0] = (u8)value
+            target[1] = (u8)(value >> 8)
+        .rgba8888:
+            if not target_premultiplied:
+                let scale = export_unpremul_scale(a)
+                r = r * scale
+                g = g * scale
+                b = b * scale
+            target[0] = (u8)export_to_unorm(r, 255.0)
+            target[1] = (u8)export_to_unorm(g, 255.0)
+            target[2] = (u8)export_to_unorm(b, 255.0)
+            target[3] = (u8)export_to_unorm(a, 255.0)
+        _: trap("VERIFY_NOT_REACHED")
+
+## Ported from Libraries/LibGfx/ImmutableBitmap.cpp:121 Gfx::ImmutableBitmap::export_to_byte_buffer.
+pub func immutable_bitmap_export_to_byte_buffer(this: const ImmutableBitmap*, format_: ExportFormat, flags: i32, target_width: i32?, target_height: i32?) -> BitmapExportResult!:
+    # (SkiaBackendContext::the() is always null in the port, so there is no GPU image to make.)
+
+    var width = target_width else immutable_bitmap_width(this)
+    var height = target_height else immutable_bitmap_height(this)
+
+    if format_ == ExportFormat.rgb888 and (width != immutable_bitmap_width(this) or height != immutable_bitmap_height(this)):
+        ak.dbgln("FIXME: Ignoring target width and height because scaling is not implemented for this export format.")
+        width = immutable_bitmap_width(this)
+        height = immutable_bitmap_height(this)
+
+    let number_of_bytes = bytes_per_pixel_for_export_format(format_)
+    # Checked<size_t> buffer_pitch = width; buffer_pitch *= number_of_bytes;
+    let buffer_pitch = (usize)(i64)width *? (usize)number_of_bytes else error(ak.ak_error, "Gfx::ImmutableBitmap::export_to_byte_buffer size overflow")
+
+    if (buffer_pitch *? (usize)(i64)height) == none:
+        error(ak.ak_error, "Gfx::ImmutableBitmap::export_to_byte_buffer size overflow")
+
+    var buffer = ak.byte_buffer_create_zeroed(buffer_pitch * (usize)height) else trap("MUST: ByteBuffer::create_zeroed")
+
+    if width > 0 and height > 0:
+        let raw_buffer = ak.byte_buffer_bytes(&buffer)
+        if format_ == ExportFormat.rgb888:
+            # 24 bit RGB is not supported by Skia, so we need to handle this format ourselves.
+            for y in 0..<height:
+                let target_y = height - y - 1 if (flags & export_flags_flip_y) != 0 else y
+                for x in 0..<width:
+                    let pixel = immutable_bitmap_get_pixel(this, x, y)
+                    let buffer_offset = ((usize)target_y * buffer_pitch) + ((usize)x * 3)
+                    raw_buffer[buffer_offset + 0] = color_red(&pixel)
+                    raw_buffer[buffer_offset + 1] = color_green(&pixel)
+                    raw_buffer[buffer_offset + 2] = color_blue(&pixel)
+        else:
+            if format_ == ExportFormat.rgba5551:
+                # export_format_to_skia_color_type answers kUnknown_SkColorType for it, and
+                # SkSurfaces::WrapPixels fails on that, which the donor VERIFYs.
+                ak.dbgln("FIXME: Support conversion to RGBA5551.")
+                trap("VERIFY: no surface for RGBA5551")
+            let bitmap = this.m_impl.bitmap else trap("VERIFY: ImmutableBitmap without pixels")
+            let source_unpremultiplied = bitmap_alpha_type(bitmap) == AlphaType.unpremultiplied
+            # RGBx8888 is kRGB_888x, whose alpha reads as opaque.
+            let source_opaque = bitmap_format(bitmap) == BitmapFormat.rg_bx8888
+            let target_premultiplied = (flags & export_flags_premultiply_alpha) != 0
+            let source_width = immutable_bitmap_width(this)
+            let source_height = immutable_bitmap_height(this)
+            for y in 0..<height:
+                # FlipY: canvas->translate(0, height); canvas->scale(1, -1).
+                let target_y = height - y - 1 if (flags & export_flags_flip_y) != 0 else y
+                # drawImageRect(sk_image, {0, 0, width, height}, nearest): the source pixel
+                # under this pixel's center.
+                let source_y = export_nearest_source(y, height, source_height)
+                for x in 0..<width:
+                    let source_x = export_nearest_source(x, width, source_width)
+                    let color = bitmap_get_pixel(bitmap, source_x, source_y)
+                    let offset = (usize)target_y * buffer_pitch + (usize)x * (usize)number_of_bytes
+                    export_store_pixel(format_, color, source_unpremultiplied, source_opaque, target_premultiplied, raw_buffer[offset..<offset + (usize)number_of_bytes])
+    else:
+        assert(ak.byte_buffer_is_empty(&buffer))
+
+    return BitmapExportResult(buffer = buffer, width = width, height = height)
+
+# The source row (or column) nearest-neighbor sampling reads for target index `i` when
+# `target_count` pixels cover `source_count`: floor((i + 0.5) * source / target), clamped.
+func export_nearest_source(i: i32, target_count: i32, source_count: i32) -> i32:
+    if target_count == source_count:
+        return i
+    let position = ((f32)i + 0.5) * ((f32)source_count / (f32)target_count)
+    var index = (i32)math32.floor(position)
+    if index < 0:
+        index = 0
+    if index >= source_count:
+        index = source_count - 1
+    return index
+
+# mark: Creation ===============================================================================
+
+# `adopt_ref(*new ImmutableBitmap(make<ImmutableBitmapImpl>(move(impl))))`.
+func immutable_bitmap_adopt(impl: ImmutableBitmapImpl) -> ImmutableBitmap*:
+    let owned = new ImmutableBitmapImpl(context = impl.context, sk_image = impl.sk_image, sk_bitmap = impl.sk_bitmap, bitmap = impl.bitmap, color_space = impl.color_space) else trap("out of memory")
+    let this = new ImmutableBitmap(m_impl = owned) else trap("out of memory")
+    immutable_bitmap_construct(this, owned)
+    return this
+
+## Ported from Libraries/LibGfx/ImmutableBitmap.cpp:204 Gfx::ImmutableBitmap::create_from_yuv.
+## Not supported: YUVData is Rust code in the donor and is dropped (DESIGN.md §7.2).
+pub func immutable_bitmap_create_from_yuv(yuv_data: YuvData*) -> ImmutableBitmap*!:
+    discard(yuv_data)
+    trap("unsupported: YUVData (Rust in the donor; dropped by DESIGN.md §7.2)")
+
+## Ported from Libraries/LibGfx/ImmutableBitmap.cpp:283 Gfx::ImmutableBitmap::create.
+pub func immutable_bitmap_create_color_space(bitmap: const Bitmap*, color_space: ColorSpace) -> ImmutableBitmap*:
+    # The donor installs the bitmap's pixels in an SkBitmap (color type from the format, alpha
+    # type premultiplied or unpremultiplied as the bitmap's) and makes an SkImage of them;
+    # the port keeps the bitmap.
+    var sk_bitmap: SkBitmap
+    return immutable_bitmap_adopt(ImmutableBitmapImpl(context = none, sk_image = none, sk_bitmap = sk_bitmap, bitmap = bitmap, color_space = color_space))
+
+## Ported from Libraries/LibGfx/ImmutableBitmap.cpp:301 Gfx::ImmutableBitmap::create.
+pub func immutable_bitmap_create_alpha_type(bitmap: const Bitmap*, alpha_type: AlphaType, color_space: ColorSpace) -> ImmutableBitmap*:
+    # Convert the source bitmap to the right alpha type on a mismatch. We want to do this when converting from a
+    # Bitmap to an ImmutableBitmap, since at that point we usually know the right alpha type to use in context.
+    var converted_bitmap = bitmap
+    if bitmap_alpha_type(bitmap) != alpha_type:
+        let new_bitmap = bitmap_clone(bitmap) else trap("MUST: Bitmap::clone")
+        bitmap_set_alpha_type_destructive(new_bitmap, alpha_type)
+        converted_bitmap = new_bitmap
+
+    return immutable_bitmap_create_color_space(converted_bitmap, color_space)
+
+## Ported from Libraries/LibGfx/ImmutableBitmap.cpp:316 Gfx::ImmutableBitmap::create_snapshot_from_painting_surface.
+pub func immutable_bitmap_create_snapshot_from_painting_surface(painting_surface: PaintingSurface*) -> ImmutableBitmap*:
+    painting_surface_lock_context(painting_surface)
+    # sk_image_snapshot<sk_sp<SkImage>>(): a copy of the surface's current pixels.
+    let snapshot = painting_surface_snapshot_bitmap(painting_surface)
+    painting_surface_unlock_context(painting_surface)
+
+    var color_space: ColorSpace = ---
+    color_space_construct(&color_space)
+    var sk_bitmap: SkBitmap
+    return immutable_bitmap_adopt(ImmutableBitmapImpl(context = painting_surface_skia_backend_context(painting_surface), sk_image = none, sk_bitmap = sk_bitmap, bitmap = snapshot, color_space = color_space))
+
+## Ported from Libraries/LibGfx/ImmutableBitmap.cpp:332 Gfx::ImmutableBitmap::ImmutableBitmap.
+pub func immutable_bitmap_construct(this: ImmutableBitmap*, impl: ImmutableBitmapImpl*):
+    this.m_impl = impl
+
+## Ported from Libraries/LibGfx/ImmutableBitmap.cpp:344 Gfx::ImmutableBitmap::lock_context.
+pub func immutable_bitmap_lock_context(this: ImmutableBitmap*):
+    # `if (context) context->lock();`: the port has no SkiaBackendContext, so `context` is none.
+    assert(this.m_impl.context == none)
+
+## Ported from Libraries/LibGfx/ImmutableBitmap.cpp:351 Gfx::ImmutableBitmap::unlock_context.
+pub func immutable_bitmap_unlock_context(this: ImmutableBitmap*):
+    # `if (context) context->unlock();`: see immutable_bitmap_lock_context.
+    assert(this.m_impl.context == none)

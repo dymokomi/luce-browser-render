@@ -14,7 +14,10 @@
 
 ## Gfx::Path (Libraries/LibGfx/Path.h:56).
 pub struct Path:
-    pub var m_impl: void*?  # cut (upward reference, DESIGN.md §4.1.3): AK::NonnullOwnPtr<Gfx::PathImpl>
+    # AK::NonnullOwnPtr<Gfx::PathImpl> in the donor. Region r10: the implementation is
+    # PathImplRaster (which replaces PathImplSkia, the only PathImpl); none is the empty path a
+    # default-constructed Path holds (path.lucb).
+    pub var m_impl: PathImplRaster*?
 
 ## Gfx::Path::CapStyle (Libraries/LibGfx/Path.h:80).
 pub enum PathCapStyle as i32:

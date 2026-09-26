@@ -1,0 +1,193 @@
+#==============================================================================================
+#
+#   painting_surface - PaintingSurface: a drawing target backed by a bitmap
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/PaintingSurface.cpp (lines 1-243). The struct and its Impl
+#       are in types_painting_surface.
+#
+#       Replaced: Skia (DESIGN.md §7.3). The donor's surface is an SkSurface: on the GPU when
+#       a SkiaBackendContext exists, otherwise wrapping a bitmap's pixels. The port has no
+#       GPU backend, so every surface takes the donor's CPU path: its pixels are a Bitmap, and
+#       the raster module draws into them between painting_surface_begin_raster and
+#       painting_surface_end_raster (what PainterSkia's `with_canvas` brackets). Surfaces over
+#       Metal textures or Vulkan images (create_from_shared_image_buffer) are not supported,
+#       and the accessors that expose Skia objects (canvas, sk_surface, sk_image_snapshot)
+#       trap; painting_surface_snapshot_bitmap stands in for sk_image_snapshot.
+#
+#       The destructor only drops the SkSurface under the context lock; nothing to port.
+#
+#==============================================================================================
+
+# mark: Creation ===============================================================================
+
+# `adopt_ref(*new PaintingSurface(make<Impl>(context, size, surface, bitmap)))` on the CPU path.
+func painting_surface_create_over_bitmap(bitmap: Bitmap*) -> PaintingSurface*:
+    let impl = new PaintingSurfaceImpl(context = none, size = bitmap_size(bitmap), bitmap = bitmap) else trap("out of memory")
+    let this = new PaintingSurface(m_impl = impl) else trap("out of memory")
+    painting_surface_construct(this, impl)
+    return this
+
+## Ported from Libraries/LibGfx/PaintingSurface.cpp:99 Gfx::PaintingSurface::create_with_size.
+pub func painting_surface_create_with_size(size: IntSize, color_type: BitmapFormat, alpha_type: AlphaType) -> PaintingSurface*:
+    # (SkiaBackendContext::the() is always null in the port: no GPU render target.)
+    let bitmap = bitmap_create_alpha_type(color_type, alpha_type, size) else trap("MUST: Bitmap::create")
+    return painting_surface_create_over_bitmap(bitmap)
+
+## Ported from Libraries/LibGfx/PaintingSurface.cpp:121 Gfx::PaintingSurface::wrap_bitmap.
+pub func painting_surface_wrap_bitmap(bitmap: Bitmap*) -> PaintingSurface*:
+    return painting_surface_create_over_bitmap(bitmap)
+
+## Ported from Libraries/LibGfx/PaintingSurface.cpp:132 Gfx::PaintingSurface::create_from_shared_image_buffer.
+## Replaced: needs a Metal texture from an IOSurface; the port has no GPU backend.
+pub func painting_surface_create_from_shared_image_buffer(shared_image_buffer: SharedImageBuffer*, context: SkiaBackendContext*, origin: PaintingSurfaceOrigin = PaintingSurfaceOrigin.top_left) -> PaintingSurface*:
+    discard(shared_image_buffer)
+    discard(context)
+    discard(origin)
+    trap("unsupported: GPU painting surfaces (Metal/Vulkan) in the CPU-only port")
+
+## Ported from Libraries/LibGfx/PaintingSurface.cpp:151 Gfx::PaintingSurface::PaintingSurface.
+pub func painting_surface_construct(this: PaintingSurface*, impl: PaintingSurfaceImpl*):
+    this.m_impl = impl
+
+# mark: Pixels =================================================================================
+
+## Ported from Libraries/LibGfx/PaintingSurface.cpp:163 Gfx::PaintingSurface::read_into_bitmap.
+pub func painting_surface_read_into_bitmap(this: PaintingSurface*, bitmap: Bitmap*):
+    painting_surface_lock_context(this)
+    # m_impl->surface->readPixels(pixmap of `bitmap`, 0, 0): a conversion into the bitmap's
+    # color and alpha types.
+    painting_surface_copy_pixels(this.m_impl.bitmap, bitmap)
+    painting_surface_unlock_context(this)
+
+## Ported from Libraries/LibGfx/PaintingSurface.cpp:174 Gfx::PaintingSurface::write_from_bitmap.
+pub func painting_surface_write_from_bitmap(this: PaintingSurface*, bitmap: const Bitmap*):
+    painting_surface_lock_context(this)
+    # m_impl->surface->writePixels(pixmap of `bitmap`, 0, 0)
+    painting_surface_copy_pixels(bitmap, this.m_impl.bitmap)
+    painting_surface_unlock_context(this)
+
+# SkSurface::readPixels / writePixels at (0, 0): the pixels of the overlapping rectangle of
+# `source`, converted to `target`'s color and alpha types.
+func painting_surface_copy_pixels(source: const Bitmap*, target: Bitmap*):
+    let width = bitmap_width(source) if bitmap_width(source) < bitmap_width(target) else bitmap_width(target)
+    let height = bitmap_height(source) if bitmap_height(source) < bitmap_height(target) else bitmap_height(target)
+    if width <= 0 or height <= 0:
+        return
+    if bitmap_format(source) == bitmap_format(target) and bitmap_alpha_type(source) == bitmap_alpha_type(target):
+        for y in 0..<height:
+            let source_row = bitmap_scanline_const(source, y) else trap("VERIFY")
+            let target_row = bitmap_scanline(target, y) else trap("VERIFY")
+            for x in 0..<(usize)width:
+                target_row[x] = source_row[x]
+        return
+    # Through premultiplied RGBA, one row at a time.
+    let row_bytes = ak.alloc_atomic((usize)width * 4)
+    defer ak.kfree(row_bytes.data)
+    let row = u32[]((u32*)row_bytes.data, (usize)width)
+    for y in 0..<height:
+        let source_row = bitmap_scanline_const(source, y) else trap("VERIFY")
+        for x in 0..<(usize)width:
+            var rgba = raster_pixel_to_rgba(bitmap_format(source), source_row[x])
+            if bitmap_alpha_type(source) == AlphaType.unpremultiplied and bitmap_has_alpha_channel(source):
+                rgba = raster_premultiply_pixel(rgba)
+            row[x] = rgba
+        let target_row = bitmap_scanline(target, y) else trap("VERIFY")
+        for x in 0..<(usize)width:
+            var rgba = row[x]
+            if bitmap_alpha_type(target) == AlphaType.unpremultiplied and bitmap_has_alpha_channel(target):
+                rgba = raster_unpremultiply_pixel(rgba)
+            target_row[x] = raster_rgba_to_pixel(bitmap_format(target), rgba)
+
+## Ported from Libraries/LibGfx/PaintingSurface.cpp:205 Gfx::PaintingSurface::notify_content_will_change.
+pub func painting_surface_notify_content_will_change(this: PaintingSurface*):
+    painting_surface_lock_context(this)
+    # SkSurface::notifyContentWillChange(kDiscard_ContentChangeMode) detaches snapshots that
+    # share the pixels; the port's snapshots are copies (painting_surface_snapshot_bitmap).
+    painting_surface_unlock_context(this)
+
+## The raster module's view of the surface's pixels, valid until the matching
+## painting_surface_end_raster: premultiplied RGBA, width == stride. Replaces the SkCanvas
+## the donor draws on (PainterSkia's `with_canvas`). Calls nest.
+pub func painting_surface_begin_raster(this: PaintingSurface*) -> raster.PixmapMut:
+    let impl = this.m_impl
+    let width = (u32)bitmap_width(impl.bitmap)
+    let height = (u32)bitmap_height(impl.bitmap)
+    if impl.raster_depth == 0:
+        if raster_can_alias_bitmap(impl.bitmap):
+            let pixels = bitmap_scanline_u8(impl.bitmap, 0) else trap("VERIFY")
+            impl.raster_pixels = u8[](pixels, (usize)width * (usize)height * 4)
+            impl.raster_aliases_bitmap = true
+        else:
+            let needed = (usize)width * (usize)height * 4
+            if impl.raster_pixels.length != needed or impl.raster_aliases_bitmap:
+                impl.raster_pixels = ak.alloc_atomic(needed)
+            impl.raster_aliases_bitmap = false
+            raster_load_bitmap(impl.bitmap, impl.raster_pixels)
+    impl.raster_depth += 1
+    return raster.PixmapMut.from_bytes(impl.raster_pixels, width, height) else trap("VERIFY: raster pixmap")
+
+## Ends the drawing begun by painting_surface_begin_raster: the outermost call converts the
+## drawn pixels back into the surface's bitmap when they are not the bitmap's own.
+pub func painting_surface_end_raster(this: PaintingSurface*):
+    let impl = this.m_impl
+    assert(impl.raster_depth > 0)
+    impl.raster_depth -= 1
+    if impl.raster_depth == 0 and not impl.raster_aliases_bitmap:
+        raster_store_bitmap(impl.raster_pixels, impl.bitmap)
+
+## The surface's pixels as a new bitmap: replaces sk_image_snapshot<sk_sp<SkImage>>() (an
+## SkImage of the surface's current contents).
+pub func painting_surface_snapshot_bitmap(this: const PaintingSurface*) -> Bitmap*:
+    return bitmap_clone(this.m_impl.bitmap) else trap("MUST: snapshot")
+
+## The bitmap the surface draws into (the donor's Impl::bitmap).
+pub func painting_surface_bitmap(this: const PaintingSurface*) -> Bitmap*:
+    return this.m_impl.bitmap
+
+# mark: Accessors ==============================================================================
+
+## Ported from Libraries/LibGfx/PaintingSurface.cpp:185 Gfx::PaintingSurface::size.
+pub func painting_surface_size(this: const PaintingSurface*) -> IntSize:
+    return this.m_impl.size
+
+## Ported from Libraries/LibGfx/PaintingSurface.cpp:190 Gfx::PaintingSurface::rect.
+pub func painting_surface_rect(this: const PaintingSurface*) -> DevicePixelRect:
+    return DevicePixelRect(m_location = IntPoint(m_x = 0, m_y = 0), m_size = this.m_impl.size)
+
+## Ported from Libraries/LibGfx/PaintingSurface.cpp:195 Gfx::PaintingSurface::canvas.
+## Replaced: there is no SkCanvas; draw through painting_surface_begin_raster.
+pub func painting_surface_canvas(this: const PaintingSurface*) -> SkCanvas*:
+    discard(this)
+    trap("replaced: PaintingSurface::canvas (use painting_surface_begin_raster)")
+
+## Ported from Libraries/LibGfx/PaintingSurface.cpp:200 Gfx::PaintingSurface::sk_surface.
+## Replaced: there is no SkSurface; draw through painting_surface_begin_raster.
+pub func painting_surface_sk_surface(this: const PaintingSurface*) -> SkSurface*:
+    discard(this)
+    trap("replaced: PaintingSurface::sk_surface (use painting_surface_begin_raster)")
+
+## Ported from Libraries/LibGfx/PaintingSurface.cpp:213 Gfx::PaintingSurface::sk_image_snapshot.
+## Replaced: there is no SkImage; use painting_surface_snapshot_bitmap.
+pub func painting_surface_sk_image_snapshot_sk_sp(this: const PaintingSurface*) -> void*?:
+    discard(this)
+    trap("replaced: PaintingSurface::sk_image_snapshot (use painting_surface_snapshot_bitmap)")
+
+## Ported from Libraries/LibGfx/PaintingSurface.cpp:218 Gfx::PaintingSurface::skia_backend_context.
+pub func painting_surface_skia_backend_context(this: const PaintingSurface*) -> SkiaBackendContext*?:
+    return this.m_impl.context
+
+## Ported from Libraries/LibGfx/PaintingSurface.cpp:223 Gfx::PaintingSurface::flush.
+pub func painting_surface_flush(this: PaintingSurface*):
+    if ak.function1_is_set(&this.on_flush):
+        ak.function1_call(&this.on_flush, this)
+
+## Ported from Libraries/LibGfx/PaintingSurface.cpp:229 Gfx::PaintingSurface::lock_context.
+pub func painting_surface_lock_context(this: const PaintingSurface*):
+    # `if (context) context->lock();`: the port has no SkiaBackendContext, so `context` is none.
+    assert(this.m_impl.context == none)
+
+## Ported from Libraries/LibGfx/PaintingSurface.cpp:236 Gfx::PaintingSurface::unlock_context.
+pub func painting_surface_unlock_context(this: const PaintingSurface*):
+    # `if (context) context->unlock();`: see painting_surface_lock_context.
+    assert(this.m_impl.context == none)

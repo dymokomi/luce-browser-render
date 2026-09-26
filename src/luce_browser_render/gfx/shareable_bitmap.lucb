@@ -1,0 +1,31 @@
+#==============================================================================================
+#
+#   shareable_bitmap - ShareableBitmap: a bitmap that can cross a process boundary
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/ShareableBitmap.cpp (lines 1-80). The IPC encode/decode
+#       specializations are not ported (LibIPC is not part of the port); the defaulted
+#       copy and move operations are Luce's struct copy.
+#
+#==============================================================================================
+
+## Ported from Libraries/LibGfx/ShareableBitmap.cpp:16 Gfx::ShareableBitmap::ShareableBitmap.
+pub func shareable_bitmap_construct(this: ShareableBitmap*):
+    this.m_bitmap = none
+
+## Ported from Libraries/LibGfx/ShareableBitmap.cpp:18 Gfx::ShareableBitmap::ShareableBitmap.
+pub func shareable_bitmap_construct_bitmap(this: ShareableBitmap*, bitmap: Bitmap*, arg1: ShareableBitmapTag):
+    discard(arg1)
+    this.m_bitmap = bitmap
+
+## Ported from Libraries/LibGfx/ShareableBitmap.cpp:31 Gfx::ShareableBitmap::is_valid.
+pub func shareable_bitmap_is_valid(this: const ShareableBitmap*) -> bool:
+    return this.m_bitmap != none
+
+## Ported from Libraries/LibGfx/ShareableBitmap.cpp:33 Gfx::ShareableBitmap::bitmap.
+pub func shareable_bitmap_bitmap_const(this: const ShareableBitmap*) -> const Bitmap*?:
+    return this.m_bitmap
+
+## Ported from Libraries/LibGfx/ShareableBitmap.cpp:34 Gfx::ShareableBitmap::bitmap.
+pub func shareable_bitmap_bitmap(this: ShareableBitmap*) -> Bitmap*?:
+    return this.m_bitmap

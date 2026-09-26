@@ -1,0 +1,287 @@
+#==============================================================================================
+#
+#   raster_utils - conversions between gfx types and the raster module
+#
+#   DESCRIPTION:
+#       Replaces Libraries/LibGfx/SkiaUtils.{h,cpp} (DESIGN.md §7.2): where LibGfx converts
+#       its types to Skia's (to_skia_color, to_skia_blender, to_skia_sampling_options, ...),
+#       the port converts them to the raster module's (the tiny-skia port, DESIGN.md §7.3).
+#       Each function names the SkiaUtils function it replaces.
+#
+#       The raster module draws into premultiplied RGBA bytes. A Bitmap may hold any of the
+#       four 8888 orders, premultiplied or not, so drawing into or from one goes through
+#       raster_load_bitmap / raster_store_bitmap, which convert as Skia does when it reads
+#       and writes pixels of those color and alpha types:
+#       - BGRA8888 is kBGRA_8888, RGBA8888 is kRGBA_8888 and RGBx8888 is kRGB_888x (alpha
+#         read as opaque, written as 0xFF); BGRx8888 is kBGRA_8888 with an opaque alpha
+#         type, so its alpha byte is used as stored (SkiaUtils.h's FIXME);
+#       - premultiplying is SkOpts::RGBA_to_rgbA ((c * a + 127) // 255) and unpremultiplying
+#         SkOpts::rgbA_to_RGBA (RasterPipeline's float math, rounded to even), which is
+#         also what SkConvertPixels uses between the two alpha types.
+#
+#==============================================================================================
+
+# mark: Premultiplication ======================================================================
+
+# Skia's RGBA_to_rgbA on one pixel (SkSwizzler_opts.inc RGBA_to_rgbA_portable): the alpha
+# byte is the top one, so the same code serves both channel orders.
+func raster_premultiply_pixel(pixel: u32) -> u32:
+    let a = (pixel >> 24) & 0xFF
+    let b = (((pixel >> 16) & 0xFF) * a + 127) // 255
+    let g = (((pixel >> 8) & 0xFF) * a + 127) // 255
+    let r = ((pixel & 0xFF) * a + 127) // 255
+    return (a << 24) | (b << 16) | (g << 8) | r
+
+# unpremul_simulating_RP (SkSwizzler_opts.inc): the channel normalized to [0, 1], divided by
+# the normalized alpha, scaled back and rounded to even as RasterPipeline's store_8888 does.
+func raster_unpremultiply_channel(reciprocal_a: f32, c: f32) -> u32:
+    let normalized_c = c * (1.0 / 255.0)
+    var answer = normalized_c * reciprocal_a * 255.0
+    if answer > 255.0:
+        answer = 255.0
+    return (u32)ak.rounding_rint_f32(answer)
+
+# Skia's rgbA_to_RGBA on one pixel (rgbA_to_CCCA without SK_USE_FAST_UNPREMUL).
+func raster_unpremultiply_pixel(pixel: u32) -> u32:
+    let a = (f32)((pixel >> 24) & 0xFF)
+    let normalized_a = a * (1.0 / 255.0)
+    let reciprocal_a: f32 = 1.0 / normalized_a if normalized_a != 0.0 else 0.0
+    let b = raster_unpremultiply_channel(reciprocal_a, (f32)((pixel >> 16) & 0xFF))
+    let g = raster_unpremultiply_channel(reciprocal_a, (f32)((pixel >> 8) & 0xFF))
+    let r = raster_unpremultiply_channel(reciprocal_a, (f32)(pixel & 0xFF))
+    return ((pixel >> 24) << 24) | (b << 16) | (g << 8) | r
+
+## Premultiplies a row of 8888 pixels in place, as SkOpts::RGBA_to_rgbA does.
+pub func raster_premultiply_row(row: u32[]):
+    for i in 0..<row.length:
+        row[i] = raster_premultiply_pixel(row[i])
+
+## Unpremultiplies a row of 8888 pixels in place, as SkOpts::rgbA_to_RGBA does.
+pub func raster_unpremultiply_row(row: u32[]):
+    for i in 0..<row.length:
+        row[i] = raster_unpremultiply_pixel(row[i])
+
+# mark: Bitmap pixels ==========================================================================
+
+# A pixel of `format` (as the u32 the bitmap stores) as premultiplied-or-not RGBA in the byte
+# order the raster module reads (R in the low byte).
+func raster_pixel_to_rgba(format_: BitmapFormat, pixel: u32) -> u32:
+    match format_:
+        .rgba8888: return pixel
+        .rg_bx8888: return pixel | 0xFF000000
+        .bgra8888, .bg_rx8888:
+            return (pixel & 0xFF00FF00) | ((pixel >> 16) & 0xFF) | ((pixel & 0xFF) << 16)
+        _: trap("VERIFY_NOT_REACHED")
+
+# The inverse of raster_pixel_to_rgba.
+func raster_rgba_to_pixel(format_: BitmapFormat, rgba: u32) -> u32:
+    match format_:
+        .rgba8888: return rgba
+        .rg_bx8888: return rgba | 0xFF000000
+        .bgra8888, .bg_rx8888:
+            return (rgba & 0xFF00FF00) | ((rgba >> 16) & 0xFF) | ((rgba & 0xFF) << 16)
+        _: trap("VERIFY_NOT_REACHED")
+
+## Whether the raster module can draw straight into `bitmap`'s pixels: premultiplied
+## RGBA8888 rows without padding (the raster module requires width == stride).
+pub func raster_can_alias_bitmap(bitmap: const Bitmap*) -> bool:
+    return bitmap_format(bitmap) == BitmapFormat.rgba8888 and bitmap_alpha_type(bitmap) == AlphaType.premultiplied and bitmap_pitch(bitmap) == (usize)bitmap_width(bitmap) * 4
+
+## Converts `bitmap`'s pixels into `target` (width * height * 4 bytes) as premultiplied RGBA,
+## the form the raster module draws with. `as_premultiplied` reads unpremultiplied pixels as
+## if they were premultiplied (SkPixmap::scalePixels's trick for scaling unpremultiplied
+## pixels without premultiplying them).
+pub func raster_load_bitmap(bitmap: const Bitmap*, target: u8[], as_premultiplied: bool = false):
+    let width = (usize)bitmap_width(bitmap)
+    let height = bitmap_height(bitmap)
+    assert(target.length >= width * (usize)height * 4)
+    let premultiply = bitmap_alpha_type(bitmap) == AlphaType.unpremultiplied and bitmap_has_alpha_channel(bitmap) and not as_premultiplied
+    let words = u32[]((u32*)target.data, width * (usize)height)
+    for y in 0..<height:
+        let row = bitmap_scanline_const(bitmap, y) else trap("VERIFY: bitmap data")
+        let base = (usize)y * width
+        for x in 0..<width:
+            var rgba = raster_pixel_to_rgba(bitmap_format(bitmap), row[x])
+            if premultiply:
+                rgba = raster_premultiply_pixel(rgba)
+            words[base + x] = rgba
+
+## Converts premultiplied RGBA `source` (width * height * 4 bytes) into `bitmap`'s format and
+## alpha type. `as_premultiplied` stores the bytes as they are into an unpremultiplied bitmap
+## (the counterpart of raster_load_bitmap's).
+pub func raster_store_bitmap(source: const u8[], bitmap: Bitmap*, as_premultiplied: bool = false):
+    let width = (usize)bitmap_width(bitmap)
+    let height = bitmap_height(bitmap)
+    assert(source.length >= width * (usize)height * 4)
+    let unpremultiply = bitmap_alpha_type(bitmap) == AlphaType.unpremultiplied and bitmap_has_alpha_channel(bitmap) and not as_premultiplied
+    let words = u32[]((u32*)source.data, width * (usize)height)
+    for y in 0..<height:
+        let row = bitmap_scanline(bitmap, y) else trap("VERIFY: bitmap data")
+        let base = (usize)y * width
+        for x in 0..<width:
+            var rgba = words[base + x]
+            if unpremultiply:
+                rgba = raster_unpremultiply_pixel(rgba)
+            row[x] = raster_rgba_to_pixel(bitmap_format(bitmap), rgba)
+
+# mark: SkiaUtils ==============================================================================
+
+## Replaces SkiaUtils.h to_skia_color (SkColorSetARGB) with the raster module's color.
+pub func to_raster_color(color: Color) -> raster.Color:
+    return raster.Color.from_rgba8(color_red(&color), color_green(&color), color_blue(&color), color_alpha(&color))
+
+## Replaces SkiaUtils.h's SkMatrix::MakeAll(a, c, e, b, d, f, 0, 0, 1) of an AffineTransform.
+pub func to_raster_transform(transform: AffineTransform) -> raster.Transform:
+    return raster.Transform.from_row(affine_transform_a(&transform), affine_transform_b(&transform), affine_transform_c(&transform), affine_transform_d(&transform), affine_transform_e(&transform), affine_transform_f(&transform))
+
+## Replaces SkiaUtils.h to_skia_path_fill_type.
+pub func to_raster_fill_rule(winding_rule: WindingRule) -> raster.FillRule:
+    match winding_rule:
+        .nonzero: return raster.FillRule.winding
+        .even_odd: return raster.FillRule.even_odd
+        _: trap("VERIFY_NOT_REACHED")
+
+## Replaces SkiaUtils.h to_skia_cap.
+pub func to_raster_cap(cap_style: PathCapStyle) -> raster.LineCap:
+    match cap_style:
+        .butt: return raster.LineCap.butt
+        .round: return raster.LineCap.round
+        .square: return raster.LineCap.square
+        _: trap("VERIFY_NOT_REACHED")
+
+## Replaces SkiaUtils.h to_skia_join.
+pub func to_raster_join(join_style: PathJoinStyle) -> raster.LineJoin:
+    match join_style:
+        .round: return raster.LineJoin.round
+        .bevel: return raster.LineJoin.bevel
+        .miter: return raster.LineJoin.miter
+        _: trap("VERIFY_NOT_REACHED")
+
+## Replaces SkiaUtils.h to_skia_sampling_options. The raster module has no mipmaps, so
+## BilinearMipmap samples bilinearly (FIXME: mipmaps for minification).
+pub func to_raster_filter_quality(scaling_mode: ScalingMode) -> raster.FilterQuality:
+    match scaling_mode:
+        .none_: return raster.FilterQuality.nearest       # SkSamplingOptions(): nearest
+        .bilinear: return raster.FilterQuality.bilinear
+        .bilinear_mipmap: return raster.FilterQuality.bilinear
+        .nearest_neighbor: return raster.FilterQuality.nearest
+        _: trap("VERIFY_NOT_REACHED")
+
+## Replaces SkiaUtils.cpp to_skia_blender. plus-darker is an SkSL runtime blender in the
+## donor, which the raster module does not have.
+pub func to_raster_blend_mode(compositing_and_blending_operator: CompositingAndBlendingOperator) -> raster.BlendMode:
+    match compositing_and_blending_operator:
+        .normal: return raster.BlendMode.source_over
+        .multiply: return raster.BlendMode.multiply
+        .screen: return raster.BlendMode.screen
+        .overlay: return raster.BlendMode.overlay
+        .darken: return raster.BlendMode.darken
+        .lighten: return raster.BlendMode.lighten
+        .color_dodge: return raster.BlendMode.color_dodge
+        .color_burn: return raster.BlendMode.color_burn
+        .hard_light: return raster.BlendMode.hard_light
+        .soft_light: return raster.BlendMode.soft_light
+        .difference: return raster.BlendMode.difference
+        .exclusion: return raster.BlendMode.exclusion
+        .hue: return raster.BlendMode.hue
+        .saturation: return raster.BlendMode.saturation
+        .color: return raster.BlendMode.color
+        .luminosity: return raster.BlendMode.luminosity
+        .clear: return raster.BlendMode.clear
+        .copy: return raster.BlendMode.source
+        .source_over: return raster.BlendMode.source_over
+        .destination_over: return raster.BlendMode.destination_over
+        .source_in: return raster.BlendMode.source_in
+        .destination_in: return raster.BlendMode.destination_in
+        .source_out: return raster.BlendMode.source_out
+        .destination_out: return raster.BlendMode.destination_out
+        .source_a_top: return raster.BlendMode.source_atop
+        .destination_a_top: return raster.BlendMode.destination_atop
+        .xor: return raster.BlendMode.xor
+        .lighter: return raster.BlendMode.plus
+        .plus_darker:
+            # https://drafts.fxtf.org/compositing/#porterduffcompositingoperators_plus_darker
+            # FIXME: The donor uses an SkSL runtime blender here.
+            trap("unported: the plus-darker blender (an SkSL runtime effect in the donor)")
+        .plus_lighter:
+            # https://drafts.fxtf.org/compositing/#porterduffcompositingoperators_plus_lighter
+            # saturate(source + destination), which is Skia's kPlus.
+            return raster.BlendMode.plus
+        _: trap("VERIFY_NOT_REACHED")
+
+# mark: Scaling ================================================================================
+
+# Skia's nearest-neighbor image sampling of one axis (SkRasterPipeline_opts.h: seed_shader's
+# pixel center, matrix_scale_translate with the inverse of RectToRect's scale, then gather's
+# clamp_ex and, since m144's SkImageShader sets roundDownAtInteger for nearest sampling, one
+# ULP down before truncating, so an exact integer coordinate selects the pixel before it).
+# The raster module (tiny-skia) samples without that bias, so scaled() does this itself.
+func raster_nearest_index(target_index: i32, inverse_scale: f32, source_count: i32) -> i32:
+    var x = ((f32)target_index + 0.5) * inverse_scale
+    # clamp_ex: [FLT_MIN, limit - 1 ULP]
+    let smallest = f32.bits(0x00800000)
+    let limit = f32.bits(((f32)source_count).bits() - 1)
+    if not (x > smallest):
+        x = smallest
+    if x > limit:
+        x = limit
+    x = f32.bits(x.bits() - 1)
+    return (i32)x
+
+# SkPixmap::scalePixels with nearest sampling: every target pixel takes the source pixel
+# raster_nearest_index picks (drawPaint with kSrc covers each pixel fully).
+func raster_scale_nearest(source: const u8[], source_width: i32, source_height: i32, target: u8[], target_width: i32, target_height: i32):
+    # SkMatrix::RectToRect's scale, inverted as SkMatrix::invert does (1 / scale).
+    let one: f32 = 1.0
+    let inverse_x = one / ((f32)target_width / (f32)source_width)
+    let inverse_y = one / ((f32)target_height / (f32)source_height)
+    let source_words = u32[]((u32*)source.data, (usize)source_width * (usize)source_height)
+    let target_words = u32[]((u32*)target.data, (usize)target_width * (usize)target_height)
+    for y in 0..<target_height:
+        let source_y = raster_nearest_index(y, inverse_y, source_height)
+        for x in 0..<target_width:
+            let source_x = raster_nearest_index(x, inverse_x, source_width)
+            target_words[(usize)y * (usize)target_width + (usize)x] = source_words[(usize)source_y * (usize)source_width + (usize)source_x]
+
+## Replaces SkImage::scalePixels (SkPixmapDraw.cpp SkPixmap::scalePixels) for Bitmap::scaled:
+## draws `source` scaled onto the whole of `target` with the Src blend mode, clamping at the
+## edges. Answers false where Skia's scalePixels does.
+pub func raster_scale_pixels(source: const Bitmap*, target: Bitmap*, scaling_mode: ScalingMode) -> bool:
+    let source_width = bitmap_width(source)
+    let source_height = bitmap_height(source)
+    let target_width = bitmap_width(target)
+    let target_height = bitmap_height(target)
+
+    # Can't do anthing with empty src or dst
+    if source_width <= 0 or source_height <= 0 or target_width <= 0 or target_height <= 0:
+        return false
+
+    # If src and dst are both unpremul, we fake the source out to appear as if premul and mark
+    # the destination as opaque, so unpremul pixels are scaled without premultiplying them.
+    let clamp_as_if_unpremul = bitmap_alpha_type(source) == AlphaType.unpremultiplied and bitmap_alpha_type(target) == AlphaType.unpremultiplied
+
+    let source_bytes = ak.alloc_atomic((usize)source_width * (usize)source_height * 4)
+    raster_load_bitmap(source, source_bytes, clamp_as_if_unpremul)
+    let target_bytes = ak.alloc_atomic((usize)target_width * (usize)target_height * 4)
+    memory.set(target_bytes, 0)
+
+    # no scaling involved?
+    if source_width == target_width and source_height == target_height:
+        memory.copy(target_bytes, source_bytes, target_bytes.length)
+    elif to_raster_filter_quality(scaling_mode) == raster.FilterQuality.nearest:
+        raster_scale_nearest(source_bytes, source_width, source_height, target_bytes, target_width, target_height)
+    else:
+        let source_pixmap = raster.PixmapRef.from_bytes(source_bytes, (u32)source_width, (u32)source_height) else return false
+        var target_pixmap = raster.PixmapMut.from_bytes(target_bytes, (u32)target_width, (u32)target_height) else return false
+        # SkMatrix::RectToRectOrIdentity(src bounds, dst bounds)
+        let scale = raster.Transform.from_scale((f32)target_width / (f32)source_width, (f32)target_height / (f32)source_height)
+        var paint = raster.Paint()
+        paint.shader = raster.Pattern.new_(source_pixmap, raster.SpreadMode.pad_, to_raster_filter_quality(scaling_mode), 1.0, scale)
+        paint.blend_mode = raster.BlendMode.source
+        let rect = raster.Rect.from_xywh(0.0, 0.0, (f32)target_width, (f32)target_height) else return false
+        target_pixmap.fill_rect(rect, &paint, raster.Transform.identity(), none)
+
+    raster_store_bitmap(target_bytes, target, clamp_as_if_unpremul)
+    ak.kfree(source_bytes.data)
+    ak.kfree(target_bytes.data)
+    return true

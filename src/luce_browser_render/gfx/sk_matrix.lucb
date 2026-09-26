@@ -1,0 +1,439 @@
+#==============================================================================================
+#
+#   sk_matrix - the subset of Skia's SkMatrix that the path model uses
+#
+#   DESCRIPTION:
+#       Port of Skia m144 src/core/SkMatrix.cpp (lines 53-160 type masks, 258-480 translate,
+#       scale and rotate, 540-700 ScaleTranslate and concatenation, 780-1030 the point
+#       mapping procs) and the inline parts of include/core/SkMatrix.h that they use. The
+#       type mask is kept as Skia keeps it (computed lazily when unknown), because it selects
+#       the point-mapping proc and the shortcut paths of setConcat, whose float operation
+#       orders differ. skvx lane arithmetic is written out per lane in the same order.
+#
+#       Copyright 2006 The Android Open Source Project
+#       Copyright 2011+ Google Inc.
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-tiny-skia)
+#
+#==============================================================================================
+
+# mark: Masks ===================================================================================
+
+## SkMatrix::kIdentity_Mask.
+pub let sk_matrix_identity_mask: u8 = 0x00
+## SkMatrix::kTranslate_Mask.
+pub let sk_matrix_translate_mask: u8 = 0x01
+## SkMatrix::kScale_Mask.
+pub let sk_matrix_scale_mask: u8 = 0x02
+## SkMatrix::kAffine_Mask.
+pub let sk_matrix_affine_mask: u8 = 0x04
+## SkMatrix::kPerspective_Mask.
+pub let sk_matrix_perspective_mask: u8 = 0x08
+let sk_matrix_rect_stays_rect_mask: u8 = 0x10
+let sk_matrix_only_perspective_valid_mask: u8 = 0x40
+let sk_matrix_unknown_mask: u8 = 0x80
+let sk_matrix_orable_masks: u8 = 0x0F
+
+# The fMat indices (SkMatrix::kMScaleX ...).
+let sk_m_scale_x: usize = 0
+let sk_m_skew_x: usize = 1
+let sk_m_trans_x: usize = 2
+let sk_m_skew_y: usize = 3
+let sk_m_scale_y: usize = 4
+let sk_m_trans_y: usize = 5
+let sk_m_persp0: usize = 6
+let sk_m_persp1: usize = 7
+let sk_m_persp2: usize = 8
+
+# 1.0f as its two's-complement bits (kScalar1Int).
+let sk_scalar1_int: i32 = 0x3f800000
+
+# mark: SkMatrix ================================================================================
+
+## SkMatrix (include/core/SkMatrix.h): a 3x3 matrix in row-major order (scale-x, skew-x,
+## translate-x, skew-y, scale-y, translate-y, persp0, persp1, persp2) and its type mask.
+pub struct SkMatrix:
+    pub var mat: f32[9]
+    pub var type_mask: u8
+
+## Ported from include/core/SkMatrix.h:54 SkMatrix::SkMatrix(): the identity.
+pub func sk_matrix_identity() -> SkMatrix:
+    return SkMatrix(mat = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+        type_mask = sk_matrix_identity_mask | sk_matrix_rect_stays_rect_mask)
+
+## Ported from include/core/SkMatrix.h:153 SkMatrix::MakeAll (setAll: the type mask is
+## unknown).
+pub func sk_matrix_make_all(scale_x: f32, skew_x: f32, trans_x: f32, skew_y: f32, scale_y: f32,
+        trans_y: f32, persp0: f32, persp1: f32, persp2: f32) -> SkMatrix:
+    return SkMatrix(mat = [scale_x, skew_x, trans_x, skew_y, scale_y, trans_y, persp0, persp1, persp2],
+        type_mask = sk_matrix_unknown_mask)
+
+## Ported from src/core/SkMatrix.cpp:86 SkMatrix::computePerspectiveTypeMask.
+func sk_matrix_compute_perspective_type_mask(this: const SkMatrix*) -> u8:
+    # Benchmarking suggests that replacing this set of SkScalarAs2sCompliment
+    # is a win, but replacing those below is not. We don't yet understand
+    # that result.
+    if this.mat[sk_m_persp0] != 0.0 or this.mat[sk_m_persp1] != 0.0 or this.mat[sk_m_persp2] != 1.0:
+        # If this is a perspective transform, we return true for all other
+        # transform flags - this does not disable any optimizations, respects
+        # the rule that the type mask must be conservative, and speeds up
+        # type mask computation.
+        return sk_matrix_orable_masks
+    return sk_matrix_only_perspective_valid_mask | sk_matrix_unknown_mask
+
+## Ported from src/core/SkMatrix.cpp:101 SkMatrix::computeTypeMask.
+func sk_matrix_compute_type_mask(this: const SkMatrix*) -> u8:
+    var mask: i32 = 0
+
+    if this.mat[sk_m_persp0] != 0.0 or this.mat[sk_m_persp1] != 0.0 or this.mat[sk_m_persp2] != 1.0:
+        # Once it is determined that that this is a perspective transform,
+        # all other flags are moot as far as optimizations are concerned.
+        return sk_matrix_orable_masks
+
+    if this.mat[sk_m_trans_x] != 0.0 or this.mat[sk_m_trans_y] != 0.0:
+        mask = mask | (i32)sk_matrix_translate_mask
+
+    var m00 = sk_float_as_2s_compliment(this.mat[sk_m_scale_x])
+    var m01 = sk_float_as_2s_compliment(this.mat[sk_m_skew_x])
+    var m10 = sk_float_as_2s_compliment(this.mat[sk_m_skew_y])
+    var m11 = sk_float_as_2s_compliment(this.mat[sk_m_scale_y])
+
+    if (m01 | m10) != 0:
+        # The skew components may be scale-inducing, unless we are dealing
+        # with a pure rotation.  Testing for a pure rotation is expensive,
+        # so we opt for being conservative by always setting the scale bit.
+        # along with affine.
+        # By doing this, we are also ensuring that matrices have the same
+        # type masks as their inverses.
+        mask = mask | (i32)(sk_matrix_affine_mask | sk_matrix_scale_mask)
+
+        # For rectStaysRect, in the affine case, we only need check that
+        # the primary diagonal is all zeros and that the secondary diagonal
+        # is all non-zero.
+
+        # map non-zero to 1
+        m01 = (i32)(m01 != 0)
+        m10 = (i32)(m10 != 0)
+
+        let dp0 = (i32)((m00 | m11) == 0)  # true if both are 0
+        let ds1 = m01 & m10  # true if both are 1
+
+        mask = mask | ((dp0 & ds1) << 4)
+    else:
+        # Only test for scale explicitly if not affine, since affine sets the
+        # scale bit.
+        if ((m00 ^ sk_scalar1_int) | (m11 ^ sk_scalar1_int)) != 0:
+            mask = mask | (i32)sk_matrix_scale_mask
+
+        # Not affine, therefore we already know secondary diagonal is
+        # all zeros, so we just need to check that primary diagonal is
+        # all non-zero.
+
+        # map non-zero to 1
+        m00 = (i32)(m00 != 0)
+        m11 = (i32)(m11 != 0)
+
+        # record if the (p)rimary diagonal is all non-zero
+        mask = mask | ((m00 & m11) << 4)
+
+    return (u8)mask
+
+## Ported from include/core/SkMatrix.h:181 SkMatrix::getType: the public type bits
+## (kTranslate, kScale, kAffine, kPerspective), computed when unknown.
+pub func sk_matrix_get_type(this: SkMatrix*) -> u8:
+    if (this.type_mask & sk_matrix_unknown_mask) != 0:
+        this.type_mask = sk_matrix_compute_type_mask(this)
+    return this.type_mask & 0xF
+
+## Ported from include/core/SkMatrix.h:197 SkMatrix::isIdentity.
+pub func sk_matrix_is_identity(this: SkMatrix*) -> bool:
+    return sk_matrix_get_type(this) == 0
+
+## Ported from include/core/SkMatrix.h:1842 SkMatrix::getPerspectiveTypeMaskOnly.
+func sk_matrix_get_perspective_type_mask_only(this: SkMatrix*) -> u8:
+    if (this.type_mask & sk_matrix_unknown_mask) != 0 and (this.type_mask & sk_matrix_only_perspective_valid_mask) == 0:
+        this.type_mask = sk_matrix_compute_perspective_type_mask(this)
+    return this.type_mask & 0xF
+
+## Ported from include/core/SkMatrix.h:286 SkMatrix::hasPerspective.
+pub func sk_matrix_has_perspective(this: SkMatrix*) -> bool:
+    return (sk_matrix_get_perspective_type_mask_only(this) & sk_matrix_perspective_mask) != 0
+
+## Ported from include/core/SkMatrix.h:245 SkMatrix::rectStaysRect.
+pub func sk_matrix_rect_stays_rect(this: SkMatrix*) -> bool:
+    if (this.type_mask & sk_matrix_unknown_mask) != 0:
+        this.type_mask = sk_matrix_compute_type_mask(this)
+    return (this.type_mask & sk_matrix_rect_stays_rect_mask) != 0
+
+## Ported from include/core/SkMatrix.h:1853 SkMatrix::isTriviallyIdentity.
+func sk_matrix_is_trivially_identity(this: const SkMatrix*) -> bool:
+    if (this.type_mask & sk_matrix_unknown_mask) != 0:
+        return false
+    return (this.type_mask & 0xF) == 0
+
+## Ported from include/core/SkMatrix.h:1860 SkMatrix::updateTranslateMask.
+func sk_matrix_update_translate_mask(this: SkMatrix*):
+    if this.mat[sk_m_trans_x] != 0.0 or this.mat[sk_m_trans_y] != 0.0:
+        this.type_mask = this.type_mask | sk_matrix_translate_mask
+    else:
+        this.type_mask = this.type_mask & ~sk_matrix_translate_mask
+
+# mark: Translate, scale, rotate ================================================================
+
+## Ported from src/core/SkMatrix.cpp:258 SkMatrix::setTranslate.
+pub func sk_matrix_set_translate(this: SkMatrix*, dx: f32, dy: f32):
+    let moved = dx != 0.0 or dy != 0.0
+    *this = SkMatrix(mat = [1.0, 0.0, dx, 0.0, 1.0, dy, 0.0, 0.0, 1.0],
+        type_mask = (sk_matrix_translate_mask if moved else sk_matrix_identity_mask) | sk_matrix_rect_stays_rect_mask)
+
+## Ported from src/core/SkMatrix.cpp:285 SkMatrix::postTranslate.
+pub func sk_matrix_post_translate(this: SkMatrix*, dx: f32, dy: f32):
+    if sk_matrix_has_perspective(this):
+        var m = sk_matrix_identity()
+        sk_matrix_set_translate(&m, dx, dy)
+        sk_matrix_post_concat(this, &m)
+    else:
+        this.mat[sk_m_trans_x] += dx
+        this.mat[sk_m_trans_y] += dy
+        sk_matrix_update_translate_mask(this)
+
+## Ported from src/core/SkMatrix.cpp:309 SkMatrix::setScale(sx, sy).
+pub func sk_matrix_set_scale(this: SkMatrix*, sx: f32, sy: f32):
+    let rect_mask = 0 if (sx == 0.0 or sy == 0.0) else sk_matrix_rect_stays_rect_mask
+    let kind = sk_matrix_identity_mask if (sx == 1.0 and sy == 1.0) else sk_matrix_scale_mask
+    *this = SkMatrix(mat = [sx, 0.0, 0.0, 0.0, sy, 0.0, 0.0, 0.0, 1.0], type_mask = kind | rect_mask)
+
+## Ported from src/core/SkMatrix.cpp:329 SkMatrix::preScale(sx, sy).
+pub func sk_matrix_pre_scale(this: SkMatrix*, sx: f32, sy: f32):
+    if 1.0 == sx and 1.0 == sy:
+        return
+
+    # the assumption is that these multiplies are very cheap, and that
+    # a full concat and/or just computing the matrix type is more expensive.
+    # Also, the fixed-point case checks for overflow, but the float doesn't,
+    # so we can get away with these blind multiplies.
+
+    this.mat[sk_m_scale_x] *= sx
+    this.mat[sk_m_skew_y] *= sx
+    this.mat[sk_m_persp0] *= sx
+
+    this.mat[sk_m_skew_x] *= sy
+    this.mat[sk_m_scale_y] *= sy
+    this.mat[sk_m_persp1] *= sy
+
+    # Attempt to simplify our type when applying an inverse scale.
+    # TODO: The persp/affine preconditions are in place to keep the mask consistent with
+    #       what computeTypeMask() would produce (persp/skew always implies kScale).
+    #       We should investigate whether these flag dependencies are truly needed.
+    if this.mat[sk_m_scale_x] == 1.0 and this.mat[sk_m_scale_y] == 1.0 and (this.type_mask & (sk_matrix_perspective_mask | sk_matrix_affine_mask)) == 0:
+        this.type_mask = this.type_mask & ~sk_matrix_scale_mask
+    else:
+        this.type_mask = this.type_mask | sk_matrix_scale_mask
+        # Remove kRectStaysRect if the preScale factors were 0
+        if sx == 0.0 or sy == 0.0:
+            this.type_mask = this.type_mask & ~sk_matrix_rect_stays_rect_mask
+
+## Ported from src/core/SkMatrix.cpp:440 SkMatrix::setSinCos(sinV, cosV).
+pub func sk_matrix_set_sin_cos(this: SkMatrix*, sin_v: f32, cos_v: f32):
+    this.mat[sk_m_scale_x] = cos_v
+    this.mat[sk_m_skew_x] = -sin_v
+    this.mat[sk_m_trans_x] = 0.0
+
+    this.mat[sk_m_skew_y] = sin_v
+    this.mat[sk_m_scale_y] = cos_v
+    this.mat[sk_m_trans_y] = 0.0
+
+    this.mat[sk_m_persp0] = 0.0
+    this.mat[sk_m_persp1] = 0.0
+    this.mat[sk_m_persp2] = 1.0
+
+    this.type_mask = sk_matrix_unknown_mask | sk_matrix_only_perspective_valid_mask
+
+## Ported from src/core/SkMatrix.cpp:461 SkMatrix::setRotate(degrees).
+pub func sk_matrix_set_rotate(this: SkMatrix*, degrees: f32):
+    let rad = sk_degrees_to_radians(degrees)
+    sk_matrix_set_sin_cos(this, sk_scalar_sin_snap_to_zero(rad), sk_scalar_cos_snap_to_zero(rad))
+
+## Ported from src/core/SkMatrix.cpp:472 SkMatrix::preRotate(degrees).
+pub func sk_matrix_pre_rotate(this: SkMatrix*, degrees: f32):
+    var m = sk_matrix_identity()
+    sk_matrix_set_rotate(&m, degrees)
+    sk_matrix_pre_concat(this, &m)
+
+## Ported from src/core/SkMatrix.cpp:542 SkMatrix::ScaleTranslate.
+pub func sk_matrix_scale_translate(sx: f32, sy: f32, tx: f32, ty: f32) -> SkMatrix:
+    var mask: u8 = 0
+    if sx != 1.0 or sy != 1.0:
+        mask = mask | sk_matrix_scale_mask
+    if tx != 0.0 or ty != 0.0:
+        mask = mask | sk_matrix_translate_mask
+    if sx != 0.0 and sy != 0.0:
+        mask = mask | sk_matrix_rect_stays_rect_mask
+    return SkMatrix(mat = [sx, 0.0, tx, 0.0, sy, ty, 0.0, 0.0, 1.0], type_mask = mask)
+
+# mark: Concatenation ===========================================================================
+
+## Ported from src/core/SkMatrix.cpp:603 muladdmul: a*b + c*d in double.
+func sk_matrix_muladdmul(a: f32, b: f32, c_: f32, d: f32) -> f32:
+    return (f32)((f64)a * (f64)b + (f64)c_ * (f64)d)
+
+## Ported from src/core/SkMatrix.cpp:607 rowcol3.
+func sk_matrix_rowcol3(row: const f32[], col: const f32[]) -> f32:
+    return row[0] * col[0] + row[1] * col[3] + row[2] * col[6]
+
+## Ported from src/core/SkMatrix.cpp:611 only_scale_and_translate.
+func sk_matrix_only_scale_and_translate(mask: u8) -> bool:
+    return 0 == (mask & (sk_matrix_affine_mask | sk_matrix_perspective_mask))
+
+## Ported from src/core/SkMatrix.cpp:615 SkMatrix::setConcat: this = a * b.
+pub func sk_matrix_set_concat(this: SkMatrix*, a0: const SkMatrix*, b0: const SkMatrix*):
+    var a = *a0
+    var b = *b0
+    let a_type = sk_matrix_get_type(&a)
+    let b_type = sk_matrix_get_type(&b)
+
+    if sk_matrix_is_trivially_identity(&a):
+        *this = b
+    elif sk_matrix_is_trivially_identity(&b):
+        *this = a
+    elif sk_matrix_only_scale_and_translate(a_type | b_type):
+        *this = sk_matrix_scale_translate(a.mat[sk_m_scale_x] * b.mat[sk_m_scale_x],
+            a.mat[sk_m_scale_y] * b.mat[sk_m_scale_y],
+            a.mat[sk_m_scale_x] * b.mat[sk_m_trans_x] + a.mat[sk_m_trans_x],
+            a.mat[sk_m_scale_y] * b.mat[sk_m_trans_y] + a.mat[sk_m_trans_y])
+    else:
+        var tmp = sk_matrix_identity()
+
+        if ((a_type | b_type) & sk_matrix_perspective_mask) != 0:
+            let am: const f32[] = a.mat
+            let bm: const f32[] = b.mat
+            tmp.mat[sk_m_scale_x] = sk_matrix_rowcol3(am[0..], bm[0..])
+            tmp.mat[sk_m_skew_x] = sk_matrix_rowcol3(am[0..], bm[1..])
+            tmp.mat[sk_m_trans_x] = sk_matrix_rowcol3(am[0..], bm[2..])
+            tmp.mat[sk_m_skew_y] = sk_matrix_rowcol3(am[3..], bm[0..])
+            tmp.mat[sk_m_scale_y] = sk_matrix_rowcol3(am[3..], bm[1..])
+            tmp.mat[sk_m_trans_y] = sk_matrix_rowcol3(am[3..], bm[2..])
+            tmp.mat[sk_m_persp0] = sk_matrix_rowcol3(am[6..], bm[0..])
+            tmp.mat[sk_m_persp1] = sk_matrix_rowcol3(am[6..], bm[1..])
+            tmp.mat[sk_m_persp2] = sk_matrix_rowcol3(am[6..], bm[2..])
+
+            tmp.type_mask = sk_matrix_unknown_mask
+        else:
+            tmp.mat[sk_m_scale_x] = sk_matrix_muladdmul(a.mat[sk_m_scale_x], b.mat[sk_m_scale_x],
+                a.mat[sk_m_skew_x], b.mat[sk_m_skew_y])
+
+            tmp.mat[sk_m_skew_x] = sk_matrix_muladdmul(a.mat[sk_m_scale_x], b.mat[sk_m_skew_x],
+                a.mat[sk_m_skew_x], b.mat[sk_m_scale_y])
+
+            tmp.mat[sk_m_trans_x] = sk_matrix_muladdmul(a.mat[sk_m_scale_x], b.mat[sk_m_trans_x],
+                a.mat[sk_m_skew_x], b.mat[sk_m_trans_y]) + a.mat[sk_m_trans_x]
+
+            tmp.mat[sk_m_skew_y] = sk_matrix_muladdmul(a.mat[sk_m_skew_y], b.mat[sk_m_scale_x],
+                a.mat[sk_m_scale_y], b.mat[sk_m_skew_y])
+
+            tmp.mat[sk_m_scale_y] = sk_matrix_muladdmul(a.mat[sk_m_skew_y], b.mat[sk_m_skew_x],
+                a.mat[sk_m_scale_y], b.mat[sk_m_scale_y])
+
+            tmp.mat[sk_m_trans_y] = sk_matrix_muladdmul(a.mat[sk_m_skew_y], b.mat[sk_m_trans_x],
+                a.mat[sk_m_scale_y], b.mat[sk_m_trans_y]) + a.mat[sk_m_trans_y]
+
+            tmp.mat[sk_m_persp0] = 0.0
+            tmp.mat[sk_m_persp1] = 0.0
+            tmp.mat[sk_m_persp2] = 1.0
+            tmp.type_mask = sk_matrix_unknown_mask | sk_matrix_only_perspective_valid_mask
+        *this = tmp
+
+## Ported from src/core/SkMatrix.cpp:680 SkMatrix::preConcat: this = this * mat.
+pub func sk_matrix_pre_concat(this: SkMatrix*, mat: const SkMatrix*):
+    # check for identity first, so we don't do a needless copy of ourselves
+    # to ourselves inside setConcat()
+    var m = *mat
+    if not sk_matrix_is_identity(&m):
+        let self_copy = *this
+        sk_matrix_set_concat(this, &self_copy, &m)
+
+## Ported from src/core/SkMatrix.cpp:689 SkMatrix::postConcat: this = mat * this.
+pub func sk_matrix_post_concat(this: SkMatrix*, mat: const SkMatrix*):
+    # check for identity first, so we don't do a needless copy of ourselves
+    # to ourselves inside setConcat()
+    var m = *mat
+    if not sk_matrix_is_identity(&m):
+        let self_copy = *this
+        sk_matrix_set_concat(this, &m, &self_copy)
+
+# mark: Mapping points ==========================================================================
+
+## Ported from src/core/SkMatrix.cpp:903 SkMatrix::Trans_pts.
+func sk_matrix_trans_pts(m: const SkMatrix*, dst: SkPoint[], src: const SkPoint[]):
+    let tx = m.mat[sk_m_trans_x]
+    let ty = m.mat[sk_m_trans_y]
+    for i in 0..<dst.length:
+        dst[i] = SkPoint(x = src[i].x + tx, y = src[i].y + ty)
+
+## Ported from src/core/SkMatrix.cpp:931 SkMatrix::Scale_pts: p * scale + trans per lane.
+func sk_matrix_scale_pts(m: const SkMatrix*, dst: SkPoint[], src: const SkPoint[]):
+    let tx = m.mat[sk_m_trans_x]
+    let ty = m.mat[sk_m_trans_y]
+    let sx = m.mat[sk_m_scale_x]
+    let sy = m.mat[sk_m_scale_y]
+    for i in 0..<dst.length:
+        dst[i] = SkPoint(x = src[i].x * sx + tx, y = src[i].y * sy + ty)
+
+## Ported from src/core/SkMatrix.cpp:961 SkMatrix::Persp_pts.
+func sk_matrix_persp_pts(m: const SkMatrix*, dst: SkPoint[], src: const SkPoint[]):
+    for i in 0..<dst.length:
+        let sy = src[i].y
+        let sx = src[i].x
+        let x = (sx * m.mat[sk_m_scale_x] + sy * m.mat[sk_m_skew_x]) + m.mat[sk_m_trans_x]
+        let y = (sx * m.mat[sk_m_skew_y] + sy * m.mat[sk_m_scale_y]) + m.mat[sk_m_trans_y]
+        var z = (sx * m.mat[sk_m_persp0] + sy * m.mat[sk_m_persp1]) + m.mat[sk_m_persp2]
+        if z != 0.0:
+            z = 1.0 / z
+        dst[i] = SkPoint(x = x * z, y = y * z)
+
+## Ported from src/core/SkMatrix.cpp:988 SkMatrix::Affine_vpts: src * scale + swizzle(src) *
+## skew + trans, lane by lane.
+func sk_matrix_affine_vpts(m: const SkMatrix*, dst: SkPoint[], src: const SkPoint[]):
+    let tx = m.mat[sk_m_trans_x]
+    let ty = m.mat[sk_m_trans_y]
+    let sx = m.mat[sk_m_scale_x]
+    let sy = m.mat[sk_m_scale_y]
+    let kx = m.mat[sk_m_skew_x]
+    let ky = m.mat[sk_m_skew_y]
+    for i in 0..<dst.length:
+        let p = src[i]
+        dst[i] = SkPoint(x = p.x * sx + p.y * kx + tx, y = p.y * sy + p.x * ky + ty)
+
+## Ported from src/core/SkMatrix.cpp:782 SkMatrix::mapPoints: maps min(dst, src) points with
+## the proc the type mask selects (gMapPtsProcs). `dst` and `src` may be the same span.
+pub func sk_matrix_map_points(this: SkMatrix*, dst: SkPoint[], src: const SkPoint[]):
+    let count = dst.length if dst.length < src.length else src.length
+    let d = dst[..<count]
+    let s = src[..<count]
+    let kind = sk_matrix_get_type(this)
+    if kind == 0:
+        # Identity_pts
+        if (usize)d.data != (usize)s.data:
+            for i in 0..<count:
+                d[i] = s[i]
+    elif kind == sk_matrix_translate_mask:
+        sk_matrix_trans_pts(this, d, s)
+    elif kind <= (sk_matrix_scale_mask | sk_matrix_translate_mask):
+        sk_matrix_scale_pts(this, d, s)
+    elif kind < sk_matrix_perspective_mask:
+        sk_matrix_affine_vpts(this, d, s)
+    else:
+        sk_matrix_persp_pts(this, d, s)
+
+## Ported from include/core/SkMatrix.h:1355 SkMatrix::mapPoint (mapPointAffine or
+## mapPointPerspective).
+pub func sk_matrix_map_point(this: SkMatrix*, p: SkPoint) -> SkPoint:
+    if sk_matrix_has_perspective(this):
+        let x = (p.x * this.mat[sk_m_scale_x] + p.y * this.mat[sk_m_skew_x]) + this.mat[sk_m_trans_x]
+        let y = (p.x * this.mat[sk_m_skew_y] + p.y * this.mat[sk_m_scale_y]) + this.mat[sk_m_trans_y]
+        var z = (p.x * this.mat[sk_m_persp0] + p.y * this.mat[sk_m_persp1]) + this.mat[sk_m_persp2]
+        if z != 0.0:
+            z = 1.0 / z
+        return SkPoint(x = x * z, y = y * z)
+    return SkPoint(x = (p.x * this.mat[0] + p.y * this.mat[1]) + this.mat[2],
+        y = (p.x * this.mat[3] + p.y * this.mat[4]) + this.mat[5])

@@ -1,4 +1,96 @@
 # C++ name	package	module	Luce name	file:line	kind
+(r10: Class information of PainterRaster (a subclass of Gfx::Painter).)	luce-browser-render	gfx	painter_raster_class	-	addition
+(r10: Converts `bitmap`'s pixels into `target` (width * height * 4 bytes) as premultiplied RGBA, the form the raster module draws with.)	luce-browser-render	gfx	raster_load_bitmap	-	addition
+(r10: Converts premultiplied RGBA `source` (width * height * 4 bytes) into `bitmap`'s format and alpha type.)	luce-browser-render	gfx	raster_store_bitmap	-	addition
+(r10: Ends the drawing begun by painting_surface_begin_raster: the outermost call converts the drawn pixels back into the surface's bitmap when they are not the bitmap's own.)	luce-browser-render	gfx	painting_surface_end_raster	-	addition
+(r10: Gfx::ExportFlags::FlipY (the anonymous enum of ExportFlags, ImmutableBitmap.h:45).)	luce-browser-render	gfx	export_flags_flip_y	-	addition
+(r10: Gfx::ExportFlags::PremultiplyAlpha (the anonymous enum of ExportFlags, ImmutableBitmap.h:44).)	luce-browser-render	gfx	export_flags_premultiply_alpha	-	addition
+(r10: One SkColorFilter (the replacement for Skia's SkColorFilter).)	luce-browser-render	gfx	ColorFilter	-	addition
+(r10: One SkImageFilter of a filter graph (the replacement for Skia's SkImageFilter, made by the Filter factories in filter.lucb).)	luce-browser-render	gfx	ImageFilter	-	addition
+(r10: PainterSkia (Libraries/LibGfx/PainterSkia.h:17), on the raster module.)	luce-browser-render	gfx	PainterRaster	-	addition
+(r10: Ported from include/private/base/SkFloatingPoint.h SkIsNaN.)	luce-browser-render	gfx	sk_is_nan	-	addition
+(r10: Ported from src/utils/SkParsePath.cpp SkParsePath::ToSVGString(path, kAbsolute).)	luce-browser-render	gfx	sk_parse_path_to_svg_string	-	addition
+(r10: Premultiplies a row of 8888 pixels in place, as SkOpts::RGBA_to_rgbA does.)	luce-browser-render	gfx	raster_premultiply_row	-	addition
+(r10: Replaces SkImage::scalePixels (SkPixmapDraw.cpp SkPixmap::scalePixels) for Bitmap::scaled: draws `source` scaled onto the whole of `target` with the Src blend mode, clamping at the edges.)	luce-browser-render	gfx	raster_scale_pixels	-	addition
+(r10: Replaces SkiaUtils.cpp to_skia_blender.)	luce-browser-render	gfx	to_raster_blend_mode	-	addition
+(r10: Replaces SkiaUtils.h to_skia_cap.)	luce-browser-render	gfx	to_raster_cap	-	addition
+(r10: Replaces SkiaUtils.h to_skia_color (SkColorSetARGB) with the raster module's color.)	luce-browser-render	gfx	to_raster_color	-	addition
+(r10: Replaces SkiaUtils.h to_skia_join.)	luce-browser-render	gfx	to_raster_join	-	addition
+(r10: Replaces SkiaUtils.h to_skia_path_fill_type.)	luce-browser-render	gfx	to_raster_fill_rule	-	addition
+(r10: Replaces SkiaUtils.h to_skia_sampling_options.)	luce-browser-render	gfx	to_raster_filter_quality	-	addition
+(r10: Replaces SkiaUtils.h's SkMatrix::MakeAll(a, c, e, b, d, f, 0, 0, 1) of an AffineTransform.)	luce-browser-render	gfx	to_raster_transform	-	addition
+(r10: SK_ScalarNearlyZero (include/core/SkScalar.h:99): 1 / 4096.)	luce-browser-render	gfx	sk_scalar_nearly_zero	-	addition
+(r10: SK_ScalarPI.)	luce-browser-render	gfx	sk_scalar_pi	-	addition
+(r10: SK_ScalarSinCosNearlyZero (include/core/SkScalar.h:113): 1 / 65536.)	luce-browser-render	gfx	sk_scalar_sin_cos_nearly_zero	-	addition
+(r10: SkAutoConicToQuads (src/core/SkGeometry.h:505): the quads approximating a conic.)	luce-browser-render	gfx	SkAutoConicToQuads	-	addition
+(r10: SkConic (src/core/SkGeometry.h:323): three points and a weight.)	luce-browser-render	gfx	SkConic	-	addition
+(r10: SkConic(const SkPoint pts[3], SkScalar w).)	luce-browser-render	gfx	sk_conic_from_points	-	addition
+(r10: SkContourMeasure: one contour's segments, the points they use, its length and whether it is closed.)	luce-browser-render	gfx	SkContourMeasure	-	addition
+(r10: SkContourMeasure::Segment: the distance at its end, the index of its first point, its t value at the end and its type.)	luce-browser-render	gfx	SkContourMeasureSegment	-	addition
+(r10: SkContourMeasureIter::Impl: the path (a copy), the position in it, the tolerance and whether contours are closed by force.)	luce-browser-render	gfx	SkContourMeasureIter	-	addition
+(r10: SkDegreesToRadians (include/core/SkScalar.h): degrees * (SK_ScalarPI / 180).)	luce-browser-render	gfx	sk_degrees_to_radians	-	addition
+(r10: SkMatrix (include/core/SkMatrix.h): a 3x3 matrix in row-major order (scale-x, skew-x, translate-x, skew-y, scale-y, translate-y, persp0, persp1, persp2) and its type mask.)	luce-browser-render	gfx	SkMatrix	-	addition
+(r10: SkMatrix::kAffine_Mask.)	luce-browser-render	gfx	sk_matrix_affine_mask	-	addition
+(r10: SkMatrix::kIdentity_Mask.)	luce-browser-render	gfx	sk_matrix_identity_mask	-	addition
+(r10: SkMatrix::kPerspective_Mask.)	luce-browser-render	gfx	sk_matrix_perspective_mask	-	addition
+(r10: SkMatrix::kScale_Mask.)	luce-browser-render	gfx	sk_matrix_scale_mask	-	addition
+(r10: SkMatrix::kTranslate_Mask.)	luce-browser-render	gfx	sk_matrix_translate_mask	-	addition
+(r10: SkPath (include/core/SkPath.h) with its SkPathRef folded in.)	luce-browser-render	gfx	SkPath	-	addition
+(r10: SkPath::AddPathMode.)	luce-browser-render	gfx	SkPathAddPathMode	-	addition
+(r10: SkPath::ArcSize.)	luce-browser-render	gfx	SkPathArcSize	-	addition
+(r10: SkPath::Iter: iterates a path's contours, emitting a closing line before each close (and, when `force_close`, before each open contour ends).)	luce-browser-render	gfx	SkPathIter	-	addition
+(r10: SkPath::IterRec: a verb, its points (the previous point first, `count` of them: move 1, line 2, quad and conic 3, cubic 4, close 0 or 1) and the conic weight (1 otherwise).)	luce-browser-render	gfx	SkPathIterRec	-	addition
+(r10: SkPath::RawIter (SkPathPriv::Iterate): the stored verbs as they are, each with the previous point first (a move has only its own point).)	luce-browser-render	gfx	SkPathRawIter	-	addition
+(r10: SkPath::countPoints.)	luce-browser-render	gfx	sk_path_count_points	-	addition
+(r10: SkPath::countVerbs.)	luce-browser-render	gfx	sk_path_count_verbs	-	addition
+(r10: SkPath::getFillType.)	luce-browser-render	gfx	sk_path_get_fill_type	-	addition
+(r10: SkPath::setFillType.)	luce-browser-render	gfx	sk_path_set_fill_type	-	addition
+(r10: SkPathDirection (include/core/SkPathTypes.h).)	luce-browser-render	gfx	SkPathDirection	-	addition
+(r10: SkPathEdgeIter (src/core/SkPathPriv.h:475): the edges of a path, with a closing line after each contour that has edges.)	luce-browser-render	gfx	SkPathEdgeIter	-	addition
+(r10: SkPathEdgeIter::Edge.)	luce-browser-render	gfx	SkPathEdge	-	addition
+(r10: SkPathEdgeIter::Result: an edge's points (2 to 4) and whether it starts a contour.)	luce-browser-render	gfx	SkPathEdgeRec	-	addition
+(r10: SkPathEdgeIter::conicWeight: the weight of the conic edge just returned.)	luce-browser-render	gfx	sk_path_edge_iter_conic_weight	-	addition
+(r10: SkPathFillType (include/core/SkPathTypes.h).)	luce-browser-render	gfx	SkPathFillType	-	addition
+(r10: SkPathMeasure (include/core/SkPathMeasure.h): the current contour of a path.)	luce-browser-render	gfx	SkPathMeasure	-	addition
+(r10: SkPathVerb (include/core/SkPathTypes.h).)	luce-browser-render	gfx	SkPathVerb	-	addition
+(r10: SkPoint (include/core/SkPoint.h): a point or a vector of two floats.)	luce-browser-render	gfx	SkPoint	-	addition
+(r10: SkPoint(x, y).)	luce-browser-render	gfx	sk_point	-	addition
+(r10: SkPoint::cross.)	luce-browser-render	gfx	sk_point_cross	-	addition
+(r10: SkPoint::dot.)	luce-browser-render	gfx	sk_point_dot	-	addition
+(r10: SkPoint::isFinite.)	luce-browser-render	gfx	sk_point_is_finite	-	addition
+(r10: SkPoint::operator* (scalar).)	luce-browser-render	gfx	sk_point_scale	-	addition
+(r10: SkPoint::operator+.)	luce-browser-render	gfx	sk_point_add	-	addition
+(r10: SkPoint::operator-.)	luce-browser-render	gfx	sk_point_sub	-	addition
+(r10: SkPoint::operator== (compares with float equality, so NaN points are never equal).)	luce-browser-render	gfx	sk_point_eq	-	addition
+(r10: SkRect (include/core/SkRect.h): left, top, right, bottom.)	luce-browser-render	gfx	SkRect	-	addition
+(r10: SkScalarAbs (std::fabs).)	luce-browser-render	gfx	sk_scalar_abs	-	addition
+(r10: The SkColorFilters factory a ColorFilter was made with, and its arguments.)	luce-browser-render	gfx	ColorFilterNode	-	addition
+(r10: The SkImageFilters factory an ImageFilter was made with, and its arguments.)	luce-browser-render	gfx	ImageFilterNode	-	addition
+(r10: The SkPath of a path (PathImplSkia::sk_path()): for the members that live in web_fonts and for drawing.)	luce-browser-render	gfx	path_sk_path	-	addition
+(r10: The SkPath of a path, read-only (PathImplSkia::sk_path() const).)	luce-browser-render	gfx	path_sk_path_const	-	addition
+(r10: The SkShader of an ImageFilterNode.shader.)	luce-browser-render	gfx	ImageFilterShader	-	addition
+(r10: The bitmap the surface draws into (the donor's Impl::bitmap).)	luce-browser-render	gfx	painting_surface_bitmap	-	addition
+(r10: The part of SkCanvas's state a PainterRaster keeps: the matrix and the clip.)	luce-browser-render	gfx	PainterRasterState	-	addition
+(r10: The path for drawing with the raster module (replaces to_skia_path, SkiaUtils.cpp): the SkPath's contours as a raster.Path, conics turned into quads with the tolerance Skia's edge builder uses (1/4 pixel, SkEdgeBuilder), as tiny-skia's conic_to does.)	luce-browser-render	gfx	sk_path_to_raster_path	-	addition
+(r10: The path for drawing with the raster module (to_skia_path): see sk_path_to_raster_path.)	luce-browser-render	gfx	path_to_raster_path	-	addition
+(r10: The path implementation behind gfx.Path (PathImplSkia in the donor): an SkPath and the point of the last move_to, which close() returns to.)	luce-browser-render	gfx	PathImplRaster	-	addition
+(r10: The pixels from begin() to end() as a read-only span.)	luce-browser-render	gfx	bitmap_pixels_const	-	addition
+(r10: The pixels from begin() to end() as a span: the range C++'s `for (auto& pixel : *this)` walks.)	luce-browser-render	gfx	bitmap_pixels	-	addition
+(r10: The raster module's view of the surface's pixels, valid until the matching painting_surface_end_raster: premultiplied RGBA, width == stride.)	luce-browser-render	gfx	painting_surface_begin_raster	-	addition
+(r10: The stored conic weights.)	luce-browser-render	gfx	sk_path_conic_weights	-	addition
+(r10: The stored points.)	luce-browser-render	gfx	sk_path_points	-	addition
+(r10: The stored verbs.)	luce-browser-render	gfx	sk_path_verbs	-	addition
+(r10: The surface's pixels as a new bitmap: replaces sk_image_snapshot<sk_sp<SkImage>>() (an SkImage of the surface's current contents).)	luce-browser-render	gfx	painting_surface_snapshot_bitmap	-	addition
+(r10: The vtable of PainterRaster.)	luce-browser-render	gfx	painter_raster_vtable	-	addition
+(r10: Unpremultiplies a row of 8888 pixels in place, as SkOpts::rgbA_to_RGBA does.)	luce-browser-render	gfx	raster_unpremultiply_row	-	addition
+(r10: Whether region r08 (Color, geometry) is ported; the tests that call its functions run only then.)	luce-browser-render	gfx	tests_gfx_paint_r08_is_ported	-	addition
+(r10: Whether the raster module can draw straight into `bitmap`'s pixels: premultiplied RGBA8888 rows without padding (the raster module requires width == stride).)	luce-browser-render	gfx	raster_can_alias_bitmap	-	addition
+(r10: Whether the raster module draws as the donor's Skia (m144) does: analytic anti-aliasing (SkScan_AAAPath, where tiny-skia supersamples 4x4) and the lowp pipeline's div255.)	luce-browser-render	gfx	tests_gfx_paint_raster_is_skia_m144	-	addition
+(r10: kMaxConicToQuadPOW2 (src/core/SkGeometry.cpp): at most 2^5 quads per conic.)	luce-browser-render	gfx	sk_max_conic_to_quad_pow2	-	addition
+(r10: std::fmaxf: the larger value, ignoring a NaN operand.)	luce-browser-render	gfx	sk_fmaxf	-	addition
+(r10: std::fminf: the smaller value, ignoring a NaN operand.)	luce-browser-render	gfx	sk_fminf	-	addition
+(r10: std::max for floats.)	luce-browser-render	gfx	sk_max	-	addition
+(r10: std::min/std::max on floats as Skia writes them: `a < b ? a : b` keeps `b` when either is NaN.)	luce-browser-render	gfx	sk_min	-	addition
 Core::AnonymousBuffer	luce-browser-render	gfx	CoreAnonymousBuffer	Libraries/LibCore/AnonymousBuffer.h:38	opaque
 Gfx::(anonymous)::format_to_8bit_compatible	luce-browser-render	gfx	format_to_8bit_compatible	Libraries/LibGfx/Color.cpp:45	stub
 Gfx::(anonymous)::nth_digit	luce-browser-render	gfx	nth_digit	Libraries/LibGfx/Color.cpp:26	stub
@@ -52,78 +144,78 @@ Gfx::Bitmap::Bitmap	luce-browser-render	gfx	bitmap_construct_int_size_backing_st
 Gfx::Bitmap::Bitmap	luce-browser-render	gfx	bitmap_construct_int_size_usize	Libraries/LibGfx/Bitmap.cpp:123	construct
 Gfx::Bitmap::DiffResult	luce-browser-render	gfx	BitmapDiffResult	Libraries/LibGfx/Bitmap.h:114	opaque
 Gfx::Bitmap::InitializeBackingStore	luce-browser-render	gfx	BitmapInitializeBackingStore	Libraries/LibGfx/Bitmap.h:145	enum
-Gfx::Bitmap::allocate_backing_store	luce-browser-render	gfx	bitmap_allocate_backing_store	Libraries/LibGfx/Bitmap.cpp:250	stub
-Gfx::Bitmap::alpha_type	luce-browser-render	gfx	bitmap_alpha_type	Libraries/LibGfx/Bitmap.h:137	stub
-Gfx::Bitmap::anonymous_buffer	luce-browser-render	gfx	bitmap_anonymous_buffer	Libraries/LibGfx/Bitmap.h:111	stub
-Gfx::Bitmap::anonymous_buffer	luce-browser-render	gfx	bitmap_anonymous_buffer_const	Libraries/LibGfx/Bitmap.h:112	stub
-Gfx::Bitmap::begin	luce-browser-render	gfx	bitmap_begin	Libraries/LibGfx/Bitmap.h:204	stub
-Gfx::Bitmap::begin	luce-browser-render	gfx	bitmap_begin_const	Libraries/LibGfx/Bitmap.h:209	stub
-Gfx::Bitmap::clone	luce-browser-render	gfx	bitmap_clone	Libraries/LibGfx/Bitmap.cpp:165	stub
-Gfx::Bitmap::create	luce-browser-render	gfx	bitmap_create_alpha_type	Libraries/LibGfx/Bitmap.cpp:81	stub
-Gfx::Bitmap::create	luce-browser-render	gfx	bitmap_create_int_size	Libraries/LibGfx/Bitmap.cpp:75	stub
-Gfx::Bitmap::create_shareable	luce-browser-render	gfx	bitmap_create_shareable	Libraries/LibGfx/Bitmap.cpp:87	stub
-Gfx::Bitmap::create_with_anonymous_buffer	luce-browser-render	gfx	bitmap_create_with_anonymous_buffer	Libraries/LibGfx/Bitmap.cpp:136	stub
-Gfx::Bitmap::create_with_raw_data	luce-browser-render	gfx	bitmap_create_with_raw_data	Libraries/LibGfx/Bitmap.cpp:144	stub
-Gfx::Bitmap::create_wrapper	luce-browser-render	gfx	bitmap_create_wrapper	Libraries/LibGfx/Bitmap.cpp:116	stub
-Gfx::Bitmap::cropped	luce-browser-render	gfx	bitmap_cropped	Libraries/LibGfx/Bitmap.cpp:175	stub
-Gfx::Bitmap::data_size	luce-browser-render	gfx	bitmap_data_size	Libraries/LibGfx/Bitmap.h:224	stub
-Gfx::Bitmap::diff	luce-browser-render	gfx	bitmap_diff	Libraries/LibGfx/Bitmap.cpp:271	stub
-Gfx::Bitmap::end	luce-browser-render	gfx	bitmap_end	Libraries/LibGfx/Bitmap.h:214	stub
-Gfx::Bitmap::end	luce-browser-render	gfx	bitmap_end_const	Libraries/LibGfx/Bitmap.h:219	stub
-Gfx::Bitmap::format	luce-browser-render	gfx	bitmap_format	Libraries/LibGfx/Bitmap.h:100	stub
-Gfx::Bitmap::get_pixel	luce-browser-render	gfx	bitmap_get_pixel	Libraries/LibGfx/Bitmap.h:229	stub
-Gfx::Bitmap::has_alpha_channel	luce-browser-render	gfx	bitmap_has_alpha_channel	Libraries/LibGfx/Bitmap.h:99	stub
-Gfx::Bitmap::height	luce-browser-render	gfx	bitmap_height	Libraries/LibGfx/Bitmap.h:93	stub
-Gfx::Bitmap::minimum_pitch	luce-browser-render	gfx	bitmap_minimum_pitch	Libraries/LibGfx/Bitmap.cpp:46	stub
-Gfx::Bitmap::pitch	luce-browser-render	gfx	bitmap_pitch	Libraries/LibGfx/Bitmap.h:95	stub
-Gfx::Bitmap::rect	luce-browser-render	gfx	bitmap_rect	Libraries/LibGfx/Bitmap.h:90	stub
-Gfx::Bitmap::scaled	luce-browser-render	gfx	bitmap_scaled	Libraries/LibGfx/Bitmap.cpp:197	stub
-Gfx::Bitmap::scanline	luce-browser-render	gfx	bitmap_scanline	Libraries/LibGfx/Bitmap.h:194	stub
-Gfx::Bitmap::scanline	luce-browser-render	gfx	bitmap_scanline_const	Libraries/LibGfx/Bitmap.h:199	stub
-Gfx::Bitmap::scanline_u8	luce-browser-render	gfx	bitmap_scanline_u8	Libraries/LibGfx/Bitmap.h:180	stub
-Gfx::Bitmap::scanline_u8	luce-browser-render	gfx	bitmap_scanline_u8_const	Libraries/LibGfx/Bitmap.h:187	stub
-Gfx::Bitmap::set_alpha_type_destructive	luce-browser-render	gfx	bitmap_set_alpha_type_destructive	Libraries/LibGfx/Bitmap.cpp:314	stub
-Gfx::Bitmap::set_pixel	luce-browser-render	gfx	bitmap_set_pixel	Libraries/LibGfx/Bitmap.h:249	stub
-Gfx::Bitmap::size	luce-browser-render	gfx	bitmap_size	Libraries/LibGfx/Bitmap.h:91	stub
-Gfx::Bitmap::size_in_bytes	luce-browser-render	gfx	bitmap_size_in_bytes	Libraries/LibGfx/Bitmap.h:106	stub
-Gfx::Bitmap::size_in_bytes	luce-browser-render	gfx	bitmap_size_in_bytes_usize	Libraries/LibGfx/Bitmap.h:105	stub
-Gfx::Bitmap::strip_alpha_channel	luce-browser-render	gfx	bitmap_strip_alpha_channel	Libraries/LibGfx/Bitmap.cpp:234	stub
-Gfx::Bitmap::to_bitmap_backed_by_anonymous_buffer	luce-browser-render	gfx	bitmap_to_bitmap_backed_by_anonymous_buffer	Libraries/LibGfx/Bitmap.cpp:215	stub
-Gfx::Bitmap::to_shareable_bitmap	luce-browser-render	gfx	bitmap_to_shareable_bitmap	Libraries/LibGfx/Bitmap.cpp:242	stub
-Gfx::Bitmap::unchecked_scanline	luce-browser-render	gfx	bitmap_unchecked_scanline	Libraries/LibGfx/Bitmap.h:170	stub
-Gfx::Bitmap::unchecked_scanline	luce-browser-render	gfx	bitmap_unchecked_scanline_const	Libraries/LibGfx/Bitmap.h:175	stub
-Gfx::Bitmap::unchecked_scanline_u8	luce-browser-render	gfx	bitmap_unchecked_scanline_u8	Libraries/LibGfx/Bitmap.h:160	stub
-Gfx::Bitmap::unchecked_scanline_u8	luce-browser-render	gfx	bitmap_unchecked_scanline_u8_const	Libraries/LibGfx/Bitmap.h:165	stub
-Gfx::Bitmap::width	luce-browser-render	gfx	bitmap_width	Libraries/LibGfx/Bitmap.h:92	stub
+Gfx::Bitmap::allocate_backing_store	luce-browser-render	gfx	bitmap_allocate_backing_store	Libraries/LibGfx/Bitmap.cpp:250	ported
+Gfx::Bitmap::alpha_type	luce-browser-render	gfx	bitmap_alpha_type	Libraries/LibGfx/Bitmap.h:137	ported
+Gfx::Bitmap::anonymous_buffer	luce-browser-render	gfx	bitmap_anonymous_buffer	Libraries/LibGfx/Bitmap.h:111	ported
+Gfx::Bitmap::anonymous_buffer	luce-browser-render	gfx	bitmap_anonymous_buffer_const	Libraries/LibGfx/Bitmap.h:112	ported
+Gfx::Bitmap::begin	luce-browser-render	gfx	bitmap_begin	Libraries/LibGfx/Bitmap.h:204	ported
+Gfx::Bitmap::begin	luce-browser-render	gfx	bitmap_begin_const	Libraries/LibGfx/Bitmap.h:209	ported
+Gfx::Bitmap::clone	luce-browser-render	gfx	bitmap_clone	Libraries/LibGfx/Bitmap.cpp:165	ported
+Gfx::Bitmap::create	luce-browser-render	gfx	bitmap_create_alpha_type	Libraries/LibGfx/Bitmap.cpp:81	ported
+Gfx::Bitmap::create	luce-browser-render	gfx	bitmap_create_int_size	Libraries/LibGfx/Bitmap.cpp:75	ported
+Gfx::Bitmap::create_shareable	luce-browser-render	gfx	bitmap_create_shareable	Libraries/LibGfx/Bitmap.cpp:87	replaced
+Gfx::Bitmap::create_with_anonymous_buffer	luce-browser-render	gfx	bitmap_create_with_anonymous_buffer	Libraries/LibGfx/Bitmap.cpp:136	replaced
+Gfx::Bitmap::create_with_raw_data	luce-browser-render	gfx	bitmap_create_with_raw_data	Libraries/LibGfx/Bitmap.cpp:144	ported
+Gfx::Bitmap::create_wrapper	luce-browser-render	gfx	bitmap_create_wrapper	Libraries/LibGfx/Bitmap.cpp:116	ported
+Gfx::Bitmap::cropped	luce-browser-render	gfx	bitmap_cropped	Libraries/LibGfx/Bitmap.cpp:175	ported
+Gfx::Bitmap::data_size	luce-browser-render	gfx	bitmap_data_size	Libraries/LibGfx/Bitmap.h:224	ported
+Gfx::Bitmap::diff	luce-browser-render	gfx	bitmap_diff	Libraries/LibGfx/Bitmap.cpp:271	ported
+Gfx::Bitmap::end	luce-browser-render	gfx	bitmap_end	Libraries/LibGfx/Bitmap.h:214	ported
+Gfx::Bitmap::end	luce-browser-render	gfx	bitmap_end_const	Libraries/LibGfx/Bitmap.h:219	ported
+Gfx::Bitmap::format	luce-browser-render	gfx	bitmap_format	Libraries/LibGfx/Bitmap.h:100	ported
+Gfx::Bitmap::get_pixel	luce-browser-render	gfx	bitmap_get_pixel	Libraries/LibGfx/Bitmap.h:229	ported
+Gfx::Bitmap::has_alpha_channel	luce-browser-render	gfx	bitmap_has_alpha_channel	Libraries/LibGfx/Bitmap.h:99	ported
+Gfx::Bitmap::height	luce-browser-render	gfx	bitmap_height	Libraries/LibGfx/Bitmap.h:93	ported
+Gfx::Bitmap::minimum_pitch	luce-browser-render	gfx	bitmap_minimum_pitch	Libraries/LibGfx/Bitmap.cpp:46	ported
+Gfx::Bitmap::pitch	luce-browser-render	gfx	bitmap_pitch	Libraries/LibGfx/Bitmap.h:95	ported
+Gfx::Bitmap::rect	luce-browser-render	gfx	bitmap_rect	Libraries/LibGfx/Bitmap.h:90	ported
+Gfx::Bitmap::scaled	luce-browser-render	gfx	bitmap_scaled	Libraries/LibGfx/Bitmap.cpp:197	replaced
+Gfx::Bitmap::scanline	luce-browser-render	gfx	bitmap_scanline	Libraries/LibGfx/Bitmap.h:194	ported
+Gfx::Bitmap::scanline	luce-browser-render	gfx	bitmap_scanline_const	Libraries/LibGfx/Bitmap.h:199	ported
+Gfx::Bitmap::scanline_u8	luce-browser-render	gfx	bitmap_scanline_u8	Libraries/LibGfx/Bitmap.h:180	ported
+Gfx::Bitmap::scanline_u8	luce-browser-render	gfx	bitmap_scanline_u8_const	Libraries/LibGfx/Bitmap.h:187	ported
+Gfx::Bitmap::set_alpha_type_destructive	luce-browser-render	gfx	bitmap_set_alpha_type_destructive	Libraries/LibGfx/Bitmap.cpp:314	ported
+Gfx::Bitmap::set_pixel	luce-browser-render	gfx	bitmap_set_pixel	Libraries/LibGfx/Bitmap.h:249	ported
+Gfx::Bitmap::size	luce-browser-render	gfx	bitmap_size	Libraries/LibGfx/Bitmap.h:91	ported
+Gfx::Bitmap::size_in_bytes	luce-browser-render	gfx	bitmap_size_in_bytes	Libraries/LibGfx/Bitmap.h:106	ported
+Gfx::Bitmap::size_in_bytes	luce-browser-render	gfx	bitmap_size_in_bytes_usize	Libraries/LibGfx/Bitmap.h:105	ported
+Gfx::Bitmap::strip_alpha_channel	luce-browser-render	gfx	bitmap_strip_alpha_channel	Libraries/LibGfx/Bitmap.cpp:234	ported
+Gfx::Bitmap::to_bitmap_backed_by_anonymous_buffer	luce-browser-render	gfx	bitmap_to_bitmap_backed_by_anonymous_buffer	Libraries/LibGfx/Bitmap.cpp:215	replaced
+Gfx::Bitmap::to_shareable_bitmap	luce-browser-render	gfx	bitmap_to_shareable_bitmap	Libraries/LibGfx/Bitmap.cpp:242	ported
+Gfx::Bitmap::unchecked_scanline	luce-browser-render	gfx	bitmap_unchecked_scanline	Libraries/LibGfx/Bitmap.h:170	ported
+Gfx::Bitmap::unchecked_scanline	luce-browser-render	gfx	bitmap_unchecked_scanline_const	Libraries/LibGfx/Bitmap.h:175	ported
+Gfx::Bitmap::unchecked_scanline_u8	luce-browser-render	gfx	bitmap_unchecked_scanline_u8	Libraries/LibGfx/Bitmap.h:160	ported
+Gfx::Bitmap::unchecked_scanline_u8	luce-browser-render	gfx	bitmap_unchecked_scanline_u8_const	Libraries/LibGfx/Bitmap.h:165	ported
+Gfx::Bitmap::width	luce-browser-render	gfx	bitmap_width	Libraries/LibGfx/Bitmap.h:92	ported
 Gfx::BitmapExportResult	luce-browser-render	gfx	BitmapExportResult	Libraries/LibGfx/BitmapExportResult.h:13	struct
 Gfx::BitmapFormat	luce-browser-render	gfx	BitmapFormat	Libraries/LibGfx/Bitmap.h:30	enum
 Gfx::BitmapMetadata	luce-browser-render	gfx	BitmapMetadata	Libraries/LibGfx/BitmapSequence.h:22	struct
 Gfx::BitmapSequence	luce-browser-render	gfx	BitmapSequence	Libraries/LibGfx/BitmapSequence.h:17	struct
 Gfx::CanvasConicGradientPaintStyle	luce-browser-render	gfx	CanvasConicGradientPaintStyle	Libraries/LibGfx/PaintStyle.h:133	struct
 Gfx::CanvasConicGradientPaintStyle::CanvasConicGradientPaintStyle	luce-browser-render	gfx	canvas_conic_gradient_paint_style_construct	Libraries/LibGfx/PaintStyle.h:144	construct
-Gfx::CanvasConicGradientPaintStyle::center	luce-browser-render	gfx	canvas_conic_gradient_paint_style_center	Libraries/LibGfx/PaintStyle.h:140	stub
-Gfx::CanvasConicGradientPaintStyle::create	luce-browser-render	gfx	canvas_conic_gradient_paint_style_create	Libraries/LibGfx/PaintStyle.h:135	stub
-Gfx::CanvasConicGradientPaintStyle::start_angle	luce-browser-render	gfx	canvas_conic_gradient_paint_style_start_angle	Libraries/LibGfx/PaintStyle.h:141	stub
+Gfx::CanvasConicGradientPaintStyle::center	luce-browser-render	gfx	canvas_conic_gradient_paint_style_center	Libraries/LibGfx/PaintStyle.h:140	ported
+Gfx::CanvasConicGradientPaintStyle::create	luce-browser-render	gfx	canvas_conic_gradient_paint_style_create	Libraries/LibGfx/PaintStyle.h:135	ported
+Gfx::CanvasConicGradientPaintStyle::start_angle	luce-browser-render	gfx	canvas_conic_gradient_paint_style_start_angle	Libraries/LibGfx/PaintStyle.h:141	ported
 Gfx::CanvasLinearGradientPaintStyle	luce-browser-render	gfx	CanvasLinearGradientPaintStyle	Libraries/LibGfx/PaintStyle.h:112	struct
 Gfx::CanvasLinearGradientPaintStyle::CanvasLinearGradientPaintStyle	luce-browser-render	gfx	canvas_linear_gradient_paint_style_construct	Libraries/LibGfx/PaintStyle.h:123	construct
-Gfx::CanvasLinearGradientPaintStyle::create	luce-browser-render	gfx	canvas_linear_gradient_paint_style_create	Libraries/LibGfx/PaintStyle.h:114	stub
-Gfx::CanvasLinearGradientPaintStyle::end_point	luce-browser-render	gfx	canvas_linear_gradient_paint_style_end_point	Libraries/LibGfx/PaintStyle.h:120	stub
-Gfx::CanvasLinearGradientPaintStyle::start_point	luce-browser-render	gfx	canvas_linear_gradient_paint_style_start_point	Libraries/LibGfx/PaintStyle.h:119	stub
+Gfx::CanvasLinearGradientPaintStyle::create	luce-browser-render	gfx	canvas_linear_gradient_paint_style_create	Libraries/LibGfx/PaintStyle.h:114	ported
+Gfx::CanvasLinearGradientPaintStyle::end_point	luce-browser-render	gfx	canvas_linear_gradient_paint_style_end_point	Libraries/LibGfx/PaintStyle.h:120	ported
+Gfx::CanvasLinearGradientPaintStyle::start_point	luce-browser-render	gfx	canvas_linear_gradient_paint_style_start_point	Libraries/LibGfx/PaintStyle.h:119	ported
 Gfx::CanvasPatternPaintStyle	luce-browser-render	gfx	CanvasPatternPaintStyle	Libraries/LibGfx/PaintStyle.h:84	struct
 Gfx::CanvasPatternPaintStyle::CanvasPatternPaintStyle	luce-browser-render	gfx	canvas_pattern_paint_style_construct	Libraries/LibGfx/PaintStyle.cpp:13	construct
 Gfx::CanvasPatternPaintStyle::Repetition	luce-browser-render	gfx	CanvasPatternPaintStyleRepetition	Libraries/LibGfx/PaintStyle.h:86	enum
-Gfx::CanvasPatternPaintStyle::create	luce-browser-render	gfx	canvas_pattern_paint_style_create	Libraries/LibGfx/PaintStyle.cpp:19	stub
-Gfx::CanvasPatternPaintStyle::image	luce-browser-render	gfx	canvas_pattern_paint_style_image	Libraries/LibGfx/PaintStyle.cpp:24	stub
-Gfx::CanvasPatternPaintStyle::repetition	luce-browser-render	gfx	canvas_pattern_paint_style_repetition	Libraries/LibGfx/PaintStyle.h:96	stub
-Gfx::CanvasPatternPaintStyle::set_transform	luce-browser-render	gfx	canvas_pattern_paint_style_set_transform	Libraries/LibGfx/PaintStyle.h:98	stub
-Gfx::CanvasPatternPaintStyle::transform	luce-browser-render	gfx	canvas_pattern_paint_style_transform	Libraries/LibGfx/PaintStyle.h:97	stub
+Gfx::CanvasPatternPaintStyle::create	luce-browser-render	gfx	canvas_pattern_paint_style_create	Libraries/LibGfx/PaintStyle.cpp:19	ported
+Gfx::CanvasPatternPaintStyle::image	luce-browser-render	gfx	canvas_pattern_paint_style_image	Libraries/LibGfx/PaintStyle.cpp:24	ported
+Gfx::CanvasPatternPaintStyle::repetition	luce-browser-render	gfx	canvas_pattern_paint_style_repetition	Libraries/LibGfx/PaintStyle.h:96	ported
+Gfx::CanvasPatternPaintStyle::set_transform	luce-browser-render	gfx	canvas_pattern_paint_style_set_transform	Libraries/LibGfx/PaintStyle.h:98	ported
+Gfx::CanvasPatternPaintStyle::transform	luce-browser-render	gfx	canvas_pattern_paint_style_transform	Libraries/LibGfx/PaintStyle.h:97	ported
 Gfx::CanvasRadialGradientPaintStyle	luce-browser-render	gfx	CanvasRadialGradientPaintStyle	Libraries/LibGfx/PaintStyle.h:154	struct
 Gfx::CanvasRadialGradientPaintStyle::CanvasRadialGradientPaintStyle	luce-browser-render	gfx	canvas_radial_gradient_paint_style_construct	Libraries/LibGfx/PaintStyle.h:167	construct
-Gfx::CanvasRadialGradientPaintStyle::create	luce-browser-render	gfx	canvas_radial_gradient_paint_style_create	Libraries/LibGfx/PaintStyle.h:156	stub
-Gfx::CanvasRadialGradientPaintStyle::end_center	luce-browser-render	gfx	canvas_radial_gradient_paint_style_end_center	Libraries/LibGfx/PaintStyle.h:163	stub
-Gfx::CanvasRadialGradientPaintStyle::end_radius	luce-browser-render	gfx	canvas_radial_gradient_paint_style_end_radius	Libraries/LibGfx/PaintStyle.h:164	stub
-Gfx::CanvasRadialGradientPaintStyle::start_center	luce-browser-render	gfx	canvas_radial_gradient_paint_style_start_center	Libraries/LibGfx/PaintStyle.h:161	stub
-Gfx::CanvasRadialGradientPaintStyle::start_radius	luce-browser-render	gfx	canvas_radial_gradient_paint_style_start_radius	Libraries/LibGfx/PaintStyle.h:162	stub
+Gfx::CanvasRadialGradientPaintStyle::create	luce-browser-render	gfx	canvas_radial_gradient_paint_style_create	Libraries/LibGfx/PaintStyle.h:156	ported
+Gfx::CanvasRadialGradientPaintStyle::end_center	luce-browser-render	gfx	canvas_radial_gradient_paint_style_end_center	Libraries/LibGfx/PaintStyle.h:163	ported
+Gfx::CanvasRadialGradientPaintStyle::end_radius	luce-browser-render	gfx	canvas_radial_gradient_paint_style_end_radius	Libraries/LibGfx/PaintStyle.h:164	ported
+Gfx::CanvasRadialGradientPaintStyle::start_center	luce-browser-render	gfx	canvas_radial_gradient_paint_style_start_center	Libraries/LibGfx/PaintStyle.h:161	ported
+Gfx::CanvasRadialGradientPaintStyle::start_radius	luce-browser-render	gfx	canvas_radial_gradient_paint_style_start_radius	Libraries/LibGfx/PaintStyle.h:162	ported
 Gfx::ChannelSelector	luce-browser-render	gfx	ChannelSelector	Libraries/LibGfx/Filter.h:18	enum
 Gfx::CodePointFallbackKey	luce-browser-render	web_fonts	CodePointFallbackKey	Libraries/LibGfx/Font/FontDatabase.h:19	struct
 Gfx::CodePointFallbackKey::hash	luce-browser-render	web_fonts	code_point_fallback_key_hash	Libraries/LibGfx/Font/FontDatabase.h:27	stub
@@ -223,28 +315,28 @@ Gfx::ExportFlags	luce-browser-render	gfx	ExportFlags	Libraries/LibGfx/ImmutableB
 Gfx::ExportFormat	luce-browser-render	gfx	ExportFormat	Libraries/LibGfx/ImmutableBitmap.h:35	enum
 Gfx::Filter	luce-browser-render	gfx	Filter	Libraries/LibGfx/Filter.h:42	struct
 Gfx::Filter::Filter	luce-browser-render	gfx	filter_construct	Libraries/LibGfx/Filter.cpp:37	construct
-Gfx::Filter::arithmetic	luce-browser-render	gfx	filter_arithmetic	Libraries/LibGfx/Filter.cpp:47	stub
-Gfx::Filter::blend	luce-browser-render	gfx	filter_blend	Libraries/LibGfx/Filter.cpp:66	stub
-Gfx::Filter::blur	luce-browser-render	gfx	filter_blur	Libraries/LibGfx/Filter.cpp:75	stub
-Gfx::Filter::color	luce-browser-render	gfx	filter_color	Libraries/LibGfx/Filter.cpp:127	stub
-Gfx::Filter::color_matrix	luce-browser-render	gfx	filter_color_matrix	Libraries/LibGfx/Filter.cpp:219	stub
-Gfx::Filter::color_table	luce-browser-render	gfx	filter_color_table	Libraries/LibGfx/Filter.cpp:226	stub
-Gfx::Filter::compose	luce-browser-render	gfx	filter_compose	Libraries/LibGfx/Filter.cpp:57	stub
-Gfx::Filter::dilate	luce-browser-render	gfx	filter_dilate	Libraries/LibGfx/Filter.cpp:314	stub
-Gfx::Filter::displacement_map	luce-browser-render	gfx	filter_displacement_map	Libraries/LibGfx/Filter.cpp:91	stub
-Gfx::Filter::drop_shadow	luce-browser-render	gfx	filter_drop_shadow	Libraries/LibGfx/Filter.cpp:117	stub
-Gfx::Filter::erode	luce-browser-render	gfx	filter_erode	Libraries/LibGfx/Filter.cpp:308	stub
-Gfx::Filter::flood	luce-browser-render	gfx	filter_flood	Libraries/LibGfx/Filter.cpp:83	stub
-Gfx::Filter::hue_rotate	luce-browser-render	gfx	filter_hue_rotate	Libraries/LibGfx/Filter.cpp:259	stub
-Gfx::Filter::image	luce-browser-render	gfx	filter_image	Libraries/LibGfx/Filter.cpp:289	stub
-Gfx::Filter::impl	luce-browser-render	gfx	filter_impl	Libraries/LibGfx/Filter.cpp:42	stub
-Gfx::Filter::merge	luce-browser-render	gfx	filter_merge	Libraries/LibGfx/Filter.cpp:298	stub
-Gfx::Filter::offset	luce-browser-render	gfx	filter_offset	Libraries/LibGfx/Filter.cpp:320	stub
-Gfx::Filter::saturate	luce-browser-render	gfx	filter_saturate	Libraries/LibGfx/Filter.cpp:249	stub
-Gfx::Filter::turbulence	luce-browser-render	gfx	filter_turbulence	Libraries/LibGfx/Filter.cpp:326	stub
+Gfx::Filter::arithmetic	luce-browser-render	gfx	filter_arithmetic	Libraries/LibGfx/Filter.cpp:47	ported
+Gfx::Filter::blend	luce-browser-render	gfx	filter_blend	Libraries/LibGfx/Filter.cpp:66	ported
+Gfx::Filter::blur	luce-browser-render	gfx	filter_blur	Libraries/LibGfx/Filter.cpp:75	ported
+Gfx::Filter::color	luce-browser-render	gfx	filter_color	Libraries/LibGfx/Filter.cpp:127	ported
+Gfx::Filter::color_matrix	luce-browser-render	gfx	filter_color_matrix	Libraries/LibGfx/Filter.cpp:219	ported
+Gfx::Filter::color_table	luce-browser-render	gfx	filter_color_table	Libraries/LibGfx/Filter.cpp:226	ported
+Gfx::Filter::compose	luce-browser-render	gfx	filter_compose	Libraries/LibGfx/Filter.cpp:57	ported
+Gfx::Filter::dilate	luce-browser-render	gfx	filter_dilate	Libraries/LibGfx/Filter.cpp:314	ported
+Gfx::Filter::displacement_map	luce-browser-render	gfx	filter_displacement_map	Libraries/LibGfx/Filter.cpp:91	ported
+Gfx::Filter::drop_shadow	luce-browser-render	gfx	filter_drop_shadow	Libraries/LibGfx/Filter.cpp:117	ported
+Gfx::Filter::erode	luce-browser-render	gfx	filter_erode	Libraries/LibGfx/Filter.cpp:308	ported
+Gfx::Filter::flood	luce-browser-render	gfx	filter_flood	Libraries/LibGfx/Filter.cpp:83	ported
+Gfx::Filter::hue_rotate	luce-browser-render	gfx	filter_hue_rotate	Libraries/LibGfx/Filter.cpp:259	ported
+Gfx::Filter::image	luce-browser-render	gfx	filter_image	Libraries/LibGfx/Filter.cpp:289	ported
+Gfx::Filter::impl	luce-browser-render	gfx	filter_impl	Libraries/LibGfx/Filter.cpp:42	ported
+Gfx::Filter::merge	luce-browser-render	gfx	filter_merge	Libraries/LibGfx/Filter.cpp:298	ported
+Gfx::Filter::offset	luce-browser-render	gfx	filter_offset	Libraries/LibGfx/Filter.cpp:320	ported
+Gfx::Filter::saturate	luce-browser-render	gfx	filter_saturate	Libraries/LibGfx/Filter.cpp:249	ported
+Gfx::Filter::turbulence	luce-browser-render	gfx	filter_turbulence	Libraries/LibGfx/Filter.cpp:326	ported
 Gfx::FilterImpl	luce-browser-render	gfx	FilterImpl	Libraries/LibGfx/FilterImpl.h:15	struct
-Gfx::FilterImpl::clone	luce-browser-render	gfx	filter_impl_clone	Libraries/LibGfx/FilterImpl.h:23	stub
-Gfx::FilterImpl::create	luce-browser-render	gfx	filter_impl_create	Libraries/LibGfx/FilterImpl.h:18	stub
+Gfx::FilterImpl::clone	luce-browser-render	gfx	filter_impl_clone	Libraries/LibGfx/FilterImpl.h:23	ported
+Gfx::FilterImpl::create	luce-browser-render	gfx	filter_impl_create	Libraries/LibGfx/FilterImpl.h:18	ported
 Gfx::FlagRole	luce-browser-render	gfx	FlagRole	Libraries/LibGfx/SystemTheme.h:202	enum
 Gfx::Font	luce-browser-render	web_fonts	Font	Libraries/LibGfx/Font/Font.h:58	struct
 Gfx::Font [default member initializers]	luce-browser-render	web_fonts	font_init_fields	Libraries/LibGfx/Font/Font.h:58	init fields
@@ -331,9 +423,9 @@ Gfx::FontVariationSettings::to_sorted_list	luce-browser-render	web_fonts	font_va
 Gfx::FontWidth	luce-browser-render	web_fonts	FontWidth	Libraries/LibGfx/Font/Font.h:44	enum
 Gfx::FourCC	luce-browser-render	gfx	FourCc	Libraries/LibGfx/FourCC.h:13	struct
 Gfx::FourCC::FourCC	luce-browser-render	gfx	four_cc_construct	Libraries/LibGfx/FourCC.h:16	construct
-Gfx::FourCC::from_u32	luce-browser-render	gfx	four_cc_from_u32	Libraries/LibGfx/FourCC.h:24	stub
-Gfx::FourCC::operator<	luce-browser-render	gfx	four_cc_lt	Libraries/LibGfx/FourCC.h:45	stub
-Gfx::FourCC::to_u32	luce-browser-render	gfx	four_cc_to_u32	Libraries/LibGfx/FourCC.h:37	stub
+Gfx::FourCC::from_u32	luce-browser-render	gfx	four_cc_from_u32	Libraries/LibGfx/FourCC.h:24	ported
+Gfx::FourCC::operator<	luce-browser-render	gfx	four_cc_lt	Libraries/LibGfx/FourCC.h:45	ported
+Gfx::FourCC::to_u32	luce-browser-render	gfx	four_cc_to_u32	Libraries/LibGfx/FourCC.h:37	ported
 Gfx::GlyphRun	luce-browser-render	web_fonts	GlyphRun	Libraries/LibGfx/TextLayout.h:33	struct
 Gfx::GlyphRun::CachedTextBlob	luce-browser-render	web_fonts	GlyphRunCachedTextBlob	Libraries/LibGfx/TextLayout.cpp:21	opaque
 Gfx::GlyphRun::GlyphRun	luce-browser-render	web_fonts	glyph_run_construct	Libraries/LibGfx/TextLayout.cpp:27	construct
@@ -350,34 +442,34 @@ Gfx::GlyphRun::slice	luce-browser-render	web_fonts	glyph_run_slice	Libraries/Lib
 Gfx::GlyphRun::text_type	luce-browser-render	web_fonts	glyph_run_text_type	Libraries/LibGfx/TextLayout.h:47	stub
 Gfx::GlyphRun::width	luce-browser-render	web_fonts	glyph_run_width	Libraries/LibGfx/TextLayout.h:51	stub
 Gfx::GradientPaintStyle	luce-browser-render	gfx	GradientPaintStyle	Libraries/LibGfx/PaintStyle.h:49	struct
-Gfx::GradientPaintStyle::add_color_stop	luce-browser-render	gfx	gradient_paint_style_add_color_stop_color_stop	Libraries/LibGfx/PaintStyle.h:56	stub
-Gfx::GradientPaintStyle::add_color_stop	luce-browser-render	gfx	gradient_paint_style_add_color_stop_f32	Libraries/LibGfx/PaintStyle.h:51	stub
-Gfx::GradientPaintStyle::color_stops	luce-browser-render	gfx	gradient_paint_style_color_stops	Libraries/LibGfx/PaintStyle.h:69	stub
+Gfx::GradientPaintStyle::add_color_stop	luce-browser-render	gfx	gradient_paint_style_add_color_stop_color_stop	Libraries/LibGfx/PaintStyle.h:56	ported
+Gfx::GradientPaintStyle::add_color_stop	luce-browser-render	gfx	gradient_paint_style_add_color_stop_f32	Libraries/LibGfx/PaintStyle.h:51	ported
+Gfx::GradientPaintStyle::color_stops	luce-browser-render	gfx	gradient_paint_style_color_stops	Libraries/LibGfx/PaintStyle.h:69	ported
 Gfx::GradientPaintStyle::is_visible	luce-browser-render	gfx	gradient_paint_style_is_visible_impl	Libraries/LibGfx/PaintStyle.h:74	impl
-Gfx::GradientPaintStyle::repeat_length	luce-browser-render	gfx	gradient_paint_style_repeat_length	Libraries/LibGfx/PaintStyle.h:72	stub
-Gfx::GradientPaintStyle::set_color_stops	luce-browser-render	gfx	gradient_paint_style_set_color_stops	Libraries/LibGfx/PaintStyle.h:70	stub
-Gfx::GradientPaintStyle::set_repeat_length	luce-browser-render	gfx	gradient_paint_style_set_repeat_length	Libraries/LibGfx/PaintStyle.h:64	stub
+Gfx::GradientPaintStyle::repeat_length	luce-browser-render	gfx	gradient_paint_style_repeat_length	Libraries/LibGfx/PaintStyle.h:72	ported
+Gfx::GradientPaintStyle::set_color_stops	luce-browser-render	gfx	gradient_paint_style_set_color_stops	Libraries/LibGfx/PaintStyle.h:70	ported
+Gfx::GradientPaintStyle::set_repeat_length	luce-browser-render	gfx	gradient_paint_style_set_repeat_length	Libraries/LibGfx/PaintStyle.h:64	ported
 Gfx::HSV	luce-browser-render	gfx	Hsv	Libraries/LibGfx/Color.h:40	struct
 Gfx::ImageCursor	luce-browser-render	gfx	ImageCursor	Libraries/LibGfx/Cursor.h:41	struct
 Gfx::ImageCursor::operator==	luce-browser-render	gfx	image_cursor_eq	Libraries/LibGfx/Cursor.cpp:14	stub
 Gfx::ImmutableBitmap	luce-browser-render	gfx	ImmutableBitmap	Libraries/LibGfx/ImmutableBitmap.h:50	struct
 Gfx::ImmutableBitmap::ImmutableBitmap	luce-browser-render	gfx	immutable_bitmap_construct	Libraries/LibGfx/ImmutableBitmap.cpp:332	construct
-Gfx::ImmutableBitmap::alpha_type	luce-browser-render	gfx	immutable_bitmap_alpha_type	Libraries/LibGfx/ImmutableBitmap.cpp:66	stub
-Gfx::ImmutableBitmap::bitmap	luce-browser-render	gfx	immutable_bitmap_bitmap	Libraries/LibGfx/ImmutableBitmap.cpp:188	stub
-Gfx::ImmutableBitmap::create	luce-browser-render	gfx	immutable_bitmap_create_alpha_type	Libraries/LibGfx/ImmutableBitmap.cpp:301	stub
-Gfx::ImmutableBitmap::create	luce-browser-render	gfx	immutable_bitmap_create_color_space	Libraries/LibGfx/ImmutableBitmap.cpp:283	stub
-Gfx::ImmutableBitmap::create_from_yuv	luce-browser-render	gfx	immutable_bitmap_create_from_yuv	Libraries/LibGfx/ImmutableBitmap.cpp:204	stub
-Gfx::ImmutableBitmap::create_snapshot_from_painting_surface	luce-browser-render	gfx	immutable_bitmap_create_snapshot_from_painting_surface	Libraries/LibGfx/ImmutableBitmap.cpp:316	stub
-Gfx::ImmutableBitmap::ensure_sk_image	luce-browser-render	gfx	immutable_bitmap_ensure_sk_image	Libraries/LibGfx/ImmutableBitmap.cpp:241	stub
-Gfx::ImmutableBitmap::export_to_byte_buffer	luce-browser-render	gfx	immutable_bitmap_export_to_byte_buffer	Libraries/LibGfx/ImmutableBitmap.cpp:121	stub
-Gfx::ImmutableBitmap::get_pixel	luce-browser-render	gfx	immutable_bitmap_get_pixel	Libraries/LibGfx/ImmutableBitmap.cpp:266	stub
-Gfx::ImmutableBitmap::height	luce-browser-render	gfx	immutable_bitmap_height	Libraries/LibGfx/ImmutableBitmap.cpp:51	stub
-Gfx::ImmutableBitmap::lock_context	luce-browser-render	gfx	immutable_bitmap_lock_context	Libraries/LibGfx/ImmutableBitmap.cpp:344	stub
-Gfx::ImmutableBitmap::rect	luce-browser-render	gfx	immutable_bitmap_rect	Libraries/LibGfx/ImmutableBitmap.cpp:56	stub
-Gfx::ImmutableBitmap::size	luce-browser-render	gfx	immutable_bitmap_size	Libraries/LibGfx/ImmutableBitmap.cpp:61	stub
-Gfx::ImmutableBitmap::sk_image	luce-browser-render	gfx	immutable_bitmap_sk_image	Libraries/LibGfx/ImmutableBitmap.cpp:73	stub
-Gfx::ImmutableBitmap::unlock_context	luce-browser-render	gfx	immutable_bitmap_unlock_context	Libraries/LibGfx/ImmutableBitmap.cpp:351	stub
-Gfx::ImmutableBitmap::width	luce-browser-render	gfx	immutable_bitmap_width	Libraries/LibGfx/ImmutableBitmap.cpp:46	stub
+Gfx::ImmutableBitmap::alpha_type	luce-browser-render	gfx	immutable_bitmap_alpha_type	Libraries/LibGfx/ImmutableBitmap.cpp:66	ported
+Gfx::ImmutableBitmap::bitmap	luce-browser-render	gfx	immutable_bitmap_bitmap	Libraries/LibGfx/ImmutableBitmap.cpp:188	ported
+Gfx::ImmutableBitmap::create	luce-browser-render	gfx	immutable_bitmap_create_alpha_type	Libraries/LibGfx/ImmutableBitmap.cpp:301	ported
+Gfx::ImmutableBitmap::create	luce-browser-render	gfx	immutable_bitmap_create_color_space	Libraries/LibGfx/ImmutableBitmap.cpp:283	ported
+Gfx::ImmutableBitmap::create_from_yuv	luce-browser-render	gfx	immutable_bitmap_create_from_yuv	Libraries/LibGfx/ImmutableBitmap.cpp:204	replaced
+Gfx::ImmutableBitmap::create_snapshot_from_painting_surface	luce-browser-render	gfx	immutable_bitmap_create_snapshot_from_painting_surface	Libraries/LibGfx/ImmutableBitmap.cpp:316	ported
+Gfx::ImmutableBitmap::ensure_sk_image	luce-browser-render	gfx	immutable_bitmap_ensure_sk_image	Libraries/LibGfx/ImmutableBitmap.cpp:241	ported
+Gfx::ImmutableBitmap::export_to_byte_buffer	luce-browser-render	gfx	immutable_bitmap_export_to_byte_buffer	Libraries/LibGfx/ImmutableBitmap.cpp:121	ported
+Gfx::ImmutableBitmap::get_pixel	luce-browser-render	gfx	immutable_bitmap_get_pixel	Libraries/LibGfx/ImmutableBitmap.cpp:266	ported
+Gfx::ImmutableBitmap::height	luce-browser-render	gfx	immutable_bitmap_height	Libraries/LibGfx/ImmutableBitmap.cpp:51	ported
+Gfx::ImmutableBitmap::lock_context	luce-browser-render	gfx	immutable_bitmap_lock_context	Libraries/LibGfx/ImmutableBitmap.cpp:344	ported
+Gfx::ImmutableBitmap::rect	luce-browser-render	gfx	immutable_bitmap_rect	Libraries/LibGfx/ImmutableBitmap.cpp:56	ported
+Gfx::ImmutableBitmap::size	luce-browser-render	gfx	immutable_bitmap_size	Libraries/LibGfx/ImmutableBitmap.cpp:61	ported
+Gfx::ImmutableBitmap::sk_image	luce-browser-render	gfx	immutable_bitmap_sk_image	Libraries/LibGfx/ImmutableBitmap.cpp:73	replaced
+Gfx::ImmutableBitmap::unlock_context	luce-browser-render	gfx	immutable_bitmap_unlock_context	Libraries/LibGfx/ImmutableBitmap.cpp:351	ported
+Gfx::ImmutableBitmap::width	luce-browser-render	gfx	immutable_bitmap_width	Libraries/LibGfx/ImmutableBitmap.cpp:46	ported
 Gfx::ImmutableBitmapImpl	luce-browser-render	gfx	ImmutableBitmapImpl	Libraries/LibGfx/ImmutableBitmap.cpp:38	struct
 Gfx::InterpolationColorSpace	luce-browser-render	gfx	InterpolationColorSpace	Libraries/LibGfx/InterpolationColorSpace.h:11	enum
 Gfx::LineStyle	luce-browser-render	gfx	LineStyle	Libraries/LibGfx/LineStyle.h:11	enum
@@ -412,7 +504,7 @@ Gfx::Painter::clear_rect	luce-browser-render	gfx	painter_clear_rect_impl	Librari
 Gfx::Painter::clear_rect [dispatch]	luce-browser-render	gfx	painter_clear_rect	Libraries/LibGfx/Painter.h:20	dispatcher
 Gfx::Painter::clip	luce-browser-render	gfx	painter_clip_impl	Libraries/LibGfx/Painter.h:45	impl
 Gfx::Painter::clip [dispatch]	luce-browser-render	gfx	painter_clip	Libraries/LibGfx/Painter.h:20	dispatcher
-Gfx::Painter::create	luce-browser-render	gfx	painter_create	Libraries/LibGfx/Painter.cpp:16	stub
+Gfx::Painter::create	luce-browser-render	gfx	painter_create	Libraries/LibGfx/Painter.cpp:16	ported
 Gfx::Painter::draw_bitmap	luce-browser-render	gfx	painter_draw_bitmap_impl	Libraries/LibGfx/Painter.h:29	impl
 Gfx::Painter::draw_bitmap [dispatch]	luce-browser-render	gfx	painter_draw_bitmap	Libraries/LibGfx/Painter.h:20	dispatcher
 Gfx::Painter::fill_path	luce-browser-render	gfx	painter_fill_path_color_winding_rule_f32_impl	Libraries/LibGfx/Painter.h:37	impl
@@ -439,25 +531,41 @@ Gfx::Painter::stroke_path [dispatch]	luce-browser-render	gfx	painter_stroke_path
 Gfx::Painter::stroke_path [dispatch]	luce-browser-render	gfx	painter_stroke_path_color_f32_f32	Libraries/LibGfx/Painter.h:20	dispatcher
 Gfx::Painter::stroke_path [dispatch]	luce-browser-render	gfx	painter_stroke_path_paint_style_optional_filter_f32_f32_compositing_and_blending_opera	Libraries/LibGfx/Painter.h:20	dispatcher
 Gfx::Painter::stroke_path [dispatch]	luce-browser-render	gfx	painter_stroke_path_paint_style_optional_filter_f32_f32_compositing_and_blending_opera_path_cap_style	Libraries/LibGfx/Painter.h:20	dispatcher
+Gfx::PainterSkia::PainterSkia	luce-browser-render	gfx	painter_raster_create	PainterSkia.cpp:152	replaced
+Gfx::PainterSkia::clear_rect	luce-browser-render	gfx	painter_raster_clear_rect_impl	PainterSkia.cpp:162	replaced
+Gfx::PainterSkia::clip	luce-browser-render	gfx	painter_raster_clip_impl	PainterSkia.cpp:353	replaced
+Gfx::PainterSkia::draw_bitmap	luce-browser-render	gfx	painter_raster_draw_bitmap_impl	PainterSkia.cpp:181	replaced
+Gfx::PainterSkia::fill_path	luce-browser-render	gfx	painter_raster_fill_path_color_blurred_impl	PainterSkia.cpp:311	replaced
+Gfx::PainterSkia::fill_path	luce-browser-render	gfx	painter_raster_fill_path_color_impl	PainterSkia.cpp:299	replaced
+Gfx::PainterSkia::fill_path	luce-browser-render	gfx	painter_raster_fill_path_paint_style_impl	PainterSkia.cpp:325	replaced
+Gfx::PainterSkia::fill_rect	luce-browser-render	gfx	painter_raster_fill_rect_impl	PainterSkia.cpp:172	replaced
+Gfx::PainterSkia::reset	luce-browser-render	gfx	painter_raster_reset_impl	PainterSkia.cpp:365	replaced
+Gfx::PainterSkia::restore	luce-browser-render	gfx	painter_raster_restore_impl	PainterSkia.cpp:346	replaced
+Gfx::PainterSkia::save	luce-browser-render	gfx	painter_raster_save_impl	PainterSkia.cpp:339	replaced
+Gfx::PainterSkia::set_transform	luce-browser-render	gfx	painter_raster_set_transform_impl	PainterSkia.cpp:205	replaced
+Gfx::PainterSkia::stroke_path	luce-browser-render	gfx	painter_raster_stroke_path_color_impl	PainterSkia.cpp:217	replaced
+Gfx::PainterSkia::stroke_path	luce-browser-render	gfx	painter_raster_stroke_path_color_styled_impl	PainterSkia.cpp:233	replaced
+Gfx::PainterSkia::stroke_path	luce-browser-render	gfx	painter_raster_stroke_path_paint_style_impl	PainterSkia.cpp:257	replaced
+Gfx::PainterSkia::stroke_path	luce-browser-render	gfx	painter_raster_stroke_path_paint_style_styled_impl	PainterSkia.cpp:276	replaced
 Gfx::PaintingSurface	luce-browser-render	gfx	PaintingSurface	Libraries/LibGfx/PaintingSurface.h:34	struct
 Gfx::PaintingSurface::Impl	luce-browser-render	gfx	PaintingSurfaceImpl	Libraries/LibGfx/PaintingSurface.cpp:28	opaque
 Gfx::PaintingSurface::Origin	luce-browser-render	gfx	PaintingSurfaceOrigin	Libraries/LibGfx/PaintingSurface.h:36	enum
 Gfx::PaintingSurface::PaintingSurface	luce-browser-render	gfx	painting_surface_construct	Libraries/LibGfx/PaintingSurface.cpp:151	construct
-Gfx::PaintingSurface::canvas	luce-browser-render	gfx	painting_surface_canvas	Libraries/LibGfx/PaintingSurface.cpp:195	stub
-Gfx::PaintingSurface::create_from_shared_image_buffer	luce-browser-render	gfx	painting_surface_create_from_shared_image_buffer	Libraries/LibGfx/PaintingSurface.cpp:132	stub
-Gfx::PaintingSurface::create_with_size	luce-browser-render	gfx	painting_surface_create_with_size	Libraries/LibGfx/PaintingSurface.cpp:99	stub
-Gfx::PaintingSurface::flush	luce-browser-render	gfx	painting_surface_flush	Libraries/LibGfx/PaintingSurface.cpp:223	stub
-Gfx::PaintingSurface::lock_context	luce-browser-render	gfx	painting_surface_lock_context	Libraries/LibGfx/PaintingSurface.cpp:229	stub
-Gfx::PaintingSurface::notify_content_will_change	luce-browser-render	gfx	painting_surface_notify_content_will_change	Libraries/LibGfx/PaintingSurface.cpp:205	stub
-Gfx::PaintingSurface::read_into_bitmap	luce-browser-render	gfx	painting_surface_read_into_bitmap	Libraries/LibGfx/PaintingSurface.cpp:163	stub
-Gfx::PaintingSurface::rect	luce-browser-render	gfx	painting_surface_rect	Libraries/LibGfx/PaintingSurface.cpp:190	stub
-Gfx::PaintingSurface::size	luce-browser-render	gfx	painting_surface_size	Libraries/LibGfx/PaintingSurface.cpp:185	stub
-Gfx::PaintingSurface::sk_image_snapshot	luce-browser-render	gfx	painting_surface_sk_image_snapshot_sk_sp	Libraries/LibGfx/PaintingSurface.cpp:213	stub
-Gfx::PaintingSurface::sk_surface	luce-browser-render	gfx	painting_surface_sk_surface	Libraries/LibGfx/PaintingSurface.cpp:200	stub
-Gfx::PaintingSurface::skia_backend_context	luce-browser-render	gfx	painting_surface_skia_backend_context	Libraries/LibGfx/PaintingSurface.cpp:218	stub
-Gfx::PaintingSurface::unlock_context	luce-browser-render	gfx	painting_surface_unlock_context	Libraries/LibGfx/PaintingSurface.cpp:236	stub
-Gfx::PaintingSurface::wrap_bitmap	luce-browser-render	gfx	painting_surface_wrap_bitmap	Libraries/LibGfx/PaintingSurface.cpp:121	stub
-Gfx::PaintingSurface::write_from_bitmap	luce-browser-render	gfx	painting_surface_write_from_bitmap	Libraries/LibGfx/PaintingSurface.cpp:174	stub
+Gfx::PaintingSurface::canvas	luce-browser-render	gfx	painting_surface_canvas	Libraries/LibGfx/PaintingSurface.cpp:195	replaced
+Gfx::PaintingSurface::create_from_shared_image_buffer	luce-browser-render	gfx	painting_surface_create_from_shared_image_buffer	Libraries/LibGfx/PaintingSurface.cpp:132	replaced
+Gfx::PaintingSurface::create_with_size	luce-browser-render	gfx	painting_surface_create_with_size	Libraries/LibGfx/PaintingSurface.cpp:99	ported
+Gfx::PaintingSurface::flush	luce-browser-render	gfx	painting_surface_flush	Libraries/LibGfx/PaintingSurface.cpp:223	ported
+Gfx::PaintingSurface::lock_context	luce-browser-render	gfx	painting_surface_lock_context	Libraries/LibGfx/PaintingSurface.cpp:229	ported
+Gfx::PaintingSurface::notify_content_will_change	luce-browser-render	gfx	painting_surface_notify_content_will_change	Libraries/LibGfx/PaintingSurface.cpp:205	ported
+Gfx::PaintingSurface::read_into_bitmap	luce-browser-render	gfx	painting_surface_read_into_bitmap	Libraries/LibGfx/PaintingSurface.cpp:163	ported
+Gfx::PaintingSurface::rect	luce-browser-render	gfx	painting_surface_rect	Libraries/LibGfx/PaintingSurface.cpp:190	ported
+Gfx::PaintingSurface::size	luce-browser-render	gfx	painting_surface_size	Libraries/LibGfx/PaintingSurface.cpp:185	ported
+Gfx::PaintingSurface::sk_image_snapshot	luce-browser-render	gfx	painting_surface_sk_image_snapshot_sk_sp	Libraries/LibGfx/PaintingSurface.cpp:213	replaced
+Gfx::PaintingSurface::sk_surface	luce-browser-render	gfx	painting_surface_sk_surface	Libraries/LibGfx/PaintingSurface.cpp:200	replaced
+Gfx::PaintingSurface::skia_backend_context	luce-browser-render	gfx	painting_surface_skia_backend_context	Libraries/LibGfx/PaintingSurface.cpp:218	ported
+Gfx::PaintingSurface::unlock_context	luce-browser-render	gfx	painting_surface_unlock_context	Libraries/LibGfx/PaintingSurface.cpp:236	ported
+Gfx::PaintingSurface::wrap_bitmap	luce-browser-render	gfx	painting_surface_wrap_bitmap	Libraries/LibGfx/PaintingSurface.cpp:121	ported
+Gfx::PaintingSurface::write_from_bitmap	luce-browser-render	gfx	painting_surface_write_from_bitmap	Libraries/LibGfx/PaintingSurface.cpp:174	ported
 Gfx::Palette	luce-browser-render	gfx	Palette	Libraries/LibGfx/Palette.h:58	struct
 Gfx::Palette::Palette	luce-browser-render	gfx	palette_construct	Libraries/LibGfx/Palette.cpp:23	construct
 Gfx::Palette::accent	luce-browser-render	gfx	palette_accent	Libraries/LibGfx/Palette.h:64	stub
@@ -599,35 +707,35 @@ Gfx::Path	luce-browser-render	gfx	Path	Libraries/LibGfx/Path.h:56	struct
 Gfx::Path::CapStyle	luce-browser-render	gfx	PathCapStyle	Libraries/LibGfx/Path.h:80	enum
 Gfx::Path::JoinStyle	luce-browser-render	gfx	PathJoinStyle	Libraries/LibGfx/Path.h:86	enum
 Gfx::Path::Path	luce-browser-render	web_fonts	path_construct	Libraries/LibGfx/Path.h:126	construct
-Gfx::Path::append_path	luce-browser-render	gfx	path_append_path	Libraries/LibGfx/Path.h:104	stub
-Gfx::Path::arc_to	luce-browser-render	gfx	path_arc_to	Libraries/LibGfx/Path.h:93	stub
-Gfx::Path::bounding_box	luce-browser-render	gfx	path_bounding_box	Libraries/LibGfx/Path.h:109	stub
-Gfx::Path::clear	luce-browser-render	gfx	path_clear	Libraries/LibGfx/Path.h:75	stub
-Gfx::Path::clone	luce-browser-render	gfx	path_clone	Libraries/LibGfx/Path.h:113	stub
-Gfx::Path::close	luce-browser-render	gfx	path_close	Libraries/LibGfx/Path.h:78	stub
-Gfx::Path::contains	luce-browser-render	gfx	path_contains	Libraries/LibGfx/Path.h:110	stub
-Gfx::Path::copy_transformed	luce-browser-render	gfx	path_copy_transformed	Libraries/LibGfx/Path.h:114	stub
-Gfx::Path::cubic_bezier_curve_to	luce-browser-render	gfx	path_cubic_bezier_curve_to	Libraries/LibGfx/Path.h:95	stub
-Gfx::Path::elliptical_arc_to	luce-browser-render	gfx	path_elliptical_arc_to	Libraries/LibGfx/Path.h:92	stub
-Gfx::Path::glyph_run	luce-browser-render	web_fonts	path_glyph_run	Libraries/LibGfx/Path.h:98	stub
-Gfx::Path::horizontal_line_to	luce-browser-render	gfx	path_horizontal_line_to	Libraries/LibGfx/Path.h:101	stub
-Gfx::Path::impl	luce-browser-render	web_fonts	path_impl	Libraries/LibGfx/Path.h:122	stub
-Gfx::Path::impl	luce-browser-render	web_fonts	path_impl_const	Libraries/LibGfx/Path.h:123	stub
-Gfx::Path::intersect	luce-browser-render	gfx	path_intersect	Libraries/LibGfx/Path.h:105	stub
-Gfx::Path::is_empty	luce-browser-render	gfx	path_is_empty	Libraries/LibGfx/Path.h:107	stub
-Gfx::Path::last_point	luce-browser-render	gfx	path_last_point	Libraries/LibGfx/Path.h:108	stub
-Gfx::Path::line_to	luce-browser-render	gfx	path_line_to	Libraries/LibGfx/Path.h:77	stub
-Gfx::Path::move_to	luce-browser-render	gfx	path_move_to	Libraries/LibGfx/Path.h:76	stub
-Gfx::Path::offset	luce-browser-render	gfx	path_offset	Libraries/LibGfx/Path.h:99	stub
-Gfx::Path::place_text_along	luce-browser-render	web_fonts	path_place_text_along_utf16_view	Libraries/LibGfx/Path.h:116	stub
-Gfx::Path::place_text_along	luce-browser-render	web_fonts	path_place_text_along_utf8_view	Libraries/LibGfx/Path.h:115	stub
-Gfx::Path::quadratic_bezier_curve_to	luce-browser-render	gfx	path_quadratic_bezier_curve_to	Libraries/LibGfx/Path.h:94	stub
-Gfx::Path::set_fill_type	luce-browser-render	gfx	path_set_fill_type	Libraries/LibGfx/Path.h:111	stub
-Gfx::Path::text	luce-browser-render	web_fonts	path_text_utf16_view	Libraries/LibGfx/Path.h:97	stub
-Gfx::Path::text	luce-browser-render	web_fonts	path_text_utf8_view	Libraries/LibGfx/Path.h:96	stub
-Gfx::Path::to_svg_string	luce-browser-render	gfx	path_to_svg_string	Libraries/LibGfx/Path.h:118	stub
-Gfx::Path::transform	luce-browser-render	gfx	path_transform	Libraries/LibGfx/Path.h:120	stub
-Gfx::Path::vertical_line_to	luce-browser-render	gfx	path_vertical_line_to	Libraries/LibGfx/Path.h:102	stub
+Gfx::Path::append_path	luce-browser-render	gfx	path_append_path	Libraries/LibGfx/Path.h:104	ported
+Gfx::Path::arc_to	luce-browser-render	gfx	path_arc_to	Libraries/LibGfx/Path.h:93	ported
+Gfx::Path::bounding_box	luce-browser-render	gfx	path_bounding_box	Libraries/LibGfx/Path.h:109	ported
+Gfx::Path::clear	luce-browser-render	gfx	path_clear	Libraries/LibGfx/Path.h:75	ported
+Gfx::Path::clone	luce-browser-render	gfx	path_clone	Libraries/LibGfx/Path.h:113	ported
+Gfx::Path::close	luce-browser-render	gfx	path_close	Libraries/LibGfx/Path.h:78	ported
+Gfx::Path::contains	luce-browser-render	gfx	path_contains	Libraries/LibGfx/Path.h:110	ported
+Gfx::Path::copy_transformed	luce-browser-render	gfx	path_copy_transformed	Libraries/LibGfx/Path.h:114	ported
+Gfx::Path::cubic_bezier_curve_to	luce-browser-render	gfx	path_cubic_bezier_curve_to	Libraries/LibGfx/Path.h:95	ported
+Gfx::Path::elliptical_arc_to	luce-browser-render	gfx	path_elliptical_arc_to	Libraries/LibGfx/Path.h:92	ported
+Gfx::Path::glyph_run	luce-browser-render	web_fonts	path_glyph_run	Libraries/LibGfx/Path.h:98	ported
+Gfx::Path::horizontal_line_to	luce-browser-render	gfx	path_horizontal_line_to	Libraries/LibGfx/Path.h:101	ported
+Gfx::Path::impl	luce-browser-render	web_fonts	path_impl	Libraries/LibGfx/Path.h:122	replaced
+Gfx::Path::impl	luce-browser-render	web_fonts	path_impl_const	Libraries/LibGfx/Path.h:123	replaced
+Gfx::Path::intersect	luce-browser-render	gfx	path_intersect	Libraries/LibGfx/Path.h:105	ported
+Gfx::Path::is_empty	luce-browser-render	gfx	path_is_empty	Libraries/LibGfx/Path.h:107	ported
+Gfx::Path::last_point	luce-browser-render	gfx	path_last_point	Libraries/LibGfx/Path.h:108	ported
+Gfx::Path::line_to	luce-browser-render	gfx	path_line_to	Libraries/LibGfx/Path.h:77	ported
+Gfx::Path::move_to	luce-browser-render	gfx	path_move_to	Libraries/LibGfx/Path.h:76	ported
+Gfx::Path::offset	luce-browser-render	gfx	path_offset	Libraries/LibGfx/Path.h:99	ported
+Gfx::Path::place_text_along	luce-browser-render	web_fonts	path_place_text_along_utf16_view	Libraries/LibGfx/Path.h:116	ported
+Gfx::Path::place_text_along	luce-browser-render	web_fonts	path_place_text_along_utf8_view	Libraries/LibGfx/Path.h:115	ported
+Gfx::Path::quadratic_bezier_curve_to	luce-browser-render	gfx	path_quadratic_bezier_curve_to	Libraries/LibGfx/Path.h:94	ported
+Gfx::Path::set_fill_type	luce-browser-render	gfx	path_set_fill_type	Libraries/LibGfx/Path.h:111	ported
+Gfx::Path::text	luce-browser-render	web_fonts	path_text_utf16_view	Libraries/LibGfx/Path.h:97	ported
+Gfx::Path::text	luce-browser-render	web_fonts	path_text_utf8_view	Libraries/LibGfx/Path.h:96	ported
+Gfx::Path::to_svg_string	luce-browser-render	gfx	path_to_svg_string	Libraries/LibGfx/Path.h:118	ported
+Gfx::Path::transform	luce-browser-render	gfx	path_transform	Libraries/LibGfx/Path.h:120	ported
+Gfx::Path::vertical_line_to	luce-browser-render	gfx	path_vertical_line_to	Libraries/LibGfx/Path.h:102	ported
 Gfx::PathFontProvider	luce-browser-render	web_fonts	PathFontProvider	Libraries/LibGfx/Font/PathFontProvider.h:17	struct
 Gfx::PathFontProvider [default member initializers]	luce-browser-render	web_fonts	path_font_provider_init_fields	Libraries/LibGfx/Font/PathFontProvider.h:17	init fields
 Gfx::PathFontProvider::PathFontProvider	luce-browser-render	web_fonts	path_font_provider_construct	Libraries/LibGfx/Font/PathFontProvider.cpp:18	construct
@@ -653,7 +761,7 @@ Gfx::PathImpl::contains	luce-browser-render	web_fonts	path_impl_contains_impl	Li
 Gfx::PathImpl::contains [dispatch]	luce-browser-render	web_fonts	path_impl_contains	Libraries/LibGfx/Path.h:20	dispatcher
 Gfx::PathImpl::copy_transformed	luce-browser-render	web_fonts	path_impl_copy_transformed_impl	Libraries/LibGfx/Path.h:49	impl
 Gfx::PathImpl::copy_transformed [dispatch]	luce-browser-render	web_fonts	path_impl_copy_transformed	Libraries/LibGfx/Path.h:20	dispatcher
-Gfx::PathImpl::create	luce-browser-render	web_fonts	path_impl_create	Libraries/LibGfx/Path.cpp:12	stub
+Gfx::PathImpl::create	luce-browser-render	web_fonts	path_impl_create	Libraries/LibGfx/Path.cpp:12	replaced
 Gfx::PathImpl::cubic_bezier_curve_to	luce-browser-render	web_fonts	path_impl_cubic_bezier_curve_to_impl	Libraries/LibGfx/Path.h:33	impl
 Gfx::PathImpl::cubic_bezier_curve_to [dispatch]	luce-browser-render	web_fonts	path_impl_cubic_bezier_curve_to	Libraries/LibGfx/Path.h:20	dispatcher
 Gfx::PathImpl::elliptical_arc_to	luce-browser-render	web_fonts	path_impl_elliptical_arc_to_impl	Libraries/LibGfx/Path.h:30	impl
@@ -686,6 +794,26 @@ Gfx::PathImpl::text [dispatch]	luce-browser-render	web_fonts	path_impl_text_utf1
 Gfx::PathImpl::text [dispatch]	luce-browser-render	web_fonts	path_impl_text_utf8_view	Libraries/LibGfx/Path.h:20	dispatcher
 Gfx::PathImpl::to_svg_string	luce-browser-render	web_fonts	path_impl_to_svg_string_impl	Libraries/LibGfx/Path.h:53	impl
 Gfx::PathImpl::to_svg_string [dispatch]	luce-browser-render	web_fonts	path_impl_to_svg_string	Libraries/LibGfx/Path.h:20	dispatcher
+Gfx::PathImplSkia::PathImplSkia(PathImplSkia	luce-browser-render	gfx	path_impl_raster_clone	PathSkia.cpp:35	replaced
+Gfx::PathImplSkia::append_path	luce-browser-render	gfx	path_impl_raster_append_path	PathSkia.cpp:207	replaced
+Gfx::PathImplSkia::arc_to	luce-browser-render	gfx	path_impl_raster_arc_to	PathSkia.cpp:76	replaced
+Gfx::PathImplSkia::bounding_box	luce-browser-render	gfx	path_impl_raster_bounding_box	PathSkia.cpp:230	replaced
+Gfx::PathImplSkia::clear	luce-browser-render	gfx	path_impl_raster_clear	PathSkia.cpp:43	replaced
+Gfx::PathImplSkia::close	luce-browser-render	gfx	path_impl_raster_close	PathSkia.cpp:59	replaced
+Gfx::PathImplSkia::contains	luce-browser-render	gfx	path_impl_raster_contains	PathSkia.cpp:236	replaced
+Gfx::PathImplSkia::copy_transformed	luce-browser-render	gfx	path_impl_raster_copy_transformed	PathSkia.cpp:253	replaced
+Gfx::PathImplSkia::create	luce-browser-render	gfx	path_impl_raster_create	PathSkia.cpp:25	replaced
+Gfx::PathImplSkia::cubic_bezier_curve_to	luce-browser-render	gfx	path_impl_raster_cubic_bezier_curve_to	PathSkia.cpp:90	replaced
+Gfx::PathImplSkia::elliptical_arc_to	luce-browser-render	gfx	path_impl_raster_elliptical_arc_to	PathSkia.cpp:65	replaced
+Gfx::PathImplSkia::intersect	luce-browser-render	gfx	path_impl_raster_intersect	PathSkia.cpp:212	replaced
+Gfx::PathImplSkia::is_empty	luce-browser-render	gfx	path_impl_raster_is_empty	PathSkia.cpp:217	replaced
+Gfx::PathImplSkia::last_point	luce-browser-render	gfx	path_impl_raster_last_point	PathSkia.cpp:222	replaced
+Gfx::PathImplSkia::line_to	luce-browser-render	gfx	path_impl_raster_line_to	PathSkia.cpp:54	replaced
+Gfx::PathImplSkia::move_to	luce-browser-render	gfx	path_impl_raster_move_to	PathSkia.cpp:48	replaced
+Gfx::PathImplSkia::offset	luce-browser-render	gfx	path_impl_raster_offset	PathSkia.cpp:131	replaced
+Gfx::PathImplSkia::quadratic_bezier_curve_to	luce-browser-render	gfx	path_impl_raster_quadratic_bezier_curve_to	PathSkia.cpp:85	replaced
+Gfx::PathImplSkia::set_fill_type	luce-browser-render	gfx	path_impl_raster_set_fill_type	PathSkia.cpp:243	replaced
+Gfx::PathImplSkia::to_svg_string	luce-browser-render	gfx	path_impl_raster_to_svg_string	PathSkia.cpp:259	replaced
 Gfx::PathRole	luce-browser-render	gfx	PathRole	Libraries/LibGfx/SystemTheme.h:256	enum
 Gfx::Point	luce-browser-render	gfx	Point	Libraries/LibGfx/Point.h:20	opaque
 Gfx::Point::Point<T> [CssPixelPoint]	luce-browser-render	gfx	css_pixel_point_construct	Libraries/LibGfx/Point.h:24	construct
@@ -1161,23 +1289,23 @@ Gfx::Rect<f32>	luce-browser-render	gfx	FloatRect	Libraries/LibGfx/Rect.h:20	inst
 Gfx::SVGGradientPaintStyle	luce-browser-render	gfx	SvgGradientPaintStyle	Libraries/LibGfx/PaintStyle.h:183	struct
 Gfx::SVGGradientPaintStyle [default member initializers]	luce-browser-render	gfx	svg_gradient_paint_style_init_fields	Libraries/LibGfx/PaintStyle.h:183	init fields
 Gfx::SVGGradientPaintStyle::SpreadMethod	luce-browser-render	gfx	SvgGradientPaintStyleSpreadMethod	Libraries/LibGfx/PaintStyle.h:187	enum
-Gfx::SVGGradientPaintStyle::gradient_transform_scale	luce-browser-render	gfx	svg_gradient_paint_style_gradient_transform_scale	Libraries/LibGfx/PaintStyle.h:200	stub
-Gfx::SVGGradientPaintStyle::scale_adjusted_inverse_gradient_transform	luce-browser-render	gfx	svg_gradient_paint_style_scale_adjusted_inverse_gradient_transform	Libraries/LibGfx/PaintStyle.h:199	stub
-Gfx::SVGGradientPaintStyle::set_gradient_transform	luce-browser-render	gfx	svg_gradient_paint_style_set_gradient_transform	Libraries/LibGfx/GradientPainting.cpp:43	stub
-Gfx::SVGGradientPaintStyle::set_spread_method	luce-browser-render	gfx	svg_gradient_paint_style_set_spread_method	Libraries/LibGfx/PaintStyle.h:193	stub
-Gfx::SVGGradientPaintStyle::spread_method	luce-browser-render	gfx	svg_gradient_paint_style_spread_method	Libraries/LibGfx/PaintStyle.h:201	stub
+Gfx::SVGGradientPaintStyle::gradient_transform_scale	luce-browser-render	gfx	svg_gradient_paint_style_gradient_transform_scale	Libraries/LibGfx/PaintStyle.h:200	ported
+Gfx::SVGGradientPaintStyle::scale_adjusted_inverse_gradient_transform	luce-browser-render	gfx	svg_gradient_paint_style_scale_adjusted_inverse_gradient_transform	Libraries/LibGfx/PaintStyle.h:199	ported
+Gfx::SVGGradientPaintStyle::set_gradient_transform	luce-browser-render	gfx	svg_gradient_paint_style_set_gradient_transform	Libraries/LibGfx/GradientPainting.cpp:43	ported
+Gfx::SVGGradientPaintStyle::set_spread_method	luce-browser-render	gfx	svg_gradient_paint_style_set_spread_method	Libraries/LibGfx/PaintStyle.h:193	ported
+Gfx::SVGGradientPaintStyle::spread_method	luce-browser-render	gfx	svg_gradient_paint_style_spread_method	Libraries/LibGfx/PaintStyle.h:201	ported
 Gfx::SVGLinearGradientPaintStyle	luce-browser-render	gfx	SvgLinearGradientPaintStyle	Libraries/LibGfx/PaintStyle.h:209	struct
 Gfx::SVGLinearGradientPaintStyle::SVGLinearGradientPaintStyle	luce-browser-render	gfx	svg_linear_gradient_paint_style_construct	Libraries/LibGfx/PaintStyle.h:226	construct
-Gfx::SVGLinearGradientPaintStyle::create	luce-browser-render	gfx	svg_linear_gradient_paint_style_create	Libraries/LibGfx/PaintStyle.h:211	stub
-Gfx::SVGLinearGradientPaintStyle::set_end_point	luce-browser-render	gfx	svg_linear_gradient_paint_style_set_end_point	Libraries/LibGfx/PaintStyle.h:221	stub
-Gfx::SVGLinearGradientPaintStyle::set_start_point	luce-browser-render	gfx	svg_linear_gradient_paint_style_set_start_point	Libraries/LibGfx/PaintStyle.h:216	stub
+Gfx::SVGLinearGradientPaintStyle::create	luce-browser-render	gfx	svg_linear_gradient_paint_style_create	Libraries/LibGfx/PaintStyle.h:211	ported
+Gfx::SVGLinearGradientPaintStyle::set_end_point	luce-browser-render	gfx	svg_linear_gradient_paint_style_set_end_point	Libraries/LibGfx/PaintStyle.h:221	ported
+Gfx::SVGLinearGradientPaintStyle::set_start_point	luce-browser-render	gfx	svg_linear_gradient_paint_style_set_start_point	Libraries/LibGfx/PaintStyle.h:216	ported
 Gfx::SVGRadialGradientPaintStyle	luce-browser-render	gfx	SvgRadialGradientPaintStyle	Libraries/LibGfx/PaintStyle.h:237	struct
 Gfx::SVGRadialGradientPaintStyle::SVGRadialGradientPaintStyle	luce-browser-render	gfx	svg_radial_gradient_paint_style_construct	Libraries/LibGfx/PaintStyle.h:264	construct
-Gfx::SVGRadialGradientPaintStyle::create	luce-browser-render	gfx	svg_radial_gradient_paint_style_create	Libraries/LibGfx/PaintStyle.h:239	stub
-Gfx::SVGRadialGradientPaintStyle::set_end_center	luce-browser-render	gfx	svg_radial_gradient_paint_style_set_end_center	Libraries/LibGfx/PaintStyle.h:254	stub
-Gfx::SVGRadialGradientPaintStyle::set_end_radius	luce-browser-render	gfx	svg_radial_gradient_paint_style_set_end_radius	Libraries/LibGfx/PaintStyle.h:259	stub
-Gfx::SVGRadialGradientPaintStyle::set_start_center	luce-browser-render	gfx	svg_radial_gradient_paint_style_set_start_center	Libraries/LibGfx/PaintStyle.h:244	stub
-Gfx::SVGRadialGradientPaintStyle::set_start_radius	luce-browser-render	gfx	svg_radial_gradient_paint_style_set_start_radius	Libraries/LibGfx/PaintStyle.h:249	stub
+Gfx::SVGRadialGradientPaintStyle::create	luce-browser-render	gfx	svg_radial_gradient_paint_style_create	Libraries/LibGfx/PaintStyle.h:239	ported
+Gfx::SVGRadialGradientPaintStyle::set_end_center	luce-browser-render	gfx	svg_radial_gradient_paint_style_set_end_center	Libraries/LibGfx/PaintStyle.h:254	ported
+Gfx::SVGRadialGradientPaintStyle::set_end_radius	luce-browser-render	gfx	svg_radial_gradient_paint_style_set_end_radius	Libraries/LibGfx/PaintStyle.h:259	ported
+Gfx::SVGRadialGradientPaintStyle::set_start_center	luce-browser-render	gfx	svg_radial_gradient_paint_style_set_start_center	Libraries/LibGfx/PaintStyle.h:244	ported
+Gfx::SVGRadialGradientPaintStyle::set_start_radius	luce-browser-render	gfx	svg_radial_gradient_paint_style_set_start_radius	Libraries/LibGfx/PaintStyle.h:249	ported
 Gfx::ScaledFontMetrics	luce-browser-render	web_fonts	ScaledFontMetrics	Libraries/LibGfx/Font/Typeface.h:29	struct
 Gfx::ScaledFontMetrics::height	luce-browser-render	web_fonts	scaled_font_metrics_height	Libraries/LibGfx/Font/Typeface.h:35	stub
 Gfx::ScalingMode	luce-browser-render	gfx	ScalingMode	Libraries/LibGfx/ScalingMode.h:12	enum
@@ -1186,9 +1314,9 @@ Gfx::ShareableBitmap	luce-browser-render	gfx	ShareableBitmap	Libraries/LibGfx/Sh
 Gfx::ShareableBitmap::ShareableBitmap	luce-browser-render	gfx	shareable_bitmap_construct	Libraries/LibGfx/ShareableBitmap.cpp:16	construct
 Gfx::ShareableBitmap::ShareableBitmap	luce-browser-render	gfx	shareable_bitmap_construct_bitmap	Libraries/LibGfx/ShareableBitmap.cpp:18	construct
 Gfx::ShareableBitmap::Tag	luce-browser-render	gfx	ShareableBitmapTag	Libraries/LibGfx/ShareableBitmap.h:19	enum
-Gfx::ShareableBitmap::bitmap	luce-browser-render	gfx	shareable_bitmap_bitmap	Libraries/LibGfx/ShareableBitmap.cpp:34	stub
-Gfx::ShareableBitmap::bitmap	luce-browser-render	gfx	shareable_bitmap_bitmap_const	Libraries/LibGfx/ShareableBitmap.cpp:33	stub
-Gfx::ShareableBitmap::is_valid	luce-browser-render	gfx	shareable_bitmap_is_valid	Libraries/LibGfx/ShareableBitmap.cpp:31	stub
+Gfx::ShareableBitmap::bitmap	luce-browser-render	gfx	shareable_bitmap_bitmap	Libraries/LibGfx/ShareableBitmap.cpp:34	ported
+Gfx::ShareableBitmap::bitmap	luce-browser-render	gfx	shareable_bitmap_bitmap_const	Libraries/LibGfx/ShareableBitmap.cpp:33	ported
+Gfx::ShareableBitmap::is_valid	luce-browser-render	gfx	shareable_bitmap_is_valid	Libraries/LibGfx/ShareableBitmap.cpp:31	ported
 Gfx::SharedImage	luce-browser-render	gfx	SharedImage	Libraries/LibGfx/SharedImage.h:44	opaque
 Gfx::SharedImageBuffer	luce-browser-render	gfx	SharedImageBuffer	Libraries/LibGfx/SharedImageBuffer.h:20	opaque
 Gfx::Size	luce-browser-render	gfx	Size	Libraries/LibGfx/Size.h:17	opaque
@@ -1319,8 +1447,8 @@ Gfx::Size<u32>	luce-browser-render	gfx	SizeOfU32	Libraries/LibGfx/Size.h:17	inst
 Gfx::SkiaBackendContext	luce-browser-render	gfx	SkiaBackendContext	Libraries/LibGfx/SkiaBackendContext.h:29	opaque
 Gfx::SolidColorPaintStyle	luce-browser-render	gfx	SolidColorPaintStyle	Libraries/LibGfx/PaintStyle.h:29	struct
 Gfx::SolidColorPaintStyle::SolidColorPaintStyle	luce-browser-render	gfx	solid_color_paint_style_construct	Libraries/LibGfx/PaintStyle.h:41	construct
-Gfx::SolidColorPaintStyle::color	luce-browser-render	gfx	solid_color_paint_style_color	Libraries/LibGfx/PaintStyle.h:38	stub
-Gfx::SolidColorPaintStyle::create	luce-browser-render	gfx	solid_color_paint_style_create	Libraries/LibGfx/PaintStyle.h:31	stub
+Gfx::SolidColorPaintStyle::color	luce-browser-render	gfx	solid_color_paint_style_color	Libraries/LibGfx/PaintStyle.h:38	ported
+Gfx::SolidColorPaintStyle::create	luce-browser-render	gfx	solid_color_paint_style_create	Libraries/LibGfx/PaintStyle.h:31	ported
 Gfx::SolidColorPaintStyle::is_visible	luce-browser-render	gfx	solid_color_paint_style_is_visible_impl	Libraries/LibGfx/PaintStyle.h:36	impl
 Gfx::StandardCursor	luce-browser-render	gfx	StandardCursor	Libraries/LibGfx/Cursor.h:17	enum
 Gfx::SystemFontProvider	luce-browser-render	web_fonts	SystemFontProvider	Libraries/LibGfx/Font/FontDatabase.h:35	struct
@@ -1398,25 +1526,25 @@ Gfx::YUV	luce-browser-render	gfx	Yuv	Libraries/LibGfx/Color.h:46	struct
 Gfx::YUVData	luce-browser-render	gfx	YuvData	Libraries/LibGfx/YUVData.h:31	opaque
 Gfx::a98_rgb_to_linear_a98_rgb	luce-browser-render	gfx	a98_rgb_to_linear_a98_rgb	Libraries/LibGfx/ColorConversion.cpp:500	stub
 Gfx::a98rgb_to_xyz65	luce-browser-render	gfx	a98rgb_to_xyz65	Libraries/LibGfx/ColorConversion.cpp:97	stub
-Gfx::bitmap_format_name	luce-browser-render	gfx	bitmap_format_name	Libraries/LibGfx/Bitmap.cpp:34	stub
-Gfx::bytes_per_pixel_for_export_format	luce-browser-render	gfx	bytes_per_pixel_for_export_format	Libraries/LibGfx/ImmutableBitmap.cpp:78	stub
-Gfx::calculate_gradient_length	luce-browser-render	gfx	calculate_gradient_length	Libraries/LibGfx/Gradients.h:39	stub
-Gfx::calculate_gradient_length	luce-browser-render	gfx	calculate_gradient_length_f32	Libraries/LibGfx/Gradients.h:33	stub
+Gfx::bitmap_format_name	luce-browser-render	gfx	bitmap_format_name	Libraries/LibGfx/Bitmap.cpp:34	ported
+Gfx::bytes_per_pixel_for_export_format	luce-browser-render	gfx	bytes_per_pixel_for_export_format	Libraries/LibGfx/ImmutableBitmap.cpp:78	ported
+Gfx::calculate_gradient_length	luce-browser-render	gfx	calculate_gradient_length	Libraries/LibGfx/Gradients.h:39	ported
+Gfx::calculate_gradient_length	luce-browser-render	gfx	calculate_gradient_length_f32	Libraries/LibGfx/Gradients.h:33	ported
 Gfx::color_from_linear_srgb	luce-browser-render	gfx	color_from_linear_srgb	Libraries/LibGfx/Color.cpp:457	stub
-Gfx::color_stop_step	luce-browser-render	gfx	color_stop_step	Libraries/LibGfx/GradientPainting.cpp:16	stub
+Gfx::color_stop_step	luce-browser-render	gfx	color_stop_step	Libraries/LibGfx/GradientPainting.cpp:16	ported
 Gfx::color_to_srgb	luce-browser-render	gfx	color_to_srgb	Libraries/LibGfx/ColorConversion.cpp:14	stub
 Gfx::cubic_interpolate	luce-browser-render	gfx	cubic_interpolate	Libraries/LibGfx/Point.h:276	stub
 Gfx::display_p3_to_linear_display_p3	luce-browser-render	gfx	display_p3_to_linear_display_p3	Libraries/LibGfx/ColorConversion.cpp:80	stub
 Gfx::enclosing_int_rect	luce-browser-render	gfx	enclosing_int_rect	Libraries/LibGfx/Rect.h:592	stub
-Gfx::export_format_name	luce-browser-render	gfx	export_format_name	Libraries/LibGfx/ImmutableBitmap.cpp:26	stub
-Gfx::export_format_to_skia_color_type	luce-browser-render	gfx	export_format_to_skia_color_type	Libraries/LibGfx/ImmutableBitmap.cpp:97	stub
+Gfx::export_format_name	luce-browser-render	gfx	export_format_name	Libraries/LibGfx/ImmutableBitmap.cpp:26	ported
+Gfx::export_format_to_skia_color_type	luce-browser-render	gfx	export_format_to_skia_color_type	Libraries/LibGfx/ImmutableBitmap.cpp:97	dropped
 Gfx::extract_2d_affine_transform	luce-browser-render	gfx	extract_2d_affine_transform	Libraries/LibGfx/Matrix4x4.h:86	stub
 Gfx::font_format_is_supported	luce-browser-render	web_fonts	font_format_is_supported	Libraries/LibGfx/Font/FontSupport.cpp:13	stub
 Gfx::font_slope_names	luce-browser-render	web_fonts	font_slope_names	Libraries/LibGfx/Font/FontStyleMapping.h:32	variable
 Gfx::font_tech_is_supported	luce-browser-render	web_fonts	font_tech_is_supported	Libraries/LibGfx/Font/FontSupport.cpp:36	stub
 Gfx::font_weight_names	luce-browser-render	web_fonts	font_weight_names	Libraries/LibGfx/Font/FontStyleMapping.h:19	variable
 Gfx::font_width_names	luce-browser-render	web_fonts	font_width_names	Libraries/LibGfx/Font/FontStyleMapping.h:39	variable
-Gfx::get_metadata	luce-browser-render	gfx	get_metadata	Libraries/LibGfx/BitmapSequence.cpp:17	stub
+Gfx::get_metadata	luce-browser-render	gfx	get_metadata	Libraries/LibGfx/BitmapSequence.cpp:17	ported
 Gfx::hb_face_has_table	luce-browser-render	web_fonts	hb_face_has_table	Libraries/LibGfx/Font/Font.cpp:165	stub
 Gfx::hex_string_to_color	luce-browser-render	gfx	hex_string_to_color	Libraries/LibGfx/Color.cpp:354	stub
 Gfx::hsl_to_srgb	luce-browser-render	gfx	hsl_to_srgb	Libraries/LibGfx/ColorConversion.h:40	stub
@@ -1424,7 +1552,7 @@ Gfx::hsv_to_srgb	luce-browser-render	gfx	hsv_to_srgb	Libraries/LibGfx/ColorConve
 Gfx::hwb_to_srgb	luce-browser-render	gfx	hwb_to_srgb	Libraries/LibGfx/ColorConversion.cpp:417	stub
 Gfx::is_right_text_alignment	luce-browser-render	gfx	is_right_text_alignment	Libraries/LibGfx/TextAlignment.h:31	stub
 Gfx::is_valid_alpha_type	luce-browser-render	gfx	is_valid_alpha_type	Libraries/LibGfx/Color.h:30	stub
-Gfx::is_valid_bitmap_format	luce-browser-render	gfx	is_valid_bitmap_format	Libraries/LibGfx/Bitmap.h:38	stub
+Gfx::is_valid_bitmap_format	luce-browser-render	gfx	is_valid_bitmap_format	Libraries/LibGfx/Bitmap.h:38	ported
 Gfx::is_vertically_centered_text_alignment	luce-browser-render	gfx	is_vertically_centered_text_alignment	Libraries/LibGfx/TextAlignment.h:43	stub
 Gfx::lab_to_lch	luce-browser-render	gfx	lab_to_lch	Libraries/LibGfx/ColorConversion.cpp:370	stub
 Gfx::lab_to_xyz50	luce-browser-render	gfx	lab_to_xyz50	Libraries/LibGfx/ColorConversion.cpp:191	stub
@@ -1446,14 +1574,14 @@ Gfx::measure_text_width	luce-browser-render	web_fonts	measure_text_width	Librari
 Gfx::name_to_slope	luce-browser-render	web_fonts	name_to_slope	Libraries/LibGfx/Font/FontStyleMapping.h:78	stub
 Gfx::name_to_weight	luce-browser-render	web_fonts	name_to_weight	Libraries/LibGfx/Font/FontStyleMapping.h:60	stub
 Gfx::name_to_width	luce-browser-render	web_fonts	name_to_width	Libraries/LibGfx/Font/FontStyleMapping.h:96	stub
-Gfx::normalized_gradient_angle_radians	luce-browser-render	gfx	normalized_gradient_angle_radians	Libraries/LibGfx/Gradients.h:25	stub
+Gfx::normalized_gradient_angle_radians	luce-browser-render	gfx	normalized_gradient_angle_radians	Libraries/LibGfx/Gradients.h:25	ported
 Gfx::number_of_fonts_in_ttc	luce-browser-render	web_fonts	number_of_fonts_in_ttc	Libraries/LibGfx/Font/PathFontProvider.cpp:22	stub
 Gfx::oklab_to_linear_srgb	luce-browser-render	gfx	oklab_to_linear_srgb	Libraries/LibGfx/ColorConversion.h:182	stub
 Gfx::oklab_to_oklch	luce-browser-render	gfx	oklab_to_oklch	Libraries/LibGfx/ColorConversion.cpp:335	stub
 Gfx::oklab_to_xyz65	luce-browser-render	gfx	oklab_to_xyz65	Libraries/LibGfx/ColorConversion.cpp:286	stub
 Gfx::oklch_to_oklab	luce-browser-render	gfx	oklch_to_oklab	Libraries/LibGfx/ColorConversion.cpp:338	stub
 Gfx::operator*	luce-browser-render	gfx	mul_opaque	Libraries/LibGfx/Matrix4x4.h:21	stub
-Gfx::origin_to_sk_origin	luce-browser-render	gfx	origin_to_sk_origin	Libraries/LibGfx/PaintingSurface.cpp:36	stub
+Gfx::origin_to_sk_origin	luce-browser-render	gfx	origin_to_sk_origin	Libraries/LibGfx/PaintingSurface.cpp:36	dropped
 Gfx::parse_rgb_color	luce-browser-render	gfx	parse_rgb_color	Libraries/LibGfx/Color.cpp:134	stub
 Gfx::parse_rgba_color	luce-browser-render	gfx	parse_rgba_color	Libraries/LibGfx/Color.cpp:155	stub
 Gfx::polar_to_rectangular	luce-browser-render	gfx	polar_to_rectangular	Libraries/LibGfx/ColorConversion.cpp:321	stub
@@ -1468,7 +1596,7 @@ Gfx::scale_matrix	luce-browser-render	gfx	scale_matrix	Libraries/LibGfx/Matrix4x
 Gfx::setup_text_shaping	luce-browser-render	web_fonts	setup_text_shaping	Libraries/LibGfx/TextLayout.cpp:154	stub
 Gfx::shape_text	luce-browser-render	web_fonts	shape_text_f32	Libraries/LibGfx/TextLayout.cpp:198	stub
 Gfx::shape_text	luce-browser-render	web_fonts	shape_text_utf16_view	Libraries/LibGfx/TextLayout.cpp:115	stub
-Gfx::size_would_overflow	luce-browser-render	gfx	size_would_overflow	Libraries/LibGfx/Bitmap.cpp:63	stub
+Gfx::size_would_overflow	luce-browser-render	gfx	size_would_overflow	Libraries/LibGfx/Bitmap.cpp:63	ported
 Gfx::slope_to_name	luce-browser-render	web_fonts	slope_to_name	Libraries/LibGfx/Font/FontStyleMapping.h:69	stub
 Gfx::smallest_of	luce-browser-render	gfx	smallest_of	Libraries/LibGfx/AffineTransform.cpp:194	stub
 Gfx::srgb_to_color	luce-browser-render	gfx	srgb_to_color	Libraries/LibGfx/ColorConversion.cpp:24	stub
@@ -1480,7 +1608,7 @@ Gfx::srgb_to_yuv	luce-browser-render	gfx	srgb_to_yuv	Libraries/LibGfx/ColorConve
 Gfx::standard_cursor_to_string	luce-browser-render	gfx	standard_cursor_to_string	Libraries/LibGfx/Cursor.h:50	stub
 Gfx::text_alignment_from_string	luce-browser-render	gfx	text_alignment_from_string	Libraries/LibGfx/TextAlignment.h:55	stub
 Gfx::text_shaping_resolution	luce-browser-render	web_fonts	text_shaping_resolution	Libraries/LibGfx/Font/Font.h:56	variable
-Gfx::to_skia_alpha_type	luce-browser-render	gfx	to_skia_alpha_type	Libraries/LibGfx/ImmutableBitmap.cpp:271	stub
+Gfx::to_skia_alpha_type	luce-browser-render	gfx	to_skia_alpha_type	Libraries/LibGfx/ImmutableBitmap.cpp:271	dropped
 Gfx::to_string	luce-browser-render	gfx	to_string	Libraries/LibGfx/TextAlignment.h:65	stub
 Gfx::transform_point	luce-browser-render	gfx	transform_point	Libraries/LibGfx/Matrix4x4.h:33	stub
 Gfx::translation_matrix	luce-browser-render	gfx	translation_matrix	Libraries/LibGfx/Matrix4x4.h:42	stub
@@ -1498,12 +1626,128 @@ Gfx::xyz65_to_oklab	luce-browser-render	gfx	xyz65_to_oklab	Libraries/LibGfx/Colo
 Gfx::xyz65_to_xyz50	luce-browser-render	gfx	xyz65_to_xyz50	Libraries/LibGfx/ColorConversion.cpp:239	stub
 Gfx::yuv_to_srgb	luce-browser-render	gfx	yuv_to_srgb	Libraries/LibGfx/ColorConversion.h:147	stub
 Media::CodingIndependentCodePoints	luce-browser-render	gfx	MediaCodingIndependentCodePoints	Libraries/LibMedia/Color/CodingIndependentCodePoints.h:165	opaque
+SkAutoConicToQuads::computeQuads(pts	luce-browser-render	gfx	sk_auto_conic_to_quads	skia/src/core/SkGeometry.h:521	ported
 SkBitmap	luce-browser-render	gfx	SkBitmap	Build/vcpkg_installed/arm64-osx-dynamic/include/skia/core/SkBitmap.h:0	opaque
 SkCanvas	luce-browser-render	gfx	SkCanvas	Libraries/LibGfx/PaintingSurface.h:29	opaque
+SkChopCubicAt	luce-browser-render	gfx	sk_chop_cubic_at	skia/src/core/SkGeometry.cpp:473	ported
+SkChopCubicAt(src	luce-browser-render	gfx	sk_chop_cubic_at2	skia/src/core/SkGeometry.cpp:504	ported
+SkChopCubicAt(src	luce-browser-render	gfx	sk_chop_cubic_at_values	skia/src/core/SkGeometry.cpp:541	ported
+SkChopCubicAtHalf	luce-browser-render	gfx	sk_chop_cubic_at_half	skia/src/core/SkGeometry.cpp:575	ported
+SkChopCubicAtYExtrema	luce-browser-render	gfx	sk_chop_cubic_at_y_extrema	skia/src/core/SkGeometry.cpp:698	ported
+SkChopQuadAt	luce-browser-render	gfx	sk_chop_quad_at	skia/src/core/SkGeometry.cpp:175	ported
+SkChopQuadAtHalf	luce-browser-render	gfx	sk_chop_quad_at_half	skia/src/core/SkGeometry.cpp:193	ported
+SkChopQuadAtYExtrema	luce-browser-render	gfx	sk_chop_quad_at_y_extrema	skia/src/core/SkGeometry.cpp:279	ported
+SkConic::chop	luce-browser-render	gfx	sk_conic_chop	skia/src/core/SkGeometry.cpp:1430	ported
+SkConic::chopAt(t	luce-browser-render	gfx	sk_conic_chop_at	skia/src/core/SkGeometry.cpp:1297	ported
+SkConic::chopAtYExtrema	luce-browser-render	gfx	sk_conic_chop_at_y_extrema	skia/src/core/SkGeometry.cpp:1674	ported
+SkConic::chopIntoQuadsPOW2	luce-browser-render	gfx	sk_conic_chop_into_quads_pow2	skia/src/core/SkGeometry.cpp:1574	ported
+SkConic::computeQuadPOW2	luce-browser-render	gfx	sk_conic_compute_quad_pow2	skia/src/core/SkGeometry.cpp:1492	ported
+SkConic::evalTangentAt	luce-browser-render	gfx	sk_conic_eval_tangent_at	skia/src/core/SkGeometry.cpp:1364	ported
+SkConic::findYExtrema	luce-browser-render	gfx	sk_conic_find_y_extrema	skia/src/core/SkGeometry.cpp:1652	ported
+SkConic::set	luce-browser-render	gfx	sk_conic	skia/src/core/SkGeometry.h:336	ported
+SkConicCoeff	luce-browser-render	gfx	sk_conic_eval_at	skia/src/core/SkGeometry.h:447	ported
+SkContourMeasure::distanceToSegment	luce-browser-render	gfx	sk_contour_measure_distance_to_segment	skia/src/core/SkContourMeasure.cpp:579	ported
+SkContourMeasure::getPosTan	luce-browser-render	gfx	sk_contour_measure_get_pos_tan	skia/src/core/SkContourMeasure.cpp:609	ported
+SkContourMeasureIter::Impl::buildSegments	luce-browser-render	gfx	sk_measure_build_segments	skia/src/core/SkContourMeasure.cpp:357	ported
+SkContourMeasureIter::Impl::compute_conic_segs	luce-browser-render	gfx	sk_measure_compute_conic_segs	skia/src/core/SkContourMeasure.cpp:255	ported
+SkContourMeasureIter::Impl::compute_cubic_segs	luce-browser-render	gfx	sk_measure_compute_cubic_segs	skia/src/core/SkContourMeasure.cpp:284	ported
+SkContourMeasureIter::Impl::compute_line_seg	luce-browser-render	gfx	sk_measure_compute_line_seg	skia/src/core/SkContourMeasure.cpp:312	ported
+SkContourMeasureIter::Impl::compute_quad_segs	luce-browser-render	gfx	sk_measure_compute_quad_segs	skia/src/core/SkContourMeasure.cpp:229	ported
+SkContourMeasureIter::SkContourMeasureIter	luce-browser-render	gfx	sk_contour_measure_iter	skia/src/core/SkContourMeasure.cpp:505	ported
+SkContourMeasureIter::next	luce-browser-render	gfx	sk_contour_measure_iter_next	skia/src/core/SkContourMeasure.cpp:525	ported
+SkCubicClipper::ChopMonoAtY	luce-browser-render	gfx	sk_cubic_clipper_chop_mono_at_y	skia/src/core/SkCubicClipper.cpp:26	ported
+SkEvalCubicAt	luce-browser-render	gfx	sk_eval_cubic_at	skia/src/core/SkGeometry.cpp:418	ported
+SkEvalQuadAt(src	luce-browser-render	gfx	sk_eval_quad_at	skia/src/core/SkGeometry.cpp:144	ported
+SkEvalQuadTangentAt	luce-browser-render	gfx	sk_eval_quad_tangent_at	skia/src/core/SkGeometry.cpp:148	ported
+SkFindCubicExtrema	luce-browser-render	gfx	sk_find_cubic_extrema	skia/src/core/SkGeometry.cpp:454	ported
+SkFindQuadExtrema	luce-browser-render	gfx	sk_find_quad_extrema	skia/src/core/SkGeometry.cpp:265	ported
+SkFindUnitQuadRoots	luce-browser-render	gfx	sk_find_unit_quad_roots	skia/src/core/SkGeometry.cpp:95	ported
+SkFloatAs2sCompliment	luce-browser-render	gfx	sk_float_as_2s_compliment	skia/src/base/SkFloatBits.h:58	ported
 SkFont	luce-browser-render	web_fonts	SkFont	Libraries/LibGfx/Font/Font.h:20	opaque
 SkImage	luce-browser-render	gfx	SkImage	Libraries/LibGfx/ImmutableBitmap.h:20	opaque
+SkIsFinite(const	luce-browser-render	gfx	sk_are_finite	skia/include/private/base/SkFloatingPoint.h:58	ported
+SkIsFinite(x	luce-browser-render	gfx	sk_is_finite2	skia/include/private/base/SkFloatingPoint.h:50	ported
+SkIsFinite(x)	luce-browser-render	gfx	sk_is_finite	skia/include/private/base/SkFloatingPoint.h:50	ported
+SkMatrix::Affine_vpts	luce-browser-render	gfx	sk_matrix_affine_vpts	skia/src/core/SkMatrix.cpp:988	ported
+SkMatrix::MakeAll	luce-browser-render	gfx	sk_matrix_make_all	skia/include/core/SkMatrix.h:153	ported
+SkMatrix::Persp_pts	luce-browser-render	gfx	sk_matrix_persp_pts	skia/src/core/SkMatrix.cpp:961	ported
+SkMatrix::ScaleTranslate	luce-browser-render	gfx	sk_matrix_scale_translate	skia/src/core/SkMatrix.cpp:542	ported
+SkMatrix::Scale_pts	luce-browser-render	gfx	sk_matrix_scale_pts	skia/src/core/SkMatrix.cpp:931	ported
+SkMatrix::SkMatrix()	luce-browser-render	gfx	sk_matrix_identity	skia/include/core/SkMatrix.h:54	ported
+SkMatrix::Trans_pts	luce-browser-render	gfx	sk_matrix_trans_pts	skia/src/core/SkMatrix.cpp:903	ported
+SkMatrix::computePerspectiveTypeMask	luce-browser-render	gfx	sk_matrix_compute_perspective_type_mask	skia/src/core/SkMatrix.cpp:86	ported
+SkMatrix::computeTypeMask	luce-browser-render	gfx	sk_matrix_compute_type_mask	skia/src/core/SkMatrix.cpp:101	ported
+SkMatrix::getPerspectiveTypeMaskOnly	luce-browser-render	gfx	sk_matrix_get_perspective_type_mask_only	skia/include/core/SkMatrix.h:1842	ported
+SkMatrix::getType	luce-browser-render	gfx	sk_matrix_get_type	skia/include/core/SkMatrix.h:181	ported
+SkMatrix::hasPerspective	luce-browser-render	gfx	sk_matrix_has_perspective	skia/include/core/SkMatrix.h:286	ported
+SkMatrix::isIdentity	luce-browser-render	gfx	sk_matrix_is_identity	skia/include/core/SkMatrix.h:197	ported
+SkMatrix::isTriviallyIdentity	luce-browser-render	gfx	sk_matrix_is_trivially_identity	skia/include/core/SkMatrix.h:1853	ported
+SkMatrix::mapPoint	luce-browser-render	gfx	sk_matrix_map_point	skia/include/core/SkMatrix.h:1355	ported
+SkMatrix::mapPoints	luce-browser-render	gfx	sk_matrix_map_points	skia/src/core/SkMatrix.cpp:782	ported
+SkMatrix::postConcat	luce-browser-render	gfx	sk_matrix_post_concat	skia/src/core/SkMatrix.cpp:689	ported
+SkMatrix::postTranslate	luce-browser-render	gfx	sk_matrix_post_translate	skia/src/core/SkMatrix.cpp:285	ported
+SkMatrix::preConcat	luce-browser-render	gfx	sk_matrix_pre_concat	skia/src/core/SkMatrix.cpp:680	ported
+SkMatrix::preRotate(degrees)	luce-browser-render	gfx	sk_matrix_pre_rotate	skia/src/core/SkMatrix.cpp:472	ported
+SkMatrix::preScale(sx	luce-browser-render	gfx	sk_matrix_pre_scale	skia/src/core/SkMatrix.cpp:329	ported
+SkMatrix::rectStaysRect	luce-browser-render	gfx	sk_matrix_rect_stays_rect	skia/include/core/SkMatrix.h:245	ported
+SkMatrix::setConcat	luce-browser-render	gfx	sk_matrix_set_concat	skia/src/core/SkMatrix.cpp:615	ported
+SkMatrix::setRotate(degrees)	luce-browser-render	gfx	sk_matrix_set_rotate	skia/src/core/SkMatrix.cpp:461	ported
+SkMatrix::setScale(sx	luce-browser-render	gfx	sk_matrix_set_scale	skia/src/core/SkMatrix.cpp:309	ported
+SkMatrix::setSinCos(sinV	luce-browser-render	gfx	sk_matrix_set_sin_cos	skia/src/core/SkMatrix.cpp:440	ported
+SkMatrix::setTranslate	luce-browser-render	gfx	sk_matrix_set_translate	skia/src/core/SkMatrix.cpp:258	ported
+SkMatrix::updateTranslateMask	luce-browser-render	gfx	sk_matrix_update_translate_mask	skia/include/core/SkMatrix.h:1860	ported
 SkPaint	luce-browser-render	display_list	SkPaint	Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:14	opaque
+SkPath::Iter::Iter(path	luce-browser-render	gfx	sk_path_iter	skia/src/core/SkPath.cpp:308	ported
+SkPath::Iter::autoClose	luce-browser-render	gfx	sk_path_iter_auto_close	skia/src/core/SkPath.cpp:354	ported
+SkPath::Iter::next()	luce-browser-render	gfx	sk_path_iter_next	skia/src/core/SkPath.cpp:455	ported
+SkPath::Iter::next(SkPoint[4])	luce-browser-render	gfx	sk_path_iter_next_verb	skia/src/core/SkPath.cpp:375	ported
+SkPath::RawIter::next()	luce-browser-render	gfx	sk_path_raw_iter_next	skia/src/core/SkPath.cpp:519	ported
+SkPath::RawIter::setPath	luce-browser-render	gfx	sk_path_raw_iter	skia/src/core/SkPath.cpp:470	ported
+SkPath::SkPath(SkPathFillType)	luce-browser-render	gfx	sk_path_create	skia/src/core/SkPath_pathref.cpp:55	ported
+SkPath::SkPath(const	luce-browser-render	gfx	sk_path_clone	skia/src/core/SkPath_pathref.cpp:70	ported
+SkPath::addPath(srcPath	luce-browser-render	gfx	sk_path_add_path	skia/src/core/SkPath_editing.cpp:778	ported
+SkPath::arcTo(rx	luce-browser-render	gfx	sk_path_arc_to_rotated	skia/src/core/SkPath_editing.cpp:551	ported
+SkPath::close	luce-browser-render	gfx	sk_path_close	skia/src/core/SkPath_editing.cpp:218	ported
+SkPath::conicTo	luce-browser-render	gfx	sk_path_conic_to	skia/src/core/SkPath_editing.cpp:162	ported
+SkPath::contains	luce-browser-render	gfx	sk_path_contains	skia/src/core/SkPath.cpp:547	ported
+SkPath::cubicTo	luce-browser-render	gfx	sk_path_cubic_to	skia/src/core/SkPath_editing.cpp:194	ported
+SkPath::getBounds	luce-browser-render	gfx	sk_path_get_bounds	skia/src/core/SkPath_pathref.cpp:148	ported
+SkPath::getLastPt	luce-browser-render	gfx	sk_path_get_last_pt	skia/src/core/SkPath.cpp:252	ported
+SkPath::injectMoveToIfNeeded	luce-browser-render	gfx	sk_path_inject_move_to_if_needed	skia/src/core/SkPath_editing.cpp:112	ported
+SkPath::isEmpty	luce-browser-render	gfx	sk_path_is_empty	skia/src/core/SkPath.cpp:169	ported
+SkPath::isFinite	luce-browser-render	gfx	sk_path_is_finite	skia/src/core/SkPath_pathref.cpp:143	ported
+SkPath::lineTo	luce-browser-render	gfx	sk_path_line_to	skia/src/core/SkPath_editing.cpp:126	ported
+SkPath::moveTo	luce-browser-render	gfx	sk_path_move_to	skia/src/core/SkPath_editing.cpp:82	ported
+SkPath::offset(dx	luce-browser-render	gfx	sk_path_offset	skia/src/core/SkPath_pathref.cpp:289	ported
+SkPath::quadTo	luce-browser-render	gfx	sk_path_quad_to	skia/src/core/SkPath_editing.cpp:143	ported
+SkPath::reset	luce-browser-render	gfx	sk_path_reset	skia/src/core/SkPath_pathref.cpp:131	ported
+SkPath::setLastPt	luce-browser-render	gfx	sk_path_set_last_pt	skia/src/core/SkPath_editing.cpp:952	ported
+SkPath::transform(matrix)	luce-browser-render	gfx	sk_path_transform	skia/src/core/SkPath_pathref.cpp:309	ported
+SkPathEdgeIter::SkPathEdgeIter(const	luce-browser-render	gfx	sk_path_edge_iter	skia/src/core/SkPath.cpp:911	ported
+SkPathEdgeIter::next	luce-browser-render	gfx	sk_path_edge_iter_next	skia/src/core/SkPathPriv.h:517	ported
+SkPathIterPointsPerVerb	luce-browser-render	gfx	sk_path_iter_points_per_verb	skia/src/core/SkPath.cpp:449	ported
+SkPathMeasure::SkPathMeasure(path	luce-browser-render	gfx	sk_path_measure	skia/src/core/SkPathMeasure.cpp:24	ported
+SkPathMeasure::getLength	luce-browser-render	gfx	sk_path_measure_get_length	skia/src/core/SkPathMeasure.cpp:37	ported
+SkPathMeasure::getPosTan	luce-browser-render	gfx	sk_path_measure_get_pos_tan	skia/src/core/SkPathMeasure.cpp:41	ported
+SkPathMeasure::isClosed	luce-browser-render	gfx	sk_path_measure_is_closed	skia/src/core/SkPathMeasure.cpp:53	ported
+SkPathMeasure::nextContour	luce-browser-render	gfx	sk_path_measure_next_contour	skia/src/core/SkPathMeasure.cpp:57	ported
+SkPoint::Distance	luce-browser-render	gfx	sk_point_distance	skia/include/private/base/SkPoint_impl.h:508	ported
+SkPoint::Length	luce-browser-render	gfx	sk_point_length	skia/src/core/SkPoint.cpp:79	ported
+SkPointPriv::AreFinite	luce-browser-render	gfx	sk_points_are_finite	skia/src/core/SkPointPriv.h:22	ported
+SkPointPriv::CanNormalize	luce-browser-render	gfx	sk_point_can_normalize	skia/src/core/SkPointPriv.h:28	ported
+SkPointPriv::EqualsWithinTolerance	luce-browser-render	gfx	sk_point_equals_within_tolerance	skia/src/core/SkPointPriv.h:54	ported
+SkPointPriv::LengthSqd	luce-browser-render	gfx	sk_point_length_sqd	skia/src/core/SkPointPriv.h:63	ported
+SkRect::Bounds	luce-browser-render	gfx	sk_rect_bounds	skia/src/core/SkRect.cpp:50	ported
+SkRect::setBoundsCheck	luce-browser-render	gfx	sk_rect_set_bounds_check	skia/src/core/SkRect.cpp:121	ported
+SkScalarCosSnapToZero	luce-browser-render	gfx	sk_scalar_cos_snap_to_zero	skia/include/core/SkScalar.h:120	ported
+SkScalarInterp	luce-browser-render	gfx	sk_scalar_interp	skia/include/core/SkScalar.h:131	ported
+SkScalarNearlyEqual	luce-browser-render	gfx	sk_scalar_nearly_equal	skia/include/core/SkScalar.h:107	ported
+SkScalarNearlyZero	luce-browser-render	gfx	sk_scalar_nearly_zero_tol	skia/include/core/SkScalar.h:101	ported
+SkScalarSignAsInt	luce-browser-render	gfx	sk_scalar_sign_as_int	skia/include/core/SkScalar.h:90	ported
+SkScalarSinSnapToZero	luce-browser-render	gfx	sk_scalar_sin_snap_to_zero	skia/include/core/SkScalar.h:115	ported
+SkStrAppendScalar	luce-browser-render	gfx	sk_append_scalar	skia/src/core/SkString.cpp:164	ported
 SkSurface	luce-browser-render	gfx	SkSurface	Libraries/LibGfx/SkiaBackendContext.h:22	opaque
+SkTKSearch	luce-browser-render	gfx	sk_measure_tk_search	skia/src/core/SkContourMeasure.cpp:552	ported
 SkTextBlob	luce-browser-render	web_fonts	SkTextBlob	Libraries/LibGfx/TextLayout.h:22	opaque
 SkTypeface	luce-browser-render	web_fonts	SkTypeface	Libraries/LibGfx/Font/Typeface.h:21	opaque
 Threading::Mutex	luce-browser-render	display_list	ThreadingMutex	Libraries/LibThreading/Mutex.h:17	opaque
@@ -2021,16 +2265,61 @@ Web::operator>	luce-browser-render	gfx	gt_i32	Libraries/LibWeb/PixelUnits.h:35	s
 Web::operator>=	luce-browser-render	gfx	ge	Libraries/LibWeb/PixelUnits.h:41	stub
 abs	luce-browser-render	gfx	abs_css_pixels	Libraries/LibWeb/PixelUnits.h:429	stub
 abs	luce-browser-render	gfx	abs_i32	Libraries/LibWeb/PixelUnits.h:459	stub
+bad_conic_w	luce-browser-render	gfx	sk_conic_bad_w	skia/src/core/SkGeometry.cpp:1488	ported
+between	luce-browser-render	gfx	sk_conic_between	skia/src/core/SkGeometry.cpp:1529	ported
+between	luce-browser-render	gfx	sk_contains_between	skia/src/core/SkPathPriv.cpp:893	ported
 c:@E@GrSurfaceOrigin	luce-browser-render	gfx	CEGrSurfaceOrigin	generated	opaque
 c:@E@SkAlphaType	luce-browser-render	gfx	CESkAlphaType	generated	opaque
 c:@E@SkColorType	luce-browser-render	gfx	CESkColorType	generated	opaque
 ceil	luce-browser-render	gfx	ceil	Libraries/LibWeb/PixelUnits.h:439	stub
+cheap_dist_exceeds_limit	luce-browser-render	gfx	sk_measure_cheap_dist_exceeds_limit	skia/src/core/SkContourMeasure.cpp:170	ported
+checkOnCurve	luce-browser-render	gfx	sk_contains_check_on_curve	skia/src/core/SkPathPriv.cpp:920	ported
+compute_pos_tan	luce-browser-render	gfx	sk_measure_compute_pos_tan	skia/src/core/SkContourMeasure.cpp:458	ported
+conic_deriv_coeff	luce-browser-render	gfx	sk_conic_deriv_coeff	skia/src/core/SkGeometry.cpp:1251	ported
+conic_eval_denominator	luce-browser-render	gfx	sk_contains_conic_eval_denominator	skia/src/core/SkPathPriv.cpp:995	ported
+conic_eval_numerator	luce-browser-render	gfx	sk_contains_conic_eval_numerator	skia/src/core/SkPathPriv.cpp:984	ported
+conic_find_extrema	luce-browser-render	gfx	sk_conic_find_extrema	skia/src/core/SkGeometry.cpp:1262	ported
+conic_too_curvy	luce-browser-render	gfx	sk_measure_conic_too_curvy	skia/src/core/SkContourMeasure.cpp:161	ported
 constrained	luce-browser-render	gfx	constrained	Libraries/LibWeb/PixelUnits.h:471	stub
+contains_inclusive	luce-browser-render	gfx	sk_contains_inclusive	skia/src/core/SkPathPriv.cpp:1292	ported
+cubic_too_curvy	luce-browser-render	gfx	sk_measure_cubic_too_curvy	skia/src/core/SkContourMeasure.cpp:177	ported
+eval_cubic_derivative	luce-browser-render	gfx	sk_geometry_eval_cubic_derivative	skia/src/core/SkGeometry.cpp:394	ported
+eval_cubic_pts	luce-browser-render	gfx	sk_contains_eval_cubic_pts	skia/src/core/SkPathPriv.cpp:899	ported
+find_minmax<N>	luce-browser-render	gfx	sk_contains_find_minmax	skia/src/core/SkPathPriv.cpp:908	ported
 floor	luce-browser-render	gfx	floor	Libraries/LibWeb/PixelUnits.h:434	stub
 hb_blob_t	luce-browser-render	web_fonts	HbBlobT	Libraries/LibGfx/Font/Typeface.h:22	opaque
 hb_buffer_t	luce-browser-render	web_fonts	HbBufferT	Libraries/LibGfx/Font/Font.h:22	opaque
 hb_face_t	luce-browser-render	web_fonts	HbFaceT	Libraries/LibGfx/Font/Typeface.h:23	opaque
 hb_font_t	luce-browser-render	web_fonts	HbFontT	Libraries/LibGfx/Font/Font.h:21	opaque
+interp	luce-browser-render	gfx	sk_geometry_interp	skia/src/core/SkGeometry.cpp:169	ported
+is_mono_quad	luce-browser-render	gfx	sk_contains_is_mono_quad	skia/src/core/SkPathPriv.cpp:1052	ported
+is_not_monotonic	luce-browser-render	gfx	sk_geometry_is_not_monotonic	skia/src/core/SkGeometry.cpp:43	ported
+muladdmul	luce-browser-render	gfx	sk_matrix_muladdmul	skia/src/core/SkMatrix.cpp:603	ported
+only_scale_and_translate	luce-browser-render	gfx	sk_matrix_only_scale_and_translate	skia/src/core/SkMatrix.cpp:611	ported
+poly_eval(A	luce-browser-render	gfx	sk_contains_poly_eval3	skia/src/core/SkPathPriv.cpp:884	ported
+poly_eval(A	luce-browser-render	gfx	sk_contains_poly_eval4	skia/src/core/SkPathPriv.cpp:888	ported
+quad_too_curvy	luce-browser-render	gfx	sk_measure_quad_too_curvy	skia/src/core/SkContourMeasure.cpp:148	ported
 round	luce-browser-render	gfx	round	Libraries/LibWeb/PixelUnits.h:446	stub
+rowcol3	luce-browser-render	gfx	sk_matrix_rowcol3	skia/src/core/SkMatrix.cpp:607	ported
+set_point_length<false>	luce-browser-render	gfx	sk_point_set_length	skia/src/core/SkPoint.cpp:42	ported
+sk_float_ceil2int	luce-browser-render	gfx	sk_float_ceil2int	skia/include/private/base/SkFloatingPoint.h:120	ported
+sk_float_round	luce-browser-render	gfx	sk_float_round	skia/include/private/base/SkFloatingPoint.h:38	ported
 sqrt	luce-browser-render	gfx	sqrt	Libraries/LibWeb/PixelUnits.h:454	stub
 square_distance_between	luce-browser-render	gfx	square_distance_between	Libraries/LibWeb/PixelUnits.h:464	stub
+subdivide	luce-browser-render	gfx	sk_conic_subdivide	skia/src/core/SkGeometry.cpp:1533	ported
+subdivide_w_value	luce-browser-render	gfx	sk_conic_subdivide_w_value	skia/src/core/SkGeometry.cpp:1397	ported
+tValue2Scalar	luce-browser-render	gfx	sk_t_value_to_scalar	skia/src/core/SkContourMeasure.cpp:29	ported
+tangent_conic	luce-browser-render	gfx	sk_contains_tangent_conic	skia/src/core/SkPathPriv.cpp:1217	ported
+tangent_cubic	luce-browser-render	gfx	sk_contains_tangent_cubic	skia/src/core/SkPathPriv.cpp:1189	ported
+tangent_line	luce-browser-render	gfx	sk_contains_tangent_line	skia/src/core/SkPathPriv.cpp:1270	ported
+tangent_quad	luce-browser-render	gfx	sk_contains_tangent_quad	skia/src/core/SkPathPriv.cpp:1244	ported
+tspan_big_enough	luce-browser-render	gfx	sk_measure_tspan_big_enough	skia/src/core/SkContourMeasure.cpp:137	ported
+unchecked_mix	luce-browser-render	gfx	sk_geometry_mix	skia/src/core/SkGeometry.cpp:468	ported
+valid_unit_divide	luce-browser-render	gfx	sk_valid_unit_divide	skia/src/core/SkGeometry.cpp:54	ported
+winding_conic	luce-browser-render	gfx	sk_contains_winding_conic	skia/src/core/SkPathPriv.cpp:1064	ported
+winding_cubic	luce-browser-render	gfx	sk_contains_winding_cubic	skia/src/core/SkPathPriv.cpp:974	ported
+winding_line	luce-browser-render	gfx	sk_contains_winding_line	skia/src/core/SkPathPriv.cpp:1149	ported
+winding_mono_conic	luce-browser-render	gfx	sk_contains_winding_mono_conic	skia/src/core/SkPathPriv.cpp:1002	ported
+winding_mono_cubic	luce-browser-render	gfx	sk_contains_winding_mono_cubic	skia/src/core/SkPathPriv.cpp:928	ported
+winding_mono_quad	luce-browser-render	gfx	sk_contains_winding_mono_quad	skia/src/core/SkPathPriv.cpp:1078	ported
+winding_quad	luce-browser-render	gfx	sk_contains_winding_quad	skia/src/core/SkPathPriv.cpp:1133	ported

@@ -1,0 +1,285 @@
+#==============================================================================================
+#
+#   path - the Font-dependent members of Gfx::Path and the PathImpl interface
+#
+#   DESCRIPTION:
+#       Port of the members of Libraries/LibGfx/Path.h (lines 18-131) and Path.cpp (lines
+#       1-19) that name Font or GlyphRun, which gfx cannot import (DESIGN.md §4.1): Path's
+#       text, glyph_run and place_text_along, following PathImplSkia's bodies
+#       (Libraries/LibGfx/PathSkia.cpp lines 96-203) over the SkPath of gfx.Path
+#       (gfx.path_sk_path), and the abstract PathImpl.
+#
+#       PathImpl: gfx.Path's implementation is gfx.PathImplRaster (which replaces
+#       PathImplSkia, the donor's only PathImpl) and gfx calls it directly, so this abstract
+#       interface has no implementation. Its pure virtual members trap as pure virtuals do;
+#       PathImpl::create, Path::impl and the private Path(NonnullOwnPtr<PathImpl>&&) are
+#       replaced by gfx.path_impl_raster_create, gfx.path_sk_path and gfx.Path's fields, and
+#       trap.
+#
+#       Integration point with region r09 (web_fonts): Skia's SkFont gives PathImplSkia each
+#       glyph's outline (SkFont::getPath / getPaths, at the font's pixel size, in pixels, y
+#       down, the origin on the baseline) and advance (SkFont::getPos / getWidths). The port's
+#       font reader does not expose those yet, so path_glyph_outline and path_glyph_advance
+#       trap; everything around them is ported.
+#
+#==============================================================================================
+
+# mark: SkFont =================================================================================
+
+# SkFont::getPath(glyph) for `font.skia_font(1)`: the glyph's outline, or none (a glyph with no
+# outline). FIXME(r09): needs the font reader's glyph outlines.
+func path_glyph_outline(font: const Font*, glyph_id: u32) -> gfx.SkPath?:
+    discard(font)
+    discard(glyph_id)
+    trap("unported: glyph outlines (SkFont::getPath) come from web_fonts' font reader (region r09)")
+
+# SkFont::getWidths({glyph}) for `font.skia_font(1)`: the glyph's horizontal advance in pixels.
+# FIXME(r09): needs the font reader's advances by glyph id.
+func path_glyph_advance(font: const Font*, glyph_id: u32) -> f32:
+    discard(font)
+    discard(glyph_id)
+    trap("unported: glyph advances by glyph id (SkFont::getWidths) come from web_fonts' font reader (region r09)")
+
+# SkAutoToGlyphs over UTF-8: the glyph of each code point (SkFont::textToGlyphs).
+func path_glyphs_of_utf8(font: const Font*, text: const ak.Utf8View*) -> ak.Vector[u32]:
+    var glyphs: ak.Vector[u32] = ak.vector_create_atomic[u32]()
+    var it = ak.utf8_view_begin(text)
+    while not ak.utf8_code_point_iterator_done(&it):
+        ak.vector_append_t(&glyphs, font_glyph_id_for_code_point(font, ak.utf8_code_point_iterator_deref(&it)))
+        discard(ak.utf8_code_point_iterator_inc(&it))
+    return glyphs
+
+# SkAutoToGlyphs over UTF-16: the glyph of each code point (SkFont::textToGlyphs).
+func path_glyphs_of_utf16(font: const Font*, text: const ak.Utf16View*) -> ak.Vector[u32]:
+    var glyphs: ak.Vector[u32] = ak.vector_create_atomic[u32]()
+    var it = ak.utf16_view_begin(text)
+    while not ak.utf16_code_point_iterator_done(&it):
+        ak.vector_append_t(&glyphs, font_glyph_id_for_code_point(font, ak.utf16_code_point_iterator_deref(&it)))
+        discard(ak.utf16_code_point_iterator_inc(&it))
+    return glyphs
+
+# SkTextUtils::GetPath (Skia src/utils/SkTextUtils.cpp:39): the outlines of `glyphs` laid out
+# from (x, y) by their advances (SkFont::getPos), as a new path that replaces `path`.
+func path_text_get_path(glyphs: const ak.Vector[u32]*, x: f32, y: f32, font: const Font*, path: gfx.SkPath*):
+    var result = gfx.sk_path_create()
+    var position = gfx.SkPoint(x = x, y = y)
+    for glyph in ak.vector_span_const(glyphs):
+        # getPaths hands each glyph's path with the identity scale (a scale-1 font)
+        if let glyph_path = path_glyph_outline(font, glyph):
+            var matrix = gfx.sk_matrix_identity()
+            gfx.sk_matrix_post_translate(&matrix, position.x, position.y)
+            gfx.sk_path_add_path(&result, &glyph_path, &matrix, gfx.SkPathAddPathMode.append)
+        position.x = position.x + path_glyph_advance(font, glyph)
+    *path = result
+
+# mark: Path ===================================================================================
+
+## Ported from Libraries/LibGfx/Path.h:96 Gfx::Path::text (PathSkia.cpp:96 PathImplSkia::text).
+pub func path_text_utf8_view(this: gfx.Path*, text: ak.Utf8View, font: const Font*):
+    let last_point = gfx.path_last_point(this)
+    let glyphs = path_glyphs_of_utf8(font, &text)
+    path_text_get_path(&glyphs, gfx.float_point_x(&last_point), gfx.float_point_y(&last_point), font, gfx.path_sk_path(this))
+
+## Ported from Libraries/LibGfx/Path.h:97 Gfx::Path::text (PathSkia.cpp:101 PathImplSkia::text).
+pub func path_text_utf16_view(this: gfx.Path*, text: ak.Utf16View, font: const Font*):
+    if ak.utf16_view_has_ascii_storage(&text):
+        var bytes: ak.StringView
+        ak.string_view_construct_span_u8(&bytes, ak.utf16_view_bytes(&text))
+        var utf8: ak.Utf8View
+        ak.utf8_view_construct_string_view(&utf8, bytes)
+        path_text_utf8_view(this, utf8, font)
+        return
+
+    let last_point = gfx.path_last_point(this)
+    let glyphs = path_glyphs_of_utf16(font, &text)
+    path_text_get_path(&glyphs, gfx.float_point_x(&last_point), gfx.float_point_y(&last_point), font, gfx.path_sk_path(this))
+
+## Ported from Libraries/LibGfx/Path.h:98 Gfx::Path::glyph_run (PathSkia.cpp:111 PathImplSkia::glyph_run).
+pub func path_glyph_run(this: gfx.Path*, glyph_run: const GlyphRun*):
+    let sk_path = gfx.path_sk_path(this)
+    let font = glyph_run_font(glyph_run)
+    gfx.sk_path_set_fill_type(sk_path, gfx.SkPathFillType.winding)
+    let font_ascent = font_pixel_metrics(&font).ascent
+    let glyphs = glyph_run_glyphs_const(glyph_run)
+    for glyph in ak.vector_span_const(&glyphs):
+        var glyph_path = path_glyph_outline(&font, glyph.glyph_id) else continue
+        gfx.sk_path_offset(&glyph_path, gfx.float_point_x(&glyph.position), gfx.float_point_y(&glyph.position) + font_ascent)
+        var identity = gfx.sk_matrix_identity()
+        gfx.sk_path_add_path(sk_path, &glyph_path, &identity, gfx.SkPathAddPathMode.append)
+
+# PathSkia.cpp:131 place_text_along_impl: each glyph placed on `path` at the distance it has
+# reached, rotated to the path's tangent there; glyphs whose midpoint is past the end are not
+# rendered.
+func path_place_text_along_impl(path: const gfx.SkPath*, font: const Font*, glyphs: const ak.Vector[u32]*) -> gfx.Path:
+    var path_measure = gfx.sk_path_measure(path, false)
+    var accumulated_distance: f32 = 0.0
+
+    var output_path: gfx.Path
+    let output = gfx.path_sk_path(&output_path)
+    let path_length = gfx.sk_path_measure_get_length(&path_measure)
+
+    for glyph in ak.vector_span_const(glyphs):
+        let glyph_path = path_glyph_outline(font, glyph)
+
+        let advance = path_glyph_advance(font, glyph)
+
+        let position_and_tangent = gfx.sk_path_measure_get_pos_tan(&path_measure, accumulated_distance) else continue
+        let position = position_and_tangent.0
+        let tangent = position_and_tangent.1
+
+        # Any typographic characters with mid-points that are not on the path are not rendered.
+        let midpoint_distance = accumulated_distance + (advance / 2.0)
+        if midpoint_distance > path_length:
+            break
+
+        var matrix = gfx.sk_matrix_identity()
+        gfx.sk_matrix_set_translate(&matrix, position.x, position.y)
+        gfx.sk_matrix_pre_rotate(&matrix, math32.atan2(tangent.y, tangent.x) * (180.0 / gfx.sk_scalar_pi))
+
+        # (sk_font.getPath leaves glyph_path empty for a glyph without an outline.)
+        var placed = glyph_path else gfx.sk_path_create()
+        gfx.sk_path_transform(&placed, &matrix)
+        var identity = gfx.sk_matrix_identity()
+        gfx.sk_path_add_path(output, &placed, &identity, gfx.SkPathAddPathMode.append)
+
+        accumulated_distance += advance
+
+    return output_path
+
+## Ported from Libraries/LibGfx/Path.h:115 Gfx::Path::place_text_along (PathSkia.cpp:181).
+pub func path_place_text_along_utf8_view(this: const gfx.Path*, text: ak.Utf8View, font: const Font*) -> gfx.Path:
+    let glyphs = path_glyphs_of_utf8(font, &text)
+    return path_place_text_along_impl(gfx.path_sk_path_const(this), font, &glyphs)
+
+## Ported from Libraries/LibGfx/Path.h:116 Gfx::Path::place_text_along (PathSkia.cpp:190).
+pub func path_place_text_along_utf16_view(this: const gfx.Path*, text: ak.Utf16View, font: const Font*) -> gfx.Path:
+    if ak.utf16_view_has_ascii_storage(&text):
+        var bytes: ak.StringView
+        ak.string_view_construct_span_u8(&bytes, ak.utf16_view_bytes(&text))
+        var utf8: ak.Utf8View
+        ak.utf8_view_construct_string_view(&utf8, bytes)
+        return path_place_text_along_utf8_view(this, utf8, font)
+
+    let glyphs = path_glyphs_of_utf16(font, &text)
+    return path_place_text_along_impl(gfx.path_sk_path_const(this), font, &glyphs)
+
+## Ported from Libraries/LibGfx/Path.h:122 Gfx::Path::impl. Replaced: the implementation is
+## gfx.PathImplRaster, reached through gfx.path_sk_path (see the header).
+pub func path_impl(this: gfx.Path*) -> PathImpl*:
+    discard(this)
+    trap("replaced: Path::impl (gfx.Path's implementation is gfx.PathImplRaster)")
+
+## Ported from Libraries/LibGfx/Path.h:123 Gfx::Path::impl. Replaced: see path_impl.
+pub func path_impl_const(this: const gfx.Path*) -> PathImpl*:
+    discard(this)
+    trap("replaced: Path::impl (gfx.Path's implementation is gfx.PathImplRaster)")
+
+## Ported from Libraries/LibGfx/Path.h:126 Gfx::Path::Path(NonnullOwnPtr<PathImpl>&&).
+## Replaced: a gfx.Path is built from a gfx.PathImplRaster (see the header).
+pub func path_construct(this: gfx.Path*, impl: PathImpl*):
+    discard(this)
+    discard(impl)
+    trap("replaced: Path(NonnullOwnPtr<PathImpl>) (gfx.Path's implementation is gfx.PathImplRaster)")
+
+# mark: PathImpl ===============================================================================
+
+## Ported from Libraries/LibGfx/Path.cpp:12 Gfx::PathImpl::create. Replaced: gfx.Path creates
+## its gfx.PathImplRaster itself (gfx.path_impl_raster_create).
+pub func path_impl_create() -> PathImpl*:
+    trap("replaced: PathImpl::create (gfx.path_impl_raster_create)")
+
+## Ported from Libraries/LibGfx/Path.h:26 Gfx::PathImpl::clear (pure virtual).
+pub func path_impl_clear_impl(this: PathImpl*):
+    trap("pure virtual: Gfx::PathImpl::clear")
+
+## Ported from Libraries/LibGfx/Path.h:27 Gfx::PathImpl::move_to (pure virtual).
+pub func path_impl_move_to_impl(this: PathImpl*, arg0: gfx.FloatPoint):
+    trap("pure virtual: Gfx::PathImpl::move_to")
+
+## Ported from Libraries/LibGfx/Path.h:28 Gfx::PathImpl::line_to (pure virtual).
+pub func path_impl_line_to_impl(this: PathImpl*, arg0: gfx.FloatPoint):
+    trap("pure virtual: Gfx::PathImpl::line_to")
+
+## Ported from Libraries/LibGfx/Path.h:29 Gfx::PathImpl::close (pure virtual).
+pub func path_impl_close_impl(this: PathImpl*):
+    trap("pure virtual: Gfx::PathImpl::close")
+
+## Ported from Libraries/LibGfx/Path.h:30 Gfx::PathImpl::elliptical_arc_to (pure virtual).
+pub func path_impl_elliptical_arc_to_impl(this: PathImpl*, point: gfx.FloatPoint, radii: gfx.FloatSize, x_axis_rotation: f32, large_arc: bool, sweep: bool):
+    trap("pure virtual: Gfx::PathImpl::elliptical_arc_to")
+
+## Ported from Libraries/LibGfx/Path.h:31 Gfx::PathImpl::arc_to (pure virtual).
+pub func path_impl_arc_to_impl(this: PathImpl*, point: gfx.FloatPoint, radius: f32, large_arc: bool, sweep: bool):
+    trap("pure virtual: Gfx::PathImpl::arc_to")
+
+## Ported from Libraries/LibGfx/Path.h:32 Gfx::PathImpl::quadratic_bezier_curve_to (pure virtual).
+pub func path_impl_quadratic_bezier_curve_to_impl(this: PathImpl*, through: gfx.FloatPoint, point: gfx.FloatPoint):
+    trap("pure virtual: Gfx::PathImpl::quadratic_bezier_curve_to")
+
+## Ported from Libraries/LibGfx/Path.h:33 Gfx::PathImpl::cubic_bezier_curve_to (pure virtual).
+pub func path_impl_cubic_bezier_curve_to_impl(this: PathImpl*, c1: gfx.FloatPoint, c2: gfx.FloatPoint, p2: gfx.FloatPoint):
+    trap("pure virtual: Gfx::PathImpl::cubic_bezier_curve_to")
+
+## Ported from Libraries/LibGfx/Path.h:34 Gfx::PathImpl::text (pure virtual).
+pub func path_impl_text_utf8_view_impl(this: PathImpl*, arg0: ak.Utf8View, arg1: Font):
+    trap("pure virtual: Gfx::PathImpl::text")
+
+## Ported from Libraries/LibGfx/Path.h:35 Gfx::PathImpl::text (pure virtual).
+pub func path_impl_text_utf16_view_impl(this: PathImpl*, arg0: ak.Utf16View, arg1: Font):
+    trap("pure virtual: Gfx::PathImpl::text")
+
+## Ported from Libraries/LibGfx/Path.h:36 Gfx::PathImpl::glyph_run (pure virtual).
+pub func path_impl_glyph_run_impl(this: PathImpl*, arg0: GlyphRun):
+    trap("pure virtual: Gfx::PathImpl::glyph_run")
+
+## Ported from Libraries/LibGfx/Path.h:37 Gfx::PathImpl::offset (pure virtual).
+pub func path_impl_offset_impl(this: PathImpl*, arg0: gfx.FloatPoint):
+    trap("pure virtual: Gfx::PathImpl::offset")
+
+## Ported from Libraries/LibGfx/Path.h:39 Gfx::PathImpl::append_path (pure virtual).
+pub func path_impl_append_path_impl(this: PathImpl*, arg0: gfx.Path):
+    trap("pure virtual: Gfx::PathImpl::append_path")
+
+## Ported from Libraries/LibGfx/Path.h:40 Gfx::PathImpl::intersect (pure virtual).
+pub func path_impl_intersect_impl(this: PathImpl*, arg0: gfx.Path):
+    trap("pure virtual: Gfx::PathImpl::intersect")
+
+## Ported from Libraries/LibGfx/Path.h:42 Gfx::PathImpl::is_empty (pure virtual).
+pub func path_impl_is_empty_impl(this: PathImpl*) -> bool:
+    trap("pure virtual: Gfx::PathImpl::is_empty")
+
+## Ported from Libraries/LibGfx/Path.h:43 Gfx::PathImpl::last_point (pure virtual).
+pub func path_impl_last_point_impl(this: PathImpl*) -> gfx.FloatPoint:
+    trap("pure virtual: Gfx::PathImpl::last_point")
+
+## Ported from Libraries/LibGfx/Path.h:44 Gfx::PathImpl::bounding_box (pure virtual).
+pub func path_impl_bounding_box_impl(this: PathImpl*) -> gfx.FloatRect:
+    trap("pure virtual: Gfx::PathImpl::bounding_box")
+
+## Ported from Libraries/LibGfx/Path.h:45 Gfx::PathImpl::set_fill_type (pure virtual).
+pub func path_impl_set_fill_type_impl(this: PathImpl*, winding_rule: gfx.WindingRule):
+    trap("pure virtual: Gfx::PathImpl::set_fill_type")
+
+## Ported from Libraries/LibGfx/Path.h:46 Gfx::PathImpl::contains (pure virtual).
+pub func path_impl_contains_impl(this: PathImpl*, point: gfx.FloatPoint, arg1: gfx.WindingRule) -> bool:
+    trap("pure virtual: Gfx::PathImpl::contains")
+
+## Ported from Libraries/LibGfx/Path.h:48 Gfx::PathImpl::clone (pure virtual).
+pub func path_impl_clone_impl(this: PathImpl*) -> PathImpl*:
+    trap("pure virtual: Gfx::PathImpl::clone")
+
+## Ported from Libraries/LibGfx/Path.h:49 Gfx::PathImpl::copy_transformed (pure virtual).
+pub func path_impl_copy_transformed_impl(this: PathImpl*, arg0: gfx.AffineTransform) -> PathImpl*:
+    trap("pure virtual: Gfx::PathImpl::copy_transformed")
+
+## Ported from Libraries/LibGfx/Path.h:50 Gfx::PathImpl::place_text_along (pure virtual).
+pub func path_impl_place_text_along_utf8_view_impl(this: PathImpl*, text: ak.Utf8View, arg1: Font) -> PathImpl*:
+    trap("pure virtual: Gfx::PathImpl::place_text_along")
+
+## Ported from Libraries/LibGfx/Path.h:51 Gfx::PathImpl::place_text_along (pure virtual).
+pub func path_impl_place_text_along_utf16_view_impl(this: PathImpl*, text: ak.Utf16View, arg1: Font) -> PathImpl*:
+    trap("pure virtual: Gfx::PathImpl::place_text_along")
+
+## Ported from Libraries/LibGfx/Path.h:53 Gfx::PathImpl::to_svg_string (pure virtual).
+pub func path_impl_to_svg_string_impl(this: PathImpl*) -> ak.String:
+    trap("pure virtual: Gfx::PathImpl::to_svg_string")
