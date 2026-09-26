@@ -74,9 +74,8 @@ func test_sk_check_svg(this: const TestSkGfxPath*, expected: str):
     let svg = sk_parse_path_to_svg_string(&this.path)
     let text = test_sk_text(&svg)
     if text != expected:
-        print(f"svg: {text}")
-        print(f"expected: {expected}")
-    assert(text == expected)
+        # a trap's message reaches stderr even when buffered stdout is lost with the process
+        trap(f"svg: {text}\nexpected: {expected}")
 
 # PathImplSkia::bounding_box: x, y, width, height as bits.
 func test_sk_check_bounds(this: const TestSkGfxPath*, x: u32, y: u32, width: u32, height: u32):
