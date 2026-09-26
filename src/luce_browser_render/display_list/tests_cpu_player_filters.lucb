@@ -1,0 +1,102 @@
+#==============================================================================================
+#
+#   tests_cpu_player_filters - the CPU player's image filters, text shadows and backdrops
+#                              against Skia
+#
+#   DESCRIPTION:
+#       Scenes whose layers go through the image filter evaluator (cpu_filter.lucb): CSS-like
+#       filters on apply_effects (blur, drop shadow with opacity, a color filter chain under a
+#       blend mode, a blur under a scale and a clip), a text shadow and a backdrop blur,
+#       compared with DisplayListPlayerSkia's pixels (tests_skia_reference_data_2.lucb) under
+#       Ladybird's fuzzy reftest rule. Every scene matches exactly but the text shadow, whose
+#       glyphs differ as tests_cpu_player_2.lucb's do (hinted masks against unhinted
+#       outlines), softened by the blur. The test bodies are `noinline` functions (# workaround:
+#       compiler-issues/ranges_facts_cubic).
+#
+#==============================================================================================
+
+## An apply_effects command with `filter`.
+func test_effects_with_filter(opacity: f32, operator_: gfx.CompositingAndBlendingOperator, filter: gfx.Filter) -> ApplyEffects:
+    return ApplyEffects(opacity = opacity, compositing_and_blending_operator = operator_, filter = filter)
+
+test "cpu player filters: blur":
+    test_cpu_player_filter_blur()
+
+noinline func test_cpu_player_filter_blur():
+    let scene = test_scene_new(24, 24)
+    defer test_scene_release(&scene)
+    let player = test_scene_player(&scene)
+    display_list_player_apply_effects(player, test_effects_with_filter(1.0, gfx.CompositingAndBlendingOperator.normal, gfx.filter_blur(2.0, 2.0)))
+    display_list_player_fill_rect(player, FillRect(rect = test_rect(6, 6, 12, 12), color = test_color(0, 0, 255, 255)))
+    display_list_player_restore(player, Restore())
+    expect_like_skia(&scene, "filter_blur", skia_filter_blur, 0, 0)
+
+test "cpu player filters: drop shadow under opacity":
+    test_cpu_player_filter_drop_shadow()
+
+noinline func test_cpu_player_filter_drop_shadow():
+    let scene = test_scene_new(24, 24)
+    defer test_scene_release(&scene)
+    let player = test_scene_player(&scene)
+    let shadow = gfx.filter_drop_shadow(2.0, 3.0, 1.5, test_color(0, 0, 0, 160))
+    display_list_player_apply_effects(player, test_effects_with_filter(0.8, gfx.CompositingAndBlendingOperator.normal, shadow))
+    display_list_player_fill_rect(player, FillRect(rect = test_rect(4, 4, 12, 10), color = test_color(255, 128, 0, 255)))
+    display_list_player_restore(player, Restore())
+    expect_like_skia(&scene, "filter_drop_shadow_opacity", skia_filter_drop_shadow_opacity, 0, 0)
+
+test "cpu player filters: a color filter chain under multiply":
+    test_cpu_player_filter_color_chain()
+
+noinline func test_cpu_player_filter_color_chain():
+    let scene = test_scene_new(16, 16)
+    defer test_scene_release(&scene)
+    let player = test_scene_player(&scene)
+    let grayscale = gfx.filter_color(gfx.ColorFilterType.grayscale, 0.5)
+    let hue = gfx.filter_hue_rotate(90.0, &grayscale)
+    display_list_player_apply_effects(player, test_effects_with_filter(1.0, gfx.CompositingAndBlendingOperator.multiply, hue))
+    display_list_player_fill_rect(player, FillRect(rect = test_rect(2, 2, 12, 12), color = test_color(200, 40, 90, 200)))
+    display_list_player_restore(player, Restore())
+    expect_like_skia(&scene, "filter_color_chain", skia_filter_color_chain, 0, 0)
+
+test "cpu player filters: blur under a scale and a clip":
+    test_cpu_player_filter_blur_clipped_scaled()
+
+noinline func test_cpu_player_filter_blur_clipped_scaled():
+    let scene = test_scene_new(24, 24)
+    defer test_scene_release(&scene)
+    let player = test_scene_player(&scene)
+    display_list_player_save(player, Save())
+    display_list_player_apply_transform(player, gfx.FloatPoint(m_x = 0.0, m_y = 0.0), test_matrix([[1.5, 0.0, 0.0, 0.0], [0.0, 1.5, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]))
+    display_list_player_save(player, Save())
+    display_list_player_add_clip_rect(player, AddClipRect(rect = test_rect(2, 2, 12, 12)))
+    display_list_player_apply_effects(player, test_effects_with_filter(1.0, gfx.CompositingAndBlendingOperator.normal, gfx.filter_blur(1.0, 1.0)))
+    display_list_player_fill_rect(player, FillRect(rect = test_rect(4, 4, 6, 6), color = test_color(0, 160, 0, 255)))
+    display_list_player_restore(player, Restore())
+    display_list_player_restore(player, Restore())
+    display_list_player_restore(player, Restore())
+    expect_like_skia(&scene, "filter_blur_clipped_scaled", skia_filter_blur_clipped_scaled, 0, 0)
+
+test "cpu player filters: text shadow":
+    test_cpu_player_text_shadow()
+
+noinline func test_cpu_player_text_shadow():
+    with memory.heap:
+        let scene = test_scene_new(40, 24)
+        defer test_scene_release(&scene)
+        let run = test_glyph_run("Hi", test_font("tests/web_fonts/fonts/Lato-Bold.ttf", 15.0), 1.0)
+        let command = PaintTextShadow(glyph_run = run, shadow_bounding_rect = test_rect(0, 0, 40, 24), text_rect = test_rect(4, 2, 30, 20), draw_location = test_float_point(1.0, 14.0), blur_radius = 4, color = test_color(255, 0, 0, 255))
+        display_list_player_paint_text_shadow(test_scene_player(&scene), command)
+        expect_like_skia(&scene, "text_shadow", skia_text_shadow, 20, 500)
+
+test "cpu player filters: backdrop blur":
+    test_cpu_player_backdrop_blur()
+
+noinline func test_cpu_player_backdrop_blur():
+    let scene = test_scene_new(24, 24)
+    defer test_scene_release(&scene)
+    let player = test_scene_player(&scene)
+    display_list_player_fill_rect(player, FillRect(rect = test_rect(0, 0, 12, 24), color = test_color(255, 0, 0, 255)))
+    display_list_player_fill_rect(player, FillRect(rect = test_rect(12, 0, 12, 24), color = test_color(0, 0, 255, 255)))
+    let command = ApplyBackdropFilter(backdrop_region = test_rect(4, 4, 16, 16), corner_radii = test_uniform_radii(0), backdrop_filter = gfx.filter_blur(2.0, 2.0))
+    display_list_player_apply_backdrop_filter(player, command)
+    expect_like_skia(&scene, "backdrop_blur", skia_backdrop_blur, 0, 0)

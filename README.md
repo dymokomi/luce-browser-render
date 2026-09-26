@@ -26,8 +26,9 @@ of this repository.
 
 ## Testing
 
-`./test.sh` checks the formatting, type-checks every module with warnings as errors and runs the `display_list` and `raster` tests (the CPU
-display-list player is compared with Skia's pixels; the rasterizer with tiny-skia's reference
+`./test.sh` checks the formatting, type-checks every module with warnings as errors and runs
+every module's tests (the CPU display-list player is compared with Skia's pixels, the fonts
+and paths with the reference build's LibGfx, the rasterizer with tiny-skia's reference
 images).
 
 ## License
