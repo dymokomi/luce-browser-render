@@ -11,14 +11,13 @@
 #         ltra/ltrm or rtla/rtlm, abvm, blwm, ccmp, locl, mark, mkmk, rlig, calt, clig, curs,
 #         dist, kern, liga, rclt) overridden by the font's features, and the lookups of the
 #         chosen features applied in lookup-list order;
-#       - GSUB lookups 1 (single), 2 (multiple), 3 (alternate), 4 (ligature) and 7
-#         (extension);
+#       - GSUB lookups 1 (single), 2 (multiple), 3 (alternate), 4 (ligature), 5 and 6
+#         (contextual, in hb_context.lucb) and 7 (extension);
 #       - lookup flags (ignore base/ligature/mark, mark attachment type, mark filtering sets).
 #
 #       GPOS and the kern table are in hb_position.lucb.
 #
-#       FIXME: contextual and chaining substitutions (GSUB 5, 6, 8) and FeatureVariations are
-#       not applied.
+#       FIXME: reverse chaining substitution (GSUB 8) and FeatureVariations are not applied.
 #
 #==============================================================================================
 
@@ -147,6 +146,11 @@ func hb_class_for_substitute(face: const SfntFace*, glyph: u32, fallback: u8) ->
 struct HbPlanLookup:
     var index: u16
     var feature_value: u32
+    ## Whether the lookup's features match joiners automatically (all but mark and mkmk,
+    ## which HarfBuzz adds with F_MANUAL_JOINERS; a lookup shared by features keeps the
+    ## automatic behaviour only if all of them have it).
+    var auto_zwj: bool
+    var auto_zwnj: bool
 
 ## The shaping plan: GSUB's two stages and GPOS's lookups, in lookup-list order.
 pub struct HbLayoutPlan:
@@ -249,6 +253,7 @@ func ot_collect_lookups(table: const u8[], lang_sys: usize?, wanted: const HbWan
     for position in 0..<feature_count + 1:
         var feature_index: u16
         var value: u32 = 1
+        var manual_joiners = false
         if position == feature_count:
             # The required feature is always applied.
             if required == 0xFFFF:
@@ -257,6 +262,7 @@ func ot_collect_lookups(table: const u8[], lang_sys: usize?, wanted: const HbWan
         else:
             feature_index = sfnt_u16(table, lang + 6 + position * 2)
             let tag = sfnt_u32(table, feature_list + 2 + (usize)feature_index * 6)
+            manual_joiners = tag == sfnt_tag('m', 'a', 'r', 'k') or tag == sfnt_tag('m', 'k', 'm', 'k')
             var enabled = false
             for entry in wanted:
                 if entry.tag == tag:
@@ -268,21 +274,24 @@ func ot_collect_lookups(table: const u8[], lang_sys: usize?, wanted: const HbWan
         let lookup_count = (usize)sfnt_u16(table, feature + 2)
         for lookup_position in 0..<lookup_count:
             let lookup_index = sfnt_u16(table, feature + 4 + lookup_position * 2)
-            hb_plan_add_lookup(&lookups, lookup_index, value)
+            hb_plan_add_lookup(&lookups, lookup_index, value, manual_joiners)
     return lookups
 
 ## Adds a lookup keeping the list sorted and without duplicates (hb_ot_map_t merges the
 ## lookups of a stage by index).
-func hb_plan_add_lookup(lookups: ak.Vector[HbPlanLookup]*, index: u16, value: u32):
+func hb_plan_add_lookup(lookups: ak.Vector[HbPlanLookup]*, index: u16, value: u32, manual_joiners: bool):
     var position: usize = 0
     while position < ak.vector_size(lookups):
         let existing = ak.vector_at(lookups, position)
         if existing.index == index:
+            if manual_joiners:
+                existing.auto_zwj = false
+                existing.auto_zwnj = false
             return
         if existing.index > index:
             break
         position += 1
-    ak.vector_insert(lookups, position, HbPlanLookup(index = index, feature_value = value))
+    ak.vector_insert(lookups, position, HbPlanLookup(index = index, feature_value = value, auto_zwj = not manual_joiners, auto_zwnj = not manual_joiners))
 
 ## Plans the layout of `buffer` with the font's `features`.
 func hb_layout_plan(face: const SfntFace*, buffer: const HbBufferT*, features: const HbFeature[]) -> HbLayoutPlan:
@@ -318,8 +327,13 @@ struct OtLookup:
     var lookup_type: u16
     var flags: u16
     var mark_filtering_set: u16
+    # The applying context's joiner handling and table (hb_ot_apply_context_t's auto_zwj,
+    # auto_zwnj and table_index), which nested lookups inherit.
+    var auto_zwj: bool
+    var auto_zwnj: bool
+    var is_gpos: bool
 
-func ot_lookup(table: const u8[], index: u16) -> OtLookup?:
+func ot_lookup(table: const u8[], index: u16, auto_zwj: bool, auto_zwnj: bool, is_gpos: bool) -> OtLookup?:
     let lookup_list = (usize)sfnt_u16(table, 8)
     if lookup_list == 0 or index >= sfnt_u16(table, lookup_list):
         return none
@@ -329,7 +343,7 @@ func ot_lookup(table: const u8[], index: u16) -> OtLookup?:
     var mark_filtering_set: u16 = 0
     if (flags & 0x10) != 0:
         mark_filtering_set = sfnt_u16(table, offset + 6 + subtable_count * 2)
-    return OtLookup(table = table, offset = offset, lookup_type = sfnt_u16(table, offset), flags = flags, mark_filtering_set = mark_filtering_set)
+    return OtLookup(table = table, offset = offset, lookup_type = sfnt_u16(table, offset), flags = flags, mark_filtering_set = mark_filtering_set, auto_zwj = auto_zwj, auto_zwnj = auto_zwnj, is_gpos = is_gpos)
 
 ## The subtable `index` of a lookup, with its type after resolving an extension subtable
 ## (`extension_type`: 7 in GSUB, 9 in GPOS).
@@ -356,11 +370,12 @@ func ot_lookup_skips(face: const SfntFace*, lookup: const OtLookup*, info: const
             return gdef_mark_attachment_class(face, info.codepoint) != attachment_type
     return false
 
-## The next glyph after `index` a lookup would consider, skipping what its flags skip.
+## The next glyph after `index` a lookup would consider (skippy_iter.next without a match
+## function: what the flags skip and default ignorables are passed over).
 func ot_next_glyph(face: const SfntFace*, lookup: const OtLookup*, infos: const HbGlyphInfo[], index: usize) -> usize?:
     var candidate = index + 1
     while candidate < infos.length:
-        if not ot_lookup_skips(face, lookup, &infos[candidate]):
+        if ot_may_skip(face, lookup, &infos[candidate], false) == 0:
             return candidate
         candidate += 1
     return none
@@ -368,14 +383,14 @@ func ot_next_glyph(face: const SfntFace*, lookup: const OtLookup*, infos: const 
 # mark: GSUB ====================================================================================
 
 ## Applies the plan's GSUB lookups, stage by stage.
-func hb_layout_substitute(face: const SfntFace*, plan: const HbLayoutPlan*, buffer: HbBufferT*):
+func hb_layout_substitute(face: const SfntFace*, font: const HbFontT*, plan: const HbLayoutPlan*, buffer: HbBufferT*):
     for planned in ak.vector_span_const(&plan.gsub_stage_rvrn):
-        gsub_apply_lookup(face, planned, buffer)
+        gsub_apply_lookup(face, font, planned, buffer)
     for planned in ak.vector_span_const(&plan.gsub_stage_main):
-        gsub_apply_lookup(face, planned, buffer)
+        gsub_apply_lookup(face, font, planned, buffer)
 
-func gsub_apply_lookup(face: const SfntFace*, planned: HbPlanLookup, buffer: HbBufferT*):
-    let lookup = ot_lookup(face.gsub, planned.index) else return
+func gsub_apply_lookup(face: const SfntFace*, font: const HbFontT*, planned: HbPlanLookup, buffer: HbBufferT*):
+    let lookup = ot_lookup(face.gsub, planned.index, planned.auto_zwj, planned.auto_zwnj, false) else return
     let subtable_count = (usize)sfnt_u16(face.gsub, lookup.offset + 4)
     var index: usize = 0
     while index < ak.vector_size(&buffer.infos):
@@ -386,14 +401,19 @@ func gsub_apply_lookup(face: const SfntFace*, planned: HbPlanLookup, buffer: HbB
         var next = index + 1
         for subtable_index in 0..<subtable_count:
             let (lookup_type, subtable) = ot_lookup_subtable(&lookup, subtable_index, 7)
-            if let applied = gsub_apply_subtable(face, &lookup, lookup_type, subtable, planned.feature_value, buffer, index):
+            if let applied = gsub_apply_subtable(face, font, &lookup, lookup_type, subtable, planned.feature_value, buffer, index, 0):
                 next = applied
                 break
         index = next
 
 ## Applies one subtable at `index`; answers the index to continue at when it applied.
-func gsub_apply_subtable(face: const SfntFace*, lookup: const OtLookup*, lookup_type: u16, subtable: usize, feature_value: u32, buffer: HbBufferT*, index: usize) -> usize?:
+func gsub_apply_subtable(face: const SfntFace*, font: const HbFontT*, lookup: const OtLookup*, lookup_type: u16, subtable: usize, feature_value: u32, buffer: HbBufferT*, index: usize, nesting: u32) -> usize?:
     let gsub = face.gsub
+    # Contextual lookups find their own coverage.
+    if lookup_type == 5:
+        return ot_apply_context(face, font, false, lookup, subtable, buffer, index, nesting)
+    if lookup_type == 6:
+        return ot_apply_chain_context(face, font, false, lookup, subtable, buffer, index, nesting)
     let glyph = ak.vector_at(&buffer.infos, index).codepoint
     let coverage = ot_coverage_index(gsub, subtable + (usize)sfnt_u16(gsub, subtable + 2), glyph) else return none
     match lookup_type:
@@ -437,8 +457,7 @@ func gsub_apply_subtable(face: const SfntFace*, lookup: const OtLookup*, lookup_
         4:
             return gsub_apply_ligature(face, lookup, subtable, coverage, buffer, index)
         _:
-            # FIXME: contextual (5), chaining contextual (6) and reverse chaining (8)
-            # substitutions are not applied.
+            # FIXME: reverse chaining contextual substitution (8) is not applied.
             return none
 
 func gsub_replace_glyph(face: const SfntFace*, buffer: HbBufferT*, index: usize, glyph: u32):
@@ -471,10 +490,11 @@ func gsub_apply_ligature(face: const SfntFace*, lookup: const OtLookup*, subtabl
             let infos = ak.vector_span_const(&buffer.infos)
             while candidate < infos.length:
                 let info = &infos[candidate]
-                if info.codepoint == wanted and not ot_lookup_skips(face, lookup, info):
+                let skip = ot_may_skip(face, lookup, info, false)
+                if skip != 2 and info.codepoint == wanted:
                     found = true
                     break
-                if ot_lookup_skips(face, lookup, info) or (info.is_default_ignorable and not info.is_zwj and not info.is_zwnj):
+                if skip != 0:
                     candidate += 1
                     continue
                 break

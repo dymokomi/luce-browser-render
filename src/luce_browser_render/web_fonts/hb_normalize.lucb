@@ -1,0 +1,244 @@
+#==============================================================================================
+#
+#   hb_normalize - HarfBuzz's normalizer: mapping characters to glyphs with decomposition,
+#                  the space fallbacks, canonical reordering of marks and recomposition
+#
+#   DESCRIPTION:
+#       New code of the luce-browser port (DESIGN.md §7.1): hb-ot-shape-normalize.cc in the
+#       default shaper's composed-diacritics mode, which decides by the font's cmap:
+#
+#       1. decompose: a character the font has maps to its glyph; one it lacks is decomposed
+#          (canonically) when the font has every part; a space it lacks uses the space glyph
+#          with a fallback width; U+2011 falls back to U+2010; anything else is glyph 0;
+#       2. reorder: runs of marks are sorted stably by canonical combining class;
+#       3. recompose: a mark composes with the preceding starter when nothing between them
+#          blocks it and the font has a glyph for the composition.
+#
+#       web_unicode does not answer canonical combining classes, so the reordering and the
+#       blocking test ask its normalizer: NFD of two marks swaps them exactly when the first
+#       has the greater non-zero class, and NFC of a starter and a mark composes them when
+#       Unicode does. FIXME: HarfBuzz's modified combining classes (Hebrew, Arabic, Thai,
+#       Lao, Tibetan) and its decomposition of characters the font has partially are not
+#       reproduced.
+#
+#==============================================================================================
+
+## The largest run of marks HarfBuzz reorders (HB_OT_SHAPE_MAX_COMBINING_MARKS).
+let hb_max_combining_marks: usize = 32
+
+## The first round and then the second and third: see the header.
+func hb_normalize(font: const HbFontT*, buffer: HbBufferT*):
+    hb_normalize_and_map(font, buffer)
+    hb_reorder_marks(buffer)
+    hb_recompose(font, buffer)
+
+## _hb_ot_shape_normalize for the default shaper's composed-diacritics mode, as far as a
+## font's cmap decides it: a character the font has maps to its glyph; one it lacks is
+## decomposed when the font has every part; a space it lacks uses the space glyph with a
+## fallback width; U+2011 falls back to U+2010; anything else is glyph 0.
+func hb_normalize_and_map(font: const HbFontT*, buffer: HbBufferT*):
+    var mapped: ak.Vector[HbGlyphInfo]
+    ak.vector_ensure_capacity(&mapped, ak.vector_size(&buffer.infos))
+    for info in ak.vector_span_const(&buffer.infos):
+        let u = info.character
+        var current = info
+        if let glyph = hb_font_get_nominal_glyph(font, u):
+            current.codepoint = glyph
+            ak.vector_append_t(&mapped, current)
+            continue
+        if hb_decompose_into(font, &mapped, info):
+            continue
+        let space_type = hb_space_fallback_type(u)
+        if space_type != 0:
+            if let space_glyph = hb_font_get_nominal_glyph(font, 0x0020):
+                current.codepoint = space_glyph
+                current.space_fallback = space_type
+                ak.vector_append_t(&mapped, current)
+                continue
+        if u == 0x2011:
+            if let other_glyph = hb_font_get_nominal_glyph(font, 0x2010):
+                current.codepoint = other_glyph
+                ak.vector_append_t(&mapped, current)
+                continue
+        current.codepoint = 0
+        ak.vector_append_t(&mapped, current)
+    buffer.infos = mapped
+
+## The canonical decomposition of a character the font lacks, when the font has every
+## character of it (HarfBuzz's decompose() tries the same, recursively).
+func hb_decompose_into(font: const HbFontT*, mapped: ak.Vector[HbGlyphInfo]*, info: HbGlyphInfo) -> bool:
+    let u = info.character
+    # Only precomposed letters and symbols decompose; ASCII never does.
+    if u < 0xC0:
+        return false
+    var utf8: u8[4]
+    let length = hb_encode_utf8(u, utf8)
+    let normalized = web_unicode.normalize(ak.string_view_from_bytes(utf8[0..<length]), web_unicode.NormalizationForm.nfd)
+    let normalized_view = ak.string_bytes_as_string_view(&normalized)
+    let bytes = ak.string_view_bytes(&normalized_view)
+    var parts: ak.Vector[u32]
+    var index: usize = 0
+    while index < bytes.length:
+        let (code_point, size) = hb_decode_utf8(bytes, index)
+        ak.vector_append_t(&parts, code_point)
+        index += size
+    if ak.vector_size(&parts) < 2:
+        return false
+    var glyphs: ak.Vector[u32]
+    for part in ak.vector_span_const(&parts):
+        let glyph = hb_font_get_nominal_glyph(font, part) else return false
+        ak.vector_append_t(&glyphs, glyph)
+    for (position, part) in ak.vector_span_const(&parts).indexed():
+        var current = info
+        current.character = part
+        current.codepoint = *ak.vector_at(&glyphs, position)
+        current.is_default_ignorable = false
+        ak.vector_append_t(mapped, current)
+    return true
+
+## The UTF-8 encoding of a scalar value into `out`, answering its length.
+func hb_encode_utf8(code_point: u32, out: u8[]) -> usize:
+    if code_point < 0x80:
+        out[0] = (u8)code_point
+        return 1
+    if code_point < 0x800:
+        out[0] = (u8)(0xC0 | (code_point >> 6))
+        out[1] = (u8)(0x80 | (code_point & 0x3F))
+        return 2
+    if code_point < 0x10000:
+        out[0] = (u8)(0xE0 | (code_point >> 12))
+        out[1] = (u8)(0x80 | ((code_point >> 6) & 0x3F))
+        out[2] = (u8)(0x80 | (code_point & 0x3F))
+        return 3
+    out[0] = (u8)(0xF0 | (code_point >> 18))
+    out[1] = (u8)(0x80 | ((code_point >> 12) & 0x3F))
+    out[2] = (u8)(0x80 | ((code_point >> 6) & 0x3F))
+    out[3] = (u8)(0x80 | (code_point & 0x3F))
+    return 4
+
+## The scalar value at `index` of valid UTF-8 and its length.
+func hb_decode_utf8(bytes: const u8[], index: usize) -> (u32, usize):
+    let b0 = (u32)bytes[index]
+    if b0 < 0x80:
+        return (b0, 1)
+    if b0 < 0xE0 and index + 1 < bytes.length:
+        return (((b0 & 0x1F) << 6) | ((u32)bytes[index + 1] & 0x3F), 2)
+    if b0 < 0xF0 and index + 2 < bytes.length:
+        return (((b0 & 0x0F) << 12) | (((u32)bytes[index + 1] & 0x3F) << 6) | ((u32)bytes[index + 2] & 0x3F), 3)
+    if index + 3 < bytes.length:
+        return (((b0 & 0x07) << 18) | (((u32)bytes[index + 1] & 0x3F) << 12) | (((u32)bytes[index + 2] & 0x3F) << 6) | ((u32)bytes[index + 3] & 0x3F), 4)
+    return (0xFFFD, 1)
+
+
+## `text` (one or two scalar values) normalized to `form`, as scalar values.
+func hb_normalized(code_points: const u32[], form: web_unicode.NormalizationForm) -> ak.Vector[u32]:
+    var utf8: u8[8]
+    var length: usize = 0
+    for code_point in code_points:
+        length += hb_encode_utf8(code_point, utf8[length..])
+    let normalized = web_unicode.normalize(ak.string_view_from_bytes(utf8[0..<length]), form)
+    let normalized_view = ak.string_bytes_as_string_view(&normalized)
+    let bytes = ak.string_view_bytes(&normalized_view)
+    var result: ak.Vector[u32]
+    var index: usize = 0
+    while index < bytes.length:
+        let (code_point, size) = hb_decode_utf8(bytes, index)
+        ak.vector_append_t(&result, code_point)
+        index += size
+    return result
+
+## Whether canonical ordering puts `second` before `first` (ccc(first) > ccc(second) > 0).
+func hb_marks_reorder(first: u32, second: u32) -> bool:
+    let pair: u32[2] = [first, second]
+    let normalized = hb_normalized(pair, web_unicode.NormalizationForm.nfd)
+    return ak.vector_size(&normalized) == 2 and *ak.vector_at_const(&normalized, 0) == second and *ak.vector_at_const(&normalized, 1) == first
+
+## The characters whose canonical combining class is 1 (Overlay), which no other mark
+## reorders before.
+func hb_is_overlay_mark(u: u32) -> bool:
+    return (u >= 0x0334 and u <= 0x0338) or u == 0x1CD4 or (u >= 0x1CE2 and u <= 0x1CE8) or u == 0x20D2 or u == 0x20D3 or (u >= 0x20D8 and u <= 0x20DA) or u == 0x20E5 or u == 0x20E6 or u == 0x20EA or u == 0x20EB or u == 0x10A39 or (u >= 0x16AF0 and u <= 0x16AF4) or u == 0x1BC9E or (u >= 0x1D167 and u <= 0x1D169)
+
+## Whether `u` has canonical combining class 0: NFD would not move it after U+0334 (class 1)
+## and it is not itself an overlay mark.
+func hb_is_starter(u: u32) -> bool:
+    if u < 0x0300:
+        return true
+    return not hb_is_overlay_mark(u) and not hb_marks_reorder(u, 0x0334)
+
+## The second round: stable insertion sort of each run of marks by combining class
+## (hb_buffer_t::sort with compare_combining_class), merging the clusters it moves across.
+func hb_reorder_marks(buffer: HbBufferT*):
+    let infos = ak.vector_span(&buffer.infos)
+    var i: usize = 0
+    while i < infos.length:
+        if not web_unicode.code_point_has_mark_general_category(infos[i].character) or hb_is_starter(infos[i].character):
+            i += 1
+            continue
+        var end = i + 1
+        while end < infos.length and web_unicode.code_point_has_mark_general_category(infos[end].character) and not hb_is_starter(infos[end].character):
+            end += 1
+        # We are going to do a O(n^2).  Only do this if the sequence is short.
+        if end - i <= hb_max_combining_marks:
+            for k in i + 1..<end:
+                var j = k
+                while j > i and hb_marks_reorder(infos[j - 1].character, infos[j].character):
+                    j -= 1
+                if j != k:
+                    # Move k to j, merging the clusters of the range.
+                    let moved = infos[k]
+                    var cluster = moved.cluster
+                    for m in j..<k + 1:
+                        if infos[m].cluster < cluster:
+                            cluster = infos[m].cluster
+                    var m = k
+                    while m > j:
+                        infos[m] = infos[m - 1]
+                        m -= 1
+                    infos[j] = moved
+                    for n in j..<k + 1:
+                        infos[n].cluster = cluster
+        i = end
+
+## The third round: a mark composes with its starter when every mark between them has a
+## smaller combining class, Unicode composes them, and the font has the composition.
+func hb_recompose(font: const HbFontT*, buffer: HbBufferT*):
+    let count = ak.vector_size(&buffer.infos)
+    if count < 2:
+        return
+    var output: ak.Vector[HbGlyphInfo]
+    ak.vector_ensure_capacity(&output, count)
+    ak.vector_append_t(&output, *ak.vector_at_const(&buffer.infos, 0))
+    var starter: usize = 0
+    for index in 1..<count:
+        let current = *ak.vector_at_const(&buffer.infos, index)
+        let u = current.character
+        # We don't try to compose a non-mark character with it's preceding starter.
+        if web_unicode.code_point_has_mark_general_category(u):
+            let previous = *ak.vector_last(&output)
+            # If there's anything between the starter and this char, they should have CCC
+            # smaller than this character's.
+            let unblocked = starter == ak.vector_size(&output) - 1 or hb_marks_reorder(u, previous.character)
+            if unblocked:
+                let starter_info = ak.vector_at(&output, starter)
+                let pair: u32[2] = [starter_info.character, u]
+                let composed = hb_normalized(pair, web_unicode.NormalizationForm.nfc)
+                if ak.vector_size(&composed) == 1:
+                    let composed_code_point = *ak.vector_at_const(&composed, 0)
+                    if let glyph = hb_font_get_nominal_glyph(font, composed_code_point):
+                        # Composes: merge the clusters from the starter on, drop the mark.
+                        var cluster = current.cluster
+                        for m in starter..<ak.vector_size(&output):
+                            if ak.vector_at(&output, m).cluster < cluster:
+                                cluster = ak.vector_at(&output, m).cluster
+                        for m in starter..<ak.vector_size(&output):
+                            ak.vector_at(&output, m).cluster = cluster
+                        let modified = ak.vector_at(&output, starter)
+                        modified.character = composed_code_point
+                        modified.codepoint = glyph
+                        modified.is_default_ignorable = hb_is_default_ignorable(composed_code_point)
+                        continue
+        # Blocked, or doesn't compose.
+        ak.vector_append_t(&output, current)
+        if hb_is_starter(u):
+            starter = ak.vector_size(&output) - 1
+    buffer.infos = output

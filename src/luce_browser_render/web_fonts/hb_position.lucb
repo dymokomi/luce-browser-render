@@ -6,13 +6,16 @@
 #       New code of the luce-browser port (DESIGN.md §7.1), the positioning half of HarfBuzz's
 #       hb-ot-layout for the default shaper (the plan and GSUB are in hb_layout.lucb):
 #
-#       - GPOS lookups 1 (single adjustment), 2 (pair adjustment) and 9 (extension), with
-#         the lookup flags, values scaled as hb_font_t scales them;
+#       - GPOS lookups 1 (single adjustment), 2 (pair adjustment), 4, 5 and 6 (mark to base,
+#         to ligature and to mark), 7 and 8 (contextual, in hb_context.lucb) and 9
+#         (extension), with the lookup flags, values scaled as hb_font_t scales them, and
+#         the propagation of mark attachments into offsets (position_finish_offsets);
 #       - the legacy 'kern' table (Microsoft format 0) when GPOS has no kern feature, applied
 #         as hb_kern_machine_t does.
 #
-#       FIXME: cursive and mark attachment (GPOS 3-6), contextual positioning (GPOS 7, 8) and
-#       device tables are not applied.
+#       FIXME: cursive attachment (GPOS 3), device tables and the ligature-component
+#       bookkeeping of mark-to-ligature (a mark attaches to the last component) are not
+#       implemented.
 #
 #==============================================================================================
 
@@ -26,7 +29,7 @@ func hb_layout_position(font: const HbFontT*, face: const SfntFace*, plan: const
         kern_table_apply(font, face, buffer)
 
 func gpos_apply_lookup(font: const HbFontT*, face: const SfntFace*, planned: HbPlanLookup, buffer: HbBufferT*):
-    let lookup = ot_lookup(face.gpos, planned.index) else return
+    let lookup = ot_lookup(face.gpos, planned.index, planned.auto_zwj, planned.auto_zwnj, true) else return
     let subtable_count = (usize)sfnt_u16(face.gpos, lookup.offset + 4)
     var index: usize = 0
     let count = ak.vector_size(&buffer.infos)
@@ -38,7 +41,7 @@ func gpos_apply_lookup(font: const HbFontT*, face: const SfntFace*, planned: HbP
         var next = index + 1
         for subtable_index in 0..<subtable_count:
             let (lookup_type, subtable) = ot_lookup_subtable(&lookup, subtable_index, 9)
-            if let applied = gpos_apply_subtable(font, face, &lookup, lookup_type, subtable, buffer, index):
+            if let applied = gpos_apply_subtable(font, face, &lookup, lookup_type, subtable, buffer, index, 0):
                 next = applied
                 break
         index = next
@@ -66,8 +69,13 @@ func gpos_apply_value(font: const HbFontT*, table: const u8[], value_format: u16
         position.x_advance += hb_font_em_scale_x(font, sfnt_i16(table, cursor))
         cursor += 2
 
-func gpos_apply_subtable(font: const HbFontT*, face: const SfntFace*, lookup: const OtLookup*, lookup_type: u16, subtable: usize, buffer: HbBufferT*, index: usize) -> usize?:
+func gpos_apply_subtable(font: const HbFontT*, face: const SfntFace*, lookup: const OtLookup*, lookup_type: u16, subtable: usize, buffer: HbBufferT*, index: usize, nesting: u32) -> usize?:
     let gpos = face.gpos
+    # Contextual lookups find their own coverage.
+    if lookup_type == 7:
+        return ot_apply_context(face, font, true, lookup, subtable, buffer, index, nesting)
+    if lookup_type == 8:
+        return ot_apply_chain_context(face, font, true, lookup, subtable, buffer, index, nesting)
     let glyph = ak.vector_at(&buffer.infos, index).codepoint
     let coverage = ot_coverage_index(gpos, subtable + (usize)sfnt_u16(gpos, subtable + 2), glyph) else return none
     let subtable_format = sfnt_u16(gpos, subtable)
@@ -124,9 +132,12 @@ func gpos_apply_subtable(font: const HbFontT*, face: const SfntFace*, lookup: co
             if value_format2 != 0:
                 return second_index + 1
             return second_index
+        4, 5:
+            return gpos_apply_mark_to_base(font, face, lookup, lookup_type, subtable, coverage, buffer, index)
+        6:
+            return gpos_apply_mark_to_mark(font, face, lookup, subtable, coverage, buffer, index)
         _:
-            # FIXME: cursive (3), mark attachment (4, 5, 6) and contextual positioning (7, 8)
-            # are not applied.
+            # FIXME: cursive attachment (3) is not applied.
             return none
 
 ## The legacy kern table (hb-ot-kern-table.hh, Microsoft format 0), applied as
@@ -174,3 +185,139 @@ func kern_table_apply_subtable(font: const HbFontT*, kern: const u8[], pairs_hea
                 positions[index + 1].x_advance += kern2
                 positions[index + 1].x_offset += kern2
                 break
+
+# mark: Mark attachment =========================================================================
+
+## Anchor::get_anchor: the anchor at `offset` in the font's scale as floats (em_fscale; the
+## contour point of format 2 and the device tables of format 3 need a ppem HarfBuzz is not
+## given).
+func gpos_anchor(font: const HbFontT*, table: const u8[], offset: usize) -> (f32, f32):
+    let x_multf = (f32)font.x_scale / (f32)hb_face_units_per_em(font.face)
+    let y_multf = (f32)font.y_scale / (f32)hb_face_units_per_em(font.face)
+    return ((f32)sfnt_i16(table, offset + 2) * x_multf, (f32)sfnt_i16(table, offset + 4) * y_multf)
+
+## MarkArray::apply: attaches the mark at `mark_position` to the glyph at `base_position`
+## through the anchors, or answers false when the base has no anchor for the mark's class.
+func gpos_mark_array_apply(font: const HbFontT*, table: const u8[], mark_array: usize, mark_index: usize, anchor_matrix: usize, rows: usize, row: usize, class_count: usize, base_position: usize, mark_position: usize, buffer: HbBufferT*) -> bool:
+    if mark_index >= (usize)sfnt_u16(table, mark_array):
+        return false
+    let record = mark_array + 2 + mark_index * 4
+    let mark_class = (usize)sfnt_u16(table, record)
+    let mark_anchor = mark_array + (usize)sfnt_u16(table, record + 2)
+    # AnchorMatrix::get_anchor
+    if row >= rows or mark_class >= class_count:
+        return false
+    let anchor_offset = (usize)sfnt_u16(table, anchor_matrix + 2 + (row * class_count + mark_class) * 2)
+    if anchor_offset == 0:
+        return false
+    let (mark_x, mark_y) = gpos_anchor(font, table, mark_anchor)
+    let (base_x, base_y) = gpos_anchor(font, table, anchor_matrix + anchor_offset)
+    let o = ak.vector_at(&buffer.positions, mark_position)
+    o.x_offset = (i32)math32.round(base_x - mark_x)
+    o.y_offset = (i32)math32.round(base_y - mark_y)
+    o.attach_type = hb_attach_type_mark
+    o.attach_chain = (i32)base_position - (i32)mark_position
+    return true
+
+## The glyph a mark attaches to: the nearest glyph before it that the skipping iterator
+## matches with IgnoreMarks as the lookup props.
+func gpos_find_base(face: const SfntFace*, lookup: const OtLookup*, buffer: const HbBufferT*, index: usize) -> usize?:
+    let infos = ak.vector_span_const(&buffer.infos)
+    var props = *lookup
+    props.flags = 0x08
+    var j = index
+    while j > 0:
+        j -= 1
+        if ot_may_skip(face, &props, &infos[j], false) != 0:
+            continue
+        return j
+    return none
+
+## MarkBasePos (4) and MarkLigPos (5), format 1.
+func gpos_apply_mark_to_base(font: const HbFontT*, face: const SfntFace*, lookup: const OtLookup*, lookup_type: u16, subtable: usize, mark_index: usize, buffer: HbBufferT*, index: usize) -> usize?:
+    let gpos = face.gpos
+    if sfnt_u16(gpos, subtable) != 1:
+        return none
+    let base_index = gpos_find_base(face, lookup, buffer, index) else return none
+    let base_glyph = ak.vector_at_const(&buffer.infos, base_index).codepoint
+    let base_coverage = ot_coverage_index(gpos, subtable + (usize)sfnt_u16(gpos, subtable + 4), base_glyph) else return none
+    let class_count = (usize)sfnt_u16(gpos, subtable + 6)
+    let mark_array = subtable + (usize)sfnt_u16(gpos, subtable + 8)
+    let second_array = subtable + (usize)sfnt_u16(gpos, subtable + 10)
+    if lookup_type == 4:
+        let rows = (usize)sfnt_u16(gpos, second_array)
+        if not gpos_mark_array_apply(font, gpos, mark_array, mark_index, second_array, rows, base_coverage, class_count, base_index, index, buffer):
+            return none
+        return index + 1
+    # MarkLigPos: the ligature's attach table; the mark takes the last component.
+    if base_coverage >= (usize)sfnt_u16(gpos, second_array):
+        return none
+    let ligature_attach = second_array + (usize)sfnt_u16(gpos, second_array + 2 + base_coverage * 2)
+    let component_count = (usize)sfnt_u16(gpos, ligature_attach)
+    if component_count == 0:
+        return none
+    if not gpos_mark_array_apply(font, gpos, mark_array, mark_index, ligature_attach, component_count, component_count - 1, class_count, base_index, index, buffer):
+        return none
+    return index + 1
+
+## MarkMarkPos (6), format 1: the mark before, skipping what the lookup's mark filtering and
+## attachment type skip, must be a mark covered by the subtable.
+func gpos_apply_mark_to_mark(font: const HbFontT*, face: const SfntFace*, lookup: const OtLookup*, subtable: usize, mark1_index: usize, buffer: HbBufferT*, index: usize) -> usize?:
+    let gpos = face.gpos
+    if sfnt_u16(gpos, subtable) != 1:
+        return none
+    let infos = ak.vector_span_const(&buffer.infos)
+    # The lookup's props without the ignore flags (skippy_iter.prev).
+    var props = *lookup
+    props.flags = lookup.flags & ~(u16)0x0E
+    var j = index
+    var found = false
+    while j > 0:
+        j -= 1
+        if ot_may_skip(face, &props, &infos[j], false) != 0:
+            continue
+        found = true
+        break
+    if not found or infos[j].glyph_class != 3:
+        return none
+    let mark2_index = ot_coverage_index(gpos, subtable + (usize)sfnt_u16(gpos, subtable + 4), infos[j].codepoint) else return none
+    let class_count = (usize)sfnt_u16(gpos, subtable + 6)
+    let mark1_array = subtable + (usize)sfnt_u16(gpos, subtable + 8)
+    let mark2_array = subtable + (usize)sfnt_u16(gpos, subtable + 10)
+    let rows = (usize)sfnt_u16(gpos, mark2_array)
+    if not gpos_mark_array_apply(font, gpos, mark1_array, mark1_index, mark2_array, rows, mark2_index, class_count, j, index, buffer):
+        return none
+    return index + 1
+
+## propagate_attachment_offsets (hb-ot-layout-gpos-table.hh): a mark's offsets become relative
+## to its own pen position, following chains of attachments.
+func hb_propagate_attachment_offsets(buffer: HbBufferT*, i: usize, nesting_level: u32):
+    let positions = ak.vector_span(&buffer.positions)
+    let chain = positions[i].attach_chain
+    if chain == 0:
+        return
+    positions[i].attach_chain = 0
+    let target = (isize)i + (isize)chain
+    if target < 0 or (usize)target >= positions.length:
+        return
+    if nesting_level == 0:
+        return
+    let j = (usize)target
+    hb_propagate_attachment_offsets(buffer, j, nesting_level - 1)
+    positions[i].x_offset += positions[j].x_offset
+    positions[i].y_offset += positions[j].y_offset
+    if j >= i:
+        return
+    if buffer.direction != HbDirection.rtl:
+        for k in j..<i:
+            positions[i].x_offset -= positions[k].x_advance
+            positions[i].y_offset -= positions[k].y_advance
+    else:
+        for k in j + 1..<i + 1:
+            positions[i].x_offset += positions[k].x_advance
+            positions[i].y_offset += positions[k].y_advance
+
+## hb_ot_layout_position_finish_offsets.
+func hb_position_finish_offsets(buffer: HbBufferT*):
+    for i in 0..<ak.vector_size(&buffer.positions):
+        hb_propagate_attachment_offsets(buffer, i, hb_max_nesting_level)

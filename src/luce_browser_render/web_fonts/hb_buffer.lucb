@@ -10,9 +10,9 @@
 #
 #       1. the code points of the text with their clusters (UTF-8 byte offsets for ASCII
 #          text, UTF-16 code unit offsets otherwise, as the two add functions give them);
-#       2. mapping to glyphs through the cmap, with HarfBuzz's normalizer fallbacks for
-#          characters the font lacks: canonical decomposition, the space fallbacks and
-#          U+2011 as U+2010;
+#       2. mapping to glyphs through the cmap, with HarfBuzz's normalizer (hb_normalize.lucb):
+#          decomposition of what the font lacks, the space fallbacks and U+2011 as U+2010,
+#          canonical reordering of marks and recomposition;
 #       3. GSUB with the default features (ccmp, locl, rlig, calt, clig, liga, rclt, ...)
 #          and the font's shape features;
 #       4. hiding default-ignorable characters behind the space glyph;
@@ -52,12 +52,18 @@ pub struct HbGlyphInfo:
     pub var substituted: bool
     pub var ligated: bool
 
-## hb_glyph_position_t, in the font's scale (pixel size × 64 for Gfx::Font).
+## hb_glyph_position_t, in the font's scale (pixel size × 64 for Gfx::Font), with the
+## attachment HarfBuzz keeps in its private var field while positioning.
 pub struct HbGlyphPosition:
     pub var x_advance: i32
     pub var y_advance: i32
     pub var x_offset: i32
     pub var y_offset: i32
+    pub var attach_chain: i32
+    pub var attach_type: u8
+
+## GPOS_impl::ATTACH_TYPE_MARK.
+let hb_attach_type_mark: u8 = 1
 
 ## hb_buffer_create.
 pub func hb_buffer_create() -> HbBufferT*:
@@ -343,10 +349,10 @@ pub func hb_shape(font: HbFontT*, buffer: HbBufferT*, features: const HbFeature[
     let face = font.face.face else return
     hb_set_unicode_props(buffer)
     hb_form_clusters(buffer)
-    hb_normalize_and_map(font, buffer)
+    hb_normalize(font, buffer)
     hb_set_glyph_classes(face, buffer)
     let plan = hb_layout_plan(face, buffer, features)
-    hb_layout_substitute(face, &plan, buffer)
+    hb_layout_substitute(face, font, &plan, buffer)
     hb_hide_default_ignorables(font, buffer)
     hb_position(font, face, &plan, buffer)
     if buffer.direction == HbDirection.rtl:
@@ -375,103 +381,6 @@ func hb_form_clusters(buffer: HbBufferT*):
         if continuation:
             infos[index].cluster = infos[index - 1].cluster
         index += 1
-
-## _hb_ot_shape_normalize for the default shaper's composed-diacritics mode, as far as a
-## font's cmap decides it: a character the font has maps to its glyph; one it lacks is
-## decomposed when the font has every part; a space it lacks uses the space glyph with a
-## fallback width; U+2011 falls back to U+2010; anything else is glyph 0.
-func hb_normalize_and_map(font: const HbFontT*, buffer: HbBufferT*):
-    var mapped: ak.Vector[HbGlyphInfo]
-    ak.vector_ensure_capacity(&mapped, ak.vector_size(&buffer.infos))
-    for info in ak.vector_span_const(&buffer.infos):
-        let u = info.character
-        var current = info
-        if let glyph = hb_font_get_nominal_glyph(font, u):
-            current.codepoint = glyph
-            ak.vector_append_t(&mapped, current)
-            continue
-        if hb_decompose_into(font, &mapped, info):
-            continue
-        let space_type = hb_space_fallback_type(u)
-        if space_type != 0:
-            if let space_glyph = hb_font_get_nominal_glyph(font, 0x0020):
-                current.codepoint = space_glyph
-                current.space_fallback = space_type
-                ak.vector_append_t(&mapped, current)
-                continue
-        if u == 0x2011:
-            if let other_glyph = hb_font_get_nominal_glyph(font, 0x2010):
-                current.codepoint = other_glyph
-                ak.vector_append_t(&mapped, current)
-                continue
-        current.codepoint = 0
-        ak.vector_append_t(&mapped, current)
-    buffer.infos = mapped
-
-## The canonical decomposition of a character the font lacks, when the font has every
-## character of it (HarfBuzz's decompose() tries the same, recursively).
-func hb_decompose_into(font: const HbFontT*, mapped: ak.Vector[HbGlyphInfo]*, info: HbGlyphInfo) -> bool:
-    let u = info.character
-    # Only precomposed letters and symbols decompose; ASCII never does.
-    if u < 0xC0:
-        return false
-    var utf8: u8[4]
-    let length = hb_encode_utf8(u, utf8)
-    let normalized = web_unicode.normalize(ak.string_view_from_bytes(utf8[0..<length]), web_unicode.NormalizationForm.nfd)
-    let normalized_view = ak.string_bytes_as_string_view(&normalized)
-    let bytes = ak.string_view_bytes(&normalized_view)
-    var parts: ak.Vector[u32]
-    var index: usize = 0
-    while index < bytes.length:
-        let (code_point, size) = hb_decode_utf8(bytes, index)
-        ak.vector_append_t(&parts, code_point)
-        index += size
-    if ak.vector_size(&parts) < 2:
-        return false
-    var glyphs: ak.Vector[u32]
-    for part in ak.vector_span_const(&parts):
-        let glyph = hb_font_get_nominal_glyph(font, part) else return false
-        ak.vector_append_t(&glyphs, glyph)
-    for (position, part) in ak.vector_span_const(&parts).indexed():
-        var current = info
-        current.character = part
-        current.codepoint = *ak.vector_at(&glyphs, position)
-        current.is_default_ignorable = false
-        ak.vector_append_t(mapped, current)
-    return true
-
-## The UTF-8 encoding of a scalar value into `out`, answering its length.
-func hb_encode_utf8(code_point: u32, out: u8[]) -> usize:
-    if code_point < 0x80:
-        out[0] = (u8)code_point
-        return 1
-    if code_point < 0x800:
-        out[0] = (u8)(0xC0 | (code_point >> 6))
-        out[1] = (u8)(0x80 | (code_point & 0x3F))
-        return 2
-    if code_point < 0x10000:
-        out[0] = (u8)(0xE0 | (code_point >> 12))
-        out[1] = (u8)(0x80 | ((code_point >> 6) & 0x3F))
-        out[2] = (u8)(0x80 | (code_point & 0x3F))
-        return 3
-    out[0] = (u8)(0xF0 | (code_point >> 18))
-    out[1] = (u8)(0x80 | ((code_point >> 12) & 0x3F))
-    out[2] = (u8)(0x80 | ((code_point >> 6) & 0x3F))
-    out[3] = (u8)(0x80 | (code_point & 0x3F))
-    return 4
-
-## The scalar value at `index` of valid UTF-8 and its length.
-func hb_decode_utf8(bytes: const u8[], index: usize) -> (u32, usize):
-    let b0 = (u32)bytes[index]
-    if b0 < 0x80:
-        return (b0, 1)
-    if b0 < 0xE0 and index + 1 < bytes.length:
-        return (((b0 & 0x1F) << 6) | ((u32)bytes[index + 1] & 0x3F), 2)
-    if b0 < 0xF0 and index + 2 < bytes.length:
-        return (((b0 & 0x0F) << 12) | (((u32)bytes[index + 1] & 0x3F) << 6) | ((u32)bytes[index + 2] & 0x3F), 3)
-    if index + 3 < bytes.length:
-        return (((b0 & 0x07) << 18) | (((u32)bytes[index + 1] & 0x3F) << 12) | (((u32)bytes[index + 2] & 0x3F) << 6) | ((u32)bytes[index + 3] & 0x3F), 4)
-    return (0xFFFD, 1)
 
 ## hb_ot_hide_default_ignorables: default-ignorable characters that GSUB did not consume
 ## become the space glyph (zero-advanced later), or are deleted when the font has no space.
@@ -510,8 +419,8 @@ func hb_buffer_reverse(buffer: HbBufferT*):
         positions[high] = position
         low += 1
 
-## hb_ot_position: default advances, GPOS or kern, zero-width marks and default ignorables,
-## and the space fallbacks.
+## hb_ot_position: default advances and the space fallbacks, GPOS or kern, zero-width marks
+## and default ignorables, and the mark attachments.
 func hb_position(font: const HbFontT*, face: const SfntFace*, plan: const HbLayoutPlan*, buffer: HbBufferT*):
     let count = ak.vector_size(&buffer.infos)
     ak.vector_resize(&buffer.positions, count)
@@ -519,22 +428,35 @@ func hb_position(font: const HbFontT*, face: const SfntFace*, plan: const HbLayo
     let positions = ak.vector_span(&buffer.positions)
     for index in 0..<count:
         positions[index].x_advance = hb_font_get_glyph_h_advance(font, infos[index].codepoint)
+    # hb_ot_position_default ends with the space fallbacks.
+    hb_fallback_spaces(font, buffer)
 
     hb_layout_position(font, face, plan, buffer)
 
-    # hb_ot_zero_width_default_ignorables, and zero_mark_widths_by_gdef (the default
-    # shaper's HB_OT_SHAPE_ZERO_WIDTH_MARKS_BY_GDEF_LATE).
+    # zero_mark_widths_by_gdef (the default shaper's HB_OT_SHAPE_ZERO_WIDTH_MARKS_BY_GDEF_LATE).
+    # Without GPOS, HarfBuzz first moves the mark back by its advance
+    # (adjust_mark_positioning_when_zeroing, for forward text).
+    # FIXME: HarfBuzz then positions such marks over their base with the fallback mark
+    # positioning (hb-ot-shape-fallback.cc), which needs the glyph extents and the canonical
+    # combining classes; it is not implemented.
+    let adjust_offsets_when_zeroing = face.gpos.length == 0 and buffer.direction != HbDirection.rtl
+    for index in 0..<count:
+        if infos[index].glyph_class == 3:
+            if adjust_offsets_when_zeroing:
+                positions[index].x_offset -= positions[index].x_advance
+                positions[index].y_offset -= positions[index].y_advance
+            positions[index].x_advance = 0
+            positions[index].y_advance = 0
+
+    # hb_ot_zero_width_default_ignorables
     for index in 0..<count:
         if infos[index].is_default_ignorable and not infos[index].substituted:
             positions[index].x_advance = 0
             positions[index].y_advance = 0
             positions[index].x_offset = 0
             positions[index].y_offset = 0
-        elif infos[index].glyph_class == 3:
-            positions[index].x_advance = 0
-            positions[index].y_advance = 0
 
-    hb_fallback_spaces(font, buffer)
+    hb_position_finish_offsets(buffer)
 
 ## _hb_ot_shape_fallback_spaces (hb-ot-shape-fallback.cc).
 func hb_fallback_spaces(font: const HbFontT*, buffer: HbBufferT*):

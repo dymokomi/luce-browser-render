@@ -35,8 +35,10 @@ sfnt_glyf.lucb
 sfnt_cff.lucb
 sk_font.lucb
 hb_buffer.lucb
+hb_normalize.lucb
 hb_layout.lucb
 hb_position.lucb
+hb_context.lucb
 stub_r10_gfx_paint.lucb
 tests_support.lucb
 tests_oracle.lucb
