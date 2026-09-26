@@ -1,0 +1,63 @@
+#==============================================================================================
+#
+#   unicode_range - UnicodeRange: an inclusive range of code points (CSS unicode-range)
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Font/UnicodeRange.h (lines 1-49).
+#
+#==============================================================================================
+
+## Ported from Libraries/LibGfx/Font/UnicodeRange.h:16 Gfx::UnicodeRange::UnicodeRange.
+pub func unicode_range_construct(this: UnicodeRange*, min_code_point: u32, max_code_point: u32):
+    this.m_min_code_point = min_code_point
+    this.m_max_code_point = max_code_point
+    assert(min_code_point <= max_code_point)
+
+## A constructed UnicodeRange (the C++ constructor used as an expression).
+pub func unicode_range_create(min_code_point: u32, max_code_point: u32) -> UnicodeRange:
+    var range: UnicodeRange
+    unicode_range_construct(&range, min_code_point, max_code_point)
+    return range
+
+## Ported from Libraries/LibGfx/Font/UnicodeRange.h:23 Gfx::UnicodeRange::min_code_point.
+pub func unicode_range_min_code_point(this: const UnicodeRange*) -> u32:
+    return this.m_min_code_point
+
+## Ported from Libraries/LibGfx/Font/UnicodeRange.h:24 Gfx::UnicodeRange::max_code_point.
+pub func unicode_range_max_code_point(this: const UnicodeRange*) -> u32:
+    return this.m_max_code_point
+
+## Ported from Libraries/LibGfx/Font/UnicodeRange.h:26 Gfx::UnicodeRange::contains.
+pub func unicode_range_contains(this: const UnicodeRange*, code_point: u32) -> bool:
+    return this.m_min_code_point <= code_point and code_point <= this.m_max_code_point
+
+## Appends `value` in upper-case hexadecimal (AK's `{:X}`).
+func unicode_range_append_hex(builder: ak.StringBuilder*, value: u32):
+    let digits = "0123456789ABCDEF".bytes
+    var buffer: u8[8]
+    var length: usize = 0
+    var remaining = value
+    while true:
+        buffer[length] = digits[(usize)(remaining & 0xF)]
+        length += 1
+        remaining >>= 4
+        if remaining == 0:
+            break
+    while length > 0:
+        length -= 1
+        ak.string_builder_append_u8(builder, buffer[length])
+
+## Ported from Libraries/LibGfx/Font/UnicodeRange.h:31 Gfx::UnicodeRange::to_string.
+pub func unicode_range_to_string(this: const UnicodeRange*) -> ak.String:
+    var builder: ak.StringBuilder
+    ak.string_builder_construct(&builder)
+    ak.string_builder_append(&builder, "U+")
+    unicode_range_append_hex(&builder, this.m_min_code_point)
+    if this.m_min_code_point != this.m_max_code_point:
+        ak.string_builder_append(&builder, "-")
+        unicode_range_append_hex(&builder, this.m_max_code_point)
+    return ak.string_builder_to_string(&builder) else trap("MUST: String::formatted")
+
+## Ported from Libraries/LibGfx/Font/UnicodeRange.h:38 Gfx::UnicodeRange::operator==.
+pub func unicode_range_eq(this: const UnicodeRange*, other: UnicodeRange) -> bool:
+    return this.m_min_code_point == other.m_min_code_point and this.m_max_code_point == other.m_max_code_point

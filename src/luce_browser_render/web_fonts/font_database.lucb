@@ -1,0 +1,138 @@
+#==============================================================================================
+#
+#   font_database - FontDatabase: the process's font lookup over a system font provider, and
+#                   the per-code-point fallback cache
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Font/FontDatabase.cpp (lines 1-147) with the inline functions
+#       of Libraries/LibGfx/Font/FontDatabase.h (lines 1-77). The SystemFontProvider virtuals
+#       are pure. FontDatabase::font_directories keeps the donor's platform branches; the
+#       fontconfig and Haiku branches (USE_FONTCONFIG, AK_OS_HAIKU) are not built on the
+#       platforms the port targets, and Core::StandardPaths is read from the environment.
+#
+#==============================================================================================
+
+## Ported from Libraries/LibGfx/Font/FontDatabase.h:27 Gfx::CodePointFallbackKey::hash.
+pub func code_point_fallback_key_hash(this: const CodePointFallbackKey*) -> u32:
+    return ak.pair_int_hash(ak.pair_int_hash(this.code_point, (u32)this.weight), ak.pair_int_hash((u32)this.width, (u32)this.slope))
+
+## Ported from Libraries/LibGfx/Font/FontDatabase.h:39 Gfx::SystemFontProvider::name (virtual).
+pub func system_font_provider_name_impl(this: SystemFontProvider*) -> ak.StringView:
+    trap("pure virtual: Gfx::SystemFontProvider::name")
+
+## Ported from Libraries/LibGfx/Font/FontDatabase.h:40 Gfx::SystemFontProvider::get_font (virtual).
+pub func system_font_provider_get_font_impl(this: SystemFontProvider*, family: ak.FlyString, point_size: f32, weight: u32, width: u32, slope: u32, font_variation_settings: FontVariationSettings?, shape_features: ak.Vector[ShapeFeature]?) -> Font*?:
+    trap("pure virtual: Gfx::SystemFontProvider::get_font")
+
+## Ported from Libraries/LibGfx/Font/FontDatabase.h:41 Gfx::SystemFontProvider::for_each_typeface_with_family_name (virtual).
+pub func system_font_provider_for_each_typeface_with_family_name_impl(this: SystemFontProvider*, family_name: ak.FlyString, arg1: ak.Function1[Typeface*, unit]):
+    trap("pure virtual: Gfx::SystemFontProvider::for_each_typeface_with_family_name")
+
+## FontDatabase::the's `static FontDatabase s_the`.
+var font_database_s_the: FontDatabase*?
+
+## Ported from Libraries/LibGfx/Font/FontDatabase.cpp:27 Gfx::FontDatabase::the.
+pub func font_database_the() -> FontDatabase*:
+    if let the = font_database_s_the:
+        return the
+    let the = new FontDatabase else trap("out of memory")
+    font_database_construct(the)
+    font_database_s_the = the
+    return the
+
+## Ported from Libraries/LibGfx/Font/FontDatabase.cpp:33 Gfx::FontDatabase::install_system_font_provider.
+pub func font_database_install_system_font_provider(this: FontDatabase*, provider: SystemFontProvider*) -> SystemFontProvider*:
+    assert(this.m_system_font_provider == none)
+    this.m_system_font_provider = provider
+    return provider
+
+## Ported from Libraries/LibGfx/Font/FontDatabase.cpp:40 Gfx::FontDatabase::system_font_provider_name.
+pub func font_database_system_font_provider_name(this: const FontDatabase*) -> ak.StringView:
+    let provider = this.m_system_font_provider else trap("VERIFY: m_system_font_provider")
+    return system_font_provider_name(provider)
+
+## Ported from Libraries/LibGfx/Font/FontDatabase.cpp:46 Gfx::FontDatabase::FontDatabase.
+pub func font_database_construct(this: FontDatabase*):
+    return
+
+## Ported from Libraries/LibGfx/Font/FontDatabase.cpp:48 Gfx::FontDatabase::get.
+pub func font_database_get(this: FontDatabase*, family: ak.FlyString, point_size: f32, weight: u32, width: u32, slope: u32, font_variation_settings: FontVariationSettings? = none, shape_features: ak.Vector[ShapeFeature]? = none) -> Font*?:
+    let provider = this.m_system_font_provider else trap("VERIFY: m_system_font_provider")
+    return system_font_provider_get_font(provider, family, point_size, weight, width, slope, font_variation_settings, shape_features)
+
+## Ported from Libraries/LibGfx/Font/FontDatabase.cpp:53 Gfx::FontDatabase::get_font_for_code_point.
+pub func font_database_get_font_for_code_point(this: FontDatabase*, code_point: u32, point_size: f32, weight: u16, width: u16, slope: u8) -> Font*?:
+    let key = CodePointFallbackKey(code_point = code_point, weight = weight, width = width, slope = slope)
+    if ak.hash_map_get_k(&this.m_code_point_fallback_cache, key) == none:
+        # m_code_point_fallback_cache.ensure(key, [&]() -> CodePointFallbackEntry { ... })
+        var new_entry = FontDatabaseCodePointFallbackEntry(family_name = ak.fly_string_from_str(""), typeface = none)
+        let typeface_or_error: TypefaceSkia*? = typeface_skia_find_typeface_for_code_point(code_point, weight, width, slope) catch:
+            recover none
+        if let typeface = typeface_or_error:
+            new_entry = FontDatabaseCodePointFallbackEntry(family_name = typeface_family(typeface.typeface()), typeface = typeface.typeface())
+        discard(ak.hash_map_set(&this.m_code_point_fallback_cache, key, new_entry))
+    let entry = ak.hash_map_get_k(&this.m_code_point_fallback_cache, key) else trap("VERIFY_NOT_REACHED")
+
+    # FIXME: Does it matter that we don't pass a FontVariationSettings or ShapeFeatures here?
+    if let typeface = entry.typeface:
+        return typeface_font(typeface, point_size)
+
+    return none
+
+## Ported from Libraries/LibGfx/Font/FontDatabase.cpp:72 Gfx::FontDatabase::for_each_typeface_with_family_name.
+pub func font_database_for_each_typeface_with_family_name(this: FontDatabase*, family_name: ak.FlyString, callback: ak.Function1[Typeface*, unit]):
+    let provider = this.m_system_font_provider else trap("VERIFY: m_system_font_provider")
+    system_font_provider_for_each_typeface_with_family_name(provider, family_name, callback)
+
+## A String of `prefix` + `text` + `suffix` (the donor's String::formatted("{}/…")).
+func font_database_path(prefix: str, text: str, suffix: str) -> ak.String:
+    var builder: ak.StringBuilder
+    ak.string_builder_construct(&builder)
+    ak.string_builder_append(&builder, prefix)
+    ak.string_builder_append(&builder, text)
+    ak.string_builder_append(&builder, suffix)
+    return ak.string_builder_to_string(&builder) else trap("MUST: String::formatted")
+
+## Ported from Libraries/LibGfx/Font/FontDatabase.cpp:77 Gfx::FontDatabase::font_directories.
+pub func font_database_font_directories() -> ak.Vector[ak.String]!:
+    var paths: ak.Vector[ak.String]
+    if os.macos:
+        ak.vector_append_t(&paths, ak.string_from_str("/System/Library/Fonts"))
+        ak.vector_append_t(&paths, ak.string_from_str("/Library/Fonts"))
+        # Core::StandardPaths::home_directory
+        let home = os.env("HOME") else ""
+        ak.vector_append_t(&paths, font_database_path("", home, "/Library/Fonts"))
+    elif os.windows:
+        let windir = os.env("WINDIR") else ""
+        let local_app_data = os.env("LOCALAPPDATA") else ""
+        ak.vector_append_t(&paths, font_database_path("", windir, "\\Fonts"))
+        ak.vector_append_t(&paths, font_database_path("", local_app_data, "\\Microsoft\\Windows\\Fonts"))
+    else:
+        try font_database_append_xdg_font_directories(&paths)
+    return paths
+
+## The Linux branch of font_directories.
+func font_database_append_xdg_font_directories(paths: ak.Vector[ak.String]*) -> !:
+    # Core::StandardPaths::user_data_directory: $XDG_DATA_HOME, else ~/.local/share.
+    var builder: ak.StringBuilder
+    ak.string_builder_construct(&builder)
+    if let data_home = os.env("XDG_DATA_HOME"):
+        ak.string_builder_append(&builder, data_home)
+    else:
+        ak.string_builder_append(&builder, os.env("HOME") else "")
+        ak.string_builder_append(&builder, "/.local/share")
+    let user_data_directory = try ak.string_builder_to_string(&builder)
+    let user_data_view = ak.string_bytes_as_string_view(&user_data_directory)
+    let user_data_text = ak.string_view_text(user_data_view)
+    ak.vector_append_t(paths, font_database_path("", user_data_text, "/fonts"))
+    ak.vector_append_t(paths, font_database_path("", user_data_text, "/X11/fonts"))
+
+    # Core::StandardPaths::system_data_directories: $XDG_DATA_DIRS, else /usr/local/share and
+    # /usr/share.
+    let data_directories = os.env("XDG_DATA_DIRS") else "/usr/local/share:/usr/share"
+    let data_directories_view = ak.sv(data_directories)
+    let split = ak.string_view_split_view_u8(&data_directories_view, ':')
+    for data_directory in ak.vector_span_const(&split):
+        let directory = ak.string_view_text(data_directory)
+        ak.vector_append_t(paths, font_database_path("", directory, "/fonts"))
+        ak.vector_append_t(paths, font_database_path("", directory, "/X11/fonts"))

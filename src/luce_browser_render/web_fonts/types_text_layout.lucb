@@ -10,13 +10,19 @@
 #
 #==============================================================================================
 
-## Gfx::GlyphRun::CachedTextBlob (Libraries/LibGfx/TextLayout.cpp:21): opaque in this phase (not in the phase-1 closure).
+## Gfx::GlyphRun::CachedTextBlob (Libraries/LibGfx/TextLayout.cpp:21), filled by region r09.
 pub struct GlyphRunCachedTextBlob:
-    pub var opaque_: u8
+    pub var blob: SkTextBlob*?
+    pub var bounds: gfx.FloatRect
+    pub var scale: f32
 
-## SkTextBlob (Libraries/LibGfx/TextLayout.h:22): opaque in this phase (not in the phase-1 closure).
+## SkTextBlob (Libraries/LibGfx/TextLayout.h:22), filled by region r09 with the port's blob: one
+## fully positioned run (SkTextBlobBuilder::allocRunPos) and its bounds.
 pub struct SkTextBlob:
-    pub var opaque_: u8
+    pub var font: SkFont
+    pub var glyphs: ak.Vector[u32]
+    pub var positions: ak.Vector[gfx.FloatPoint]
+    pub var bounds: gfx.FloatRect
 
 # mark: DrawGlyph ===============================================================================
 

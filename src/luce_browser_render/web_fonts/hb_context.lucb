@@ -1,0 +1,356 @@
+#==============================================================================================
+#
+#   hb_context - contextual and chaining contextual lookups (GSUB 5 and 6, GPOS 7 and 8)
+#
+#   DESCRIPTION:
+#       New code of the luce-browser port (DESIGN.md §7.1), HarfBuzz's hb-ot-layout-gsubgpos.hh
+#       for the shaper: matching a rule's input, backtrack and lookahead sequences (glyph ids,
+#       classes or coverages, formats 1-3) with HarfBuzz's skipping rules, then applying the
+#       rule's nested lookups at the matched positions (apply_lookup, with its bookkeeping of
+#       buffer-length changes). The buffer is edited in place, so "positions" are indices of
+#       buffer.infos.
+#
+#==============================================================================================
+
+## HarfBuzz's HB_MAX_NESTING_LEVEL.
+let hb_max_nesting_level: u32 = 64
+
+## What a rule's sequence elements are compared with: glyph ids, classes of a ClassDef, or
+## Coverage tables (offsets from `base`).
+enum OtMatchKind as u8:
+    glyph = 0
+    class = 1
+    coverage = 2
+
+## A sequence of a rule: `count` u16 values at `values` of `table`.
+struct OtSequence:
+    var table: const u8[]
+    var kind: OtMatchKind
+    var values: usize
+    var count: usize
+    var class_def: usize
+    var base: usize
+
+## Whether element `k` of the sequence matches `glyph`.
+func ot_sequence_matches(sequence: const OtSequence*, k: usize, glyph: u32) -> bool:
+    let value = sfnt_u16(sequence.table, sequence.values + k * 2)
+    match sequence.kind:
+        .glyph: return glyph == (u32)value
+        .class: return ot_class_of(sequence.table, sequence.class_def, glyph) == value
+        .coverage: return ot_coverage_index(sequence.table, sequence.base + (usize)value, glyph) != none
+        _: return false
+
+## A hidden default ignorable (hb_set_unicode_props: CGJ, Mongolian free variation selectors
+## and tag characters), which matching never skips.
+func hb_is_hidden(ch: u32) -> bool:
+    return ch == 0x034F or (ch >= 0x180B and ch <= 0x180D) or ch == 0x180F or (ch >= 0xE0020 and ch <= 0xE007F)
+
+## hb_ot_apply_context_t::skipping_iterator_t::may_skip: 2 when the lookup's flags skip the
+## glyph, 1 for a default ignorable that is skipped unless it matches, 0 otherwise. Joiners
+## and hidden characters are matched unless the iterator ignores them (its init: ZWNJ in GPOS
+## or in a context with automatic ZWNJ, ZWJ in a context or with automatic ZWJ, hidden
+## characters in GPOS).
+func ot_may_skip(face: const SfntFace*, lookup: const OtLookup*, info: const HbGlyphInfo*, context_match: bool) -> u8:
+    if ot_lookup_skips(face, lookup, info):
+        return 2
+    let ignore_zwnj = lookup.is_gpos or (context_match and lookup.auto_zwnj)
+    let ignore_zwj = context_match or lookup.auto_zwj
+    let ignore_hidden = lookup.is_gpos
+    if info.is_default_ignorable and not info.substituted and (ignore_zwnj or not info.is_zwnj) and (ignore_zwj or not info.is_zwj) and (ignore_hidden or not hb_is_hidden(info.character)):
+        return 1
+    return 0
+
+## The positions of the input sequence (the first glyph at `index`, then the sequence's
+## elements from `first_element`), or none.
+func ot_match_input(face: const SfntFace*, lookup: const OtLookup*, infos: const HbGlyphInfo[], index: usize, sequence: const OtSequence*, first_element: usize, count: usize) -> ak.Vector[usize]?:
+    var positions: ak.Vector[usize]
+    ak.vector_append_t(&positions, index)
+    var j = index
+    for k in 1..<count:
+        var found = false
+        while j + 1 < infos.length:
+            j += 1
+            let skip = ot_may_skip(face, lookup, &infos[j], false)
+            if skip == 2:
+                continue
+            if ot_sequence_matches(sequence, first_element + k - 1, infos[j].codepoint):
+                found = true
+                break
+            if skip == 0:
+                return none
+        if not found:
+            return none
+        ak.vector_append_t(&positions, j)
+    return positions
+
+## Whether the backtrack sequence (nearest glyph first) precedes `index`.
+func ot_match_backtrack(face: const SfntFace*, lookup: const OtLookup*, infos: const HbGlyphInfo[], index: usize, sequence: const OtSequence*) -> bool:
+    var j = index
+    for k in 0..<sequence.count:
+        var found = false
+        while j > 0:
+            j -= 1
+            let skip = ot_may_skip(face, lookup, &infos[j], true)
+            if skip == 2:
+                continue
+            if ot_sequence_matches(sequence, k, infos[j].codepoint):
+                found = true
+                break
+            if skip == 0:
+                return false
+        if not found:
+            return false
+    return true
+
+## Whether the lookahead sequence follows the input, which ends before `end`.
+func ot_match_lookahead(face: const SfntFace*, lookup: const OtLookup*, infos: const HbGlyphInfo[], end: usize, sequence: const OtSequence*) -> bool:
+    var j = end - 1
+    for k in 0..<sequence.count:
+        var found = false
+        while j + 1 < infos.length:
+            j += 1
+            let skip = ot_may_skip(face, lookup, &infos[j], true)
+            if skip == 2:
+                continue
+            if ot_sequence_matches(sequence, k, infos[j].codepoint):
+                found = true
+                break
+            if skip == 0:
+                return false
+        if not found:
+            return false
+    return true
+
+## Applies a nested lookup once at `index` (hb_ot_apply_context_t::recurse): its flags must
+## accept the glyph there, then its first subtable that applies wins.
+func ot_apply_nested(face: const SfntFace*, font: const HbFontT*, is_gpos: bool, parent: const OtLookup*, lookup_index: u16, buffer: HbBufferT*, index: usize, nesting: u32) -> bool:
+    if nesting >= hb_max_nesting_level:
+        return false
+    let table = face.gpos if is_gpos else face.gsub
+    let lookup = ot_lookup(table, lookup_index, parent.auto_zwj, parent.auto_zwnj, is_gpos) else return false
+    if ot_lookup_skips(face, &lookup, ak.vector_at_const(&buffer.infos, index)):
+        return false
+    let subtable_count = (usize)sfnt_u16(table, lookup.offset + 4)
+    for subtable_index in 0..<subtable_count:
+        if is_gpos:
+            let (lookup_type, subtable) = ot_lookup_subtable(&lookup, subtable_index, 9)
+            if gpos_apply_subtable(font, face, &lookup, lookup_type, subtable, buffer, index, nesting + 1) != none:
+                return true
+        else:
+            let (lookup_type, subtable) = ot_lookup_subtable(&lookup, subtable_index, 7)
+            if gsub_apply_subtable(face, font, &lookup, lookup_type, subtable, 1, buffer, index, nesting + 1) != none:
+                return true
+    return false
+
+## apply_lookup: the rule's lookup records (at `records`, `record_count` of them) applied at
+## the matched positions; answers the position after the (possibly changed) input.
+func ot_apply_lookup_records(face: const SfntFace*, font: const HbFontT*, is_gpos: bool, parent: const OtLookup*, table: const u8[], records: usize, record_count: usize, positions: ak.Vector[usize]*, match_end: usize, buffer: HbBufferT*, nesting: u32) -> usize:
+    var end = (isize)match_end
+    var count = ak.vector_size(positions)
+    for i in 0..<record_count:
+        let idx = (usize)sfnt_u16(table, records + i * 4)
+        let lookup_index = sfnt_u16(table, records + i * 4 + 2)
+        if idx >= count:
+            continue
+        let orig_len = ak.vector_size(&buffer.infos)
+        let position = *ak.vector_at(positions, idx)
+        # This can happen if earlier recursed lookups deleted many entries.
+        if position >= orig_len:
+            continue
+        if not ot_apply_nested(face, font, is_gpos, parent, lookup_index, buffer, position, nesting):
+            continue
+        let new_len = ak.vector_size(&buffer.infos)
+        var delta = (isize)new_len - (isize)orig_len
+        if delta == 0:
+            continue
+
+        # Recursed lookup changed buffer len. Adjust: if it grew by n, n new glyphs came right
+        # after the current position; if it shrank by n, n match positions after the current
+        # one were removed (HarfBuzz's own simplification, see its TODO).
+        end += delta
+        if end < (isize)position:
+            # Never rewind end beyond the start of the current position.
+            delta += (isize)position - end
+            end = (isize)position
+
+        var next = idx + 1
+        if delta <= 0:
+            # NOTE: delta is non-positive.
+            let limit = (isize)next - (isize)count
+            if delta < limit:
+                delta = limit
+            next = (usize)((isize)next - delta)
+
+        # Shift!
+        var shifted: ak.Vector[usize]
+        for j in 0..<(usize)((isize)next + delta):
+            if j < ak.vector_size(positions):
+                ak.vector_append_t(&shifted, *ak.vector_at(positions, j))
+            else:
+                ak.vector_append_t(&shifted, 0)
+        for j in next..<count:
+            ak.vector_append_t(&shifted, *ak.vector_at(positions, j))
+        next = (usize)((isize)next + delta)
+        count = (usize)((isize)count + delta)
+
+        # Fill in new entries.
+        for j in idx + 1..<next:
+            *ak.vector_at(&shifted, j) = *ak.vector_at(&shifted, j - 1) + 1
+
+        # And fixup the rest.
+        while next < count:
+            let entry = ak.vector_at(&shifted, next)
+            *entry = (usize)((isize)*entry + delta)
+            next += 1
+        *positions = shifted
+    return (usize)end
+
+## A rule of a context or chaining context subtable: its sequences and lookup records.
+struct OtRule:
+    var backtrack: OtSequence
+    var input: OtSequence
+    var input_first_element: usize
+    var input_count: usize
+    var lookahead: OtSequence
+    var records: usize
+    var record_count: usize
+
+## Tries one rule at `index`; answers the index to continue at when it matched and applied.
+func ot_apply_rule(face: const SfntFace*, font: const HbFontT*, is_gpos: bool, lookup: const OtLookup*, rule: const OtRule*, buffer: HbBufferT*, index: usize, nesting: u32) -> usize?:
+    let infos = ak.vector_span_const(&buffer.infos)
+    var positions = ot_match_input(face, lookup, infos, index, &rule.input, rule.input_first_element, rule.input_count) else return none
+    let match_end = *ak.vector_last(&positions) + 1
+    if not ot_match_backtrack(face, lookup, infos, index, &rule.backtrack):
+        return none
+    if not ot_match_lookahead(face, lookup, infos, match_end, &rule.lookahead):
+        return none
+    let table = lookup.table
+    let end = ot_apply_lookup_records(face, font, is_gpos, lookup, table, rule.records, rule.record_count, &positions, match_end, buffer, nesting)
+    # HarfBuzz moves to `end`; a match always makes progress.
+    return end if end > index else index + 1
+
+## An empty sequence.
+func ot_empty_sequence(table: const u8[]) -> OtSequence:
+    return OtSequence(table = table, kind = OtMatchKind.glyph, values = 0, count = 0, class_def = 0, base = 0)
+
+## Context substitution or positioning (GSUB 5, GPOS 7) at `index`.
+func ot_apply_context(face: const SfntFace*, font: const HbFontT*, is_gpos: bool, lookup: const OtLookup*, subtable: usize, buffer: HbBufferT*, index: usize, nesting: u32) -> usize?:
+    let table = lookup.table
+    let glyph = ak.vector_at_const(&buffer.infos, index).codepoint
+    let subtable_format = sfnt_u16(table, subtable)
+    if subtable_format == 3:
+        let glyph_count = (usize)sfnt_u16(table, subtable + 2)
+        let record_count = (usize)sfnt_u16(table, subtable + 4)
+        if glyph_count == 0:
+            return none
+        if ot_coverage_index(table, subtable + (usize)sfnt_u16(table, subtable + 6), glyph) == none:
+            return none
+        let rule = OtRule(
+            backtrack = ot_empty_sequence(table),
+            input = OtSequence(table = table, kind = OtMatchKind.coverage, values = subtable + 6, count = glyph_count, class_def = 0, base = subtable),
+            input_first_element = 1, input_count = glyph_count,
+            lookahead = ot_empty_sequence(table),
+            records = subtable + 6 + glyph_count * 2, record_count = record_count)
+        return ot_apply_rule(face, font, is_gpos, lookup, &rule, buffer, index, nesting)
+
+    let coverage = ot_coverage_index(table, subtable + (usize)sfnt_u16(table, subtable + 2), glyph) else return none
+    var set_index = coverage
+    var kind = OtMatchKind.glyph
+    var class_def: usize = 0
+    var sets: usize = subtable + 4
+    if subtable_format == 2:
+        class_def = subtable + (usize)sfnt_u16(table, subtable + 4)
+        set_index = (usize)ot_class_of(table, class_def, glyph)
+        kind = OtMatchKind.class
+        sets = subtable + 6
+    elif subtable_format != 1:
+        return none
+    if set_index >= (usize)sfnt_u16(table, sets):
+        return none
+    let set_offset = (usize)sfnt_u16(table, sets + 2 + set_index * 2)
+    if set_offset == 0:
+        return none
+    let rule_set = subtable + set_offset
+    let rule_count = (usize)sfnt_u16(table, rule_set)
+    for rule_index in 0..<rule_count:
+        let rule_offset = rule_set + (usize)sfnt_u16(table, rule_set + 2 + rule_index * 2)
+        let glyph_count = (usize)sfnt_u16(table, rule_offset)
+        let record_count = (usize)sfnt_u16(table, rule_offset + 2)
+        if glyph_count == 0:
+            continue
+        let rule = OtRule(
+            backtrack = ot_empty_sequence(table),
+            input = OtSequence(table = table, kind = kind, values = rule_offset + 4, count = glyph_count - 1, class_def = class_def, base = 0),
+            input_first_element = 0, input_count = glyph_count,
+            lookahead = ot_empty_sequence(table),
+            records = rule_offset + 4 + (glyph_count - 1) * 2, record_count = record_count)
+        if let next = ot_apply_rule(face, font, is_gpos, lookup, &rule, buffer, index, nesting):
+            return next
+    return none
+
+## Chaining context substitution or positioning (GSUB 6, GPOS 8) at `index`.
+func ot_apply_chain_context(face: const SfntFace*, font: const HbFontT*, is_gpos: bool, lookup: const OtLookup*, subtable: usize, buffer: HbBufferT*, index: usize, nesting: u32) -> usize?:
+    let table = lookup.table
+    let glyph = ak.vector_at_const(&buffer.infos, index).codepoint
+    let subtable_format = sfnt_u16(table, subtable)
+    if subtable_format == 3:
+        let backtrack_count = (usize)sfnt_u16(table, subtable + 2)
+        let input_at = subtable + 4 + backtrack_count * 2
+        let input_count = (usize)sfnt_u16(table, input_at)
+        let lookahead_at = input_at + 2 + input_count * 2
+        let lookahead_count = (usize)sfnt_u16(table, lookahead_at)
+        let records_at = lookahead_at + 2 + lookahead_count * 2
+        if input_count == 0:
+            return none
+        if ot_coverage_index(table, subtable + (usize)sfnt_u16(table, input_at + 2), glyph) == none:
+            return none
+        let rule = OtRule(
+            backtrack = OtSequence(table = table, kind = OtMatchKind.coverage, values = subtable + 4, count = backtrack_count, class_def = 0, base = subtable),
+            input = OtSequence(table = table, kind = OtMatchKind.coverage, values = input_at + 2, count = input_count, class_def = 0, base = subtable),
+            input_first_element = 1, input_count = input_count,
+            lookahead = OtSequence(table = table, kind = OtMatchKind.coverage, values = lookahead_at + 2, count = lookahead_count, class_def = 0, base = subtable),
+            records = records_at + 2, record_count = (usize)sfnt_u16(table, records_at))
+        return ot_apply_rule(face, font, is_gpos, lookup, &rule, buffer, index, nesting)
+
+    let coverage = ot_coverage_index(table, subtable + (usize)sfnt_u16(table, subtable + 2), glyph) else return none
+    var set_index = coverage
+    var kind = OtMatchKind.glyph
+    var backtrack_class_def: usize = 0
+    var input_class_def: usize = 0
+    var lookahead_class_def: usize = 0
+    var sets: usize = subtable + 4
+    if subtable_format == 2:
+        backtrack_class_def = subtable + (usize)sfnt_u16(table, subtable + 4)
+        input_class_def = subtable + (usize)sfnt_u16(table, subtable + 6)
+        lookahead_class_def = subtable + (usize)sfnt_u16(table, subtable + 8)
+        set_index = (usize)ot_class_of(table, input_class_def, glyph)
+        kind = OtMatchKind.class
+        sets = subtable + 10
+    elif subtable_format != 1:
+        return none
+    if set_index >= (usize)sfnt_u16(table, sets):
+        return none
+    let set_offset = (usize)sfnt_u16(table, sets + 2 + set_index * 2)
+    if set_offset == 0:
+        return none
+    let rule_set = subtable + set_offset
+    let rule_count = (usize)sfnt_u16(table, rule_set)
+    for rule_index in 0..<rule_count:
+        let rule_offset = rule_set + (usize)sfnt_u16(table, rule_set + 2 + rule_index * 2)
+        let backtrack_count = (usize)sfnt_u16(table, rule_offset)
+        let input_at = rule_offset + 2 + backtrack_count * 2
+        let input_count = (usize)sfnt_u16(table, input_at)
+        if input_count == 0:
+            continue
+        let lookahead_at = input_at + 2 + (input_count - 1) * 2
+        let lookahead_count = (usize)sfnt_u16(table, lookahead_at)
+        let records_at = lookahead_at + 2 + lookahead_count * 2
+        let rule = OtRule(
+            backtrack = OtSequence(table = table, kind = kind, values = rule_offset + 2, count = backtrack_count, class_def = backtrack_class_def, base = 0),
+            input = OtSequence(table = table, kind = kind, values = input_at + 2, count = input_count - 1, class_def = input_class_def, base = 0),
+            input_first_element = 0, input_count = input_count,
+            lookahead = OtSequence(table = table, kind = kind, values = lookahead_at + 2, count = lookahead_count, class_def = lookahead_class_def, base = 0),
+            records = records_at + 2, record_count = (usize)sfnt_u16(table, records_at))
+        if let next = ot_apply_rule(face, font, is_gpos, lookup, &rule, buffer, index, nesting):
+            return next
+    return none

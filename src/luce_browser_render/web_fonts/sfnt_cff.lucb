@@ -1,0 +1,598 @@
+#==============================================================================================
+#
+#   sfnt_cff - glyph outlines of OpenType fonts with CFF data: INDEXes, DICTs and the Type 2
+#              charstring interpreter
+#
+#   DESCRIPTION:
+#       New code of the luce-browser port (DESIGN.md §7.1): FreeType's CFF driver in Luce, for
+#       unhinted outlines. The header, the Name/Top DICT/String/Global Subr INDEXes, the Top
+#       and Private DICTs (CID-keyed fonts through FDArray and FDSelect) and Type 2
+#       charstrings (Adobe Technical Note #5177) are read; hints are counted and skipped. The
+#       outline is built in font units and scaled to 26.6 fixed point at the end. CFF2 (the
+#       CFF of variable OpenType fonts) is read for the default instance: its 32-bit INDEX
+#       counts, its Top DICT, FDArray and FDSelect, and `blend` keeping the default values.
+#       FIXME: the deprecated `seac` form of endchar is not supported; FreeType's cf2 engine
+#       rounds intermediate points in 16.16 fixed point, which this interpreter does not
+#       reproduce bit for bit.
+#
+#==============================================================================================
+
+## An INDEX of a CFF table: `count` objects whose data starts at `data_start`, located by
+## offsets of `offset_size` bytes at `offsets`.
+pub struct SfntCffIndex:
+    pub var count: usize
+    pub var offset_size: usize
+    pub var offsets: usize
+    pub var data_start: usize
+    pub var end: usize
+
+## The parts of a CFF font the charstring interpreter needs.
+pub struct SfntCffFont:
+    pub var char_strings: SfntCffIndex
+    pub var global_subrs: SfntCffIndex
+    pub var local_subrs: SfntCffIndex
+    # CID-keyed fonts: one set of local subrs per font DICT, chosen by FDSelect.
+    pub var fd_local_subrs: ak.Vector[SfntCffIndex]
+    pub var fd_select: usize?
+    pub var is_cid: bool
+    # CFF2: each font DICT's default vsindex and the region count of each ItemVariationData.
+    pub var is_cff2: bool
+    pub var fd_vsindex: ak.Vector[u16]
+    pub var region_counts: ak.Vector[u16]
+
+## Reads the INDEX at `offset` of `cff` (a CFF2 INDEX has a 32-bit count).
+func sfnt_cff_read_index(cff: const u8[], offset: usize, cff2: bool = false) -> SfntCffIndex:
+    let count_size: usize = 4 if cff2 else 2
+    let count = (usize)sfnt_u32(cff, offset) if cff2 else (usize)sfnt_u16(cff, offset)
+    if count == 0:
+        return SfntCffIndex(count = 0, offset_size = 0, offsets = offset + count_size, data_start = offset + count_size, end = offset + count_size)
+    let offset_size = (usize)sfnt_u8(cff, offset + count_size)
+    let offsets = offset + count_size + 1
+    let data_start = offsets + (count + 1) * offset_size - 1
+    var index = SfntCffIndex(count = count, offset_size = offset_size, offsets = offsets, data_start = data_start, end = data_start)
+    index.end = data_start + sfnt_cff_index_offset(cff, &index, count)
+    return index
+
+## The offset of object `item` of the INDEX (1-based offsets as stored).
+func sfnt_cff_index_offset(cff: const u8[], index: const SfntCffIndex*, item: usize) -> usize:
+    let at = index.offsets + item * index.offset_size
+    match index.offset_size:
+        1: return (usize)sfnt_u8(cff, at)
+        2: return (usize)sfnt_u16(cff, at)
+        3: return (usize)sfnt_u24(cff, at)
+        4: return (usize)sfnt_u32(cff, at)
+        _: return 0
+
+## Object `item` of the INDEX, or none past its end.
+func sfnt_cff_index_item(cff: const u8[], index: const SfntCffIndex*, item: usize) -> const u8[]?:
+    if item >= index.count:
+        return none
+    let start = sfnt_cff_index_offset(cff, index, item)
+    let end = sfnt_cff_index_offset(cff, index, item + 1)
+    if start < 1 or end < start:
+        return none
+    return sfnt_slice(cff, index.data_start + start, end - start)
+
+# mark: DICTs ===================================================================================
+
+## The operands of one DICT operator: at most 48, as the spec allows.
+struct SfntCffDictEntry:
+    var operands: f64[48]
+    var count: usize
+
+## Finds operator `op` (two-byte operators as 1200 + second byte) in the DICT `dict` and
+## answers its operands, or none.
+func sfnt_cff_dict_find(dict: const u8[], op: u32) -> SfntCffDictEntry?:
+    var entry: SfntCffDictEntry
+    var cursor: usize = 0
+    while cursor < dict.length:
+        let b0 = (u32)dict[cursor]
+        # Operators are 0-21, and 22-24 in CFF2 (vsindex, blend, vstore).
+        if b0 <= 24:
+            var key = b0
+            cursor += 1
+            if b0 == 12:
+                key = 1200 + (u32)sfnt_u8(dict, cursor)
+                cursor += 1
+            if key == op:
+                return entry
+            entry.count = 0
+            continue
+        var value: f64 = 0.0
+        if b0 == 28:
+            value = (f64)sfnt_i16(dict, cursor + 1)
+            cursor += 3
+        elif b0 == 29:
+            value = (f64)sfnt_i32(dict, cursor + 1)
+            cursor += 5
+        elif b0 == 30:
+            # A real number in packed BCD: only its length matters to the operators read here.
+            cursor += 1
+            while cursor < dict.length:
+                let nibbles = dict[cursor]
+                cursor += 1
+                if (nibbles & 0x0F) == 0x0F or (nibbles >> 4) == 0x0F:
+                    break
+        elif b0 >= 32 and b0 <= 246:
+            value = (f64)((i32)b0 - 139)
+            cursor += 1
+        elif b0 >= 247 and b0 <= 250:
+            value = (f64)(((i32)b0 - 247) * 256 + (i32)sfnt_u8(dict, cursor + 1) + 108)
+            cursor += 2
+        elif b0 >= 251 and b0 <= 254:
+            value = (f64)(-((i32)b0 - 251) * 256 - (i32)sfnt_u8(dict, cursor + 1) - 108)
+            cursor += 2
+        else:
+            cursor += 1
+            continue
+        if entry.count < 48:
+            entry.operands[entry.count] = value
+            entry.count += 1
+    return none
+
+## The first operand of `op` in `dict`, or `fallback`.
+func sfnt_cff_dict_number(dict: const u8[], op: u32, fallback: f64) -> f64:
+    let entry = sfnt_cff_dict_find(dict, op) else return fallback
+    if entry.count == 0:
+        return fallback
+    return entry.operands[entry.count - 1]
+
+## The local subrs of the Private DICT that `private_entry` (size, offset) locates.
+func sfnt_cff_private_subrs(cff: const u8[], private_entry: SfntCffDictEntry?, cff2: bool = false) -> SfntCffIndex:
+    var empty = SfntCffIndex(count = 0, offset_size = 0, offsets = 0, data_start = 0, end = 0)
+    let entry = private_entry else return empty
+    if entry.count < 2:
+        return empty
+    let size = (usize)entry.operands[0]
+    let offset = (usize)entry.operands[1]
+    let private_dict = sfnt_slice(cff, offset, size)
+    let subrs = sfnt_cff_dict_number(private_dict, 19, 0.0)
+    if subrs <= 0.0:
+        return empty
+    return sfnt_cff_read_index(cff, offset + (usize)subrs, cff2)
+
+## The default vsindex (22) of the Private DICT that `private_entry` locates.
+func sfnt_cff_private_vsindex(cff: const u8[], private_entry: SfntCffDictEntry?) -> u16:
+    let entry = private_entry else return 0
+    if entry.count < 2:
+        return 0
+    let private_dict = sfnt_slice(cff, (usize)entry.operands[1], (usize)entry.operands[0])
+    return (u16)sfnt_cff_dict_number(private_dict, 22, 0.0)
+
+## Parses a CFF2 table: the Top DICT after the header, the Global Subr INDEX after it, the
+## FDArray (always present) and FDSelect, and the region counts of the VariationStore.
+func sfnt_face_cff2_font(face: const SfntFace*) -> SfntCffFont*?:
+    let cff = face.cff
+    if cff.length < 5 or sfnt_u8(cff, 0) != 2:
+        return none
+    let header_size = (usize)sfnt_u8(cff, 2)
+    let top_dict_length = (usize)sfnt_u16(cff, 3)
+    let top_dict = sfnt_slice(cff, header_size, top_dict_length)
+    let char_strings_offset = sfnt_cff_dict_number(top_dict, 17, 0.0)
+    if char_strings_offset <= 0.0:
+        return none
+    var empty = SfntCffIndex(count = 0, offset_size = 0, offsets = 0, data_start = 0, end = 0)
+    let font = new SfntCffFont(
+        char_strings = sfnt_cff_read_index(cff, (usize)char_strings_offset, true),
+        global_subrs = sfnt_cff_read_index(cff, header_size + top_dict_length, true),
+        local_subrs = empty) else trap("out of memory")
+    font.is_cff2 = true
+    font.is_cid = true
+    let fd_array_offset = sfnt_cff_dict_number(top_dict, 1236, 0.0)
+    if fd_array_offset > 0.0:
+        let fd_array = sfnt_cff_read_index(cff, (usize)fd_array_offset, true)
+        for item in 0..<fd_array.count:
+            let font_dict = sfnt_cff_index_item(cff, &fd_array, item) else break
+            let private_entry = sfnt_cff_dict_find(font_dict, 18)
+            ak.vector_append_t(&font.fd_local_subrs, sfnt_cff_private_subrs(cff, private_entry, true))
+            ak.vector_append_t(&font.fd_vsindex, sfnt_cff_private_vsindex(cff, private_entry))
+    let fd_select_offset = sfnt_cff_dict_number(top_dict, 1237, 0.0)
+    if fd_select_offset > 0.0:
+        font.fd_select = (usize)fd_select_offset
+    # VariationStore (24): a u16 length, then an ItemVariationStore.
+    let variation_store_offset = sfnt_cff_dict_number(top_dict, 24, 0.0)
+    if variation_store_offset > 0.0:
+        let store = (usize)variation_store_offset + 2
+        let data_count = (usize)sfnt_u16(cff, store + 6)
+        for index in 0..<data_count:
+            let data = store + (usize)sfnt_u32(cff, store + 8 + index * 4)
+            ak.vector_append_t(&font.region_counts, sfnt_u16(cff, data + 4))
+    let mutable_face = (SfntFace*)face
+    mutable_face.cff_font = font
+    return font
+
+## Parses the CFF table of the face once.
+func sfnt_face_cff_font(face: const SfntFace*) -> SfntCffFont*?:
+    if let font = face.cff_font:
+        return font
+    if face.is_cff2:
+        return sfnt_face_cff2_font(face)
+    let cff = face.cff
+    if cff.length < 4 or sfnt_u8(cff, 0) != 1:
+        return none
+    let header_size = (usize)sfnt_u8(cff, 2)
+    let name_index = sfnt_cff_read_index(cff, header_size)
+    let top_dict_index = sfnt_cff_read_index(cff, name_index.end)
+    let string_index = sfnt_cff_read_index(cff, top_dict_index.end)
+    let global_subrs = sfnt_cff_read_index(cff, string_index.end)
+    let top_dict = sfnt_cff_index_item(cff, &top_dict_index, 0) else return none
+    let char_strings_offset = sfnt_cff_dict_number(top_dict, 17, 0.0)
+    if char_strings_offset <= 0.0:
+        return none
+    let font = new SfntCffFont(
+        char_strings = sfnt_cff_read_index(cff, (usize)char_strings_offset),
+        global_subrs = global_subrs,
+        local_subrs = sfnt_cff_private_subrs(cff, sfnt_cff_dict_find(top_dict, 18))) else trap("out of memory")
+    # A CID-keyed font (ROS, 1230) has an FDArray (1236) and an FDSelect (1237).
+    if sfnt_cff_dict_find(top_dict, 1230) != none:
+        font.is_cid = true
+        let fd_array_offset = sfnt_cff_dict_number(top_dict, 1236, 0.0)
+        let fd_select_offset = sfnt_cff_dict_number(top_dict, 1237, 0.0)
+        if fd_array_offset > 0.0:
+            let fd_array = sfnt_cff_read_index(cff, (usize)fd_array_offset)
+            for item in 0..<fd_array.count:
+                let font_dict = sfnt_cff_index_item(cff, &fd_array, item) else break
+                ak.vector_append_t(&font.fd_local_subrs, sfnt_cff_private_subrs(cff, sfnt_cff_dict_find(font_dict, 18)))
+        if fd_select_offset > 0.0:
+            font.fd_select = (usize)fd_select_offset
+    let mutable_face = (SfntFace*)face
+    mutable_face.cff_font = font
+    return font
+
+## The font DICT of `glyph` in a CID-keyed font (FDSelect formats 0 and 3).
+func sfnt_cff_fd_for_glyph(cff: const u8[], fd_select: usize, glyph: u32) -> usize:
+    let table_format = sfnt_u8(cff, fd_select)
+    if table_format == 0:
+        return (usize)sfnt_u8(cff, fd_select + 1 + (usize)glyph)
+    if table_format == 3:
+        let ranges = (usize)sfnt_u16(cff, fd_select + 1)
+        for index in 0..<ranges:
+            let record = fd_select + 3 + index * 3
+            let first = (u32)sfnt_u16(cff, record)
+            let next = (u32)sfnt_u16(cff, record + 3)
+            if glyph >= first and glyph < next:
+                return (usize)sfnt_u8(cff, record + 2)
+    if table_format == 4:
+        # CFF2's 32-bit ranges with 16-bit font DICT indices.
+        let ranges = (usize)sfnt_u32(cff, fd_select + 1)
+        for index in 0..<ranges:
+            let record = fd_select + 5 + index * 6
+            let first = sfnt_u32(cff, record)
+            let next = sfnt_u32(cff, record + 6)
+            if glyph >= first and glyph < next:
+                return (usize)sfnt_u16(cff, record + 4)
+    return 0
+
+# mark: Type 2 charstrings =====================================================================
+
+## The state of the charstring interpreter. The stack holds 513 operands, CFF2's maximum (CFF
+## allows 48).
+struct SfntCffInterpreter:
+    var cff: const u8[]
+    var font: SfntCffFont*
+    var local_subrs: SfntCffIndex
+    var stack: f64[513]
+    var depth: usize
+    var stem_count: usize
+    var have_width: bool
+    var x: f64
+    var y: f64
+    var open: bool
+    var ended: bool
+    var outline: SfntOutline*
+    var scale: i64
+    # CFF2: the current vsindex's region count, for blend.
+    var region_count: usize
+
+## The subr bias of an INDEX (5177 §4.7).
+func sfnt_cff_bias(count: usize) -> isize:
+    if count < 1240:
+        return 107
+    if count < 33900:
+        return 1131
+    return 32768
+
+func cff_point(interpreter: SfntCffInterpreter*, x: f64, y: f64, tag: u8):
+    let outline = interpreter.outline
+    let scale = (f64)interpreter.scale / 65536.0
+    ak.vector_append_t(&outline.xs, (i64)math.round(x * scale))
+    ak.vector_append_t(&outline.ys, (i64)math.round(y * scale))
+    ak.vector_append_t(&outline.tags, tag)
+
+func cff_close_contour(interpreter: SfntCffInterpreter*):
+    if not interpreter.open:
+        return
+    interpreter.open = false
+    let outline = interpreter.outline
+    let count = ak.vector_size(&outline.xs)
+    ak.vector_append_t(&outline.contour_ends, count - 1)
+
+func cff_move_to(interpreter: SfntCffInterpreter*, dx: f64, dy: f64):
+    cff_close_contour(interpreter)
+    interpreter.x += dx
+    interpreter.y += dy
+    cff_point(interpreter, interpreter.x, interpreter.y, ft_curve_tag_on)
+    interpreter.open = true
+
+func cff_line_to(interpreter: SfntCffInterpreter*, dx: f64, dy: f64):
+    if not interpreter.open:
+        cff_move_to(interpreter, 0.0, 0.0)
+    interpreter.x += dx
+    interpreter.y += dy
+    cff_point(interpreter, interpreter.x, interpreter.y, ft_curve_tag_on)
+
+func cff_curve_to(interpreter: SfntCffInterpreter*, dx1: f64, dy1: f64, dx2: f64, dy2: f64, dx3: f64, dy3: f64):
+    if not interpreter.open:
+        cff_move_to(interpreter, 0.0, 0.0)
+    let x1 = interpreter.x + dx1
+    let y1 = interpreter.y + dy1
+    let x2 = x1 + dx2
+    let y2 = y1 + dy2
+    interpreter.x = x2 + dx3
+    interpreter.y = y2 + dy3
+    cff_point(interpreter, x1, y1, ft_curve_tag_cubic)
+    cff_point(interpreter, x2, y2, ft_curve_tag_cubic)
+    cff_point(interpreter, interpreter.x, interpreter.y, ft_curve_tag_on)
+
+## Takes the optional width operand of the first stack-clearing operator.
+func cff_take_width(interpreter: SfntCffInterpreter*, expected_even: bool, expected: usize) -> usize:
+    var first: usize = 0
+    if not interpreter.have_width:
+        interpreter.have_width = true
+        let odd = (interpreter.depth % 2) == 1
+        if (expected_even and odd) or (not expected_even and interpreter.depth > expected):
+            first = 1
+    return first
+
+## Runs one charstring (and the subrs it calls). Fails on malformed charstrings.
+func sfnt_cff_run(interpreter: SfntCffInterpreter*, code: const u8[], nesting: u32) -> !:
+    if nesting > 10:
+        error(ak.ak_error, "CFF subroutines nest too deeply")
+    var cursor: usize = 0
+    while cursor < code.length and not interpreter.ended:
+        let b0 = (u32)code[cursor]
+        if b0 >= 32 or b0 == 28:
+            var value: f64
+            if b0 == 28:
+                value = (f64)sfnt_i16(code, cursor + 1)
+                cursor += 3
+            elif b0 <= 246:
+                value = (f64)((i32)b0 - 139)
+                cursor += 1
+            elif b0 <= 250:
+                value = (f64)(((i32)b0 - 247) * 256 + (i32)sfnt_u8(code, cursor + 1) + 108)
+                cursor += 2
+            elif b0 <= 254:
+                value = (f64)(-((i32)b0 - 251) * 256 - (i32)sfnt_u8(code, cursor + 1) - 108)
+                cursor += 2
+            else:
+                value = (f64)sfnt_i32(code, cursor + 1) / 65536.0
+                cursor += 5
+            if interpreter.depth >= 513:
+                error(ak.ak_error, "CFF stack overflow")
+            interpreter.stack[interpreter.depth] = value
+            interpreter.depth += 1
+            continue
+        cursor += 1
+        let depth = interpreter.depth
+        match b0:
+            1, 3, 18, 23:
+                # hstem, vstem, hstemhm, vstemhm
+                let first = cff_take_width(interpreter, true, 0)
+                interpreter.stem_count += (depth - first) // 2
+                interpreter.depth = 0
+            19, 20:
+                # hintmask, cntrmask: implicit vstems, then the mask bytes.
+                let first = cff_take_width(interpreter, true, 0)
+                interpreter.stem_count += (depth - first) // 2
+                interpreter.depth = 0
+                cursor += (interpreter.stem_count + 7) // 8
+            21:
+                # rmoveto
+                let first = cff_take_width(interpreter, false, 2)
+                if depth < first + 2:
+                    error(ak.ak_error, "CFF rmoveto underflow")
+                cff_move_to(interpreter, interpreter.stack[first], interpreter.stack[first + 1])
+                interpreter.depth = 0
+            22, 4:
+                # hmoveto, vmoveto
+                let first = cff_take_width(interpreter, false, 1)
+                if depth < first + 1:
+                    error(ak.ak_error, "CFF moveto underflow")
+                if b0 == 22:
+                    cff_move_to(interpreter, interpreter.stack[first], 0.0)
+                else:
+                    cff_move_to(interpreter, 0.0, interpreter.stack[first])
+                interpreter.depth = 0
+            5:
+                # rlineto
+                var index: usize = 0
+                while index + 1 < depth:
+                    cff_line_to(interpreter, interpreter.stack[index], interpreter.stack[index + 1])
+                    index += 2
+                interpreter.depth = 0
+            6, 7:
+                # hlineto, vlineto: alternating horizontal and vertical lines
+                var horizontal = b0 == 6
+                for index in 0..<depth:
+                    if horizontal:
+                        cff_line_to(interpreter, interpreter.stack[index], 0.0)
+                    else:
+                        cff_line_to(interpreter, 0.0, interpreter.stack[index])
+                    horizontal = not horizontal
+                interpreter.depth = 0
+            8:
+                # rrcurveto
+                var index: usize = 0
+                while index + 5 < depth:
+                    cff_curve_to(interpreter, interpreter.stack[index], interpreter.stack[index + 1], interpreter.stack[index + 2], interpreter.stack[index + 3], interpreter.stack[index + 4], interpreter.stack[index + 5])
+                    index += 6
+                interpreter.depth = 0
+            24:
+                # rcurveline
+                var index: usize = 0
+                let curve_operands = depth - 2 if depth >= 2 else 0
+                while index + 5 < curve_operands:
+                    cff_curve_to(interpreter, interpreter.stack[index], interpreter.stack[index + 1], interpreter.stack[index + 2], interpreter.stack[index + 3], interpreter.stack[index + 4], interpreter.stack[index + 5])
+                    index += 6
+                if index + 1 < depth:
+                    cff_line_to(interpreter, interpreter.stack[index], interpreter.stack[index + 1])
+                interpreter.depth = 0
+            25:
+                # rlinecurve
+                var index: usize = 0
+                while depth - index > 6:
+                    cff_line_to(interpreter, interpreter.stack[index], interpreter.stack[index + 1])
+                    index += 2
+                if index + 5 < depth:
+                    cff_curve_to(interpreter, interpreter.stack[index], interpreter.stack[index + 1], interpreter.stack[index + 2], interpreter.stack[index + 3], interpreter.stack[index + 4], interpreter.stack[index + 5])
+                interpreter.depth = 0
+            26:
+                # vvcurveto
+                var index: usize = 0
+                var dx1: f64 = 0.0
+                if depth % 2 == 1:
+                    dx1 = interpreter.stack[0]
+                    index = 1
+                while index + 3 < depth:
+                    cff_curve_to(interpreter, dx1, interpreter.stack[index], interpreter.stack[index + 1], interpreter.stack[index + 2], 0.0, interpreter.stack[index + 3])
+                    dx1 = 0.0
+                    index += 4
+                interpreter.depth = 0
+            27:
+                # hhcurveto
+                var index: usize = 0
+                var dy1: f64 = 0.0
+                if depth % 2 == 1:
+                    dy1 = interpreter.stack[0]
+                    index = 1
+                while index + 3 < depth:
+                    cff_curve_to(interpreter, interpreter.stack[index], dy1, interpreter.stack[index + 1], interpreter.stack[index + 2], interpreter.stack[index + 3], 0.0)
+                    dy1 = 0.0
+                    index += 4
+                interpreter.depth = 0
+            30, 31:
+                # vhcurveto, hvcurveto: alternating start tangents; a last odd operand ends
+                # the last curve off-axis.
+                var horizontal = b0 == 31
+                var index: usize = 0
+                while index + 3 < depth:
+                    let extra = interpreter.stack[index + 4] if depth - index == 5 else 0.0
+                    if horizontal:
+                        cff_curve_to(interpreter, interpreter.stack[index], 0.0, interpreter.stack[index + 1], interpreter.stack[index + 2], extra, interpreter.stack[index + 3])
+                    else:
+                        cff_curve_to(interpreter, 0.0, interpreter.stack[index], interpreter.stack[index + 1], interpreter.stack[index + 2], interpreter.stack[index + 3], extra)
+                    horizontal = not horizontal
+                    index += 4
+                interpreter.depth = 0
+            15:
+                # vsindex (CFF2)
+                if depth == 0:
+                    error(ak.ak_error, "CFF vsindex underflow")
+                let vsindex = (usize)interpreter.stack[depth - 1]
+                interpreter.region_count = 0
+                if vsindex < ak.vector_size(&interpreter.font.region_counts):
+                    interpreter.region_count = (usize)*ak.vector_at(&interpreter.font.region_counts, vsindex)
+                interpreter.depth = 0
+            16:
+                # blend (CFF2): n default values stay, their n * regions deltas go (the
+                # default instance).
+                if depth == 0:
+                    error(ak.ak_error, "CFF blend underflow")
+                let n = (usize)interpreter.stack[depth - 1]
+                let removed = n * interpreter.region_count
+                if depth < 1 + n + removed:
+                    error(ak.ak_error, "CFF blend underflow")
+                interpreter.depth = depth - 1 - removed
+            10, 29:
+                # callsubr, callgsubr
+                if depth == 0:
+                    error(ak.ak_error, "CFF call underflow")
+                interpreter.depth -= 1
+                let subrs = interpreter.local_subrs if b0 == 10 else interpreter.font.global_subrs
+                let number = (isize)interpreter.stack[interpreter.depth] + sfnt_cff_bias(subrs.count)
+                if number < 0:
+                    error(ak.ak_error, "CFF subr index out of range")
+                let subr = sfnt_cff_index_item(interpreter.cff, &subrs, (usize)number) else error(ak.ak_error, "CFF subr index out of range")
+                try sfnt_cff_run(interpreter, subr, nesting + 1)
+            11:
+                # return
+                return
+            14:
+                # endchar
+                discard(cff_take_width(interpreter, false, 0))
+                cff_close_contour(interpreter)
+                interpreter.ended = true
+                return
+            12:
+                let b1 = (u32)sfnt_u8(code, cursor)
+                cursor += 1
+                try sfnt_cff_run_flex(interpreter, b1)
+            _:
+                # Reserved operators and hint replacement: clear the stack.
+                interpreter.depth = 0
+
+## The two-byte flex operators (12 34..37); the others are arithmetic this interpreter does
+## not need for outlines and clear the stack.
+func sfnt_cff_run_flex(interpreter: SfntCffInterpreter*, op: u32) -> !:
+    let depth = interpreter.depth
+    interpreter.depth = 0
+    match op:
+        35:
+            # flex
+            if depth < 13:
+                error(ak.ak_error, "CFF flex underflow")
+            cff_curve_to(interpreter, interpreter.stack[0], interpreter.stack[1], interpreter.stack[2], interpreter.stack[3], interpreter.stack[4], interpreter.stack[5])
+            cff_curve_to(interpreter, interpreter.stack[6], interpreter.stack[7], interpreter.stack[8], interpreter.stack[9], interpreter.stack[10], interpreter.stack[11])
+        34:
+            # hflex
+            if depth < 7:
+                error(ak.ak_error, "CFF hflex underflow")
+            cff_curve_to(interpreter, interpreter.stack[0], 0.0, interpreter.stack[1], interpreter.stack[2], interpreter.stack[3], 0.0)
+            cff_curve_to(interpreter, interpreter.stack[4], 0.0, interpreter.stack[5], -interpreter.stack[2], interpreter.stack[6], 0.0)
+        36:
+            # hflex1
+            if depth < 9:
+                error(ak.ak_error, "CFF hflex1 underflow")
+            cff_curve_to(interpreter, interpreter.stack[0], interpreter.stack[1], interpreter.stack[2], interpreter.stack[3], interpreter.stack[4], 0.0)
+            cff_curve_to(interpreter, interpreter.stack[5], 0.0, interpreter.stack[6], interpreter.stack[7], interpreter.stack[8], -(interpreter.stack[1] + interpreter.stack[3] + interpreter.stack[7]))
+        37:
+            # flex1: the last point's other coordinate returns to the start
+            if depth < 11:
+                error(ak.ak_error, "CFF flex1 underflow")
+            let dx = interpreter.stack[0] + interpreter.stack[2] + interpreter.stack[4] + interpreter.stack[6] + interpreter.stack[8]
+            let dy = interpreter.stack[1] + interpreter.stack[3] + interpreter.stack[5] + interpreter.stack[7] + interpreter.stack[9]
+            let horizontal = math.abs(dx) > math.abs(dy)
+            cff_curve_to(interpreter, interpreter.stack[0], interpreter.stack[1], interpreter.stack[2], interpreter.stack[3], interpreter.stack[4], interpreter.stack[5])
+            if horizontal:
+                cff_curve_to(interpreter, interpreter.stack[6], interpreter.stack[7], interpreter.stack[8], interpreter.stack[9], interpreter.stack[10], -dy)
+            else:
+                cff_curve_to(interpreter, interpreter.stack[6], interpreter.stack[7], interpreter.stack[8], interpreter.stack[9], -dx, interpreter.stack[10])
+        _:
+            return
+
+## Loads the outline of `glyph` from the face's CFF data into `outline` at the 16.16 `scale`.
+func sfnt_cff_load_glyph(face: const SfntFace*, glyph: u32, scale: i64, outline: SfntOutline*) -> !:
+    let font = sfnt_face_cff_font(face) else error(ak.ak_error, "Invalid CFF data")
+    let code = sfnt_cff_index_item(face.cff, &font.char_strings, (usize)glyph) else error(ak.ak_error, "Invalid glyph index")
+    var local_subrs = font.local_subrs
+    if font.is_cid:
+        # A CFF2 font without an FDSelect has one font DICT.
+        var fd: usize = 0
+        if let fd_select = font.fd_select:
+            fd = sfnt_cff_fd_for_glyph(face.cff, fd_select, glyph)
+        if fd < ak.vector_size(&font.fd_local_subrs):
+            local_subrs = *ak.vector_at(&font.fd_local_subrs, fd)
+    var interpreter = SfntCffInterpreter(cff = face.cff, font = font, local_subrs = local_subrs, outline = outline, scale = scale)
+    if font.is_cff2:
+        # No width in CFF2 charstrings; the font DICT's vsindex applies until a vsindex.
+        interpreter.have_width = true
+        var fd: usize = 0
+        if let fd_select = font.fd_select:
+            fd = sfnt_cff_fd_for_glyph(face.cff, fd_select, glyph)
+        if fd < ak.vector_size(&font.fd_vsindex):
+            let vsindex = (usize)*ak.vector_at(&font.fd_vsindex, fd)
+            if vsindex < ak.vector_size(&font.region_counts):
+                interpreter.region_count = (usize)*ak.vector_at(&font.region_counts, vsindex)
+    try sfnt_cff_run(&interpreter, code, 0)
+    cff_close_contour(&interpreter)

@@ -1,0 +1,38 @@
+#==============================================================================================
+#
+#   font_data - FontData: the bytes of a font file, owned as a ByteBuffer or a Core::Resource
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Font/FontData.cpp (lines 1-40). The C++ Variant is two fields
+#       (types_font_data.lucb). LibCore is not ported (DESIGN.md §1.1): a Core::Resource is
+#       opaque in ak, so a FontData made from one cannot answer its bytes; the port's
+#       PathFontProvider reads font files into ByteBuffers instead (path_font_provider.lucb).
+#
+#==============================================================================================
+
+## Ported from Libraries/LibGfx/Font/FontData.cpp:11 Gfx::FontData::create_from_byte_buffer.
+pub func font_data_create_from_byte_buffer(byte_buffer: ak.ByteBuffer) -> FontData*:
+    let font_data = new FontData else trap("out of memory")
+    font_data_construct_byte_buffer(font_data, byte_buffer)
+    return font_data
+
+## Ported from Libraries/LibGfx/Font/FontData.cpp:16 Gfx::FontData::create_from_resource.
+pub func font_data_create_from_resource(resource: const ak.CoreResource*) -> FontData*:
+    let font_data = new FontData else trap("out of memory")
+    font_data_construct_core_resource(font_data, resource)
+    return font_data
+
+## Ported from Libraries/LibGfx/Font/FontData.cpp:21 Gfx::FontData::bytes.
+pub func font_data_bytes(this: const FontData*) -> const u8[]:
+    if this.m_resource != none:
+        trap("unported: Core::Resource::data (LibCore is not ported)")
+    return ak.byte_buffer_bytes_const(&this.m_byte_buffer)
+
+## Ported from Libraries/LibGfx/Font/FontData.cpp:30 Gfx::FontData::FontData.
+pub func font_data_construct_byte_buffer(this: FontData*, byte_buffer: ak.ByteBuffer):
+    # move(byte_buffer): the storage is shared, as a move leaves nothing behind.
+    this.m_byte_buffer = byte_buffer
+
+## Ported from Libraries/LibGfx/Font/FontData.cpp:35 Gfx::FontData::FontData.
+pub func font_data_construct_core_resource(this: FontData*, resource: const ak.CoreResource*):
+    this.m_resource = resource

@@ -1,0 +1,178 @@
+#==============================================================================================
+#
+#   font_cascade_list - FontCascadeList: the fonts of a CSS font-family list in order, with
+#                       their unicode ranges, pending web fonts and a last-resort font
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/FontCascadeList.cpp (lines 1-128) with the inline functions
+#       of Libraries/LibGfx/FontCascadeList.h (lines 1-119). for_each_font_entry's template
+#       callback becomes the entries to loop over (DESIGN.md §2.9).
+#
+#==============================================================================================
+
+## Ported from Libraries/LibGfx/FontCascadeList.h:21 Gfx::FontCascadeList::create.
+pub func font_cascade_list_create() -> FontCascadeList*:
+    return new FontCascadeList else trap("out of memory")
+
+## Ported from Libraries/LibGfx/FontCascadeList.h:26 Gfx::FontCascadeList::size.
+pub func font_cascade_list_size(this: const FontCascadeList*) -> usize:
+    return ak.vector_size(&this.m_fonts)
+
+## Ported from Libraries/LibGfx/FontCascadeList.h:27 Gfx::FontCascadeList::is_empty.
+pub func font_cascade_list_is_empty(this: const FontCascadeList*) -> bool:
+    return ak.vector_is_empty(&this.m_fonts) and ak.vector_is_empty(&this.m_pending_faces) and this.m_last_resort_font == none
+
+## Ported from Libraries/LibGfx/FontCascadeList.h:28 Gfx::FontCascadeList::first.
+pub func font_cascade_list_first(this: const FontCascadeList*) -> const Font*:
+    if not ak.vector_is_empty(&this.m_fonts):
+        return ak.vector_first_const(&this.m_fonts).font
+    return this.m_last_resort_font else trap("VERIFY: FontCascadeList::first without fonts")
+
+## Ported from Libraries/LibGfx/FontCascadeList.h:31 Gfx::FontCascadeList::for_each_font_entry:
+## the entries, for `for entry in font_cascade_list_for_each_font_entry(list)`.
+pub func font_cascade_list_for_each_font_entry(this: const FontCascadeList*) -> const FontCascadeListEntry[]:
+    return ak.vector_span_const(&this.m_fonts)
+
+## Ported from Libraries/LibGfx/FontCascadeList.cpp:11 Gfx::FontCascadeList::add.
+pub func font_cascade_list_add(this: FontCascadeList*, font: const Font*):
+    ak.vector_append_t(&this.m_fonts, FontCascadeListEntry(font = font, range_data = none))
+
+## Ported from Libraries/LibGfx/FontCascadeList.cpp:16 Gfx::FontCascadeList::add.
+pub func font_cascade_list_add_vector(this: FontCascadeList*, font: const Font*, unicode_ranges: ak.Vector[UnicodeRange]):
+    if ak.vector_is_empty(&unicode_ranges):
+        ak.vector_append_t(&this.m_fonts, FontCascadeListEntry(font = font, range_data = none))
+        return
+    var lowest_code_point: u32 = 0xFFFFFFFF
+    var highest_code_point: u32 = 0
+
+    for range in ak.vector_span_const(&unicode_ranges):
+        # min() and max()
+        if unicode_range_min_code_point(&range) < lowest_code_point:
+            lowest_code_point = unicode_range_min_code_point(&range)
+        if unicode_range_max_code_point(&range) > highest_code_point:
+            highest_code_point = unicode_range_max_code_point(&range)
+
+    ak.vector_append_t(&this.m_fonts, FontCascadeListEntry(font = font,
+        range_data = FontCascadeListEntryRangeData(
+            enclosing_range = unicode_range_create(lowest_code_point, highest_code_point),
+            unicode_ranges = unicode_ranges)))
+
+## Ported from Libraries/LibGfx/FontCascadeList.cpp:37 Gfx::FontCascadeList::add_pending_face.
+# Register an unloaded face covering `unicode_ranges`. The cascade invokes
+# `start_load` the first time a rendered codepoint falls within one of the ranges.
+pub func font_cascade_list_add_pending_face(this: FontCascadeList*, unicode_ranges: ak.Vector[UnicodeRange], start_load: ak.Function0[unit]):
+    if ak.vector_is_empty(&unicode_ranges):
+        return
+
+    var lowest_code_point: u32 = 0xFFFFFFFF
+    var highest_code_point: u32 = 0
+    for range in ak.vector_span_const(&unicode_ranges):
+        # min() and max()
+        if unicode_range_min_code_point(&range) < lowest_code_point:
+            lowest_code_point = unicode_range_min_code_point(&range)
+        if unicode_range_max_code_point(&range) > highest_code_point:
+            highest_code_point = unicode_range_max_code_point(&range)
+
+    let pending = new FontCascadeListPendingFace(m_enclosing_range = unicode_range_create(0, 0)) else trap("out of memory")
+    font_cascade_list_pending_face_construct(pending, unicode_range_create(lowest_code_point, highest_code_point), unicode_ranges, start_load)
+    ak.vector_append_t(&this.m_pending_faces, pending)
+
+## Ported from Libraries/LibGfx/FontCascadeList.cpp:55 Gfx::FontCascadeList::extend.
+pub func font_cascade_list_extend(this: FontCascadeList*, other: const FontCascadeList*):
+    ak.vector_extend_2(&this.m_fonts, &other.m_fonts)
+    ak.vector_extend_2(&this.m_pending_faces, &other.m_pending_faces)
+
+## Caches `font` for an ASCII `code_point` (font_for_code_point's cache_and_return).
+func font_cascade_list_cache_and_return(this: const FontCascadeList*, code_point: u32, font: const Font*) -> const Font*:
+    if (usize)code_point < this.m_ascii_cache.length:
+        ((FontCascadeList*)this).m_ascii_cache[(usize)code_point] = font
+    return font
+
+## Ported from Libraries/LibGfx/FontCascadeList.cpp:61 Gfx::FontCascadeList::font_for_code_point.
+pub func font_cascade_list_font_for_code_point(this: const FontCascadeList*, code_point: u32, trigger_pending_loads: FontCascadeListTriggerPendingLoads = FontCascadeListTriggerPendingLoads.no) -> const Font*:
+    let mutable_this = (FontCascadeList*)this
+    # Only the text-shaping paths pass TriggerPendingLoads::Yes. Probes that don't
+    # lead to a glyph being drawn (the U+0020 check used to compute first-available-
+    # font metrics, for instance) skip this block so they can't initiate a download
+    # for a subset face that happens to cover the probe codepoint.
+    if trigger_pending_loads == FontCascadeListTriggerPendingLoads.yes:
+        # Walk pending entries first: if this codepoint falls in an unloaded face's
+        # unicode-range we kick off the fetch and drop the entry — a fallback font
+        # that happens to cover the codepoint shouldn't prevent the real face from
+        # loading. FontComputer::clear_computed_font_cache() rebuilds the cascade
+        # once the fetch completes, so later shapes pick up the loaded face. Run
+        # before the ASCII cache lookup so a previously-cached codepoint still
+        # triggers a newly-added face.
+        var index: usize = 0
+        while index < ak.vector_size(&mutable_this.m_pending_faces):
+            let pending = *ak.vector_at(&mutable_this.m_pending_faces, index)
+            if font_cascade_list_pending_face_covers(pending, code_point):
+                font_cascade_list_pending_face_start_load(pending)
+                ak.vector_remove(&mutable_this.m_pending_faces, index)
+                continue
+            index += 1
+
+    if (usize)code_point < this.m_ascii_cache.length:
+        if let cached = this.m_ascii_cache[(usize)code_point]:
+            return cached
+
+    for entry in ak.vector_span_const(&this.m_fonts):
+        if let range_data = entry.range_data:
+            if not unicode_range_contains(&range_data.enclosing_range, code_point):
+                continue
+            for range in ak.vector_span_const(&range_data.unicode_ranges):
+                if unicode_range_contains(&range, code_point) and font_contains_glyph(entry.font, code_point):
+                    return font_cascade_list_cache_and_return(this, code_point, entry.font)
+        elif font_contains_glyph(entry.font, code_point):
+            return font_cascade_list_cache_and_return(this, code_point, entry.font)
+
+    if ak.function2_is_set(&this.m_system_font_fallback_callback):
+        if let fallback = ak.function2_call(&this.m_system_font_fallback_callback, code_point, font_cascade_list_first(this)):
+            ak.vector_append_t(&mutable_this.m_fonts, FontCascadeListEntry(font = fallback, range_data = none))
+            return font_cascade_list_cache_and_return(this, code_point, ak.vector_last_const(&this.m_fonts).font)
+
+    let last_resort_font = this.m_last_resort_font else trap("VERIFY: FontCascadeList without a last resort font")
+    return font_cascade_list_cache_and_return(this, code_point, last_resort_font)
+
+## Ported from Libraries/LibGfx/FontCascadeList.cpp:117 Gfx::FontCascadeList::equals.
+pub func font_cascade_list_equals(this: const FontCascadeList*, other: const FontCascadeList*) -> bool:
+    if ak.vector_size(&this.m_fonts) != ak.vector_size(&other.m_fonts):
+        return false
+    for i in 0..<ak.vector_size(&this.m_fonts):
+        if ak.vector_at_const(&this.m_fonts, i).font != ak.vector_at_const(&other.m_fonts, i).font:
+            return false
+    return true
+
+## Ported from Libraries/LibGfx/FontCascadeList.h:71 Gfx::FontCascadeList::PendingFace::PendingFace.
+pub func font_cascade_list_pending_face_construct(this: FontCascadeListPendingFace*, enclosing: UnicodeRange, ranges: ak.Vector[UnicodeRange], start_load: ak.Function0[unit]):
+    this.m_enclosing_range = enclosing
+    this.m_unicode_ranges = ranges
+    this.m_start_load = start_load
+
+## Ported from Libraries/LibGfx/FontCascadeList.h:78 Gfx::FontCascadeList::PendingFace::covers.
+pub func font_cascade_list_pending_face_covers(this: const FontCascadeListPendingFace*, code_point: u32) -> bool:
+    if not unicode_range_contains(&this.m_enclosing_range, code_point):
+        return false
+    for range in ak.vector_span_const(&this.m_unicode_ranges):
+        if unicode_range_contains(&range, code_point):
+            return true
+    return false
+
+## Ported from Libraries/LibGfx/FontCascadeList.h:89 Gfx::FontCascadeList::PendingFace::start_load.
+pub func font_cascade_list_pending_face_start_load(this: FontCascadeListPendingFace*):
+    ak.function0_call(&this.m_start_load)
+
+## Ported from Libraries/LibGfx/FontCascadeList.h:97 Gfx::FontCascadeList::set_last_resort_font.
+pub func font_cascade_list_set_last_resort_font(this: FontCascadeList*, font: Font*):
+    this.m_last_resort_font = font
+
+## Ported from Libraries/LibGfx/FontCascadeList.h:98 Gfx::FontCascadeList::set_system_font_fallback_callback.
+pub func font_cascade_list_set_system_font_fallback_callback(this: FontCascadeList*, callback: ak.Function2[u32, const Font*, const Font*?]):
+    this.m_system_font_fallback_callback = callback
+
+## Ported from Libraries/LibGfx/FontCascadeList.h:100 Gfx::FontCascadeList::first_text_face.
+pub func font_cascade_list_first_text_face(this: const FontCascadeList*) -> const Font*:
+    for entry in ak.vector_span_const(&this.m_fonts):
+        if not font_is_emoji_font(entry.font):
+            return entry.font
+    return font_cascade_list_first(this)

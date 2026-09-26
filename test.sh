@@ -13,6 +13,11 @@ done
 echo "== luce-base test src/luce_browser_render/gfx"
 luce-base test src/luce_browser_render/gfx
 
+# web_fonts: its unit tests and the expectations of the reference build (tests_oracle), with
+# the test fonts of tests/web_fonts.
+echo "== luce-base test src/luce_browser_render/web_fonts"
+luce-base test src/luce_browser_render/web_fonts
+
 # raster: written by hand (not generated); run its tests once it exists.
 if [ -f src/luce_browser_render/raster/ORDER ]; then
     echo "== luce-base test src/luce_browser_render/raster"

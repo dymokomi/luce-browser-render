@@ -1,0 +1,164 @@
+#==============================================================================================
+#
+#   typeface_skia - TypefaceSkia: the Typeface implementation, over the port's OpenType reader
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Font/TypefaceSkia.cpp (lines 1-268) with the inline
+#       functions of Libraries/LibGfx/Font/TypefaceSkia.h (lines 1-71). Skia's SkTypeface and
+#       SkFontMgr are replaced (DESIGN.md §7.1): `font_manager().makeFromStream` is
+#       sfnt_face_create, and the SkTypeface queries read the SfntFace with the rules of Skia's
+#       FreeType scanner (sfnt_reader.lucb). The class keeps its donor name so that
+#       `as<TypefaceSkia>` and `is_skia()` work unchanged.
+#
+#       There is no system font manager: find_typeface_for_code_point and
+#       resolve_generic_family (fontconfig's matchFamilyStyleCharacter and matchFamilyStyle)
+#       find nothing. FIXME: variable fonts are not instanced (clone_with_variations answers
+#       a typeface over the same face).
+#
+#==============================================================================================
+
+## A new TypefaceSkia with its vtable and class id.
+func typeface_skia_allocate(impl: Impl*, buffer: const u8[], ttc_index: u32) -> TypefaceSkia*:
+    let this = new TypefaceSkia(typeface_base = Typeface(vtable = &typeface_skia_vtable.typeface_vtable, class_id = typeface_skia_class.first_id), m_impl = impl) else trap("out of memory")
+    typeface_skia_construct(this, impl, buffer, ttc_index)
+    return this
+
+## Ported from Libraries/LibGfx/Font/TypefaceSkia.h:18 Gfx::TypefaceSkia::load_from_buffer.
+pub func typeface_skia_load_from_buffer(buffer: const u8[], ttc_index: u32 = 0) -> TypefaceSkia*!:
+    # https://learn.microsoft.com/en-us/typography/opentype/spec/otff#ttc-header
+    # TrueType Collection files bundle multiple fonts (often different weights of the same
+    # family). We use SkFontArguments to specify which font to load from the collection.
+
+    # SkFontMgr_fontconfig::onMakeFromStreamArgs refuses empty and huge streams.
+    if buffer.length == 0 or buffer.length > (1 << 30):
+        error(ak.ak_error, "Failed to load typeface from buffer")
+    let face = sfnt_face_create(buffer, ttc_index) catch:
+        error(ak.ak_error, "Failed to load typeface from buffer")
+    let skia_typeface = new SkTypeface(face = face) else trap("out of memory")
+    let impl = new Impl(skia_typeface = skia_typeface) else trap("out of memory")
+    return typeface_skia_allocate(impl, buffer, ttc_index)
+
+## Ported from Libraries/LibGfx/Font/TypefaceSkia.h:19 Gfx::TypefaceSkia::find_typeface_for_code_point.
+pub func typeface_skia_find_typeface_for_code_point(code_point: u32, weight: u16, width: u16, slope: u8) -> TypefaceSkia*?!:
+    # font_manager().matchFamilyStyleCharacter(nullptr, style, nullptr, 0, code_point): the
+    # port has no system font manager, so there is no typeface to fall back to.
+    return none
+
+## Ported from Libraries/LibGfx/Font/TypefaceSkia.h:20 Gfx::TypefaceSkia::resolve_generic_family.
+pub func typeface_skia_resolve_generic_family(family_name: ak.StringView, weight: u16, slope: u8) -> ak.FlyString?:
+    # font_manager().matchFamilyStyle(family_name, style): no system font manager.
+    return none
+
+## Ported from Libraries/LibGfx/Font/TypefaceSkia.h:22 Gfx::TypefaceSkia::clone_with_variations.
+pub func typeface_skia_clone_with_variations(this: TypefaceSkia*, axes: ak.Vector[FontVariationAxis]) -> TypefaceSkia*?:
+    if ak.vector_is_empty(&axes):
+        return this
+
+    # font_manager().makeFromStream(stream, font_args with the variation design position and
+    # the collection index). FIXME: fvar/gvar instancing; the face is used as it is.
+    let face: SfntFace*? = sfnt_face_create(this.m_buffer, this.m_ttc_index) catch:
+        recover none
+    let parsed = face else return none
+    let skia_typeface = new SkTypeface(face = parsed) else trap("out of memory")
+    let impl = new Impl(skia_typeface = skia_typeface) else trap("out of memory")
+    return typeface_skia_allocate(impl, this.m_buffer, this.m_ttc_index)
+
+## Ported from Libraries/LibGfx/Font/TypefaceSkia.h:35 Gfx::TypefaceSkia::sk_typeface.
+pub func typeface_skia_sk_typeface(this: TypefaceSkia*) -> const SkTypeface*?:
+    return typeface_skia_impl(this).skia_typeface
+
+## Ported from Libraries/LibGfx/Font/TypefaceSkia.h:39 Gfx::TypefaceSkia::impl.
+pub func typeface_skia_impl(this: TypefaceSkia*) -> Impl*:
+    return this.m_impl
+
+## The face of the typeface (impl().skia_typeface).
+func typeface_skia_face(this: TypefaceSkia*) -> SfntFace*:
+    return typeface_skia_impl(this).skia_typeface.face
+
+## Ported from Libraries/LibGfx/Font/TypefaceSkia.h:42 Gfx::TypefaceSkia::TypefaceSkia.
+pub func typeface_skia_construct(this: TypefaceSkia*, impl: Impl*, buffer: const u8[], ttc_index: u32 = 0):
+    typeface_construct(this.typeface())
+    this.m_impl = impl
+    this.m_buffer = buffer
+    this.m_ttc_index = ttc_index
+
+## Ported from Libraries/LibGfx/Font/TypefaceSkia.h:24 Gfx::TypefaceSkia::glyph_count (override).
+pub func typeface_skia_glyph_count_impl(base: Typeface*) -> u32:
+    let this = (TypefaceSkia*)base
+    return (u32)typeface_skia_face(this).num_glyphs
+
+## Ported from Libraries/LibGfx/Font/TypefaceSkia.h:25 Gfx::TypefaceSkia::units_per_em (override).
+pub func typeface_skia_units_per_em_impl(base: Typeface*) -> u16:
+    let this = (TypefaceSkia*)base
+    return typeface_skia_face(this).units_per_em
+
+## Ported from Libraries/LibGfx/Font/TypefaceSkia.h:26 Gfx::TypefaceSkia::glyph_id_for_code_point (override).
+pub func typeface_skia_glyph_id_for_code_point_impl(base: Typeface*, code_point: u32) -> u32:
+    let this = (TypefaceSkia*)base
+    let page = typeface_skia_glyph_page(this, (usize)code_point // typeface_skia_glyph_page_glyphs_per_page)
+    return (u32)page.glyph_ids[(usize)code_point % typeface_skia_glyph_page_glyphs_per_page]
+
+## Ported from Libraries/LibGfx/Font/TypefaceSkia.h:64 Gfx::TypefaceSkia::glyph_page.
+pub func typeface_skia_glyph_page(this: TypefaceSkia*, page_index: usize) -> const TypefaceSkiaGlyphPage*:
+    if page_index == 0:
+        if this.m_glyph_page_zero == none:
+            let page = new TypefaceSkiaGlyphPage else trap("out of memory")
+            typeface_skia_populate_glyph_page(this, page, 0)
+            this.m_glyph_page_zero = page
+        return this.m_glyph_page_zero else trap("VERIFY_NOT_REACHED")
+    if let found = ak.hash_map_get_k(&this.m_glyph_pages, (u64)page_index):
+        return *found
+
+    let glyph_page = new TypefaceSkiaGlyphPage else trap("out of memory")
+    typeface_skia_populate_glyph_page(this, glyph_page, page_index)
+    discard(ak.hash_map_set(&this.m_glyph_pages, (u64)page_index, glyph_page))
+    return glyph_page
+
+## Ported from Libraries/LibGfx/Font/TypefaceSkia.h:65 Gfx::TypefaceSkia::populate_glyph_page.
+pub func typeface_skia_populate_glyph_page(this: TypefaceSkia*, glyph_page: TypefaceSkiaGlyphPage*, page_index: usize):
+    let face = typeface_skia_face(this)
+    let first_code_point = (u32)(page_index * typeface_skia_glyph_page_glyphs_per_page)
+    for i in 0..<typeface_skia_glyph_page_glyphs_per_page:
+        let code_point = first_code_point + (u32)i
+        # unicharToGlyph
+        glyph_page.glyph_ids[i] = (u16)sfnt_face_ft_glyph_for_code_point(face, code_point)
+
+## Ported from Libraries/LibGfx/Font/TypefaceSkia.h:27 Gfx::TypefaceSkia::family (override).
+pub func typeface_skia_family_impl(base: Typeface*) -> ak.FlyString:
+    let this = (TypefaceSkia*)base
+    if let family = this.m_family:
+        return family
+    # getFamilyName: the name Skia's scanner recorded, FreeType's family name.
+    let family = typeface_skia_face(this).family_name
+    this.m_family = family
+    return family
+
+## Ported from Libraries/LibGfx/Font/TypefaceSkia.h:28 Gfx::TypefaceSkia::weight (override).
+pub func typeface_skia_weight_impl(base: Typeface*) -> u16:
+    let this = (TypefaceSkia*)base
+    return sfnt_face_weight(typeface_skia_face(this))
+
+## Ported from Libraries/LibGfx/Font/TypefaceSkia.h:29 Gfx::TypefaceSkia::width (override).
+pub func typeface_skia_width_impl(base: Typeface*) -> u16:
+    let this = (TypefaceSkia*)base
+    return sfnt_face_width(typeface_skia_face(this))
+
+## Ported from Libraries/LibGfx/Font/TypefaceSkia.h:30 Gfx::TypefaceSkia::slope (override).
+pub func typeface_skia_slope_impl(base: Typeface*) -> u8:
+    let this = (TypefaceSkia*)base
+    # fontStyle().slant(): upright 0, italic 1, oblique 2.
+    return sfnt_face_slope(typeface_skia_face(this))
+
+## Ported from Libraries/LibGfx/Font/TypefaceSkia.h:32 Gfx::TypefaceSkia::buffer (override).
+pub func typeface_skia_buffer_impl(base: Typeface*) -> const u8[]:
+    let this = (TypefaceSkia*)base
+    return this.m_buffer
+
+## Ported from Libraries/LibGfx/Font/TypefaceSkia.h:33 Gfx::TypefaceSkia::ttc_index (override).
+pub func typeface_skia_ttc_index_impl(base: Typeface*) -> u32:
+    let this = (TypefaceSkia*)base
+    return this.m_ttc_index
+
+## Ported from Libraries/LibGfx/Font/TypefaceSkia.h:44 Gfx::TypefaceSkia::is_skia (override).
+pub func typeface_skia_is_skia_impl(base: Typeface*) -> bool:
+    return true

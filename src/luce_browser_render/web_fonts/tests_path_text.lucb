@@ -1,0 +1,114 @@
+#==============================================================================================
+#
+#   tests_path_text - Gfx::Path's text, glyph_run and place_text_along over the font reader
+#
+#   DESCRIPTION:
+#       path.lucb (region r10) draws text into paths through two seams that the integration
+#       connected to region r09's font reader: glyph outlines (font_glyph_path, SkFont::getPath)
+#       and advances by glyph id (sk_font_glyph_advance, SkFont::getWidths). The expectations
+#       were printed by a local program over the reference build's LibGfx (PathImplSkia under
+#       the FontConfig font manager); each path's SVG string (SkParsePath, `%.8g`) is compared
+#       by its length and FNV-1a 64 hash, and its bounds bit for bit. The test bodies are
+#       `noinline` functions (# workaround: compiler-issues/ranges_facts_cubic).
+#
+#==============================================================================================
+
+## What the reference build printed for one path: the SVG string's length, its FNV-1a 64 hash
+## and its first characters, and the bounding box's bits (x, y, width, height).
+struct TestPathTextExpected:
+    var length: usize
+    var digest: u64
+    var prefix: str
+    var bounds: u32[4]
+
+## Compares `path` with what the reference build printed for it.
+func test_path_text_expect(what: str, path: const gfx.Path*, expected: TestPathTextExpected):
+    let svg = gfx.path_to_svg_string(path)
+    let view = ak.string_bytes_as_string_view(&svg)
+    let bytes = ak.string_view_bytes(&view)
+    var digest: u64 = 0xcbf29ce484222325
+    for value in bytes:
+        digest = (digest ^ (u64)value) *% 0x100000001b3
+    if bytes.length != expected.length or digest != expected.digest:
+        print(f"{what}: {ak.string_view_text(view)}")
+        print(f"{what}: length {bytes.length}, hash {digest}; expected {expected.length}, {expected.digest}, starting {expected.prefix}")
+        assert(false, "a text path differs from the reference build")
+    let box = gfx.path_bounding_box(path)
+    test_expect_bits(what, box.m_location.m_x, expected.bounds[0])
+    test_expect_bits(what, box.m_location.m_y, expected.bounds[1])
+    test_expect_bits(what, box.m_size.m_width, expected.bounds[2])
+    test_expect_bits(what, box.m_size.m_height, expected.bounds[3])
+
+func test_path_text_point(x: f32, y: f32) -> gfx.FloatPoint:
+    return gfx.FloatPoint(m_x = x, m_y = y)
+
+func test_path_text_utf8(text: str) -> ak.Utf8View:
+    var utf8: ak.Utf8View
+    ak.utf8_view_construct_string_view(&utf8, ak.sv(text))
+    return utf8
+
+test "path text: Path::text":
+    test_body_path_text()
+
+noinline func test_body_path_text():
+    with memory.heap:
+        let serenity = typeface_font(test_typeface("SerenitySans-Regular.ttf"), 20.0)
+        var utf8_path: gfx.Path
+        gfx.path_move_to(&utf8_path, test_path_text_point(10.0, 50.0))
+        path_text_utf8_view(&utf8_path, test_path_text_utf8("Hi, fox!"), serenity)
+        test_path_text_expect("text utf8 SerenitySans 20", &utf8_path, TestPathTextExpected(length = 1579, digest = 11646935906593875520, prefix = "M12.239584 47.8125L11.588542 31.354166L15.546875", bounds = [0x41396aab, 0x41ef9555, 0x42c6b800, 0x41aa0001]))
+
+        let lato = typeface_font(test_typeface("Lato-Bold.ttf"), 13.5)
+        var utf16_path: gfx.Path
+        gfx.path_move_to(&utf16_path, test_path_text_point(3.5, 20.25))
+        let kerning = test_utf16("Kerning AVoid \u{E9}t\u{E9}")
+        path_text_utf16_view(&utf16_path, ak.utf16_string_base_utf16_view(&kerning.utf16_string_base), lato)
+        test_path_text_expect("text utf16 Lato-Bold 13.5", &utf16_path, TestPathTextExpected(length = 15837, digest = 13873431806921993192, prefix = "M7.3144531 12.691406L7.8813477 12.691406Q8.22412", bounds = [0x409c9400, 0x40dc1400, 0x43119b60, 0x4184f600]))
+
+        let tifinagh = typeface_font(test_typeface("NotoSansTifinagh-Regular.otf"), 30.0)
+        var cff_path: gfx.Path
+        gfx.path_move_to(&cff_path, test_path_text_point(0.0, 40.0))
+        let letters = test_utf16("\u{2D30}\u{2D31}\u{2D32} x")
+        path_text_utf16_view(&cff_path, ak.utf16_string_base_utf16_view(&letters.utf16_string_base), tifinagh)
+        test_path_text_expect("text utf16 Tifinagh 30 (CFF)", &cff_path, TestPathTextExpected(length = 2009, digest = 2641944460900550303, prefix = "M9.6777344 40.400391C14.160156 40.400391 17.3632", bounds = [0x40002000, 0x412ff000, 0x42da6300, 0x41eb3c00]))
+
+test "path text: Path::glyph_run":
+    test_body_path_glyph_run()
+
+noinline func test_body_path_glyph_run():
+    with memory.heap:
+        let lato = typeface_font(test_typeface("Lato-Bold.ttf"), 13.5)
+        let hello = test_utf16("Hello, AV world")
+        let run = shape_text_f32(test_path_text_point(5.0, 7.0), 0.5, ak.utf16_string_base_utf16_view(&hello.utf16_string_base), lato, GlyphRunTextType.common)
+        var path: gfx.Path
+        path_glyph_run(&path, run)
+        test_path_text_expect("glyph_run Lato-Bold 13.5", &path, TestPathTextExpected(length = 8852, digest = 2785245731125254403, prefix = "M17.295898 7L14.856934 7L14.856934 1.3134766L8.7", bounds = [0x40ca0c00, 0xc0cbec00, 0x4301aee0, 0x417ee200]))
+
+        let tifinagh = typeface_font(test_typeface("NotoSansTifinagh-Regular.otf"), 30.0)
+        let letters = test_utf16("\u{2D30}\u{2D33}")
+        let cff_run = shape_text_f32(test_path_text_point(1.0, 2.0), 0.0, ak.utf16_string_base_utf16_view(&letters.utf16_string_base), tifinagh, GlyphRunTextType.common)
+        var after_line: gfx.Path
+        gfx.path_move_to(&after_line, test_path_text_point(0.0, 0.0))
+        gfx.path_line_to(&after_line, test_path_text_point(1.0, 1.0))
+        path_glyph_run(&after_line, cff_run)
+        test_path_text_expect("glyph_run Tifinagh 30 after a line", &after_line, TestPathTextExpected(length = 1439, digest = 2914325057913589961, prefix = "M0 0L1 1M10.677734 2.4003906C15.160156 2.4003906", bounds = [0x00000000, 0xc1d48400, 0x42357400, 0x41e7b800]))
+
+test "path text: Path::place_text_along":
+    test_body_path_place_text_along()
+
+noinline func test_body_path_place_text_along():
+    with memory.heap:
+        let serenity = typeface_font(test_typeface("SerenitySans-Regular.ttf"), 20.0)
+        var curve: gfx.Path
+        gfx.path_move_to(&curve, test_path_text_point(10.0, 80.0))
+        gfx.path_cubic_bezier_curve_to(&curve, test_path_text_point(40.0, 10.0), test_path_text_point(90.0, 150.0), test_path_text_point(140.0, 60.0))
+        let along_curve = path_place_text_along_utf8_view(&curve, test_path_text_utf8("Along a curve"), serenity)
+        test_path_text_expect("place_text_along utf8 SerenitySans 20", &along_curve, TestPathTextExpected(length = 2506, digest = 17076763671110205307, prefix = "M5.903513 67.874672L8.3381538 62.458279L2.114774", bounds = [0xc09e2ca0, 0x423099ab, 0x430ee7a7, 0x42424a39]))
+
+        let lato = typeface_font(test_typeface("Lato-Bold.ttf"), 13.5)
+        var line: gfx.Path
+        gfx.path_move_to(&line, test_path_text_point(0.0, 0.0))
+        gfx.path_line_to(&line, test_path_text_point(60.0, 30.0))
+        let text = test_utf16("\u{E9}\u{E9} overflowing text")
+        let cut_off = path_place_text_along_utf16_view(&line, ak.utf16_string_base_utf16_view(&text.utf16_string_base), lato)
+        test_path_text_expect("place_text_along utf16 Lato-Bold 13.5 (cut off)", &cut_off, TestPathTextExpected(length = 7794, digest = 6995461791612323310, prefix = "M8.6708775 -6.1494055Q9.4491339 -5.7602777 9.979", bounds = [0x3ff5c595, 0xc113da5e, 0x427c9bc1, 0x42171a30]))

@@ -1,0 +1,62 @@
+#==============================================================================================
+#
+#   font_variation_settings - FontVariationAxis and FontVariationSettings: variation axis
+#                             values keyed by their four-character tags
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Font/FontVariationSettings.h (lines 1-74). FourCC("wght")
+#       builds the tag's bytes directly; FourCC's hash, to_u32 and operator< are region r10's.
+#
+#==============================================================================================
+
+## The FourCC of four ASCII characters (FourCC(char const[4])).
+func font_variation_tag(b0: u8, b1: u8, b2: u8, b3: u8) -> gfx.FourCc:
+    return gfx.FourCc(cc = [b0, b1, b2, b3])
+
+## Ported from Libraries/LibGfx/Font/FontVariationSettings.h:20 Gfx::FontVariationAxis::FontVariationAxis.
+pub func font_variation_axis_construct(this: FontVariationAxis*, t: gfx.FourCc, v: f32):
+    this.tag = t
+    this.value = v
+
+## Ported from Libraries/LibGfx/Font/FontVariationSettings.h:26 Gfx::FontVariationAxis::operator==.
+pub func font_variation_axis_eq(this: const FontVariationAxis*, other: FontVariationAxis) -> bool:
+    return this.tag == other.tag and this.value == other.value
+
+# FIXME: Support other named axes like 'slnt', 'ital', 'opsz', 'GRAD', etc.
+
+## Ported from Libraries/LibGfx/Font/FontVariationSettings.h:39 Gfx::FontVariationSettings::set_weight.
+# https://learn.microsoft.com/en-us/typography/opentype/spec/dvaraxistag_wght
+pub func font_variation_settings_set_weight(this: FontVariationSettings*, value: f32):
+    discard(ak.hash_map_set(&this.axes, font_variation_tag('w', 'g', 'h', 't'), value))
+
+## Ported from Libraries/LibGfx/Font/FontVariationSettings.h:45 Gfx::FontVariationSettings::set_width.
+# https://learn.microsoft.com/en-us/typography/opentype/spec/dvaraxistag_wdth
+pub func font_variation_settings_set_width(this: FontVariationSettings*, value: f32):
+    discard(ak.hash_map_set(&this.axes, font_variation_tag('w', 'd', 't', 'h'), value))
+
+## Ported from Libraries/LibGfx/Font/FontVariationSettings.h:51 Gfx::FontVariationSettings::set_optical_sizing.
+# https://learn.microsoft.com/en-us/typography/opentype/spec/dvaraxistag_opsz
+pub func font_variation_settings_set_optical_sizing(this: FontVariationSettings*, value: f32):
+    discard(ak.hash_map_set(&this.axes, font_variation_tag('o', 'p', 's', 'z'), value))
+
+## Ported from Libraries/LibGfx/Font/FontVariationSettings.h:56 Gfx::FontVariationSettings::is_empty.
+pub func font_variation_settings_is_empty(this: const FontVariationSettings*) -> bool:
+    return ak.hash_map_is_empty(&this.axes)
+
+## quick_sort's comparator of to_sorted_list: a.tag < b.tag.
+func font_variation_axis_tag_less_than(context: void*?, a: const FontVariationAxis*, b: const FontVariationAxis*) -> bool:
+    return gfx.four_cc_lt(&a.tag, b.tag)
+
+## Ported from Libraries/LibGfx/Font/FontVariationSettings.h:58 Gfx::FontVariationSettings::to_sorted_list.
+pub func font_variation_settings_to_sorted_list(this: const FontVariationSettings*) -> ak.Vector[FontVariationAxis]:
+    var list: ak.Vector[FontVariationAxis]
+    ak.vector_ensure_capacity(&list, ak.hash_map_size(&this.axes))
+
+    for entry in ak.hash_map_begin_const(&this.axes):
+        var axis: FontVariationAxis
+        font_variation_axis_construct(&axis, entry.key, entry.value)
+        ak.vector_unchecked_append_u(&list, axis)
+
+    ak.quick_sort_t_collection_t_less_than(ak.vector_span(&list), ak.Function2[const FontVariationAxis*, const FontVariationAxis*, bool](call = font_variation_axis_tag_less_than, context = none))
+
+    return list

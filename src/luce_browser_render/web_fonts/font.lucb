@@ -1,0 +1,245 @@
+#==============================================================================================
+#
+#   font - Font: a typeface at a size, its pixel metrics, its HarfBuzz font and shaping cache
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Font/Font.cpp (lines 1-209) with the inline functions of
+#       Libraries/LibGfx/Font/Font.h (lines 1-120). The SkFont and hb_font_t the donor creates
+#       are the port's replacements (sk_font.lucb, hb_buffer.lucb), which give the numbers
+#       Skia's FreeType backend and HarfBuzz give (DESIGN.md §6.7). Font is ref-counted in
+#       C++; here it is managed memory (DESIGN.md §3.3), and ~Font's hb_font_destroy has
+#       nothing to release.
+#
+#==============================================================================================
+
+## POINTS_PER_INCH (Libraries/LibGfx/Font/Typeface.h:17).
+pub let points_per_inch: f32 = 72.0
+
+## DEFAULT_DPI (Libraries/LibGfx/Font/Typeface.h:18).
+pub let default_dpi: u32 = 96
+
+## Ported from Libraries/LibGfx/Font/Font.h:40 Gfx::FontPixelMetrics::line_spacing.
+pub func font_pixel_metrics_line_spacing(this: const FontPixelMetrics*) -> f32:
+    return this.ascent + this.descent + this.line_gap
+
+# mark: Construction and metrics ===============================================================
+
+## Ported from Libraries/LibGfx/Font/Font.cpp:25 Gfx::Font::Font.
+pub func font_construct(this: Font*, typeface: Typeface*, point_width: f32, point_height: f32, dpi_x: u32, dpi_y: u32, variations: FontVariationSettings, features: ak.Vector[ShapeFeature]):
+    font_init_fields(this)
+    this.m_typeface = typeface
+    this.m_point_width = point_width
+    this.m_point_height = point_height
+    this.m_font_variation_settings = FontVariationSettings(axes = ak.hash_map_clone(&variations.axes) else trap("out of memory"))
+    this.m_shape_features = ak.vector_clone(&features)
+
+    let units_per_em = (f32)typeface_units_per_em(this.m_typeface)
+    this.m_x_scale = (point_width * (f32)dpi_x) / (points_per_inch * units_per_em)
+    this.m_y_scale = (point_height * (f32)dpi_y) / (points_per_inch * units_per_em)
+
+    this.m_pixel_size = this.m_point_height * ((f32)default_dpi / points_per_inch)
+
+    let sk_typeface = typeface_skia_sk_typeface(as_typeface_skia(this.m_typeface)) else trap("VERIFY: TypefaceSkia without an SkTypeface")
+    let font = sk_font_make(sk_typeface, this.m_pixel_size)
+
+    let sk_metrics = sk_font_get_metrics(&font)
+
+    var metrics: FontPixelMetrics
+    metrics.size = font.size
+    metrics.x_height = sk_metrics.x_height
+    metrics.advance_of_ascii_zero = sk_font_measure_ascii(&font, b"0")
+    metrics.ascent = -sk_metrics.ascent
+    metrics.descent = sk_metrics.descent
+    metrics.line_gap = sk_metrics.leading
+
+    this.m_pixel_metrics = metrics
+
+## Ported from Libraries/LibGfx/Font/Font.cpp:55 Gfx::Font::metrics.
+pub func font_metrics(this: const Font*) -> ScaledFontMetrics:
+    let skia_font = font_skia_font(this, 1.0)
+    let sk_metrics = sk_font_get_metrics(&skia_font)
+
+    var metrics: ScaledFontMetrics
+    metrics.ascender = -sk_metrics.ascent
+    metrics.descender = sk_metrics.descent
+    metrics.line_gap = sk_metrics.leading
+    metrics.x_height = sk_metrics.x_height
+    return metrics
+
+## Ported from Libraries/LibGfx/Font/Font.cpp:95 Gfx::Font::point_size.
+pub func font_point_size(this: const Font*) -> f32:
+    return this.m_point_height
+
+## Ported from Libraries/LibGfx/Font/Font.cpp:90 Gfx::Font::pixel_size.
+pub func font_pixel_size(this: const Font*) -> f32:
+    return this.m_pixel_size
+
+## Ported from Libraries/LibGfx/Font/Font.h:66 Gfx::Font::pixel_metrics.
+pub func font_pixel_metrics(this: const Font*) -> FontPixelMetrics:
+    return this.m_pixel_metrics
+
+## Ported from Libraries/LibGfx/Font/Font.h:67 Gfx::Font::slope.
+pub func font_slope(this: const Font*) -> u8:
+    return typeface_slope(this.m_typeface)
+
+## Ported from Libraries/LibGfx/Font/Font.h:68 Gfx::Font::weight.
+pub func font_weight(this: const Font*) -> u16:
+    return typeface_weight(this.m_typeface)
+
+## Ported from Libraries/LibGfx/Font/Font.h:69 Gfx::Font::contains_glyph.
+pub func font_contains_glyph(this: const Font*, code_point: u32) -> bool:
+    return typeface_glyph_id_for_code_point(this.m_typeface, code_point) > 0
+
+## Ported from Libraries/LibGfx/Font/Font.cpp:70 Gfx::Font::glyph_width.
+pub func font_glyph_width(this: const Font*, code_point: u32) -> f32:
+    let string = ak.utf16_string_from_code_point(code_point)
+    return measure_text_width(ak.utf16_string_base_utf16_view(&string.utf16_string_base), this)
+
+## Ported from Libraries/LibGfx/Font/Font.h:71 Gfx::Font::glyph_id_for_code_point.
+pub func font_glyph_id_for_code_point(this: const Font*, code_point: u32) -> u32:
+    return typeface_glyph_id_for_code_point(this.m_typeface, code_point)
+
+## Ported from Libraries/LibGfx/Font/Font.h:72 Gfx::Font::preferred_line_height.
+pub func font_preferred_line_height(this: const Font*) -> f32:
+    let metrics = font_metrics(this)
+    return scaled_font_metrics_height(&metrics) + font_metrics(this).line_gap
+
+## Ported from Libraries/LibGfx/Font/Font.h:73 Gfx::Font::x_height.
+pub func font_x_height(this: const Font*) -> i32:
+    # FIXME: Read from font
+    return (i32)this.m_point_height
+
+## Ported from Libraries/LibGfx/Font/Font.h:74 Gfx::Font::baseline.
+pub func font_baseline(this: const Font*) -> u8:
+    # FIXME: Read from font
+    return (u8)this.m_point_height
+
+## Ported from Libraries/LibGfx/Font/Font.cpp:68 Gfx::Font::width.
+pub func font_width(this: const Font*, view: ak.Utf16View) -> f32:
+    return measure_text_width(view, this)
+
+## Ported from Libraries/LibGfx/Font/Font.h:76 Gfx::Font::family.
+pub func font_family(this: const Font*) -> ak.FlyString:
+    return typeface_family(this.m_typeface)
+
+## Ported from Libraries/LibGfx/Font/Font.cpp:76 Gfx::Font::scaled_with_size.
+pub func font_scaled_with_size(this: const Font*, point_size: f32) -> Font*:
+    if point_size == this.m_point_height and point_size == this.m_point_width:
+        return (Font*)this
+
+    # FIXME: Should we be discarding m_font_variation_settings and m_shape_features here?
+    return typeface_font(this.m_typeface, point_size)
+
+## Ported from Libraries/LibGfx/Font/Font.cpp:85 Gfx::Font::with_size.
+pub func font_with_size(this: const Font*, point_size: f32) -> Font*:
+    return font_scaled_with_size(this, point_size)
+
+## Ported from Libraries/LibGfx/Font/Font.h:81 Gfx::Font::typeface.
+pub func font_typeface(this: const Font*) -> Typeface*:
+    return this.m_typeface
+
+## Ported from Libraries/LibGfx/Font/Font.cpp:138 Gfx::Font::skia_font.
+pub func font_skia_font(this: const Font*, scale: f32) -> SkFont:
+    let sk_typeface = typeface_skia_sk_typeface(as_typeface_skia(this.m_typeface)) else trap("VERIFY: TypefaceSkia without an SkTypeface")
+    var sk_font = sk_font_make(sk_typeface, font_pixel_size(this) * scale)
+    sk_font.subpixel = true
+    return sk_font
+
+## Ported from Libraries/LibGfx/Font/Font.cpp:106 Gfx::Font::bold_variant.
+pub func font_bold_variant(this: const Font*) -> const Font*:
+    if let bold_variant = this.m_bold_variant:
+        return bold_variant
+    let mutable_this = (Font*)this
+    mutable_this.m_bold_variant = font_database_get(font_database_the(), font_family(this), font_point_size(this), 700, (u32)FontWidth.normal, 0)
+    if mutable_this.m_bold_variant == none:
+        mutable_this.m_bold_variant = this
+    return mutable_this.m_bold_variant else trap("VERIFY_NOT_REACHED")
+
+## Ported from Libraries/LibGfx/Font/Font.cpp:116 Gfx::Font::harfbuzz_font.
+pub func font_harfbuzz_font(this: const Font*) -> HbFontT*?:
+    if this.m_harfbuzz_font == none:
+        let mutable_this = (Font*)this
+        let harfbuzz_font = hb_font_create(typeface_harfbuzz_typeface(font_typeface(this)) else trap("VERIFY: no HarfBuzz face"))
+        mutable_this.m_harfbuzz_font = harfbuzz_font
+        hb_font_set_scale(harfbuzz_font, (i32)(font_pixel_size(this) * text_shaping_resolution), (i32)(font_pixel_size(this) * text_shaping_resolution))
+        hb_font_set_ptem(harfbuzz_font, font_point_size(this))
+
+        let variations = this.m_font_variation_settings.axes
+        if not ak.hash_map_is_empty(&variations):
+            var hb_list: ak.Vector[HbVariation]
+            ak.vector_ensure_capacity(&hb_list, ak.hash_map_size(&variations))
+
+            for axis in ak.hash_map_begin_const(&variations):
+                ak.vector_unchecked_append_u(&hb_list, HbVariation(tag = gfx.four_cc_to_u32(&axis.key), value = axis.value))
+
+            hb_font_set_variations(harfbuzz_font, ak.vector_span_const(&hb_list))
+    return this.m_harfbuzz_font
+
+## Ported from Libraries/LibGfx/Font/Font.h:87 Gfx::Font::features.
+pub func font_features(this: const Font*) -> ak.Vector[ShapeFeature]:
+    return this.m_shape_features
+
+# mark: The shaping cache and emoji detection ================================================
+
+## Ported from Libraries/LibGfx/Font/Font.cpp:151 Gfx::Font::ShapingCache::clear.
+pub func font_shaping_cache_clear(this: FontShapingCache*):
+    for it in ak.hash_map_begin(&this.map):
+        hb_buffer_destroy(it.value)
+    ak.hash_map_clear(&this.map)
+    for index in 0..<this.single_ascii_character_map.length:
+        if let buffer = this.single_ascii_character_map[index]:
+            hb_buffer_destroy(buffer)
+            this.single_ascii_character_map[index] = none
+
+## Ported from Libraries/LibGfx/Font/Font.h:96 Gfx::Font::shaping_cache.
+pub func font_shaping_cache(this: const Font*) -> FontShapingCache*:
+    return &((Font*)this).m_shaping_cache
+
+## Ported from Libraries/LibGfx/Font/Font.cpp:165 Gfx::hb_face_has_table.
+func hb_face_has_table(face: HbFaceT*?, tag: u32) -> bool:
+    let hb_face = face else return false
+    return hb_face_has_table_tag(hb_face, tag)
+
+## Ported from Libraries/LibGfx/Font/Font.cpp:173 Gfx::Font::is_emoji_font.
+pub func font_is_emoji_font(this: const Font*) -> bool:
+    if this.m_is_emoji_font == ak.TriState.unknown:
+        # NOTE: This is a heuristic approach to determine if a font is an emoji font.
+        #       AFAIK there is no definitive way to know this from the font data itself.
+
+        # 1. If the family name contains "emoji", it's probably an emoji font.
+        let family = font_family(this)
+        let family_view = ak.fly_string_bytes_as_string_view(&family)
+        let name_contains_emoji = ak.string_view_contains_string_view(&family_view, ak.sv("emoji"))
+
+        # 2. Check for color font tables and absence of regular text glyphs.
+        let hb_font = font_harfbuzz_font(this) else trap("VERIFY: no HarfBuzz font")
+        let face = hb_font_get_face(hb_font)
+
+        # hb_ot_color_has_layers and hb_ot_color_has_svg: the port checks for the tables.
+        let has_colr = hb_face_has_table(face, sfnt_tag('C', 'O', 'L', 'R'))
+        let has_svg = hb_face_has_table(face, sfnt_tag('S', 'V', 'G', ' '))
+
+        let has_sbix = hb_face_has_table(face, sfnt_tag('s', 'b', 'i', 'x'))
+        let has_cbdt = hb_face_has_table(face, sfnt_tag('C', 'B', 'D', 'T'))
+        let has_cblc = hb_face_has_table(face, sfnt_tag('C', 'B', 'L', 'C'))
+        let has_any_color = has_colr or has_svg or has_sbix or (has_cbdt and has_cblc)
+
+        let has_uppercase_a = hb_font_get_nominal_glyph(hb_font, (u32)'A') != none
+        let has_lowercase_a = hb_font_get_nominal_glyph(hb_font, (u32)'a') != none
+        let looks_like_text = has_uppercase_a and has_lowercase_a
+
+        let mutable_this = (Font*)this
+        mutable_this.m_is_emoji_font = ak.TriState.true_ if (name_contains_emoji and not looks_like_text) or (has_any_color and not looks_like_text) else ak.TriState.false_
+        # donor quirk: the first call answers false whatever it found.
+        return false
+
+    return this.m_is_emoji_font == ak.TriState.true_
+
+# mark: Glyph outlines for the display list =====================================================
+
+## The outline of `glyph` for drawing the font at `scale` (a device pixel ratio): what
+## `skia_font(scale).getPath(glyph)` gave Skia's painter. (r09 addition: the CPU display-list
+## player fills these paths with the raster module, DESIGN.md §7.3.)
+pub func font_glyph_path(this: const Font*, glyph: u32, scale: f32) -> GlyphPath:
+    let skia_font = font_skia_font(this, scale)
+    return sk_font_get_path(&skia_font, glyph)

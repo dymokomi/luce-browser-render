@@ -4,6 +4,78 @@
 (r08: `Color(r, g, b)` as an expression.)	luce-browser-render	gfx	color_new_u8_u8_u8	-	addition
 (r08: `Color(r, g, b, a)` as an expression.)	luce-browser-render	gfx	color_new_u8_u8_u8_u8	-	addition
 (r08: `ColorComponents { first, second, third, alpha }` as an expression.)	luce-browser-render	gfx	color_components_new	-	addition
+(r09: FT_DivFix.)	luce-browser-render	web_fonts	ft_div_fix	-	addition
+(r09: FT_Get_Char_Index over FreeType's Unicode charmap, Skia's unicharToGlyph.)	luce-browser-render	web_fonts	sfnt_face_ft_glyph_for_code_point	-	addition
+(r09: FT_Load_Glyph with FT_LOAD_NO_HINTING: the unhinted outline of a glyph.)	luce-browser-render	web_fonts	sfnt_face_load_outline	-	addition
+(r09: FT_MulDiv.)	luce-browser-render	web_fonts	ft_mul_div	-	addition
+(r09: FT_MulFix.)	luce-browser-render	web_fonts	ft_mul_fix	-	addition
+(r09: FT_PIX_ROUND.)	luce-browser-render	web_fonts	ft_pix_round	-	addition
+(r09: Gfx::UnicodeRange { min, max } as an expression.)	luce-browser-render	web_fonts	unicode_range_create	-	addition
+(r09: HB_FEATURE_GLOBAL_END.)	luce-browser-render	web_fonts	hb_feature_global_end	-	addition
+(r09: HB_TAG / FT_MAKE_TAG.)	luce-browser-render	web_fonts	sfnt_tag	-	addition
+(r09: SkFont { typeface, size }.)	luce-browser-render	web_fonts	sk_font_make	-	addition
+(r09: SkFont::getMetrics with Skia's FreeType backend's numbers.)	luce-browser-render	web_fonts	sk_font_get_metrics	-	addition
+(r09: SkFont::getPath of a glyph at a pixel size.)	luce-browser-render	web_fonts	sfnt_face_glyph_path	-	addition
+(r09: SkFont::getPath.)	luce-browser-render	web_fonts	sk_font_get_path	-	addition
+(r09: SkFont::measureText of ASCII text.)	luce-browser-render	web_fonts	sk_font_measure_ascii	-	addition
+(r09: SkFontMgr::makeFromStream: parses one font of an OpenType file or collection.)	luce-browser-render	web_fonts	sfnt_face_create	-	addition
+(r09: SkFontPriv::GetFontBounds.)	luce-browser-render	web_fonts	sk_font_bounds	-	addition
+(r09: SkFontStyle::slant of a face, as TypefaceSkia::slope numbers it.)	luce-browser-render	web_fonts	sfnt_face_slope	-	addition
+(r09: SkFontStyle::weight of a face, as Skia's FreeType scanner gives it.)	luce-browser-render	web_fonts	sfnt_face_weight	-	addition
+(r09: SkFontStyle::width of a face.)	luce-browser-render	web_fonts	sfnt_face_width	-	addition
+(r09: SkPath's verbs of a glyph path.)	luce-browser-render	web_fonts	GlyphPathVerb	-	addition
+(r09: a bounds-checked big-endian i16 read of font data.)	luce-browser-render	web_fonts	sfnt_i16	-	addition
+(r09: a bounds-checked big-endian i32 read of font data.)	luce-browser-render	web_fonts	sfnt_i32	-	addition
+(r09: a bounds-checked big-endian u16 read of font data.)	luce-browser-render	web_fonts	sfnt_u16	-	addition
+(r09: a bounds-checked big-endian u24 read of font data.)	luce-browser-render	web_fonts	sfnt_u24	-	addition
+(r09: a bounds-checked big-endian u32 read of font data.)	luce-browser-render	web_fonts	sfnt_u32	-	addition
+(r09: a bounds-checked byte read of font data.)	luce-browser-render	web_fonts	sfnt_u8	-	addition
+(r09: a clamped slice of font data.)	luce-browser-render	web_fonts	sfnt_slice	-	addition
+(r09: a glyph outline as SkPath holds it, in pixels, y down.)	luce-browser-render	web_fonts	GlyphPath	-	addition
+(r09: a glyph's advance in Skia's glyph cache for the font.)	luce-browser-render	web_fonts	sk_font_glyph_advance	-	addition
+(r09: a table record of an OpenType face.)	luce-browser-render	web_fonts	SfntTable	-	addition
+(r09: adopt_ref(*new Gfx::GlyphRun(...)).)	luce-browser-render	web_fonts	glyph_run_create	-	addition
+(r09: an FT_Outline in 26.6 fixed point.)	luce-browser-render	web_fonts	SfntOutline	-	addition
+(r09: an INDEX of a CFF table.)	luce-browser-render	web_fonts	SfntCffIndex	-	addition
+(r09: an OpenType face, the Luce replacement of SkTypeface_FreeType and hb_face_t.)	luce-browser-render	web_fonts	SfntFace	-	addition
+(r09: an OpenType table of a face, or none.)	luce-browser-render	web_fonts	sfnt_face_table	-	addition
+(r09: hb_blob_create.)	luce-browser-render	web_fonts	hb_blob_create	-	addition
+(r09: hb_buffer_add_utf16.)	luce-browser-render	web_fonts	hb_buffer_add_utf16	-	addition
+(r09: hb_buffer_add_utf8 of ASCII text.)	luce-browser-render	web_fonts	hb_buffer_add_ascii	-	addition
+(r09: hb_buffer_create.)	luce-browser-render	web_fonts	hb_buffer_create	-	addition
+(r09: hb_buffer_destroy.)	luce-browser-render	web_fonts	hb_buffer_destroy	-	addition
+(r09: hb_buffer_get_glyph_infos.)	luce-browser-render	web_fonts	hb_buffer_get_glyph_infos	-	addition
+(r09: hb_buffer_get_glyph_positions.)	luce-browser-render	web_fonts	hb_buffer_get_glyph_positions	-	addition
+(r09: hb_buffer_guess_segment_properties.)	luce-browser-render	web_fonts	hb_buffer_guess_segment_properties	-	addition
+(r09: hb_buffer_set_direction.)	luce-browser-render	web_fonts	hb_buffer_set_direction	-	addition
+(r09: hb_direction_t, horizontal.)	luce-browser-render	web_fonts	HbDirection	-	addition
+(r09: hb_face_create.)	luce-browser-render	web_fonts	hb_face_create	-	addition
+(r09: hb_face_reference_table's length > 0.)	luce-browser-render	web_fonts	hb_face_has_table_tag	-	addition
+(r09: hb_feature_t.)	luce-browser-render	web_fonts	HbFeature	-	addition
+(r09: hb_font_create.)	luce-browser-render	web_fonts	hb_font_create	-	addition
+(r09: hb_font_get_face.)	luce-browser-render	web_fonts	hb_font_get_face	-	addition
+(r09: hb_font_get_glyph_h_advance.)	luce-browser-render	web_fonts	hb_font_get_glyph_h_advance	-	addition
+(r09: hb_font_get_nominal_glyph.)	luce-browser-render	web_fonts	hb_font_get_nominal_glyph	-	addition
+(r09: hb_font_set_ptem.)	luce-browser-render	web_fonts	hb_font_set_ptem	-	addition
+(r09: hb_font_set_scale.)	luce-browser-render	web_fonts	hb_font_set_scale	-	addition
+(r09: hb_font_set_variations.)	luce-browser-render	web_fonts	hb_font_set_variations	-	addition
+(r09: hb_glyph_info_t with HarfBuzz's private glyph properties.)	luce-browser-render	web_fonts	HbGlyphInfo	-	addition
+(r09: hb_glyph_position_t.)	luce-browser-render	web_fonts	HbGlyphPosition	-	addition
+(r09: hb_shape.)	luce-browser-render	web_fonts	hb_shape	-	addition
+(r09: hb_unicode_funcs_t::is_default_ignorable.)	luce-browser-render	web_fonts	hb_is_default_ignorable	-	addition
+(r09: hb_variation_t.)	luce-browser-render	web_fonts	HbVariation	-	addition
+(r09: hmtx advance of a glyph in font units.)	luce-browser-render	web_fonts	sfnt_face_advance	-	addition
+(r09: hmtx left side bearing of a glyph in font units.)	luce-browser-render	web_fonts	sfnt_face_left_side_bearing	-	addition
+(r09: make<Gfx::PathFontProvider>(): a provider with its vtable, constructed.)	luce-browser-render	web_fonts	path_font_provider_create	-	addition
+(r09: skia_font(scale).getPath(glyph): a glyph outline for the CPU display-list player.)	luce-browser-render	web_fonts	font_glyph_path	-	addition
+(r09: the 16.16 scale FreeType uses for a face at a pixel size.)	luce-browser-render	web_fonts	sfnt_face_ft_scale	-	addition
+(r09: the OS/2 fields FreeType and Skia read, TT_OS2.)	luce-browser-render	web_fonts	SfntOs2	-	addition
+(r09: the cmap glyph of a code point, FT_Get_Char_Index / hb_font_get_nominal_glyph.)	luce-browser-render	web_fonts	sfnt_face_glyph_for_code_point	-	addition
+(r09: the fields of SkFontMetrics LibGfx reads.)	luce-browser-render	web_fonts	SkFontMetrics	-	addition
+(r09: the parsed parts of a CFF font.)	luce-browser-render	web_fonts	SfntCffFont	-	addition
+(r09: the shaping plan: the GSUB and GPOS lookups of the features.)	luce-browser-render	web_fonts	HbLayoutPlan	-	addition
+(r09: whether a face has a non-empty table.)	luce-browser-render	web_fonts	sfnt_face_has_table	-	addition
+(r09: which glyph outlines an OpenType face has.)	luce-browser-render	web_fonts	SfntOutlineFormat	-	addition
 (r10: Class information of PainterRaster (a subclass of Gfx::Painter).)	luce-browser-render	gfx	painter_raster_class	-	addition
 (r10: Converts `bitmap`'s pixels into `target` (width * height * 4 bytes) as premultiplied RGBA, the form the raster module draws with.)	luce-browser-render	gfx	raster_load_bitmap	-	addition
 (r10: Converts premultiplied RGBA `source` (width * height * 4 bytes) into `bitmap`'s format and alpha type.)	luce-browser-render	gfx	raster_store_bitmap	-	addition
@@ -99,6 +171,7 @@
 AK::Traits<Gfx::Point<T>>::hash [CssPixelPoint]	luce-browser-render	gfx	css_pixel_point_hash	Libraries/LibGfx/Point.h:312	ported
 AK::Traits<Gfx::Point<T>>::hash [FloatPoint]	luce-browser-render	gfx	float_point_hash	Libraries/LibGfx/Point.h:312	ported
 AK::Traits<Gfx::Point<T>>::hash [IntPoint]	luce-browser-render	gfx	int_point_hash	Libraries/LibGfx/Point.h:312	ported
+AK::Traits<Gfx::ShapeFeatures>::hash	luce-browser-render	web_fonts	shape_features_hash	Libraries/LibGfx/ShapeFeature.h:30	ported
 AK::Traits<Gfx::Size<T>>::hash [FloatSize]	luce-browser-render	gfx	float_size_hash	Libraries/LibGfx/Size.h:218	ported
 AK::Traits<Gfx::Size<T>>::hash [IntSize]	luce-browser-render	gfx	int_size_hash	Libraries/LibGfx/Size.h:218	ported
 Core::AnonymousBuffer	luce-browser-render	gfx	CoreAnonymousBuffer	Libraries/LibCore/AnonymousBuffer.h:38	struct
@@ -107,6 +180,7 @@ Core::AnonymousBuffer::data	luce-browser-render	gfx	core_anonymous_buffer_data	L
 Core::AnonymousBuffer::is_valid	luce-browser-render	gfx	core_anonymous_buffer_is_valid	Libraries/LibCore/AnonymousBuffer.h:45	ported
 Core::AnonymousBuffer::size	luce-browser-render	gfx	core_anonymous_buffer_size	Libraries/LibCore/AnonymousBuffer.h:48	ported
 Core::AnonymousBufferImpl	luce-browser-render	gfx	CoreAnonymousBufferImpl	Libraries/LibCore/AnonymousBuffer.h:19	struct
+DEFAULT_DPI	luce-browser-render	web_fonts	default_dpi	Libraries/LibGfx/Font/Typeface.h:18	variable
 Gfx::(anonymous)::format_to_8bit_compatible	luce-browser-render	gfx	format_to_8bit_compatible	Libraries/LibGfx/Color.cpp:45	ported
 Gfx::(anonymous)::nth_digit	luce-browser-render	gfx	nth_digit	Libraries/LibGfx/Color.cpp:26	ported
 Gfx::AffineTransform	luce-browser-render	gfx	AffineTransform	Libraries/LibGfx/AffineTransform.h:17	struct
@@ -233,7 +307,7 @@ Gfx::CanvasRadialGradientPaintStyle::start_center	luce-browser-render	gfx	canvas
 Gfx::CanvasRadialGradientPaintStyle::start_radius	luce-browser-render	gfx	canvas_radial_gradient_paint_style_start_radius	Libraries/LibGfx/PaintStyle.h:162	ported
 Gfx::ChannelSelector	luce-browser-render	gfx	ChannelSelector	Libraries/LibGfx/Filter.h:18	enum
 Gfx::CodePointFallbackKey	luce-browser-render	web_fonts	CodePointFallbackKey	Libraries/LibGfx/Font/FontDatabase.h:19	struct
-Gfx::CodePointFallbackKey::hash	luce-browser-render	web_fonts	code_point_fallback_key_hash	Libraries/LibGfx/Font/FontDatabase.h:27	stub
+Gfx::CodePointFallbackKey::hash	luce-browser-render	web_fonts	code_point_fallback_key_hash	Libraries/LibGfx/Font/FontDatabase.h:27	ported
 Gfx::Color	luce-browser-render	gfx	Color	Libraries/LibGfx/Color.h:58	struct
 Gfx::Color::BrandedColor	luce-browser-render	gfx	ColorBrandedColor	Libraries/LibGfx/Color.h:88	enum
 Gfx::Color::Color	luce-browser-render	gfx	color_construct_color_named_color	Libraries/LibGfx/Color.h:480	construct
@@ -357,84 +431,85 @@ Gfx::Font	luce-browser-render	web_fonts	Font	Libraries/LibGfx/Font/Font.h:58	str
 Gfx::Font [default member initializers]	luce-browser-render	web_fonts	font_init_fields	Libraries/LibGfx/Font/Font.h:58	init fields
 Gfx::Font::Font	luce-browser-render	web_fonts	font_construct	Libraries/LibGfx/Font/Font.cpp:25	construct
 Gfx::Font::ShapingCache	luce-browser-render	web_fonts	FontShapingCache	Libraries/LibGfx/Font/Font.h:89	struct
-Gfx::Font::ShapingCache::clear	luce-browser-render	web_fonts	font_shaping_cache_clear	Libraries/LibGfx/Font/Font.cpp:151	stub
-Gfx::Font::baseline	luce-browser-render	web_fonts	font_baseline	Libraries/LibGfx/Font/Font.h:74	stub
-Gfx::Font::bold_variant	luce-browser-render	web_fonts	font_bold_variant	Libraries/LibGfx/Font/Font.cpp:106	stub
-Gfx::Font::contains_glyph	luce-browser-render	web_fonts	font_contains_glyph	Libraries/LibGfx/Font/Font.h:69	stub
-Gfx::Font::family	luce-browser-render	web_fonts	font_family	Libraries/LibGfx/Font/Font.h:76	stub
-Gfx::Font::features	luce-browser-render	web_fonts	font_features	Libraries/LibGfx/Font/Font.h:87	stub
-Gfx::Font::glyph_id_for_code_point	luce-browser-render	web_fonts	font_glyph_id_for_code_point	Libraries/LibGfx/Font/Font.h:71	stub
-Gfx::Font::glyph_width	luce-browser-render	web_fonts	font_glyph_width	Libraries/LibGfx/Font/Font.cpp:70	stub
-Gfx::Font::harfbuzz_font	luce-browser-render	web_fonts	font_harfbuzz_font	Libraries/LibGfx/Font/Font.cpp:116	stub
-Gfx::Font::is_emoji_font	luce-browser-render	web_fonts	font_is_emoji_font	Libraries/LibGfx/Font/Font.cpp:173	stub
-Gfx::Font::metrics	luce-browser-render	web_fonts	font_metrics	Libraries/LibGfx/Font/Font.cpp:55	stub
-Gfx::Font::pixel_metrics	luce-browser-render	web_fonts	font_pixel_metrics	Libraries/LibGfx/Font/Font.h:66	stub
-Gfx::Font::pixel_size	luce-browser-render	web_fonts	font_pixel_size	Libraries/LibGfx/Font/Font.cpp:90	stub
-Gfx::Font::point_size	luce-browser-render	web_fonts	font_point_size	Libraries/LibGfx/Font/Font.cpp:95	stub
-Gfx::Font::preferred_line_height	luce-browser-render	web_fonts	font_preferred_line_height	Libraries/LibGfx/Font/Font.h:72	stub
-Gfx::Font::scaled_with_size	luce-browser-render	web_fonts	font_scaled_with_size	Libraries/LibGfx/Font/Font.cpp:76	stub
-Gfx::Font::shaping_cache	luce-browser-render	web_fonts	font_shaping_cache	Libraries/LibGfx/Font/Font.h:96	stub
-Gfx::Font::skia_font	luce-browser-render	web_fonts	font_skia_font	Libraries/LibGfx/Font/Font.cpp:138	stub
-Gfx::Font::slope	luce-browser-render	web_fonts	font_slope	Libraries/LibGfx/Font/Font.h:67	stub
-Gfx::Font::typeface	luce-browser-render	web_fonts	font_typeface	Libraries/LibGfx/Font/Font.h:81	stub
-Gfx::Font::weight	luce-browser-render	web_fonts	font_weight	Libraries/LibGfx/Font/Font.h:68	stub
-Gfx::Font::width	luce-browser-render	web_fonts	font_width	Libraries/LibGfx/Font/Font.cpp:68	stub
-Gfx::Font::with_size	luce-browser-render	web_fonts	font_with_size	Libraries/LibGfx/Font/Font.cpp:85	stub
-Gfx::Font::x_height	luce-browser-render	web_fonts	font_x_height	Libraries/LibGfx/Font/Font.h:73	stub
+Gfx::Font::ShapingCache::clear	luce-browser-render	web_fonts	font_shaping_cache_clear	Libraries/LibGfx/Font/Font.cpp:151	ported
+Gfx::Font::baseline	luce-browser-render	web_fonts	font_baseline	Libraries/LibGfx/Font/Font.h:74	ported
+Gfx::Font::bold_variant	luce-browser-render	web_fonts	font_bold_variant	Libraries/LibGfx/Font/Font.cpp:106	ported
+Gfx::Font::contains_glyph	luce-browser-render	web_fonts	font_contains_glyph	Libraries/LibGfx/Font/Font.h:69	ported
+Gfx::Font::family	luce-browser-render	web_fonts	font_family	Libraries/LibGfx/Font/Font.h:76	ported
+Gfx::Font::features	luce-browser-render	web_fonts	font_features	Libraries/LibGfx/Font/Font.h:87	ported
+Gfx::Font::glyph_id_for_code_point	luce-browser-render	web_fonts	font_glyph_id_for_code_point	Libraries/LibGfx/Font/Font.h:71	ported
+Gfx::Font::glyph_width	luce-browser-render	web_fonts	font_glyph_width	Libraries/LibGfx/Font/Font.cpp:70	ported
+Gfx::Font::harfbuzz_font	luce-browser-render	web_fonts	font_harfbuzz_font	Libraries/LibGfx/Font/Font.cpp:116	ported
+Gfx::Font::is_emoji_font	luce-browser-render	web_fonts	font_is_emoji_font	Libraries/LibGfx/Font/Font.cpp:173	ported
+Gfx::Font::metrics	luce-browser-render	web_fonts	font_metrics	Libraries/LibGfx/Font/Font.cpp:55	ported
+Gfx::Font::pixel_metrics	luce-browser-render	web_fonts	font_pixel_metrics	Libraries/LibGfx/Font/Font.h:66	ported
+Gfx::Font::pixel_size	luce-browser-render	web_fonts	font_pixel_size	Libraries/LibGfx/Font/Font.cpp:90	ported
+Gfx::Font::point_size	luce-browser-render	web_fonts	font_point_size	Libraries/LibGfx/Font/Font.cpp:95	ported
+Gfx::Font::preferred_line_height	luce-browser-render	web_fonts	font_preferred_line_height	Libraries/LibGfx/Font/Font.h:72	ported
+Gfx::Font::scaled_with_size	luce-browser-render	web_fonts	font_scaled_with_size	Libraries/LibGfx/Font/Font.cpp:76	ported
+Gfx::Font::shaping_cache	luce-browser-render	web_fonts	font_shaping_cache	Libraries/LibGfx/Font/Font.h:96	ported
+Gfx::Font::skia_font	luce-browser-render	web_fonts	font_skia_font	Libraries/LibGfx/Font/Font.cpp:138	ported
+Gfx::Font::slope	luce-browser-render	web_fonts	font_slope	Libraries/LibGfx/Font/Font.h:67	ported
+Gfx::Font::typeface	luce-browser-render	web_fonts	font_typeface	Libraries/LibGfx/Font/Font.h:81	ported
+Gfx::Font::weight	luce-browser-render	web_fonts	font_weight	Libraries/LibGfx/Font/Font.h:68	ported
+Gfx::Font::width	luce-browser-render	web_fonts	font_width	Libraries/LibGfx/Font/Font.cpp:68	ported
+Gfx::Font::with_size	luce-browser-render	web_fonts	font_with_size	Libraries/LibGfx/Font/Font.cpp:85	ported
+Gfx::Font::x_height	luce-browser-render	web_fonts	font_x_height	Libraries/LibGfx/Font/Font.h:73	ported
 Gfx::FontCacheKey	luce-browser-render	web_fonts	FontCacheKey	Libraries/LibGfx/Font/Typeface.h:41	struct
-Gfx::FontCacheKey::hash	luce-browser-render	web_fonts	font_cache_key_hash	Libraries/LibGfx/Font/Typeface.h:51	stub
-Gfx::FontCacheKey::operator==	luce-browser-render	web_fonts	font_cache_key_eq	Libraries/LibGfx/Font/Typeface.h:46	stub
+Gfx::FontCacheKey::hash	luce-browser-render	web_fonts	font_cache_key_hash	Libraries/LibGfx/Font/Typeface.h:51	ported
+Gfx::FontCacheKey::operator==	luce-browser-render	web_fonts	font_cache_key_eq	Libraries/LibGfx/Font/Typeface.h:46	ported
 Gfx::FontCascadeList	luce-browser-render	web_fonts	FontCascadeList	Libraries/LibGfx/FontCascadeList.h:17	struct
 Gfx::FontCascadeList::Entry	luce-browser-render	web_fonts	FontCascadeListEntry	Libraries/LibGfx/FontCascadeList.h:58	opaque
+Gfx::FontCascadeList::Entry::RangeData	luce-browser-render	web_fonts	FontCascadeListEntryRangeData	Libraries/LibGfx/FontCascadeList.h:60	struct
 Gfx::FontCascadeList::PendingFace	luce-browser-render	web_fonts	FontCascadeListPendingFace	Libraries/LibGfx/FontCascadeList.h:69	opaque
 Gfx::FontCascadeList::PendingFace::PendingFace	luce-browser-render	web_fonts	font_cascade_list_pending_face_construct	Libraries/LibGfx/FontCascadeList.h:71	construct
-Gfx::FontCascadeList::PendingFace::covers	luce-browser-render	web_fonts	font_cascade_list_pending_face_covers	Libraries/LibGfx/FontCascadeList.h:78	stub
-Gfx::FontCascadeList::PendingFace::start_load	luce-browser-render	web_fonts	font_cascade_list_pending_face_start_load	Libraries/LibGfx/FontCascadeList.h:89	stub
+Gfx::FontCascadeList::PendingFace::covers	luce-browser-render	web_fonts	font_cascade_list_pending_face_covers	Libraries/LibGfx/FontCascadeList.h:78	ported
+Gfx::FontCascadeList::PendingFace::start_load	luce-browser-render	web_fonts	font_cascade_list_pending_face_start_load	Libraries/LibGfx/FontCascadeList.h:89	ported
 Gfx::FontCascadeList::TriggerPendingLoads	luce-browser-render	web_fonts	FontCascadeListTriggerPendingLoads	Libraries/LibGfx/FontCascadeList.h:50	enum
-Gfx::FontCascadeList::add	luce-browser-render	web_fonts	font_cascade_list_add	Libraries/LibGfx/FontCascadeList.cpp:11	stub
-Gfx::FontCascadeList::add	luce-browser-render	web_fonts	font_cascade_list_add_vector	Libraries/LibGfx/FontCascadeList.cpp:16	stub
-Gfx::FontCascadeList::add_pending_face	luce-browser-render	web_fonts	font_cascade_list_add_pending_face	Libraries/LibGfx/FontCascadeList.cpp:37	stub
-Gfx::FontCascadeList::create	luce-browser-render	web_fonts	font_cascade_list_create	Libraries/LibGfx/FontCascadeList.h:21	stub
-Gfx::FontCascadeList::equals	luce-browser-render	web_fonts	font_cascade_list_equals	Libraries/LibGfx/FontCascadeList.cpp:117	stub
-Gfx::FontCascadeList::extend	luce-browser-render	web_fonts	font_cascade_list_extend	Libraries/LibGfx/FontCascadeList.cpp:55	stub
-Gfx::FontCascadeList::first	luce-browser-render	web_fonts	font_cascade_list_first	Libraries/LibGfx/FontCascadeList.h:28	stub
-Gfx::FontCascadeList::first_text_face	luce-browser-render	web_fonts	font_cascade_list_first_text_face	Libraries/LibGfx/FontCascadeList.h:100	stub
-Gfx::FontCascadeList::font_for_code_point	luce-browser-render	web_fonts	font_cascade_list_font_for_code_point	Libraries/LibGfx/FontCascadeList.cpp:61	stub
-Gfx::FontCascadeList::for_each_font_entry	luce-browser-render	web_fonts	font_cascade_list_for_each_font_entry	Libraries/LibGfx/FontCascadeList.h:31	stub
-Gfx::FontCascadeList::is_empty	luce-browser-render	web_fonts	font_cascade_list_is_empty	Libraries/LibGfx/FontCascadeList.h:27	stub
-Gfx::FontCascadeList::set_last_resort_font	luce-browser-render	web_fonts	font_cascade_list_set_last_resort_font	Libraries/LibGfx/FontCascadeList.h:97	stub
-Gfx::FontCascadeList::set_system_font_fallback_callback	luce-browser-render	web_fonts	font_cascade_list_set_system_font_fallback_callback	Libraries/LibGfx/FontCascadeList.h:98	stub
-Gfx::FontCascadeList::size	luce-browser-render	web_fonts	font_cascade_list_size	Libraries/LibGfx/FontCascadeList.h:26	stub
+Gfx::FontCascadeList::add	luce-browser-render	web_fonts	font_cascade_list_add	Libraries/LibGfx/FontCascadeList.cpp:11	ported
+Gfx::FontCascadeList::add	luce-browser-render	web_fonts	font_cascade_list_add_vector	Libraries/LibGfx/FontCascadeList.cpp:16	ported
+Gfx::FontCascadeList::add_pending_face	luce-browser-render	web_fonts	font_cascade_list_add_pending_face	Libraries/LibGfx/FontCascadeList.cpp:37	ported
+Gfx::FontCascadeList::create	luce-browser-render	web_fonts	font_cascade_list_create	Libraries/LibGfx/FontCascadeList.h:21	ported
+Gfx::FontCascadeList::equals	luce-browser-render	web_fonts	font_cascade_list_equals	Libraries/LibGfx/FontCascadeList.cpp:117	ported
+Gfx::FontCascadeList::extend	luce-browser-render	web_fonts	font_cascade_list_extend	Libraries/LibGfx/FontCascadeList.cpp:55	ported
+Gfx::FontCascadeList::first	luce-browser-render	web_fonts	font_cascade_list_first	Libraries/LibGfx/FontCascadeList.h:28	ported
+Gfx::FontCascadeList::first_text_face	luce-browser-render	web_fonts	font_cascade_list_first_text_face	Libraries/LibGfx/FontCascadeList.h:100	ported
+Gfx::FontCascadeList::font_for_code_point	luce-browser-render	web_fonts	font_cascade_list_font_for_code_point	Libraries/LibGfx/FontCascadeList.cpp:61	ported
+Gfx::FontCascadeList::for_each_font_entry	luce-browser-render	web_fonts	font_cascade_list_for_each_font_entry	Libraries/LibGfx/FontCascadeList.h:31	ported
+Gfx::FontCascadeList::is_empty	luce-browser-render	web_fonts	font_cascade_list_is_empty	Libraries/LibGfx/FontCascadeList.h:27	ported
+Gfx::FontCascadeList::set_last_resort_font	luce-browser-render	web_fonts	font_cascade_list_set_last_resort_font	Libraries/LibGfx/FontCascadeList.h:97	ported
+Gfx::FontCascadeList::set_system_font_fallback_callback	luce-browser-render	web_fonts	font_cascade_list_set_system_font_fallback_callback	Libraries/LibGfx/FontCascadeList.h:98	ported
+Gfx::FontCascadeList::size	luce-browser-render	web_fonts	font_cascade_list_size	Libraries/LibGfx/FontCascadeList.h:26	ported
 Gfx::FontData	luce-browser-render	web_fonts	FontData	Libraries/LibGfx/Font/FontData.h:14	struct
 Gfx::FontData::FontData	luce-browser-render	web_fonts	font_data_construct_byte_buffer	Libraries/LibGfx/Font/FontData.cpp:30	construct
 Gfx::FontData::FontData	luce-browser-render	web_fonts	font_data_construct_core_resource	Libraries/LibGfx/Font/FontData.cpp:35	construct
-Gfx::FontData::bytes	luce-browser-render	web_fonts	font_data_bytes	Libraries/LibGfx/Font/FontData.cpp:21	stub
-Gfx::FontData::create_from_byte_buffer	luce-browser-render	web_fonts	font_data_create_from_byte_buffer	Libraries/LibGfx/Font/FontData.cpp:11	stub
-Gfx::FontData::create_from_resource	luce-browser-render	web_fonts	font_data_create_from_resource	Libraries/LibGfx/Font/FontData.cpp:16	stub
+Gfx::FontData::bytes	luce-browser-render	web_fonts	font_data_bytes	Libraries/LibGfx/Font/FontData.cpp:21	ported
+Gfx::FontData::create_from_byte_buffer	luce-browser-render	web_fonts	font_data_create_from_byte_buffer	Libraries/LibGfx/Font/FontData.cpp:11	ported
+Gfx::FontData::create_from_resource	luce-browser-render	web_fonts	font_data_create_from_resource	Libraries/LibGfx/Font/FontData.cpp:16	ported
 Gfx::FontDatabase	luce-browser-render	web_fonts	FontDatabase	Libraries/LibGfx/Font/FontDatabase.h:44	struct
 Gfx::FontDatabase::CodePointFallbackEntry	luce-browser-render	web_fonts	FontDatabaseCodePointFallbackEntry	Libraries/LibGfx/Font/FontDatabase.h:62	opaque
 Gfx::FontDatabase::FontDatabase	luce-browser-render	web_fonts	font_database_construct	Libraries/LibGfx/Font/FontDatabase.cpp:46	construct
-Gfx::FontDatabase::font_directories	luce-browser-render	web_fonts	font_database_font_directories	Libraries/LibGfx/Font/FontDatabase.cpp:77	stub
-Gfx::FontDatabase::for_each_typeface_with_family_name	luce-browser-render	web_fonts	font_database_for_each_typeface_with_family_name	Libraries/LibGfx/Font/FontDatabase.cpp:72	stub
-Gfx::FontDatabase::get	luce-browser-render	web_fonts	font_database_get	Libraries/LibGfx/Font/FontDatabase.cpp:48	stub
-Gfx::FontDatabase::get_font_for_code_point	luce-browser-render	web_fonts	font_database_get_font_for_code_point	Libraries/LibGfx/Font/FontDatabase.cpp:53	stub
-Gfx::FontDatabase::install_system_font_provider	luce-browser-render	web_fonts	font_database_install_system_font_provider	Libraries/LibGfx/Font/FontDatabase.cpp:33	stub
-Gfx::FontDatabase::system_font_provider_name	luce-browser-render	web_fonts	font_database_system_font_provider_name	Libraries/LibGfx/Font/FontDatabase.cpp:40	stub
-Gfx::FontDatabase::the	luce-browser-render	web_fonts	font_database_the	Libraries/LibGfx/Font/FontDatabase.cpp:27	stub
+Gfx::FontDatabase::font_directories	luce-browser-render	web_fonts	font_database_font_directories	Libraries/LibGfx/Font/FontDatabase.cpp:77	ported
+Gfx::FontDatabase::for_each_typeface_with_family_name	luce-browser-render	web_fonts	font_database_for_each_typeface_with_family_name	Libraries/LibGfx/Font/FontDatabase.cpp:72	ported
+Gfx::FontDatabase::get	luce-browser-render	web_fonts	font_database_get	Libraries/LibGfx/Font/FontDatabase.cpp:48	ported
+Gfx::FontDatabase::get_font_for_code_point	luce-browser-render	web_fonts	font_database_get_font_for_code_point	Libraries/LibGfx/Font/FontDatabase.cpp:53	ported
+Gfx::FontDatabase::install_system_font_provider	luce-browser-render	web_fonts	font_database_install_system_font_provider	Libraries/LibGfx/Font/FontDatabase.cpp:33	ported
+Gfx::FontDatabase::system_font_provider_name	luce-browser-render	web_fonts	font_database_system_font_provider_name	Libraries/LibGfx/Font/FontDatabase.cpp:40	ported
+Gfx::FontDatabase::the	luce-browser-render	web_fonts	font_database_the	Libraries/LibGfx/Font/FontDatabase.cpp:27	ported
 Gfx::FontFormat	luce-browser-render	web_fonts	FontFormat	Libraries/LibGfx/Font/FontSupport.h:13	enum
 Gfx::FontPixelMetrics	luce-browser-render	web_fonts	FontPixelMetrics	Libraries/LibGfx/Font/Font.h:26	struct
-Gfx::FontPixelMetrics::line_spacing	luce-browser-render	web_fonts	font_pixel_metrics_line_spacing	Libraries/LibGfx/Font/Font.h:40	stub
+Gfx::FontPixelMetrics::line_spacing	luce-browser-render	web_fonts	font_pixel_metrics_line_spacing	Libraries/LibGfx/Font/Font.h:40	ported
 Gfx::FontStyleMapping	luce-browser-render	web_fonts	FontStyleMapping	Libraries/LibGfx/Font/FontStyleMapping.h:14	struct
 Gfx::FontTech	luce-browser-render	web_fonts	FontTech	Libraries/LibGfx/Font/FontSupport.h:23	enum
 Gfx::FontVariationAxis	luce-browser-render	web_fonts	FontVariationAxis	Libraries/LibGfx/Font/FontVariationSettings.h:16	struct
 Gfx::FontVariationAxis::FontVariationAxis	luce-browser-render	web_fonts	font_variation_axis_construct	Libraries/LibGfx/Font/FontVariationSettings.h:20	construct
-Gfx::FontVariationAxis::operator==	luce-browser-render	web_fonts	font_variation_axis_eq	Libraries/LibGfx/Font/FontVariationSettings.h:26	stub
+Gfx::FontVariationAxis::operator==	luce-browser-render	web_fonts	font_variation_axis_eq	Libraries/LibGfx/Font/FontVariationSettings.h:26	ported
 Gfx::FontVariationSettings	luce-browser-render	web_fonts	FontVariationSettings	Libraries/LibGfx/Font/FontVariationSettings.h:33	struct
-Gfx::FontVariationSettings::is_empty	luce-browser-render	web_fonts	font_variation_settings_is_empty	Libraries/LibGfx/Font/FontVariationSettings.h:56	stub
-Gfx::FontVariationSettings::set_optical_sizing	luce-browser-render	web_fonts	font_variation_settings_set_optical_sizing	Libraries/LibGfx/Font/FontVariationSettings.h:51	stub
-Gfx::FontVariationSettings::set_weight	luce-browser-render	web_fonts	font_variation_settings_set_weight	Libraries/LibGfx/Font/FontVariationSettings.h:39	stub
-Gfx::FontVariationSettings::set_width	luce-browser-render	web_fonts	font_variation_settings_set_width	Libraries/LibGfx/Font/FontVariationSettings.h:45	stub
-Gfx::FontVariationSettings::to_sorted_list	luce-browser-render	web_fonts	font_variation_settings_to_sorted_list	Libraries/LibGfx/Font/FontVariationSettings.h:58	stub
+Gfx::FontVariationSettings::is_empty	luce-browser-render	web_fonts	font_variation_settings_is_empty	Libraries/LibGfx/Font/FontVariationSettings.h:56	ported
+Gfx::FontVariationSettings::set_optical_sizing	luce-browser-render	web_fonts	font_variation_settings_set_optical_sizing	Libraries/LibGfx/Font/FontVariationSettings.h:51	ported
+Gfx::FontVariationSettings::set_weight	luce-browser-render	web_fonts	font_variation_settings_set_weight	Libraries/LibGfx/Font/FontVariationSettings.h:39	ported
+Gfx::FontVariationSettings::set_width	luce-browser-render	web_fonts	font_variation_settings_set_width	Libraries/LibGfx/Font/FontVariationSettings.h:45	ported
+Gfx::FontVariationSettings::to_sorted_list	luce-browser-render	web_fonts	font_variation_settings_to_sorted_list	Libraries/LibGfx/Font/FontVariationSettings.h:58	ported
 Gfx::FontWidth	luce-browser-render	web_fonts	FontWidth	Libraries/LibGfx/Font/Font.h:44	enum
 Gfx::FourCC	luce-browser-render	gfx	FourCc	Libraries/LibGfx/FourCC.h:13	struct
 Gfx::FourCC::FourCC	luce-browser-render	gfx	four_cc_construct	Libraries/LibGfx/FourCC.h:16	construct
@@ -445,17 +520,17 @@ Gfx::GlyphRun	luce-browser-render	web_fonts	GlyphRun	Libraries/LibGfx/TextLayout
 Gfx::GlyphRun::CachedTextBlob	luce-browser-render	web_fonts	GlyphRunCachedTextBlob	Libraries/LibGfx/TextLayout.cpp:21	opaque
 Gfx::GlyphRun::GlyphRun	luce-browser-render	web_fonts	glyph_run_construct	Libraries/LibGfx/TextLayout.cpp:27	construct
 Gfx::GlyphRun::TextType	luce-browser-render	web_fonts	GlyphRunTextType	Libraries/LibGfx/TextLayout.h:35	enum
-Gfx::GlyphRun::cached_blob_bounds	luce-browser-render	web_fonts	glyph_run_cached_blob_bounds	Libraries/LibGfx/TextLayout.cpp:83	stub
-Gfx::GlyphRun::cached_skia_text_blob	luce-browser-render	web_fonts	glyph_run_cached_skia_text_blob	Libraries/LibGfx/TextLayout.cpp:90	stub
-Gfx::GlyphRun::ensure_text_blob	luce-browser-render	web_fonts	glyph_run_ensure_text_blob	Libraries/LibGfx/TextLayout.cpp:51	stub
-Gfx::GlyphRun::font	luce-browser-render	web_fonts	glyph_run_font	Libraries/LibGfx/TextLayout.h:46	stub
-Gfx::GlyphRun::get_glyph_intercepts	luce-browser-render	web_fonts	glyph_run_get_glyph_intercepts	Libraries/LibGfx/TextLayout.cpp:97	stub
-Gfx::GlyphRun::glyphs	luce-browser-render	web_fonts	glyph_run_glyphs	Libraries/LibGfx/TextLayout.h:49	stub
-Gfx::GlyphRun::glyphs	luce-browser-render	web_fonts	glyph_run_glyphs_const	Libraries/LibGfx/TextLayout.h:48	stub
-Gfx::GlyphRun::is_empty	luce-browser-render	web_fonts	glyph_run_is_empty	Libraries/LibGfx/TextLayout.h:50	stub
-Gfx::GlyphRun::slice	luce-browser-render	web_fonts	glyph_run_slice	Libraries/LibGfx/TextLayout.cpp:37	stub
-Gfx::GlyphRun::text_type	luce-browser-render	web_fonts	glyph_run_text_type	Libraries/LibGfx/TextLayout.h:47	stub
-Gfx::GlyphRun::width	luce-browser-render	web_fonts	glyph_run_width	Libraries/LibGfx/TextLayout.h:51	stub
+Gfx::GlyphRun::cached_blob_bounds	luce-browser-render	web_fonts	glyph_run_cached_blob_bounds	Libraries/LibGfx/TextLayout.cpp:83	ported
+Gfx::GlyphRun::cached_skia_text_blob	luce-browser-render	web_fonts	glyph_run_cached_skia_text_blob	Libraries/LibGfx/TextLayout.cpp:90	ported
+Gfx::GlyphRun::ensure_text_blob	luce-browser-render	web_fonts	glyph_run_ensure_text_blob	Libraries/LibGfx/TextLayout.cpp:51	ported
+Gfx::GlyphRun::font	luce-browser-render	web_fonts	glyph_run_font	Libraries/LibGfx/TextLayout.h:46	ported
+Gfx::GlyphRun::get_glyph_intercepts	luce-browser-render	web_fonts	glyph_run_get_glyph_intercepts	Libraries/LibGfx/TextLayout.cpp:97	ported
+Gfx::GlyphRun::glyphs	luce-browser-render	web_fonts	glyph_run_glyphs	Libraries/LibGfx/TextLayout.h:49	ported
+Gfx::GlyphRun::glyphs	luce-browser-render	web_fonts	glyph_run_glyphs_const	Libraries/LibGfx/TextLayout.h:48	ported
+Gfx::GlyphRun::is_empty	luce-browser-render	web_fonts	glyph_run_is_empty	Libraries/LibGfx/TextLayout.h:50	ported
+Gfx::GlyphRun::slice	luce-browser-render	web_fonts	glyph_run_slice	Libraries/LibGfx/TextLayout.cpp:37	ported
+Gfx::GlyphRun::text_type	luce-browser-render	web_fonts	glyph_run_text_type	Libraries/LibGfx/TextLayout.h:47	ported
+Gfx::GlyphRun::width	luce-browser-render	web_fonts	glyph_run_width	Libraries/LibGfx/TextLayout.h:51	ported
 Gfx::GradientPaintStyle	luce-browser-render	gfx	GradientPaintStyle	Libraries/LibGfx/PaintStyle.h:49	struct
 Gfx::GradientPaintStyle::add_color_stop	luce-browser-render	gfx	gradient_paint_style_add_color_stop_color_stop	Libraries/LibGfx/PaintStyle.h:56	ported
 Gfx::GradientPaintStyle::add_color_stop	luce-browser-render	gfx	gradient_paint_style_add_color_stop_f32	Libraries/LibGfx/PaintStyle.h:51	ported
@@ -756,9 +831,9 @@ Gfx::PathFontProvider [default member initializers]	luce-browser-render	web_font
 Gfx::PathFontProvider::PathFontProvider	luce-browser-render	web_fonts	path_font_provider_construct	Libraries/LibGfx/Font/PathFontProvider.cpp:18	construct
 Gfx::PathFontProvider::for_each_typeface_with_family_name	luce-browser-render	web_fonts	path_font_provider_for_each_typeface_with_family_name_impl	Libraries/LibGfx/Font/PathFontProvider.cpp:144	impl
 Gfx::PathFontProvider::get_font	luce-browser-render	web_fonts	path_font_provider_get_font_impl	Libraries/LibGfx/Font/PathFontProvider.cpp:81	impl
-Gfx::PathFontProvider::load_all_fonts_from_uri	luce-browser-render	web_fonts	path_font_provider_load_all_fonts_from_uri	Libraries/LibGfx/Font/PathFontProvider.cpp:42	stub
+Gfx::PathFontProvider::load_all_fonts_from_uri	luce-browser-render	web_fonts	path_font_provider_load_all_fonts_from_uri	Libraries/LibGfx/Font/PathFontProvider.cpp:42	ported
 Gfx::PathFontProvider::name	luce-browser-render	web_fonts	path_font_provider_name_impl	Libraries/LibGfx/Font/PathFontProvider.h:31	impl
-Gfx::PathFontProvider::set_name_but_fixme_should_create_custom_system_font_provider	luce-browser-render	web_fonts	path_font_provider_set_name_but_fixme_should_create_custom_system_font_provider	Libraries/LibGfx/Font/PathFontProvider.h:25	stub
+Gfx::PathFontProvider::set_name_but_fixme_should_create_custom_system_font_provider	luce-browser-render	web_fonts	path_font_provider_set_name_but_fixme_should_create_custom_system_font_provider	Libraries/LibGfx/Font/PathFontProvider.h:25	ported
 Gfx::PathImpl	luce-browser-render	web_fonts	PathImpl	Libraries/LibGfx/Path.h:20	struct
 Gfx::PathImpl::append_path	luce-browser-render	web_fonts	path_impl_append_path_impl	Libraries/LibGfx/Path.h:39	impl
 Gfx::PathImpl::append_path [dispatch]	luce-browser-render	web_fonts	path_impl_append_path	Libraries/LibGfx/Path.h:20	dispatcher
@@ -1340,7 +1415,7 @@ Gfx::SVGRadialGradientPaintStyle::set_end_radius	luce-browser-render	gfx	svg_rad
 Gfx::SVGRadialGradientPaintStyle::set_start_center	luce-browser-render	gfx	svg_radial_gradient_paint_style_set_start_center	Libraries/LibGfx/PaintStyle.h:244	ported
 Gfx::SVGRadialGradientPaintStyle::set_start_radius	luce-browser-render	gfx	svg_radial_gradient_paint_style_set_start_radius	Libraries/LibGfx/PaintStyle.h:249	ported
 Gfx::ScaledFontMetrics	luce-browser-render	web_fonts	ScaledFontMetrics	Libraries/LibGfx/Font/Typeface.h:29	struct
-Gfx::ScaledFontMetrics::height	luce-browser-render	web_fonts	scaled_font_metrics_height	Libraries/LibGfx/Font/Typeface.h:35	stub
+Gfx::ScaledFontMetrics::height	luce-browser-render	web_fonts	scaled_font_metrics_height	Libraries/LibGfx/Font/Typeface.h:35	ported
 Gfx::ScalingMode	luce-browser-render	gfx	ScalingMode	Libraries/LibGfx/ScalingMode.h:12	enum
 Gfx::ShapeFeature	luce-browser-render	web_fonts	ShapeFeature	Libraries/LibGfx/ShapeFeature.h:13	struct
 Gfx::ShareableBitmap	luce-browser-render	gfx	ShareableBitmap	Libraries/LibGfx/ShareableBitmap.h:15	struct
@@ -1510,20 +1585,20 @@ Gfx::Typeface::buffer	luce-browser-render	web_fonts	typeface_buffer_impl	Librari
 Gfx::Typeface::buffer [dispatch]	luce-browser-render	web_fonts	typeface_buffer	Libraries/LibGfx/Font/Typeface.h:61	dispatcher
 Gfx::Typeface::family	luce-browser-render	web_fonts	typeface_family_impl	Libraries/LibGfx/Font/Typeface.h:73	impl
 Gfx::Typeface::family [dispatch]	luce-browser-render	web_fonts	typeface_family	Libraries/LibGfx/Font/Typeface.h:61	dispatcher
-Gfx::Typeface::font	luce-browser-render	web_fonts	typeface_font	Libraries/LibGfx/Font/Typeface.cpp:51	stub
+Gfx::Typeface::font	luce-browser-render	web_fonts	typeface_font	Libraries/LibGfx/Font/Typeface.cpp:51	ported
 Gfx::Typeface::glyph_count	luce-browser-render	web_fonts	typeface_glyph_count_impl	Libraries/LibGfx/Font/Typeface.h:70	impl
 Gfx::Typeface::glyph_count [dispatch]	luce-browser-render	web_fonts	typeface_glyph_count	Libraries/LibGfx/Font/Typeface.h:61	dispatcher
 Gfx::Typeface::glyph_id_for_code_point	luce-browser-render	web_fonts	typeface_glyph_id_for_code_point_impl	Libraries/LibGfx/Font/Typeface.h:72	impl
 Gfx::Typeface::glyph_id_for_code_point [dispatch]	luce-browser-render	web_fonts	typeface_glyph_id_for_code_point	Libraries/LibGfx/Font/Typeface.h:61	dispatcher
-Gfx::Typeface::harfbuzz_typeface	luce-browser-render	web_fonts	typeface_harfbuzz_typeface	Libraries/LibGfx/Font/Typeface.cpp:76	stub
+Gfx::Typeface::harfbuzz_typeface	luce-browser-render	web_fonts	typeface_harfbuzz_typeface	Libraries/LibGfx/Font/Typeface.cpp:76	ported
 Gfx::Typeface::is_skia	luce-browser-render	web_fonts	typeface_is_skia_impl	Libraries/LibGfx/Font/Typeface.h:85	impl
 Gfx::Typeface::is_skia [dispatch]	luce-browser-render	web_fonts	typeface_is_skia	Libraries/LibGfx/Font/Typeface.h:61	dispatcher
 Gfx::Typeface::slope	luce-browser-render	web_fonts	typeface_slope_impl	Libraries/LibGfx/Font/Typeface.h:76	impl
 Gfx::Typeface::slope [dispatch]	luce-browser-render	web_fonts	typeface_slope	Libraries/LibGfx/Font/Typeface.h:61	dispatcher
-Gfx::Typeface::try_load_from_externally_owned_memory	luce-browser-render	web_fonts	typeface_try_load_from_externally_owned_memory	Libraries/LibGfx/Font/Typeface.cpp:36	stub
-Gfx::Typeface::try_load_from_font_data	luce-browser-render	web_fonts	typeface_try_load_from_font_data	Libraries/LibGfx/Font/Typeface.cpp:22	stub
-Gfx::Typeface::try_load_from_resource	luce-browser-render	web_fonts	typeface_try_load_from_resource	Libraries/LibGfx/Font/Typeface.cpp:16	stub
-Gfx::Typeface::try_load_from_temporary_memory	luce-browser-render	web_fonts	typeface_try_load_from_temporary_memory	Libraries/LibGfx/Font/Typeface.cpp:29	stub
+Gfx::Typeface::try_load_from_externally_owned_memory	luce-browser-render	web_fonts	typeface_try_load_from_externally_owned_memory	Libraries/LibGfx/Font/Typeface.cpp:36	ported
+Gfx::Typeface::try_load_from_font_data	luce-browser-render	web_fonts	typeface_try_load_from_font_data	Libraries/LibGfx/Font/Typeface.cpp:22	ported
+Gfx::Typeface::try_load_from_resource	luce-browser-render	web_fonts	typeface_try_load_from_resource	Libraries/LibGfx/Font/Typeface.cpp:16	ported
+Gfx::Typeface::try_load_from_temporary_memory	luce-browser-render	web_fonts	typeface_try_load_from_temporary_memory	Libraries/LibGfx/Font/Typeface.cpp:29	ported
 Gfx::Typeface::ttc_index	luce-browser-render	web_fonts	typeface_ttc_index_impl	Libraries/LibGfx/Font/Typeface.h:91	impl
 Gfx::Typeface::ttc_index [dispatch]	luce-browser-render	web_fonts	typeface_ttc_index	Libraries/LibGfx/Font/Typeface.h:61	dispatcher
 Gfx::Typeface::units_per_em	luce-browser-render	web_fonts	typeface_units_per_em_impl	Libraries/LibGfx/Font/Typeface.h:71	impl
@@ -1538,18 +1613,18 @@ Gfx::TypefaceSkia::GlyphPage::glyphs_per_page	luce-browser-render	web_fonts	type
 Gfx::TypefaceSkia::Impl	luce-browser-render	web_fonts	Impl	Libraries/LibGfx/Font/TypefaceSkia.h:0	opaque
 Gfx::TypefaceSkia::TypefaceSkia	luce-browser-render	web_fonts	typeface_skia_construct	Libraries/LibGfx/Font/TypefaceSkia.h:42	construct
 Gfx::TypefaceSkia::buffer	luce-browser-render	web_fonts	typeface_skia_buffer_impl	Libraries/LibGfx/Font/TypefaceSkia.h:32	impl
-Gfx::TypefaceSkia::clone_with_variations	luce-browser-render	web_fonts	typeface_skia_clone_with_variations	Libraries/LibGfx/Font/TypefaceSkia.h:22	stub
+Gfx::TypefaceSkia::clone_with_variations	luce-browser-render	web_fonts	typeface_skia_clone_with_variations	Libraries/LibGfx/Font/TypefaceSkia.h:22	ported
 Gfx::TypefaceSkia::family	luce-browser-render	web_fonts	typeface_skia_family_impl	Libraries/LibGfx/Font/TypefaceSkia.h:27	impl
-Gfx::TypefaceSkia::find_typeface_for_code_point	luce-browser-render	web_fonts	typeface_skia_find_typeface_for_code_point	Libraries/LibGfx/Font/TypefaceSkia.h:19	stub
+Gfx::TypefaceSkia::find_typeface_for_code_point	luce-browser-render	web_fonts	typeface_skia_find_typeface_for_code_point	Libraries/LibGfx/Font/TypefaceSkia.h:19	ported
 Gfx::TypefaceSkia::glyph_count	luce-browser-render	web_fonts	typeface_skia_glyph_count_impl	Libraries/LibGfx/Font/TypefaceSkia.h:24	impl
 Gfx::TypefaceSkia::glyph_id_for_code_point	luce-browser-render	web_fonts	typeface_skia_glyph_id_for_code_point_impl	Libraries/LibGfx/Font/TypefaceSkia.h:26	impl
-Gfx::TypefaceSkia::glyph_page	luce-browser-render	web_fonts	typeface_skia_glyph_page	Libraries/LibGfx/Font/TypefaceSkia.h:64	stub
-Gfx::TypefaceSkia::impl	luce-browser-render	web_fonts	typeface_skia_impl	Libraries/LibGfx/Font/TypefaceSkia.h:39	stub
+Gfx::TypefaceSkia::glyph_page	luce-browser-render	web_fonts	typeface_skia_glyph_page	Libraries/LibGfx/Font/TypefaceSkia.h:64	ported
+Gfx::TypefaceSkia::impl	luce-browser-render	web_fonts	typeface_skia_impl	Libraries/LibGfx/Font/TypefaceSkia.h:39	ported
 Gfx::TypefaceSkia::is_skia	luce-browser-render	web_fonts	typeface_skia_is_skia_impl	Libraries/LibGfx/Font/TypefaceSkia.h:44	impl
-Gfx::TypefaceSkia::load_from_buffer	luce-browser-render	web_fonts	typeface_skia_load_from_buffer	Libraries/LibGfx/Font/TypefaceSkia.h:18	stub
-Gfx::TypefaceSkia::populate_glyph_page	luce-browser-render	web_fonts	typeface_skia_populate_glyph_page	Libraries/LibGfx/Font/TypefaceSkia.h:65	stub
-Gfx::TypefaceSkia::resolve_generic_family	luce-browser-render	web_fonts	typeface_skia_resolve_generic_family	Libraries/LibGfx/Font/TypefaceSkia.h:20	stub
-Gfx::TypefaceSkia::sk_typeface	luce-browser-render	web_fonts	typeface_skia_sk_typeface	Libraries/LibGfx/Font/TypefaceSkia.h:35	stub
+Gfx::TypefaceSkia::load_from_buffer	luce-browser-render	web_fonts	typeface_skia_load_from_buffer	Libraries/LibGfx/Font/TypefaceSkia.h:18	ported
+Gfx::TypefaceSkia::populate_glyph_page	luce-browser-render	web_fonts	typeface_skia_populate_glyph_page	Libraries/LibGfx/Font/TypefaceSkia.h:65	ported
+Gfx::TypefaceSkia::resolve_generic_family	luce-browser-render	web_fonts	typeface_skia_resolve_generic_family	Libraries/LibGfx/Font/TypefaceSkia.h:20	ported
+Gfx::TypefaceSkia::sk_typeface	luce-browser-render	web_fonts	typeface_skia_sk_typeface	Libraries/LibGfx/Font/TypefaceSkia.h:35	ported
 Gfx::TypefaceSkia::slope	luce-browser-render	web_fonts	typeface_skia_slope_impl	Libraries/LibGfx/Font/TypefaceSkia.h:30	impl
 Gfx::TypefaceSkia::ttc_index	luce-browser-render	web_fonts	typeface_skia_ttc_index_impl	Libraries/LibGfx/Font/TypefaceSkia.h:33	impl
 Gfx::TypefaceSkia::units_per_em	luce-browser-render	web_fonts	typeface_skia_units_per_em_impl	Libraries/LibGfx/Font/TypefaceSkia.h:25	impl
@@ -1557,11 +1632,11 @@ Gfx::TypefaceSkia::weight	luce-browser-render	web_fonts	typeface_skia_weight_imp
 Gfx::TypefaceSkia::width	luce-browser-render	web_fonts	typeface_skia_width_impl	Libraries/LibGfx/Font/TypefaceSkia.h:29	impl
 Gfx::UnicodeRange	luce-browser-render	web_fonts	UnicodeRange	Libraries/LibGfx/Font/UnicodeRange.h:14	struct
 Gfx::UnicodeRange::UnicodeRange	luce-browser-render	web_fonts	unicode_range_construct	Libraries/LibGfx/Font/UnicodeRange.h:16	construct
-Gfx::UnicodeRange::contains	luce-browser-render	web_fonts	unicode_range_contains	Libraries/LibGfx/Font/UnicodeRange.h:26	stub
-Gfx::UnicodeRange::max_code_point	luce-browser-render	web_fonts	unicode_range_max_code_point	Libraries/LibGfx/Font/UnicodeRange.h:24	stub
-Gfx::UnicodeRange::min_code_point	luce-browser-render	web_fonts	unicode_range_min_code_point	Libraries/LibGfx/Font/UnicodeRange.h:23	stub
-Gfx::UnicodeRange::operator==	luce-browser-render	web_fonts	unicode_range_eq	Libraries/LibGfx/Font/UnicodeRange.h:38	stub
-Gfx::UnicodeRange::to_string	luce-browser-render	web_fonts	unicode_range_to_string	Libraries/LibGfx/Font/UnicodeRange.h:31	stub
+Gfx::UnicodeRange::contains	luce-browser-render	web_fonts	unicode_range_contains	Libraries/LibGfx/Font/UnicodeRange.h:26	ported
+Gfx::UnicodeRange::max_code_point	luce-browser-render	web_fonts	unicode_range_max_code_point	Libraries/LibGfx/Font/UnicodeRange.h:24	ported
+Gfx::UnicodeRange::min_code_point	luce-browser-render	web_fonts	unicode_range_min_code_point	Libraries/LibGfx/Font/UnicodeRange.h:23	ported
+Gfx::UnicodeRange::operator==	luce-browser-render	web_fonts	unicode_range_eq	Libraries/LibGfx/Font/UnicodeRange.h:38	ported
+Gfx::UnicodeRange::to_string	luce-browser-render	web_fonts	unicode_range_to_string	Libraries/LibGfx/Font/UnicodeRange.h:31	ported
 Gfx::VectorN<3, float>	luce-browser-render	gfx	FloatVector3	Libraries/LibGfx/VectorN.h:32	struct
 Gfx::VectorN<4, float>	luce-browser-render	gfx	FloatVector4	Libraries/LibGfx/VectorN.h:32	struct
 Gfx::WindingRule	luce-browser-render	gfx	WindingRule	Libraries/LibGfx/WindingRule.h:11	enum
@@ -1582,13 +1657,13 @@ Gfx::enclosing_int_rect	luce-browser-render	gfx	enclosing_int_rect	Libraries/Lib
 Gfx::export_format_name	luce-browser-render	gfx	export_format_name	Libraries/LibGfx/ImmutableBitmap.cpp:26	ported
 Gfx::export_format_to_skia_color_type	luce-browser-render	gfx	export_format_to_skia_color_type	Libraries/LibGfx/ImmutableBitmap.cpp:97	dropped
 Gfx::extract_2d_affine_transform	luce-browser-render	gfx	extract_2d_affine_transform	Libraries/LibGfx/Matrix4x4.h:86	ported
-Gfx::font_format_is_supported	luce-browser-render	web_fonts	font_format_is_supported	Libraries/LibGfx/Font/FontSupport.cpp:13	stub
+Gfx::font_format_is_supported	luce-browser-render	web_fonts	font_format_is_supported	Libraries/LibGfx/Font/FontSupport.cpp:13	ported
 Gfx::font_slope_names	luce-browser-render	web_fonts	font_slope_names	Libraries/LibGfx/Font/FontStyleMapping.h:32	variable
-Gfx::font_tech_is_supported	luce-browser-render	web_fonts	font_tech_is_supported	Libraries/LibGfx/Font/FontSupport.cpp:36	stub
+Gfx::font_tech_is_supported	luce-browser-render	web_fonts	font_tech_is_supported	Libraries/LibGfx/Font/FontSupport.cpp:36	ported
 Gfx::font_weight_names	luce-browser-render	web_fonts	font_weight_names	Libraries/LibGfx/Font/FontStyleMapping.h:19	variable
 Gfx::font_width_names	luce-browser-render	web_fonts	font_width_names	Libraries/LibGfx/Font/FontStyleMapping.h:39	variable
 Gfx::get_metadata	luce-browser-render	gfx	get_metadata	Libraries/LibGfx/BitmapSequence.cpp:17	ported
-Gfx::hb_face_has_table	luce-browser-render	web_fonts	hb_face_has_table	Libraries/LibGfx/Font/Font.cpp:165	stub
+Gfx::hb_face_has_table	luce-browser-render	web_fonts	hb_face_has_table	Libraries/LibGfx/Font/Font.cpp:165	ported
 Gfx::hex_string_to_color	luce-browser-render	gfx	hex_string_to_color	Libraries/LibGfx/Color.cpp:354	ported
 Gfx::hsl_to_srgb	luce-browser-render	gfx	hsl_to_srgb	Libraries/LibGfx/ColorConversion.h:40	ported
 Gfx::hsv_to_srgb	luce-browser-render	gfx	hsv_to_srgb	Libraries/LibGfx/ColorConversion.h:67	ported
@@ -1613,12 +1688,12 @@ Gfx::linear_rec2020_to_xyz65	luce-browser-render	gfx	linear_rec2020_to_xyz65	Lib
 Gfx::linear_srgb_to_oklab	luce-browser-render	gfx	linear_srgb_to_oklab	Libraries/LibGfx/ColorConversion.h:204	ported
 Gfx::linear_srgb_to_srgb	luce-browser-render	gfx	linear_srgb_to_srgb	Libraries/LibGfx/ColorConversion.cpp:52	ported
 Gfx::linear_srgb_to_xyz65	luce-browser-render	gfx	linear_srgb_to_xyz65	Libraries/LibGfx/ColorConversion.cpp:225	ported
-Gfx::measure_text_width	luce-browser-render	web_fonts	measure_text_width	Libraries/LibGfx/TextLayout.cpp:273	stub
-Gfx::name_to_slope	luce-browser-render	web_fonts	name_to_slope	Libraries/LibGfx/Font/FontStyleMapping.h:78	stub
-Gfx::name_to_weight	luce-browser-render	web_fonts	name_to_weight	Libraries/LibGfx/Font/FontStyleMapping.h:60	stub
-Gfx::name_to_width	luce-browser-render	web_fonts	name_to_width	Libraries/LibGfx/Font/FontStyleMapping.h:96	stub
+Gfx::measure_text_width	luce-browser-render	web_fonts	measure_text_width	Libraries/LibGfx/TextLayout.cpp:273	ported
+Gfx::name_to_slope	luce-browser-render	web_fonts	name_to_slope	Libraries/LibGfx/Font/FontStyleMapping.h:78	ported
+Gfx::name_to_weight	luce-browser-render	web_fonts	name_to_weight	Libraries/LibGfx/Font/FontStyleMapping.h:60	ported
+Gfx::name_to_width	luce-browser-render	web_fonts	name_to_width	Libraries/LibGfx/Font/FontStyleMapping.h:96	ported
 Gfx::normalized_gradient_angle_radians	luce-browser-render	gfx	normalized_gradient_angle_radians	Libraries/LibGfx/Gradients.h:25	ported
-Gfx::number_of_fonts_in_ttc	luce-browser-render	web_fonts	number_of_fonts_in_ttc	Libraries/LibGfx/Font/PathFontProvider.cpp:22	stub
+Gfx::number_of_fonts_in_ttc	luce-browser-render	web_fonts	number_of_fonts_in_ttc	Libraries/LibGfx/Font/PathFontProvider.cpp:22	ported
 Gfx::oklab_to_linear_srgb	luce-browser-render	gfx	oklab_to_linear_srgb	Libraries/LibGfx/ColorConversion.h:182	ported
 Gfx::oklab_to_oklch	luce-browser-render	gfx	oklab_to_oklch	Libraries/LibGfx/ColorConversion.cpp:335	ported
 Gfx::oklab_to_xyz65	luce-browser-render	gfx	oklab_to_xyz65	Libraries/LibGfx/ColorConversion.cpp:286	ported
@@ -1636,11 +1711,11 @@ Gfx::rec2020_to_xyz65	luce-browser-render	gfx	rec2020_to_xyz65	Libraries/LibGfx/
 Gfx::rectangular_to_polar	luce-browser-render	gfx	rectangular_to_polar	Libraries/LibGfx/ColorConversion.cpp:308	ported
 Gfx::rotation_matrix	luce-browser-render	gfx	rotation_matrix	Libraries/LibGfx/Matrix4x4.h:62	ported
 Gfx::scale_matrix	luce-browser-render	gfx	scale_matrix	Libraries/LibGfx/Matrix4x4.h:52	ported
-Gfx::setup_text_shaping	luce-browser-render	web_fonts	setup_text_shaping	Libraries/LibGfx/TextLayout.cpp:154	stub
-Gfx::shape_text	luce-browser-render	web_fonts	shape_text_f32	Libraries/LibGfx/TextLayout.cpp:198	stub
-Gfx::shape_text	luce-browser-render	web_fonts	shape_text_utf16_view	Libraries/LibGfx/TextLayout.cpp:115	stub
+Gfx::setup_text_shaping	luce-browser-render	web_fonts	setup_text_shaping	Libraries/LibGfx/TextLayout.cpp:154	ported
+Gfx::shape_text	luce-browser-render	web_fonts	shape_text_f32	Libraries/LibGfx/TextLayout.cpp:198	ported
+Gfx::shape_text	luce-browser-render	web_fonts	shape_text_utf16_view	Libraries/LibGfx/TextLayout.cpp:115	ported
 Gfx::size_would_overflow	luce-browser-render	gfx	size_would_overflow	Libraries/LibGfx/Bitmap.cpp:63	ported
-Gfx::slope_to_name	luce-browser-render	web_fonts	slope_to_name	Libraries/LibGfx/Font/FontStyleMapping.h:69	stub
+Gfx::slope_to_name	luce-browser-render	web_fonts	slope_to_name	Libraries/LibGfx/Font/FontStyleMapping.h:69	ported
 Gfx::smallest_of	luce-browser-render	gfx	smallest_of	Libraries/LibGfx/AffineTransform.cpp:194	ported
 Gfx::srgb_to_color	luce-browser-render	gfx	srgb_to_color	Libraries/LibGfx/ColorConversion.cpp:24	ported
 Gfx::srgb_to_hsl	luce-browser-render	gfx	srgb_to_hsl	Libraries/LibGfx/ColorConversion.cpp:376	ported
@@ -1655,8 +1730,8 @@ Gfx::to_skia_alpha_type	luce-browser-render	gfx	to_skia_alpha_type	Libraries/Lib
 Gfx::to_string	luce-browser-render	gfx	to_string	Libraries/LibGfx/TextAlignment.h:65	ported
 Gfx::transform_point	luce-browser-render	gfx	transform_point	Libraries/LibGfx/Matrix4x4.h:33	ported
 Gfx::translation_matrix	luce-browser-render	gfx	translation_matrix	Libraries/LibGfx/Matrix4x4.h:42	ported
-Gfx::weight_to_name	luce-browser-render	web_fonts	weight_to_name	Libraries/LibGfx/Font/FontStyleMapping.h:51	stub
-Gfx::width_to_name	luce-browser-render	web_fonts	width_to_name	Libraries/LibGfx/Font/FontStyleMapping.h:87	stub
+Gfx::weight_to_name	luce-browser-render	web_fonts	weight_to_name	Libraries/LibGfx/Font/FontStyleMapping.h:51	ported
+Gfx::width_to_name	luce-browser-render	web_fonts	width_to_name	Libraries/LibGfx/Font/FontStyleMapping.h:87	ported
 Gfx::xyz50_to_lab	luce-browser-render	gfx	xyz50_to_lab	Libraries/LibGfx/ColorConversion.cpp:341	ported
 Gfx::xyz50_to_linear_prophoto_rgb	luce-browser-render	gfx	xyz50_to_linear_prophoto_rgb	Libraries/LibGfx/ColorConversion.cpp:599	ported
 Gfx::xyz50_to_linear_srgb	luce-browser-render	gfx	xyz50_to_linear_srgb	Libraries/LibGfx/ColorConversion.cpp:170	ported
@@ -1673,6 +1748,7 @@ Media::ColorPrimaries	luce-browser-render	gfx	MediaColorPrimaries	Libraries/LibM
 Media::MatrixCoefficients	luce-browser-render	gfx	MediaMatrixCoefficients	Libraries/LibMedia/Color/CodingIndependentCodePoints.h:58	enum
 Media::TransferCharacteristics	luce-browser-render	gfx	MediaTransferCharacteristics	Libraries/LibMedia/Color/CodingIndependentCodePoints.h:36	enum
 Media::VideoFullRangeFlag	luce-browser-render	gfx	MediaVideoFullRangeFlag	Libraries/LibMedia/Color/CodingIndependentCodePoints.h:76	enum
+POINTS_PER_INCH	luce-browser-render	web_fonts	points_per_inch	Libraries/LibGfx/Font/Typeface.h:17	variable
 SkAutoConicToQuads::computeQuads(pts	luce-browser-render	gfx	sk_auto_conic_to_quads	skia/src/core/SkGeometry.h:521	ported
 SkBitmap	luce-browser-render	gfx	SkBitmap	Build/vcpkg_installed/arm64-osx-dynamic/include/skia/core/SkBitmap.h:0	opaque
 SkCanvas	luce-browser-render	gfx	SkCanvas	Libraries/LibGfx/PaintingSurface.h:29	opaque
@@ -1813,16 +1889,16 @@ WOFF2::WOFF2ByteBufferOut::Write	luce-browser-render	web_fonts	woff2_byte_buffer
 WOFF2::WOFF2ByteBufferOut::Write	luce-browser-render	web_fonts	woff2_byte_buffer_out_write_usize_impl	Libraries/LibGfx/Font/WOFF2/Loader.cpp:33	impl
 WOFF2::WOFF2ByteBufferOut::Write [dispatch]	luce-browser-render	web_fonts	woff2_byte_buffer_out_write	Libraries/LibGfx/Font/WOFF2/Loader.cpp:13	dispatcher
 WOFF2::WOFF2ByteBufferOut::Write [dispatch]	luce-browser-render	web_fonts	woff2_byte_buffer_out_write_usize	Libraries/LibGfx/Font/WOFF2/Loader.cpp:13	dispatcher
-WOFF2::convert_to_ttf	luce-browser-render	web_fonts	woff2_convert_to_ttf	Libraries/LibGfx/Font/WOFF2/Loader.cpp:56	stub
-WOFF2::try_load_from_bytes	luce-browser-render	web_fonts	woff2_try_load_from_bytes	Libraries/LibGfx/Font/WOFF2/Loader.cpp:68	stub
+WOFF2::convert_to_ttf	luce-browser-render	web_fonts	woff2_convert_to_ttf	Libraries/LibGfx/Font/WOFF2/Loader.cpp:56	ported
+WOFF2::try_load_from_bytes	luce-browser-render	web_fonts	woff2_try_load_from_bytes	Libraries/LibGfx/Font/WOFF2/Loader.cpp:68	ported
 WOFF::Header	luce-browser-render	web_fonts	Header	Libraries/LibGfx/Font/WOFF/Loader.cpp:18	struct
 WOFF::TableDirectory	luce-browser-render	web_fonts	TableDirectory	Libraries/LibGfx/Font/WOFF/Loader.cpp:84	struct
 WOFF::TableDirectoryEntry	luce-browser-render	web_fonts	TableDirectoryEntry	Libraries/LibGfx/Font/WOFF/Loader.cpp:37	struct
 WOFF::TableRecord	luce-browser-render	web_fonts	TableRecord	Libraries/LibGfx/Font/WOFF/Loader.cpp:97	struct
 WOFF::WOFF_SIGNATURE	luce-browser-render	web_fonts	woff_woff_signature	Libraries/LibGfx/Font/WOFF/Loader.cpp:62	variable
-WOFF::pow_2_less_than_or_equal	luce-browser-render	web_fonts	woff_pow_2_less_than_or_equal	Libraries/LibGfx/Font/WOFF/Loader.cpp:64	stub
-WOFF::try_load_from_bytes	luce-browser-render	web_fonts	woff_try_load_from_bytes	Libraries/LibGfx/Font/WOFF/Loader.cpp:105	stub
-WOFF::try_load_from_resource	luce-browser-render	web_fonts	woff_try_load_from_resource	Libraries/LibGfx/Font/WOFF/Loader.cpp:71	stub
+WOFF::pow_2_less_than_or_equal	luce-browser-render	web_fonts	woff_pow_2_less_than_or_equal	Libraries/LibGfx/Font/WOFF/Loader.cpp:64	ported
+WOFF::try_load_from_bytes	luce-browser-render	web_fonts	woff_try_load_from_bytes	Libraries/LibGfx/Font/WOFF/Loader.cpp:105	ported
+WOFF::try_load_from_resource	luce-browser-render	web_fonts	woff_try_load_from_resource	Libraries/LibGfx/Font/WOFF/Loader.cpp:71	ported
 Web::CSS::BorderData	luce-browser-render	display_list	BorderData	Libraries/LibWeb/CSS/ComputedValues.h:390	struct
 Web::CSS::BorderData [default member initializers]	luce-browser-render	display_list	border_data_init_fields	Libraries/LibWeb/CSS/ComputedValues.h:390	init fields
 Web::CSS::ColorInterpolationMethodStyleValue::PolarColorInterpolationMethod	luce-browser-render	display_list	PolarColorInterpolationMethod	Libraries/LibWeb/CSS/StyleValues/ColorInterpolationMethodStyleValue.h:17	struct

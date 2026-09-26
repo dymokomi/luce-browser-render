@@ -1,0 +1,146 @@
+#==============================================================================================
+#
+#   woff_loader - WOFF 1.0: unwrapping a WOFF file into an sfnt font
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Font/WOFF/Loader.cpp (lines 1-193). The structs are the
+#       packed ones of types_loader.lucb, read and written as bytes as the donor does. The
+#       zlib-compressed tables are inflated with luce-compress's flate module (the donor uses
+#       LibCompress's ZlibDecompressor, DESIGN.md §7.1), into a buffer of the table's
+#       declared size: a stream that does not fill it exactly fails like the donor's size
+#       check.
+#
+#==============================================================================================
+
+## count_leading_zeroes_safe<u16> (AK/BuiltinWrappers.h): 16 for zero.
+func count_leading_zeroes_safe_u16(value: u16) -> u32:
+    if value == 0:
+        return 16
+    var count: u32 = 0
+    var bit: u16 = 0x8000
+    while (value & bit) == 0:
+        count += 1
+        bit >>= 1
+    return count
+
+## BigEndian<u32> read (operator T).
+func woff_be32(value: ak.BigEndian[u32]) -> u32:
+    return ak.big_endian_to_t(&value)
+
+## BigEndian<u16> read (operator T).
+func woff_be16(value: ak.BigEndian[u16]) -> u16:
+    return ak.big_endian_to_t(&value)
+
+## BigEndian<u32> constructed from a value.
+func woff_make_be32(value: u32) -> ak.BigEndian[u32]:
+    var result: ak.BigEndian[u32]
+    ak.big_endian_construct(&result, value)
+    return result
+
+## BigEndian<u16> constructed from a value.
+func woff_make_be16(value: u16) -> ak.BigEndian[u16]:
+    var result: ak.BigEndian[u16]
+    ak.big_endian_construct(&result, value)
+    return result
+
+## Ported from Libraries/LibGfx/Font/WOFF/Loader.cpp:64 WOFF::pow_2_less_than_or_equal.
+func woff_pow_2_less_than_or_equal(x: u16) -> u16:
+    assert(x > 0)
+    assert(x < 32769)
+    return (u16)(1 << (16 - count_leading_zeroes_safe_u16(x - 1)))
+
+## Ported from Libraries/LibGfx/Font/WOFF/Loader.cpp:71 WOFF::try_load_from_resource.
+pub func woff_try_load_from_resource(resource: const ak.CoreResource*, index: u32 = 0) -> Typeface*!:
+    # resource.data(): LibCore is not ported; see font_data.lucb.
+    trap("unported: Core::Resource::data (LibCore is not ported)")
+
+## Ported from Libraries/LibGfx/Font/WOFF/Loader.cpp:105 WOFF::try_load_from_bytes.
+pub func woff_try_load_from_bytes(buffer: const u8[], index: u32 = 0) -> Typeface*!:
+    var stream: ak.FixedMemoryStream = ---
+    ak.fixed_memory_stream_construct(&stream, buffer)
+    let header = try ak.stream_read_value[Header](stream.stream())
+
+    # The signature field in the WOFF header MUST contain the "magic number" 0x774F4646. If the field does not contain this value, user agents MUST reject the file as invalid.
+    if woff_be32(header.signature) != woff_woff_signature:
+        error(ak.ak_error, "Invalid WOFF signature")
+    # The flavor field corresponds to the "sfnt version" field found at the beginning of an sfnt file,
+    # indicating the type of font data contained. Although only fonts of type 0x00010000 (the version number 1.0 as a 16.16 fixed-point value, indicating TrueType glyph data)
+    # and 0x4F54544F (the tag 'OTTO', indicating CFF glyph data) are widely supported at present,
+    # it is not an error in the WOFF file if the flavor field contains a different value,
+    # indicating a WOFF-packaged version of a different sfnt flavor.
+    # (The value 0x74727565 'true' has been used for some TrueType-flavored fonts on Mac OS, for example.)
+    # Whether client software will actually support other types of sfnt font data is outside the scope of the WOFF specification, which simply describes how the sfnt is repackaged for Web use.
+
+    let num_tables = woff_be16(header.num_tables)
+    let length = woff_be32(header.length)
+    let total_sfnt_size = woff_be32(header.total_sfnt_size)
+    var expected_total_sfnt_size: usize = sizeof(TableDirectory) + (usize)num_tables * 16
+    if (usize)length > buffer.length:
+        error(ak.ak_error, "Invalid WOFF length")
+    if num_tables == 0 or num_tables > 0xFFFF // 16:
+        error(ak.ak_error, "Invalid WOFF numTables")
+    if woff_be16(header.reserved) != 0:
+        error(ak.ak_error, "Invalid WOFF reserved field")
+    if woff_be32(header.meta_length) == 0 and woff_be32(header.meta_offset) != 0:
+        error(ak.ak_error, "Invalid WOFF meta block offset")
+    if woff_be32(header.priv_length) == 0 and woff_be32(header.priv_offset) != 0:
+        error(ak.ak_error, "Invalid WOFF private block offset")
+    if sizeof(Header) + (usize)num_tables * sizeof(TableDirectoryEntry) > (usize)length:
+        error(ak.ak_error, "Truncated WOFF table directory")
+    if (usize)total_sfnt_size < expected_total_sfnt_size:
+        error(ak.ak_error, "Invalid WOFF total sfnt size")
+    if (u64)total_sfnt_size > 10 * ak.mi_b:
+        error(ak.ak_error, "Uncompressed font is more than 10 MiB")
+    var font_buffer = try ak.byte_buffer_create_zeroed((usize)total_sfnt_size)
+
+    let search_range = woff_pow_2_less_than_or_equal(num_tables)
+    var table_directory = TableDirectory(
+        sfnt_version = header.flavor,
+        num_tables = header.num_tables,
+        search_range = woff_make_be16(search_range *% 16),
+        entry_selector = woff_make_be16(ak.log2_u16(search_range)),
+        range_shift = woff_make_be16(num_tables *% 16 -% search_range *% 16))
+    ak.byte_buffer_overwrite(&font_buffer, 0, &table_directory, sizeof(TableDirectory))
+
+    var font_buffer_offset: usize = sizeof(TableDirectory) + (usize)num_tables * sizeof(TableRecord)
+    for i in 0..<(usize)num_tables:
+        let entry = try ak.stream_read_value[TableDirectoryEntry](stream.stream())
+        let entry_offset = (usize)woff_be32(entry.offset)
+        let comp_length = (usize)woff_be32(entry.comp_length)
+        let orig_length = (usize)woff_be32(entry.orig_length)
+
+        expected_total_sfnt_size += (orig_length + 3) & 0xFFFFFFFC
+        if expected_total_sfnt_size > (usize)total_sfnt_size:
+            error(ak.ak_error, "Invalid WOFF total sfnt size")
+        if entry_offset + comp_length > (usize)length:
+            error(ak.ak_error, "Truncated WOFF table")
+        if font_buffer_offset + orig_length > ak.byte_buffer_size(&font_buffer):
+            error(ak.ak_error, "Uncompressed WOFF table too big")
+        if comp_length < orig_length:
+            let compressed = buffer[entry_offset..<entry_offset + comp_length]
+            let destination = ak.byte_buffer_bytes(&font_buffer)[font_buffer_offset..<font_buffer_offset + orig_length]
+            # ZlibDecompressor::read_until_eof, then the size check: inflating into exactly
+            # the table's size fails for a stream of another length.
+            let consumed = flate.inflate_zlib(compressed, destination) catch:
+                error(ak.ak_error, "Invalid decompressed WOFF table length")
+            discard(consumed)
+        else:
+            if comp_length != orig_length:
+                error(ak.ak_error, "Invalid uncompressed WOFF table length")
+            ak.byte_buffer_overwrite(&font_buffer, font_buffer_offset, (const void*)(buffer.data + entry_offset), orig_length)
+
+        let table_directory_offset = sizeof(TableDirectory) + i * sizeof(TableRecord)
+        var table_record = TableRecord(
+            table_tag = entry.tag,
+            checksum = entry.orig_checksum,
+            offset = woff_make_be32((u32)font_buffer_offset),
+            length = entry.orig_length)
+        ak.byte_buffer_overwrite(&font_buffer, table_directory_offset, &table_record, sizeof(TableRecord))
+
+        font_buffer_offset += orig_length
+
+    if (usize)total_sfnt_size != expected_total_sfnt_size:
+        error(ak.ak_error, "Invalid WOFF total sfnt size")
+
+    let font_data = font_data_create_from_byte_buffer(font_buffer)
+    return try typeface_try_load_from_font_data(font_data, index)

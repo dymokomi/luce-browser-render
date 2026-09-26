@@ -1,0 +1,220 @@
+#==============================================================================================
+#
+#   sk_font - the parts of Skia's SkFont that LibGfx uses: font metrics, measuring text, glyph
+#             paths and text-blob bounds, with Skia's FreeType backend's numbers
+#
+#   DESCRIPTION:
+#       New code of the luce-browser port (DESIGN.md §6.7, §7.1). Gfx::Font asks an SkFont for
+#       its metrics (SkFont::getMetrics), the advance of "0" (SkFont::measureText) and glyph
+#       paths (SkFont::getPath); GlyphRun asks SkTextBlob for its bounds. Ladybird's test mode
+#       forces Skia's FontConfig font manager, so these are the numbers of Skia's FreeType
+#       scaler context (SkFontHost_FreeType.cpp), reproduced here float for float:
+#
+#       - SkScalerContext_FreeType::generateFontMetrics: the typographic metrics when OS/2's
+#         USE_TYPO_METRICS bit is set, FreeType's ascender/descender/height otherwise, each
+#         divided by units per em and multiplied by the text size in single precision; the
+#         x-height from OS/2 or from the 'x' glyph's box;
+#       - SkStrikeSpec::MakeCanonicalized: text larger than 256 px is measured at 64 px
+#         unhinted and scaled back (SkFont::setupForAsPaths);
+#       - glyph advances with Skia's default hinting (FT_LOAD_TARGET_NORMAL): the phantom
+#         points rounded to whole pixels, or the linear advance when unhinted.
+#
+#==============================================================================================
+
+## The fields of SkFontMetrics that LibGfx and the display list read.
+pub struct SkFontMetrics:
+    pub var top: f32
+    pub var ascent: f32
+    pub var descent: f32
+    pub var bottom: f32
+    pub var leading: f32
+    pub var avg_char_width: f32
+    pub var x_min: f32
+    pub var x_max: f32
+    pub var x_height: f32
+    pub var cap_height: f32
+    pub var underline_thickness: f32
+    pub var underline_position: f32
+    pub var strikeout_thickness: f32
+    pub var strikeout_position: f32
+
+## The largest text size Skia measures directly (SkStrikeSpec::ShouldDrawAsPath's memory limit).
+let sk_max_size_for_glyph_cache: f32 = 256.0
+
+## The size of SkFontPriv::kCanonicalTextSizeForPaths.
+let sk_canonical_text_size_for_paths: f32 = 64.0
+
+## An SkFont over `typeface` at `size` pixels.
+pub func sk_font_make(typeface: const SkTypeface*, size: f32) -> SkFont:
+    return SkFont(typeface = typeface, size = size)
+
+## SkFont::getMetrics.
+pub func sk_font_get_metrics(font: const SkFont*) -> SkFontMetrics:
+    var metrics: SkFontMetrics
+    let typeface = font.typeface else return metrics
+    if font.size > sk_max_size_for_glyph_cache:
+        # MakeCanonicalized: measured as a path font at the canonical size, then scaled.
+        metrics = sk_scaler_font_metrics(typeface.face, sk_canonical_text_size_for_paths, false)
+        let scale = font.size / sk_canonical_text_size_for_paths
+        metrics.top *= scale
+        metrics.ascent *= scale
+        metrics.descent *= scale
+        metrics.bottom *= scale
+        metrics.leading *= scale
+        metrics.avg_char_width *= scale
+        metrics.x_min *= scale
+        metrics.x_max *= scale
+        metrics.x_height *= scale
+        metrics.cap_height *= scale
+        metrics.underline_thickness *= scale
+        metrics.underline_position *= scale
+        metrics.strikeout_thickness *= scale
+        metrics.strikeout_position *= scale
+        return metrics
+    return sk_scaler_font_metrics(typeface.face, font.size, true)
+
+## The top of a glyph's box in pixels (getCBoxForLetter: the control box of the outline loaded
+## at the size, yMax in 26.6 over 64), or none when the face has no such glyph.
+func sk_letter_box_top(face: const SfntFace*, letter: u32, size: f32) -> f32?:
+    let glyph = sfnt_face_ft_glyph_for_code_point(face, letter)
+    if glyph == 0:
+        return none
+    let outline = sfnt_face_load_outline(face, glyph, sfnt_face_ft_scale(face, size)) else return none
+    if ak.vector_size(&outline.ys) == 0:
+        return 0.0
+    var y_max: i64 = *ak.vector_at_const(&outline.ys, 0)
+    for y in ak.vector_span_const(&outline.ys):
+        if y > y_max:
+            y_max = y
+    return (f32)y_max / 64.0
+
+## SkScalerContext_FreeType::generateFontMetrics at text size `size` (fScale.y()).
+## FIXME: FreeType hints the letter boxes it measures when the OS/2 table has no x-height
+## (`hinted`); the port measures the unhinted outline.
+func sk_scaler_font_metrics(face: const SfntFace*, size: f32, hinted: bool) -> SkFontMetrics:
+    var metrics: SkFontMetrics
+    let upem = (f32)face.units_per_em
+
+    # use the os/2 table as a source of reasonable defaults.
+    var x_height: f32 = 0.0
+    var avg_char_width: f32 = 0.0
+    var cap_height: f32 = 0.0
+    var strikeout_thickness: f32 = 0.0
+    var strikeout_position: f32 = 0.0
+    if let os2 = face.os2:
+        x_height = (f32)os2.sx_height / upem * size
+        avg_char_width = (f32)os2.x_avg_char_width / upem
+        strikeout_thickness = (f32)os2.y_strikeout_size / upem
+        strikeout_position = -(f32)os2.y_strikeout_position / upem
+        if os2.version != 0xFFFF and os2.version >= 2:
+            cap_height = (f32)os2.s_cap_height / upem * size
+
+    # pull from format-specific metrics as needed
+    var ascent: f32
+    var descent: f32
+    var leading: f32
+    # FreeType will always use HHEA metrics if they're not zero. It completely ignores the
+    # OS/2 fsSelection::UseTypoMetrics bit.
+    var use_typo_metrics = false
+    if let os2 = face.os2:
+        use_typo_metrics = os2.version != 0xFFFF and (os2.fs_selection & (1 << 7)) != 0
+    if use_typo_metrics:
+        let os2 = face.os2 else trap("VERIFY_NOT_REACHED")
+        ascent = -(f32)os2.s_typo_ascender / upem
+        descent = -(f32)os2.s_typo_descender / upem
+        leading = (f32)os2.s_typo_line_gap / upem
+    else:
+        ascent = -(f32)face.ascender / upem
+        descent = -(f32)face.descender / upem
+        leading = (f32)((i32)face.height + ((i32)face.descender - (i32)face.ascender)) / upem
+    let x_min = (f32)face.x_min / upem
+    let x_max = (f32)face.x_max / upem
+    let y_min = -(f32)face.y_min / upem
+    let y_max = -(f32)face.y_max / upem
+    let underline_thickness = (f32)face.underline_thickness / upem
+    let underline_position = -(f32)((i32)face.underline_position + (i32)face.underline_thickness // 2) / upem
+
+    # we may be able to synthesize x_height and cap_height from outline
+    if x_height == 0.0:
+        if let top = sk_letter_box_top(face, (u32)'x', size):
+            x_height = top
+    if cap_height == 0.0:
+        if let top = sk_letter_box_top(face, (u32)'H', size):
+            cap_height = top
+
+    # synthesize elements that were not provided by the os/2 table or format-specific metrics
+    if x_height == 0.0:
+        x_height = -ascent * size
+    if avg_char_width == 0.0:
+        avg_char_width = x_max - x_min
+    if cap_height == 0.0:
+        cap_height = -ascent * size
+
+    # disallow negative linespacing
+    if leading < 0.0:
+        leading = 0.0
+
+    metrics.top = y_max * size
+    metrics.ascent = ascent * size
+    metrics.descent = descent * size
+    metrics.bottom = y_min * size
+    metrics.leading = leading * size
+    metrics.avg_char_width = avg_char_width * size
+    metrics.x_min = x_min * size
+    metrics.x_max = x_max * size
+    metrics.x_height = x_height
+    metrics.cap_height = cap_height
+    metrics.underline_thickness = underline_thickness * size
+    metrics.underline_position = underline_position * size
+    metrics.strikeout_thickness = strikeout_thickness * size
+    metrics.strikeout_position = strikeout_position * size
+    return metrics
+
+## The advance of `glyph` in pixels as Skia's glyph cache has it for the font:
+## SkScalerContext_FreeType::generateMetrics with hinting (the phantom points rounded to
+## whole pixels, FT_LOAD_TARGET_NORMAL) at sizes up to 256 px, the linear advance of the
+## unhinted canonical font scaled back above that.
+pub func sk_font_glyph_advance(font: const SkFont*, glyph: u32) -> f32:
+    let typeface = font.typeface else return 0.0
+    let face = typeface.face
+    let advance_units = (i64)sfnt_face_advance(face, glyph)
+    if font.size > sk_max_size_for_glyph_cache:
+        # linearHoriAdvance: FT_MulDiv(advance, x_scale, 64) in 16.16 at the size used.
+        let linear = ft_mul_div(advance_units, sfnt_face_ft_scale(face, sk_canonical_text_size_for_paths), 64)
+        let advance = (f32)linear / 65536.0
+        return advance * (font.size / sk_canonical_text_size_for_paths)
+    let scale = sfnt_face_ft_scale(face, font.size)
+    var pp1_units: i64 = 0
+    if face.outline_format == SfntOutlineFormat.true_type:
+        if let range = sfnt_glyf_range(face, glyph):
+            let x_min: i64 = (i64)sfnt_i16(face.glyf, range.0 + 2) if range.1 > range.0 else 0
+            pp1_units = x_min - (i64)sfnt_face_left_side_bearing(face, glyph)
+    let pp1 = ft_pix_round(ft_mul_fix(pp1_units, scale))
+    let pp2 = ft_pix_round(ft_mul_fix(pp1_units + advance_units, scale))
+    return (f32)(pp2 - pp1) * 0.015625
+
+## SkFont::measureText of `text` (UTF-8 bytes of ASCII here): the sum of the glyph advances.
+pub func sk_font_measure_ascii(font: const SkFont*, text: const u8[]) -> f32:
+    let typeface = font.typeface else return 0.0
+    var width: f32 = 0.0
+    for byte in text:
+        width += sk_font_glyph_advance(font, sfnt_face_ft_glyph_for_code_point(typeface.face, (u32)byte))
+    return width
+
+## SkFont::getPath: the outline of `glyph` at the font's size.
+pub func sk_font_get_path(font: const SkFont*, glyph: u32) -> GlyphPath:
+    let typeface = font.typeface else return GlyphPath()
+    return sfnt_face_glyph_path(typeface.face, glyph, font.size)
+
+## SkFontPriv::GetFontBounds: the face's bounding box (head) at the font's size, in Skia's
+## y-down coordinates: (left, top, right, bottom).
+pub func sk_font_bounds(font: const SkFont*) -> (f32, f32, f32, f32):
+    let typeface = font.typeface else return (0.0, 0.0, 0.0, 0.0)
+    let face = typeface.face
+    let upem = (f32)face.units_per_em
+    # SkTypeface::getBounds: the head box over units per em, y flipped.
+    let left = (f32)face.x_min / upem
+    let top = -(f32)face.y_max / upem
+    let right = (f32)face.x_max / upem
+    let bottom = -(f32)face.y_min / upem
+    return (left * font.size, top * font.size, right * font.size, bottom * font.size)

@@ -25,10 +25,21 @@ pub enum FontCascadeListTriggerPendingLoads as u8:
     no = 0
     yes = 1
 
-## Gfx::FontCascadeList::Entry (Libraries/LibGfx/FontCascadeList.h:58): opaque in this phase (not in the phase-1 closure).
+## Gfx::FontCascadeList::Entry (Libraries/LibGfx/FontCascadeList.h:58), filled by region r09.
 pub struct FontCascadeListEntry:
-    pub var opaque_: u8
+    pub var font: const Font*
+    pub var range_data: FontCascadeListEntryRangeData?
 
-## Gfx::FontCascadeList::PendingFace (Libraries/LibGfx/FontCascadeList.h:69): opaque in this phase (not in the phase-1 closure).
+## Gfx::FontCascadeList::Entry::RangeData (Libraries/LibGfx/FontCascadeList.h:60), added by
+## region r09.
+pub struct FontCascadeListEntryRangeData:
+    ## The enclosing range is the union of all Unicode ranges. Used for fast skipping.
+    pub var enclosing_range: UnicodeRange
+    pub var unicode_ranges: ak.Vector[UnicodeRange]
+
+## Gfx::FontCascadeList::PendingFace (Libraries/LibGfx/FontCascadeList.h:69), filled by region
+## r09.
 pub struct FontCascadeListPendingFace:
-    pub var opaque_: u8
+    pub var m_enclosing_range: UnicodeRange
+    pub var m_unicode_ranges: ak.Vector[UnicodeRange]
+    pub var m_start_load: ak.Function0[unit]

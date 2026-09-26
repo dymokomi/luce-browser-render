@@ -10,9 +10,11 @@
 #
 #==============================================================================================
 
-## Gfx::TypefaceSkia::Impl (Libraries/LibGfx/Font/TypefaceSkia.h:0): opaque in this phase (not in the phase-1 closure).
+## Gfx::TypefaceSkia::Impl (Libraries/LibGfx/Font/TypefaceSkia.cpp:34), filled by region r09:
+## the typeface Skia made (the port's OpenType reader, types_typeface.lucb SkTypeface). The
+## stream the donor keeps for system fonts has no counterpart.
 pub struct Impl:
-    pub var opaque_: u8
+    pub var skia_typeface: SkTypeface*
 
 # mark: TypefaceSkia ============================================================================
 
@@ -59,9 +61,9 @@ pub func as_if_typeface_skia[P: IsTypeface](p: P*) -> TypefaceSkia*?:
 pub func as_typeface_skia[P: IsTypeface](p: P*) -> TypefaceSkia*:
     return as_if_typeface_skia(p) else trap("as<Gfx::TypefaceSkia> failed")
 
-## Gfx::TypefaceSkia::GlyphPage (Libraries/LibGfx/Font/TypefaceSkia.h:54): opaque in this phase (not in the phase-1 closure).
+## Gfx::TypefaceSkia::GlyphPage (Libraries/LibGfx/Font/TypefaceSkia.h:54), filled by region r09.
 pub struct TypefaceSkiaGlyphPage:
-    pub var opaque_: u8
+    pub var glyph_ids: u16[256]
 
 ## Gfx::TypefaceSkia::GlyphPage::glyphs_per_page (Libraries/LibGfx/Font/TypefaceSkia.h:55).
 pub let typeface_skia_glyph_page_glyphs_per_page: usize = 256

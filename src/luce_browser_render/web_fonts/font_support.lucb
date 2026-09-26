@@ -1,0 +1,67 @@
+#==============================================================================================
+#
+#   font_support - which font formats and font technologies the engine supports
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Font/FontSupport.cpp (lines 1-84). The donor's answers are
+#       HarfBuzz's capabilities and are kept as they are (FIXME: Determine these
+#       automatically); the port's shaper and reader support less (see hb_buffer.lucb,
+#       hb_layout.lucb, woff2_loader.lucb).
+#
+#==============================================================================================
+
+## Ported from Libraries/LibGfx/Font/FontSupport.cpp:13 Gfx::font_format_is_supported.
+pub func font_format_is_supported(format_: FontFormat) -> bool:
+    # FIXME: Determine these automatically.
+    match format_:
+        .embedded_open_type: return false
+        .open_type: return true
+        .svg: return false
+        .true_type: return true
+        .true_type_collection: return true
+        .woff: return true
+        .woff2: return true
+        _: return false
+
+## Ported from Libraries/LibGfx/Font/FontSupport.cpp:36 Gfx::font_tech_is_supported.
+pub func font_tech_is_supported(font_tech: FontTech) -> bool:
+    # https://drafts.csswg.org/css-fonts-4/#font-tech-definitions
+    # FIXME: Determine these automatically.
+    match font_tech:
+        .features_opentype:
+            # GSUB and GPOS, supported by HarfBuzz
+            return true
+        .features_aat:
+            # morx and kerx, supported by HarfBuzz
+            return true
+        .features_graphite:
+            # Silf, Glat , Gloc , Feat and Sill. HarfBuzz may or may not be built with support for it.
+            # (HB_HAS_GRAPHITE is not set in Ladybird's build.)
+            return false
+        .variations:
+            # avar, cvar, fvar, gvar, HVAR, MVAR, STAT, and VVAR, supported by HarfBuzz
+            return true
+        .color_colrv0, .color_colrv1:
+            # COLR, supported by HarfBuzz
+            return true
+        .color_svg:
+            # SVG, supported by HarfBuzz
+            return true
+        .color_sbix:
+            # sbix, supported by HarfBuzz
+            return true
+        .color_cbdt:
+            # CBDT, supported by HarfBuzz
+            return true
+        .palettes:
+            # CPAL, supported by HarfBuzz
+            return true
+        .incremental:
+            # Incremental Font Transfer: https://w3c.github.io/IFT/Overview.html
+            return false
+        # https://drafts.csswg.org/css-fonts-5/#font-tech-definitions
+        .avar2:
+            # avar version 2, supported by HarfBuzz
+            return true
+        _:
+            return false
