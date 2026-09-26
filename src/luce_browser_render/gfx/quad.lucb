@@ -1,0 +1,77 @@
+#==============================================================================================
+#
+#   quad - Gfx::Quad<float> (FloatQuad)
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Quad.h (lines 14-80) for T = float, the instantiation
+#       AffineTransform::map_to_quad produces.
+#
+#==============================================================================================
+
+## Ported from Libraries/LibGfx/Quad.h:17 Gfx::Quad::Quad for FloatQuad.
+pub func float_quad_construct(this: FloatQuad*, p1: FloatPoint, p2: FloatPoint, p3: FloatPoint, p4: FloatPoint):
+    this.m_p1 = p1
+    this.m_p2 = p2
+    this.m_p3 = p3
+    this.m_p4 = p4
+
+## Ported from Libraries/LibGfx/Quad.h:25 Gfx::Quad::p1 for FloatQuad.
+pub func float_quad_p1(this: const FloatQuad*) -> FloatPoint:
+    return this.m_p1
+
+## Ported from Libraries/LibGfx/Quad.h:26 Gfx::Quad::p2 for FloatQuad.
+pub func float_quad_p2(this: const FloatQuad*) -> FloatPoint:
+    return this.m_p2
+
+## Ported from Libraries/LibGfx/Quad.h:27 Gfx::Quad::p3 for FloatQuad.
+pub func float_quad_p3(this: const FloatQuad*) -> FloatPoint:
+    return this.m_p3
+
+## Ported from Libraries/LibGfx/Quad.h:28 Gfx::Quad::p4 for FloatQuad.
+pub func float_quad_p4(this: const FloatQuad*) -> FloatPoint:
+    return this.m_p4
+
+## Ported from Libraries/LibGfx/Quad.h:30 Gfx::Quad::bounding_rect for FloatQuad.
+pub func float_quad_bounding_rect(this: const FloatQuad*) -> FloatRect:
+    let left = ak.min_f32(ak.min_f32(float_point_x(&this.m_p1), float_point_x(&this.m_p2)), ak.min_f32(float_point_x(&this.m_p3), float_point_x(&this.m_p4)))
+    let right = ak.max_f32(ak.max_f32(float_point_x(&this.m_p1), float_point_x(&this.m_p2)), ak.max_f32(float_point_x(&this.m_p3), float_point_x(&this.m_p4)))
+    let width = right - left
+
+    let top = ak.min_f32(ak.min_f32(float_point_y(&this.m_p1), float_point_y(&this.m_p2)), ak.min_f32(float_point_y(&this.m_p3), float_point_y(&this.m_p4)))
+    let bottom = ak.max_f32(ak.max_f32(float_point_y(&this.m_p1), float_point_y(&this.m_p2)), ak.max_f32(float_point_y(&this.m_p3), float_point_y(&this.m_p4)))
+    let height = bottom - top
+
+    return FloatRect(FloatPoint(left, top), FloatSize(width, height))
+
+## Ported from Libraries/LibGfx/Quad.h:44 Gfx::Quad::contains for FloatQuad.
+pub func float_quad_contains(this: const FloatQuad*, point: FloatPoint) -> bool:
+    # Even-Odd algorithm: https://www.geeksforgeeks.org/even-odd-method-winding-number-method-inside-outside-test-of-a-polygon/
+    #
+    # 1. "Constructing a line segment between the point (P) to be examined and a known point outside the polygon"
+    #      - We're using horizontal line from (point.x, point.y) to (bounding_rect().left + bounding_rect().width + 1, point.y)
+    #        (i.e. just +1 to right of furthest-right point in quad)
+    #
+    # 2. "The number of times the line segment intersects the polygon boundary is then counted."
+    #      - We count the line's intersections with the quad by checking each quad edge for intersection (1-2, 2-3, 3-4, 4-1)
+    #
+    # 3. "The point (P) is an internal point if the number of polygon edges intersected by this line is odd;
+    #    otherwise, the point is an external point."
+
+    var intersections_with_quad: u8 = 0
+    let quad_points = [&this.m_p1, &this.m_p2, &this.m_p3, &this.m_p4, &this.m_p1]
+    var i: usize = 0
+    var j: usize = 1
+    while i < 4 and j < 5:
+        if (float_point_y(quad_points[i]) > float_point_y(&point)) == (float_point_y(quad_points[j]) > float_point_y(&point)):
+            i += 1
+            j += 1
+            continue
+
+        let x_coord_of_intersection_with_edge = ((float_point_x(quad_points[j]) - float_point_x(quad_points[i])) * (float_point_y(&point) - float_point_y(quad_points[i]))
+            / (float_point_y(quad_points[j]) - float_point_y(quad_points[i])) + float_point_x(quad_points[i]))
+        if float_point_x(&point) < x_coord_of_intersection_with_edge:
+            intersections_with_quad += 1
+        i += 1
+        j += 1
+
+    return (intersections_with_quad % 2) == 1

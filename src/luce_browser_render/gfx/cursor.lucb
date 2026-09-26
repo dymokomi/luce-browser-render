@@ -1,0 +1,42 @@
+#==============================================================================================
+#
+#   cursor - Cursor: the standard cursors and image cursors
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Cursor.h (lines 50-97) and Cursor.cpp (lines 12-20):
+#       standard_cursor_to_string and ImageCursor::operator==. The IPC encoder and decoder
+#       (Cursor.cpp lines 22-41) are not ported. The Cursor variant is `Cursor` in
+#       types_variants.lucb.
+#
+#==============================================================================================
+
+## Ported from Libraries/LibGfx/Cursor.cpp:14 Gfx::ImageCursor::operator==.
+pub func image_cursor_eq(this: const ImageCursor*, other: ImageCursor) -> bool:
+    return (int_point_eq(&this.hotspot, other.hotspot)
+        and shareable_bitmap_bitmap_const(&this.bitmap) == shareable_bitmap_bitmap_const(&other.bitmap))
+
+## Ported from Libraries/LibGfx/Cursor.h:50 Gfx::standard_cursor_to_string.
+pub func standard_cursor_to_string(cursor: StandardCursor) -> ak.StringView:
+    match cursor:
+        .none_: return ak.sv("None")
+        .hidden: return ak.sv("Hidden")
+        .arrow: return ak.sv("Arrow")
+        .crosshair: return ak.sv("Crosshair")
+        .i_beam: return ak.sv("IBeam")
+        .resize_horizontal: return ak.sv("ResizeHorizontal")
+        .resize_vertical: return ak.sv("ResizeVertical")
+        .resize_diagonal_tlbr: return ak.sv("ResizeDiagonalTLBR")
+        .resize_diagonal_bltr: return ak.sv("ResizeDiagonalBLTR")
+        .resize_column: return ak.sv("ResizeColumn")
+        .resize_row: return ak.sv("ResizeRow")
+        .hand: return ak.sv("Hand")
+        .help: return ak.sv("Help")
+        .open_hand: return ak.sv("OpenHand")
+        .drag: return ak.sv("Drag")
+        .drag_copy: return ak.sv("DragCopy")
+        .move: return ak.sv("Move")
+        .wait: return ak.sv("Wait")
+        .disallowed: return ak.sv("Disallowed")
+        .eyedropper: return ak.sv("Eyedropper")
+        .zoom: return ak.sv("Zoom")
+        _: trap("VERIFY_NOT_REACHED")

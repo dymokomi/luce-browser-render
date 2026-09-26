@@ -12,9 +12,11 @@
 pub struct CssPixelsTraits: ak.Traits[CssPixels]:
     var empty_: u8
 
-    func hash_of(key: const CssPixels*) -> u32: trap("unported: AK::Traits<CssPixels>::hash")
+    # Ported from Libraries/LibWeb/PixelUnits.h:495 AK::Traits<Web::CSSPixels>::hash.
+    func hash_of(key: const CssPixels*) -> u32: return ak.u32_hash((u32)css_pixels_raw_value(key))
 
-    func equals(a: const CssPixels*, b: const CssPixels*) -> bool: trap("unported: AK::Traits<CssPixels>::equals")
+    # Ported from Libraries/LibWeb/PixelUnits.h:500 AK::Traits<Web::CSSPixels>::equals.
+    func equals(a: const CssPixels*, b: const CssPixels*) -> bool: return *a == *b
 
 ## AK::Traits<FourCc>: AK's hash and equality for the key type.
 pub struct FourCcTraits: ak.Traits[FourCc]:
@@ -28,6 +30,8 @@ pub struct FourCcTraits: ak.Traits[FourCc]:
 pub struct IntSizeTraits: ak.Traits[IntSize]:
     var empty_: u8
 
-    func hash_of(key: const IntSize*) -> u32: trap("unported: AK::Traits<IntSize>::hash")
+    # Ported from Libraries/LibGfx/Size.h:218 AK::Traits<Gfx::Size<T>>::hash.
+    func hash_of(key: const IntSize*) -> u32: return int_size_hash(key)
 
-    func equals(a: const IntSize*, b: const IntSize*) -> bool: trap("unported: AK::Traits<IntSize>::equals")
+    # AK::DefaultTraits<Gfx::IntSize>::equals: Size::operator==.
+    func equals(a: const IntSize*, b: const IntSize*) -> bool: return int_size_eq(a, *b)

@@ -10,6 +10,14 @@
 #
 #==============================================================================================
 
+## Gfx::Quad<float> (Libraries/LibGfx/Quad.h:15), instantiated (DESIGN.md §2.8); added by hand
+## (region r08) for AffineTransform::map_to_quad.
+pub struct FloatQuad:
+    pub var m_p1: FloatPoint
+    pub var m_p2: FloatPoint
+    pub var m_p3: FloatPoint
+    pub var m_p4: FloatPoint
+
 ## Gfx::Quad (Libraries/LibGfx/Quad.h:15): opaque in this phase (not in the phase-1 closure).
 pub struct Quad:
     pub var opaque_: u8

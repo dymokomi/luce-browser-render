@@ -1,0 +1,56 @@
+#==============================================================================================
+#
+#   anonymous_buffer - Core::AnonymousBuffer: the few members Palette uses
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibCore/AnonymousBuffer.cpp (lines 15-56) and AnonymousBuffer.h
+#       (lines 46-67): creating a buffer of a size, its size and its data. LibCore is not a
+#       region of this port; PaletteImpl keeps its SystemTheme in an AnonymousBuffer, so
+#       region r08 ports these members here.
+#
+#       The donor backs a buffer with an anonymous shared-memory file (anon_create and
+#       mmap) so that it can cross processes. This port runs in one process: the buffer is
+#       zeroed managed memory (atomic storage, DESIGN.md §3.3 rule 5, since a SystemTheme
+#       holds no pointers) and has no file descriptor (m_fd stays -1). Nothing is unmapped
+#       or closed (DESIGN.md §3.3 rule 3).
+#
+#==============================================================================================
+
+## Ported from Libraries/LibCore/AnonymousBuffer.cpp:15 Core::AnonymousBuffer::create_with_size.
+pub func core_anonymous_buffer_create_with_size(size: usize) -> CoreAnonymousBuffer!:
+    # The donor's anon_create has no counterpart; create_from_anon_fd with no fd.
+    return try core_anonymous_buffer_create_from_anon_fd(-1, size)
+
+## Ported from Libraries/LibCore/AnonymousBuffer.cpp:21 Core::AnonymousBufferImpl::create.
+func core_anonymous_buffer_impl_create(fd: i32, size: usize) -> CoreAnonymousBufferImpl*!:
+    var data: void*? = none
+    # POSIX mmap rejects a zero length with EINVAL, so leave m_data null for zero-size buffers.
+    if size > 0:
+        # The donor maps `fd` (pages of zeros for a new file); this port allocates zeroed
+        # atomic storage.
+        let bytes = ak.alloc_atomic(size)
+        memory.set(bytes, 0)
+        data = (void*)bytes.data
+    return try new CoreAnonymousBufferImpl(m_fd = fd, m_size = size, m_data = data)
+
+## Ported from Libraries/LibCore/AnonymousBuffer.cpp:45 Core::AnonymousBuffer::create_from_anon_fd.
+func core_anonymous_buffer_create_from_anon_fd(fd: i32, size: usize) -> CoreAnonymousBuffer!:
+    let impl = try core_anonymous_buffer_impl_create(fd, size)
+    return CoreAnonymousBuffer(m_impl = impl)
+
+## Ported from Libraries/LibCore/AnonymousBuffer.h:46 Core::AnonymousBuffer::is_valid.
+pub func core_anonymous_buffer_is_valid(this: const CoreAnonymousBuffer*) -> bool:
+    return this.m_impl != none
+
+## Ported from Libraries/LibCore/AnonymousBuffer.h:49 Core::AnonymousBuffer::size.
+pub func core_anonymous_buffer_size(this: const CoreAnonymousBuffer*) -> usize:
+    if let impl = this.m_impl:
+        return impl.m_size
+    return 0
+
+## Ported from Libraries/LibCore/AnonymousBuffer.h:58 Core::AnonymousBuffer::data<T>: the
+## buffer's bytes, or none for an invalid buffer; the caller casts to its `T*`.
+pub func core_anonymous_buffer_data(this: const CoreAnonymousBuffer*) -> void*?:
+    if let impl = this.m_impl:
+        return impl.m_data
+    return none

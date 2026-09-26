@@ -1,0 +1,360 @@
+#==============================================================================================
+#
+#   color_3 - Color: serialization, parsing, shades and tints, color-space factories
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Color.cpp (lines 22-180 and 354-524): the 8-bit
+#       serialization helpers, serialize_a_srgb_value, to_string and its variants, the
+#       rgb()/rgba() and hex parsers, from_string, shades and tints, and the factories from
+#       linear sRGB, Display P3, A98 RGB, ProPhoto RGB, Rec. 2020, XYZ and Lab. The named
+#       CSS color table (lines 181-352) is in color_named. The IPC encoders and the AK
+#       formatters (lines 526-557) are not ported.
+#
+#       String::formatted and appendff are a vformat over type-erased arguments, MUST-ed as
+#       in C++ (see the helpers below).
+#
+#==============================================================================================
+
+# mark: Helpers =================================================================================
+
+## `MUST(String::formatted(fmtstr, arguments...))`.
+func color_string_formatted(fmtstr: str, arguments: const ak.TypeErasedParameter[]) -> ak.String:
+    var params = ak.type_erased_format_params_create(arguments)
+    return ak.string_vformatted(ak.sv(fmtstr), &params) else trap("MUST: String::formatted")
+
+## `Utf16String::formatted(fmtstr, arguments...)` (AK/Utf16String.h:116): a UTF-16 builder,
+## MUST(vformat(...)), then to_utf16_string.
+func color_utf16_string_formatted(fmtstr: str, arguments: const ak.TypeErasedParameter[]) -> ak.Utf16String:
+    var builder = ak.string_builder_new_mode(ak.StringBuilderMode.utf16)
+    ak.vformat_arguments(&builder, ak.sv(fmtstr), arguments) else trap("MUST: vformat")
+    return ak.string_builder_to_utf16_string(&builder)
+
+## `builder.appendff(fmtstr, arguments...)`.
+func color_appendff(builder: ak.StringBuilder*, fmtstr: str, arguments: const ak.TypeErasedParameter[]):
+    ak.vformat_arguments(builder, ak.sv(fmtstr), arguments) else trap("MUST: appendff")
+
+## AK::clamp_to<u8, double> (AK/Math.h:1022); the float source is rounded with round_to<u8>
+## (AArch64: to nearest even, as u32, then narrowed).
+func clamp_to_u8_f64(value: f64) -> u8:
+    if value >= 255.0:
+        return 255
+    if value <= 0.0:
+        return 0
+    return (u8)ak.rounding_round_to_f64_u32(value)
+
+# mark: Serialization ===========================================================================
+
+## Ported from Libraries/LibGfx/Color.cpp:26 Gfx::(anonymous)::nth_digit.
+func nth_digit(value: u32, digit: u8) -> u8:
+    # This helper is used to format integers.
+    # nth_digit(745, 1) -> '5'
+    # nth_digit(745, 2) -> '4'
+    # nth_digit(745, 3) -> '7'
+
+    assert(value < 1000)
+    assert(digit <= 3)
+    assert(digit > 0)
+
+    var remaining_value = value
+    var remaining_digit = digit
+    while remaining_digit > 1:
+        remaining_value = remaining_value // 10
+        remaining_digit -= 1
+
+    return (u8)((u32)'0' + remaining_value % 10)
+
+## Ported from Libraries/LibGfx/Color.cpp:45 Gfx::(anonymous)::format_to_8bit_compatible.
+func format_to_8bit_compatible(value: u8) -> u8[4]:
+    # This function formats to the shortest string that roundtrips at 8 bits.
+    # As an example:
+    #      127 / 255 = 0.498 ± 0.001
+    #      128 / 255 = 0.502 ± 0.001
+    # But round(.5 * 255) == 128, so this function returns (note that it's only the fractional part):
+    #      127 -> "498"
+    #      128 -> "5"
+
+    let three_digits: u32 = ((u32)value * 1000 + 127) // 255
+    let rounded_to_two_digits: u32 = (three_digits + 5) // 10 * 10
+
+    if (rounded_to_two_digits * 255 // 100 + 5) // 10 != (u32)value:
+        return [nth_digit(three_digits, 3), nth_digit(three_digits, 2), nth_digit(three_digits, 1), 0]
+
+    let rounded_to_one_digit: u32 = (three_digits + 50) // 100 * 100
+    if (rounded_to_one_digit * 255 // 100 + 5) // 10 != (u32)value:
+        return [nth_digit(rounded_to_two_digits, 3), nth_digit(rounded_to_two_digits, 2), 0, 0]
+
+    return [nth_digit(rounded_to_one_digit, 3), 0, 0, 0]
+
+## Ported from Libraries/LibGfx/Color.cpp:71 Gfx::Color::serialize_a_srgb_value.
+# https://www.w3.org/TR/css-color-4/#serializing-sRGB-values
+pub func color_serialize_a_srgb_value_string_builder(this: const Color*, builder: ak.StringBuilder*):
+    # The serialized form is derived from the computed value and thus, uses either the rgb() or rgba() form
+    # (depending on whether the alpha is exactly 1, or not), with lowercase letters for the function name.
+    # NOTE: Since we use Gfx::Color, having an "alpha of 1" means its value is 255.
+    if color_alpha(this) == 0:
+        color_appendff(builder, "rgba({}, {}, {}, 0)", [ak.arg_u64(color_red(this)), ak.arg_u64(color_green(this)), ak.arg_u64(color_blue(this))])
+    elif color_alpha(this) == 255:
+        color_appendff(builder, "rgb({}, {}, {})", [ak.arg_u64(color_red(this)), ak.arg_u64(color_green(this)), ak.arg_u64(color_blue(this))])
+    else:
+        var digits = format_to_8bit_compatible(color_alpha(this))
+        color_appendff(builder, "rgba({}, {}, {}, 0.{})", [ak.arg_u64(color_red(this)), ak.arg_u64(color_green(this)), ak.arg_u64(color_blue(this)), ak.arg_c_string(&digits[0])])
+
+## Ported from Libraries/LibGfx/Color.cpp:84 Gfx::Color::serialize_a_srgb_value.
+pub func color_serialize_a_srgb_value(this: const Color*) -> ak.String:
+    var builder = ak.string_builder_new()
+    color_serialize_a_srgb_value_string_builder(this, &builder)
+    return ak.string_builder_to_string_without_validation(&builder)
+
+## Ported from Libraries/LibGfx/Color.cpp:91 Gfx::Color::to_string.
+pub func color_to_string(this: const Color*, html_compatible_serialization: ColorHtmlCompatibleSerialization = ColorHtmlCompatibleSerialization.no) -> ak.String:
+    # If the following conditions are all true:
+
+    # 1. The color space is sRGB
+    # NOTE: This is currently always true for Gfx::Color.
+
+    # 2. The alpha is 1
+    # NOTE: An alpha value of 1 will be stored as 255 currently.
+
+    # 3. The RGB component values are internally represented as integers between 0 and 255 inclusive (i.e. 8-bit unsigned integer)
+    # NOTE: This is currently always true for Gfx::Color.
+
+    # 4. HTML-compatible serialization is requested
+    if color_alpha(this) == 255 and html_compatible_serialization == ColorHtmlCompatibleSerialization.yes:
+        return color_string_formatted("#{:02x}{:02x}{:02x}", [ak.arg_u64(color_red(this)), ak.arg_u64(color_green(this)), ak.arg_u64(color_blue(this))])
+
+    # Otherwise, for sRGB the CSS serialization of sRGB values is used and for other color spaces, the relevant serialization of the <color> value.
+    return color_serialize_a_srgb_value(this)
+
+## Ported from Libraries/LibGfx/Color.cpp:114 Gfx::Color::to_string_without_alpha.
+pub func color_to_string_without_alpha(this: const Color*) -> ak.String:
+    return color_string_formatted("#{:02x}{:02x}{:02x}", [ak.arg_u64(color_red(this)), ak.arg_u64(color_green(this)), ak.arg_u64(color_blue(this))])
+
+## Ported from Libraries/LibGfx/Color.cpp:119 Gfx::Color::to_utf16_string_without_alpha.
+pub func color_to_utf16_string_without_alpha(this: const Color*) -> ak.Utf16String:
+    return color_utf16_string_formatted("#{:02x}{:02x}{:02x}", [ak.arg_u64(color_red(this)), ak.arg_u64(color_green(this)), ak.arg_u64(color_blue(this))])
+
+## Ported from Libraries/LibGfx/Color.cpp:124 Gfx::Color::to_byte_string.
+pub func color_to_byte_string(this: const Color*) -> ak.ByteString:
+    let string = color_to_string(this)
+    return ak.string_to_byte_string(&string)
+
+## Ported from Libraries/LibGfx/Color.cpp:129 Gfx::Color::to_byte_string_without_alpha.
+pub func color_to_byte_string_without_alpha(this: const Color*) -> ak.ByteString:
+    let string = color_to_string_without_alpha(this)
+    return ak.string_to_byte_string(&string)
+
+# mark: Parsing =================================================================================
+
+## Ported from Libraries/LibGfx/Color.cpp:134 Gfx::parse_rgb_color.
+func parse_rgb_color(string: ak.StringView) -> Color?:
+    assert(ak.string_view_starts_with_string_view(&string, ak.sv("rgb("), ak.CaseSensitivity.case_insensitive))
+    assert(ak.string_view_ends_with_u8(&string, ')'))
+
+    let substring = ak.string_view_substring_view_usize(&string, 4, ak.string_view_length(&string) - 5)
+    let parts = ak.string_view_split_view_u8(&substring, ',')
+
+    if ak.vector_size(&parts) != 3:
+        return none
+
+    # parts[i].to_number<double>().map(AK::clamp_to<u8, double>)
+    var r: u8? = none
+    if let value = ak.string_view_to_number_f64(ak.vector_at_const(&parts, 0)): r = clamp_to_u8_f64(value)
+    var g: u8? = none
+    if let value = ak.string_view_to_number_f64(ak.vector_at_const(&parts, 1)): g = clamp_to_u8_f64(value)
+    var b: u8? = none
+    if let value = ak.string_view_to_number_f64(ak.vector_at_const(&parts, 2)): b = clamp_to_u8_f64(value)
+
+    if r == none or g == none or b == none:
+        return none
+
+    return color_new_u8_u8_u8(r else 0, g else 0, b else 0)
+
+## Ported from Libraries/LibGfx/Color.cpp:155 Gfx::parse_rgba_color.
+func parse_rgba_color(string: ak.StringView) -> Color?:
+    assert(ak.string_view_starts_with_string_view(&string, ak.sv("rgba("), ak.CaseSensitivity.case_insensitive))
+    assert(ak.string_view_ends_with_u8(&string, ')'))
+
+    let substring = ak.string_view_substring_view_usize(&string, 5, ak.string_view_length(&string) - 6)
+    let parts = ak.string_view_split_view_u8(&substring, ',')
+
+    if ak.vector_size(&parts) != 4:
+        return none
+
+    # parts[i].to_number<double>().map(AK::clamp_to<u8, double>)
+    var r: u8? = none
+    if let value = ak.string_view_to_number_f64(ak.vector_at_const(&parts, 0)): r = clamp_to_u8_f64(value)
+    var g: u8? = none
+    if let value = ak.string_view_to_number_f64(ak.vector_at_const(&parts, 1)): g = clamp_to_u8_f64(value)
+    var b: u8? = none
+    if let value = ak.string_view_to_number_f64(ak.vector_at_const(&parts, 2)): b = clamp_to_u8_f64(value)
+
+    let parse_result = ak.parse_first_number_string_view_f64(*ak.vector_at_const(&parts, 3))
+    var alpha: f64 = 0.0
+    if let result = parse_result: alpha = result.value
+
+    # `unsigned a = alpha * 255;` (the AArch64 conversion saturates, as the cast does).
+    let a = (u32)(alpha * 255.0)
+
+    if r == none or g == none or b == none or a > 255:
+        return none
+
+    return color_new_u8_u8_u8_u8(r else 0, g else 0, b else 0, (u8)a)
+
+## The `hex_nibble_to_u8` lambda of hex_string_to_color (Color.cpp:356).
+func hex_string_to_color_hex_nibble_to_u8(nibble: u8) -> u8?:
+    if not ak.is_ascii_hex_digit((u32)nibble):
+        return none
+    if nibble >= '0' and nibble <= '9':
+        return nibble - '0'
+    return 10 + ((u8)ak.to_ascii_lowercase((u32)nibble) - 'a')
+
+## The `to_hex` lambda of hex_string_to_color (Color.cpp:386).
+func hex_string_to_color_to_hex(c1: u8, c2: u8) -> u8?:
+    let nib1 = hex_string_to_color_hex_nibble_to_u8(c1)
+    let nib2 = hex_string_to_color_hex_nibble_to_u8(c2)
+    if nib1 == none or nib2 == none:
+        return none
+    return ((nib1 else 0) << 4) | (nib2 else 0)
+
+## Ported from Libraries/LibGfx/Color.cpp:354 Gfx::hex_string_to_color.
+func hex_string_to_color(string: ak.StringView) -> Color?:
+    if ak.string_view_length(&string) == 4:
+        let r = hex_string_to_color_hex_nibble_to_u8(ak.string_view_at(&string, 1))
+        let g = hex_string_to_color_hex_nibble_to_u8(ak.string_view_at(&string, 2))
+        let b = hex_string_to_color_hex_nibble_to_u8(ak.string_view_at(&string, 3))
+        if r == none or g == none or b == none:
+            return none
+        return color_new_u8_u8_u8((r else 0) * 17, (g else 0) * 17, (b else 0) * 17)
+
+    if ak.string_view_length(&string) == 5:
+        let r = hex_string_to_color_hex_nibble_to_u8(ak.string_view_at(&string, 1))
+        let g = hex_string_to_color_hex_nibble_to_u8(ak.string_view_at(&string, 2))
+        let b = hex_string_to_color_hex_nibble_to_u8(ak.string_view_at(&string, 3))
+        let a = hex_string_to_color_hex_nibble_to_u8(ak.string_view_at(&string, 4))
+        if r == none or g == none or b == none or a == none:
+            return none
+        return color_new_u8_u8_u8_u8((r else 0) * 17, (g else 0) * 17, (b else 0) * 17, (a else 0) * 17)
+
+    if ak.string_view_length(&string) != 7 and ak.string_view_length(&string) != 9:
+        return none
+
+    let r = hex_string_to_color_to_hex(ak.string_view_at(&string, 1), ak.string_view_at(&string, 2))
+    let g = hex_string_to_color_to_hex(ak.string_view_at(&string, 3), ak.string_view_at(&string, 4))
+    let b = hex_string_to_color_to_hex(ak.string_view_at(&string, 5), ak.string_view_at(&string, 6))
+    var a: u8? = 255
+    if ak.string_view_length(&string) == 9:
+        a = hex_string_to_color_to_hex(ak.string_view_at(&string, 7), ak.string_view_at(&string, 8))
+
+    if r == none or g == none or b == none or a == none:
+        return none
+
+    return color_new_u8_u8_u8_u8(r else 0, g else 0, b else 0, a else 0)
+
+## Ported from Libraries/LibGfx/Color.cpp:405 Gfx::Color::from_string.
+pub func color_from_string(string: ak.StringView) -> Color?:
+    if ak.string_view_is_empty(&string):
+        return none
+
+    if ak.string_view_at(&string, 0) == '#':
+        return hex_string_to_color(string)
+
+    if ak.string_view_starts_with_string_view(&string, ak.sv("rgb("), ak.CaseSensitivity.case_insensitive) and ak.string_view_ends_with_u8(&string, ')'):
+        return parse_rgb_color(string)
+
+    if ak.string_view_starts_with_string_view(&string, ak.sv("rgba("), ak.CaseSensitivity.case_insensitive) and ak.string_view_ends_with_u8(&string, ')'):
+        return parse_rgba_color(string)
+
+    if ak.string_view_equals_ignoring_ascii_case(&string, ak.sv("transparent")):
+        return color_from_bgra(0x00000000)
+
+    if let color = color_from_named_css_color_string(string):
+        return color
+
+    return none
+
+## Ported from Libraries/LibGfx/Color.cpp:428 Gfx::Color::from_utf16_string.
+pub func color_from_utf16_string(string: ak.Utf16View) -> Color?:
+    let utf8 = ak.utf16_view_to_utf8_but_should_be_ported_to_utf16(&string)
+    return color_from_string(ak.string_bytes_as_string_view(&utf8))
+
+# mark: Shades and tints ========================================================================
+
+## Ported from Libraries/LibGfx/Color.cpp:433 Gfx::Color::shades.
+pub func color_shades(this: const Color*, steps: u32, max: f32 = 1.0) -> ak.Vector[Color]:
+    var shade: f32 = 1.0
+    let step = max / (f32)steps
+    var shades: ak.Vector[Color]
+    for _: u32 in 0..<steps:
+        shade -= step
+        ak.vector_append_t(&shades, color_darkened(this, shade))
+    return shades
+
+## Ported from Libraries/LibGfx/Color.cpp:445 Gfx::Color::tints.
+pub func color_tints(this: const Color*, steps: u32, max: f32 = 1.0) -> ak.Vector[Color]:
+    var shade: f32 = 1.0
+    let step = max / (f32)steps
+    var tints: ak.Vector[Color]
+    for _: u32 in 0..<steps:
+        shade += step
+        ak.vector_append_t(&tints, color_lightened(this, shade))
+    return tints
+
+# mark: Color-space factories ===================================================================
+
+## Ported from Libraries/LibGfx/Color.cpp:457 Gfx::color_from_linear_srgb.
+func color_from_linear_srgb(linear: ColorComponents) -> Color:
+    let srgb = linear_srgb_to_srgb(linear)
+    return color_new_u8_u8_u8_u8(
+        (u8)ak.clamp(lroundf(color_components_at_const(&srgb, 0) * 255.0), (i64)0, (i64)255),
+        (u8)ak.clamp(lroundf(color_components_at_const(&srgb, 1) * 255.0), (i64)0, (i64)255),
+        (u8)ak.clamp(lroundf(color_components_at_const(&srgb, 2) * 255.0), (i64)0, (i64)255),
+        (u8)ak.clamp(lroundf(color_components_alpha(&srgb) * 255.0), (i64)0, (i64)255),
+    )
+
+## Ported from Libraries/LibGfx/Color.cpp:467 Gfx::Color::from_linear_srgb.
+pub func color_from_linear_srgb_2(red: f32, green: f32, blue: f32, alpha: f32 = 1.0) -> Color:
+    return color_from_linear_srgb(color_components_new(red, green, blue, alpha))
+
+## Ported from Libraries/LibGfx/Color.cpp:472 Gfx::Color::from_linear_display_p3.
+pub func color_from_linear_display_p3(r: f32, g: f32, b: f32, alpha: f32 = 1.0) -> Color:
+    let xyz = linear_display_p3_to_xyz65(color_components_new(r, g, b, alpha))
+    return color_from_xyz65(color_components_at_const(&xyz, 0), color_components_at_const(&xyz, 1), color_components_at_const(&xyz, 2), color_components_alpha(&xyz))
+
+## Ported from Libraries/LibGfx/Color.cpp:479 Gfx::Color::from_a98rgb.
+# https://www.w3.org/TR/css-color-4/#predefined-a98-rgb
+pub func color_from_a98rgb(r: f32, g: f32, b: f32, alpha: f32 = 1.0) -> Color:
+    let xyz = a98rgb_to_xyz65(color_components_new(r, g, b, alpha))
+    return color_from_xyz65(color_components_at_const(&xyz, 0), color_components_at_const(&xyz, 1), color_components_at_const(&xyz, 2), color_components_alpha(&xyz))
+
+## Ported from Libraries/LibGfx/Color.cpp:486 Gfx::Color::from_display_p3.
+# https://www.w3.org/TR/css-color-4/#predefined-a98-rgb
+pub func color_from_display_p3(r: f32, g: f32, b: f32, alpha: f32 = 1.0) -> Color:
+    let linear = display_p3_to_linear_display_p3(color_components_new(r, g, b, alpha))
+    return color_from_linear_display_p3(color_components_at_const(&linear, 0), color_components_at_const(&linear, 1), color_components_at_const(&linear, 2), color_components_alpha(&linear))
+
+## Ported from Libraries/LibGfx/Color.cpp:493 Gfx::Color::from_pro_photo_rgb.
+# https://www.w3.org/TR/css-color-4/#predefined-prophoto-rgb
+pub func color_from_pro_photo_rgb(r: f32, g: f32, b: f32, alpha: f32 = 1.0) -> Color:
+    let xyz = pro_photo_rgb_to_xyz50(color_components_new(r, g, b, alpha))
+    return color_from_xyz50(color_components_at_const(&xyz, 0), color_components_at_const(&xyz, 1), color_components_at_const(&xyz, 2), color_components_alpha(&xyz))
+
+## Ported from Libraries/LibGfx/Color.cpp:500 Gfx::Color::from_rec2020.
+# https://www.w3.org/TR/css-color-4/#predefined-rec2020
+pub func color_from_rec2020(r: f32, g: f32, b: f32, alpha: f32 = 1.0) -> Color:
+    let xyz = rec2020_to_xyz65(color_components_new(r, g, b, alpha))
+    return color_from_xyz65(color_components_at_const(&xyz, 0), color_components_at_const(&xyz, 1), color_components_at_const(&xyz, 2), color_components_alpha(&xyz))
+
+## Ported from Libraries/LibGfx/Color.cpp:506 Gfx::Color::from_xyz50.
+pub func color_from_xyz50(x: f32, y: f32, z: f32, alpha: f32 = 1.0) -> Color:
+    let linear = xyz50_to_linear_srgb(color_components_new(x, y, z, alpha))
+    return color_from_linear_srgb(linear)
+
+## Ported from Libraries/LibGfx/Color.cpp:512 Gfx::Color::from_xyz65.
+pub func color_from_xyz65(x: f32, y: f32, z: f32, alpha: f32 = 1.0) -> Color:
+    let linear = xyz65_to_linear_srgb(color_components_new(x, y, z, alpha))
+    return color_from_linear_srgb(linear)
+
+## Ported from Libraries/LibGfx/Color.cpp:518 Gfx::Color::from_lab.
+pub func color_from_lab(L: f32, a: f32, b: f32, alpha: f32 = 1.0) -> Color:
+    let xyz = lab_to_xyz50(color_components_new(L, a, b, alpha))
+    return color_from_xyz50(color_components_at_const(&xyz, 0), color_components_at_const(&xyz, 1), color_components_at_const(&xyz, 2), color_components_alpha(&xyz))

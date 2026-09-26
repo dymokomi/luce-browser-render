@@ -1,0 +1,490 @@
+#==============================================================================================
+#
+#   palette_2 - Palette: the named accessors of the theme
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Palette.h (lines 58-200): Palette's inline members, the
+#       one-line accessors of each color, alignment, flag, metric and path role, the
+#       forwarding color/alignment/flag/metric/path, theme() and impl().
+#
+#==============================================================================================
+
+# mark: Named roles =============================================================================
+
+## Ported from Libraries/LibGfx/Palette.h:64 Gfx::Palette::accent.
+pub func palette_accent(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.accent)
+
+## Ported from Libraries/LibGfx/Palette.h:65 Gfx::Palette::window.
+pub func palette_window(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.window)
+
+## Ported from Libraries/LibGfx/Palette.h:66 Gfx::Palette::window_text.
+pub func palette_window_text(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.window_text)
+
+## Ported from Libraries/LibGfx/Palette.h:67 Gfx::Palette::selection.
+pub func palette_selection(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.selection)
+
+## Ported from Libraries/LibGfx/Palette.h:68 Gfx::Palette::selection_text.
+pub func palette_selection_text(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.selection_text)
+
+## Ported from Libraries/LibGfx/Palette.h:69 Gfx::Palette::inactive_selection.
+pub func palette_inactive_selection(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.inactive_selection)
+
+## Ported from Libraries/LibGfx/Palette.h:70 Gfx::Palette::inactive_selection_text.
+pub func palette_inactive_selection_text(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.inactive_selection_text)
+
+## Ported from Libraries/LibGfx/Palette.h:71 Gfx::Palette::desktop_background.
+pub func palette_desktop_background(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.desktop_background)
+
+## Ported from Libraries/LibGfx/Palette.h:72 Gfx::Palette::active_window_border1.
+pub func palette_active_window_border1(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.active_window_border1)
+
+## Ported from Libraries/LibGfx/Palette.h:73 Gfx::Palette::active_window_border2.
+pub func palette_active_window_border2(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.active_window_border2)
+
+## Ported from Libraries/LibGfx/Palette.h:74 Gfx::Palette::active_window_title.
+pub func palette_active_window_title(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.active_window_title)
+
+## Ported from Libraries/LibGfx/Palette.h:75 Gfx::Palette::active_window_title_stripes.
+pub func palette_active_window_title_stripes(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.active_window_title_stripes)
+
+## Ported from Libraries/LibGfx/Palette.h:76 Gfx::Palette::active_window_title_shadow.
+pub func palette_active_window_title_shadow(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.active_window_title_shadow)
+
+## Ported from Libraries/LibGfx/Palette.h:77 Gfx::Palette::inactive_window_border1.
+pub func palette_inactive_window_border1(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.inactive_window_border1)
+
+## Ported from Libraries/LibGfx/Palette.h:78 Gfx::Palette::inactive_window_border2.
+pub func palette_inactive_window_border2(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.inactive_window_border2)
+
+## Ported from Libraries/LibGfx/Palette.h:79 Gfx::Palette::inactive_window_title.
+pub func palette_inactive_window_title(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.inactive_window_title)
+
+## Ported from Libraries/LibGfx/Palette.h:80 Gfx::Palette::inactive_window_title_stripes.
+pub func palette_inactive_window_title_stripes(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.inactive_window_title_stripes)
+
+## Ported from Libraries/LibGfx/Palette.h:81 Gfx::Palette::inactive_window_title_shadow.
+pub func palette_inactive_window_title_shadow(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.inactive_window_title_shadow)
+
+## Ported from Libraries/LibGfx/Palette.h:82 Gfx::Palette::moving_window_border1.
+pub func palette_moving_window_border1(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.moving_window_border1)
+
+## Ported from Libraries/LibGfx/Palette.h:83 Gfx::Palette::moving_window_border2.
+pub func palette_moving_window_border2(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.moving_window_border2)
+
+## Ported from Libraries/LibGfx/Palette.h:84 Gfx::Palette::moving_window_title.
+pub func palette_moving_window_title(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.moving_window_title)
+
+## Ported from Libraries/LibGfx/Palette.h:85 Gfx::Palette::moving_window_title_stripes.
+pub func palette_moving_window_title_stripes(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.moving_window_title_stripes)
+
+## Ported from Libraries/LibGfx/Palette.h:86 Gfx::Palette::moving_window_title_shadow.
+pub func palette_moving_window_title_shadow(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.moving_window_title_shadow)
+
+## Ported from Libraries/LibGfx/Palette.h:87 Gfx::Palette::highlight_window_border1.
+pub func palette_highlight_window_border1(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.highlight_window_border1)
+
+## Ported from Libraries/LibGfx/Palette.h:88 Gfx::Palette::highlight_window_border2.
+pub func palette_highlight_window_border2(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.highlight_window_border2)
+
+## Ported from Libraries/LibGfx/Palette.h:89 Gfx::Palette::highlight_window_title.
+pub func palette_highlight_window_title(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.highlight_window_title)
+
+## Ported from Libraries/LibGfx/Palette.h:90 Gfx::Palette::highlight_window_title_stripes.
+pub func palette_highlight_window_title_stripes(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.highlight_window_title_stripes)
+
+## Ported from Libraries/LibGfx/Palette.h:91 Gfx::Palette::highlight_window_title_shadow.
+pub func palette_highlight_window_title_shadow(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.highlight_window_title_shadow)
+
+## Ported from Libraries/LibGfx/Palette.h:92 Gfx::Palette::highlight_searching.
+pub func palette_highlight_searching(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.highlight_searching)
+
+## Ported from Libraries/LibGfx/Palette.h:93 Gfx::Palette::highlight_searching_text.
+pub func palette_highlight_searching_text(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.highlight_searching_text)
+
+## Ported from Libraries/LibGfx/Palette.h:94 Gfx::Palette::menu_stripe.
+pub func palette_menu_stripe(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.menu_stripe)
+
+## Ported from Libraries/LibGfx/Palette.h:95 Gfx::Palette::menu_base.
+pub func palette_menu_base(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.menu_base)
+
+## Ported from Libraries/LibGfx/Palette.h:96 Gfx::Palette::menu_base_text.
+pub func palette_menu_base_text(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.menu_base_text)
+
+## Ported from Libraries/LibGfx/Palette.h:97 Gfx::Palette::menu_selection.
+pub func palette_menu_selection(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.menu_selection)
+
+## Ported from Libraries/LibGfx/Palette.h:98 Gfx::Palette::menu_selection_text.
+pub func palette_menu_selection_text(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.menu_selection_text)
+
+## Ported from Libraries/LibGfx/Palette.h:99 Gfx::Palette::base.
+pub func palette_base(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.base)
+
+## Ported from Libraries/LibGfx/Palette.h:100 Gfx::Palette::base_text.
+pub func palette_base_text(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.base_text)
+
+## Ported from Libraries/LibGfx/Palette.h:101 Gfx::Palette::disabled_text_front.
+pub func palette_disabled_text_front(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.disabled_text_front)
+
+## Ported from Libraries/LibGfx/Palette.h:102 Gfx::Palette::disabled_text_back.
+pub func palette_disabled_text_back(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.disabled_text_back)
+
+## Ported from Libraries/LibGfx/Palette.h:103 Gfx::Palette::button.
+pub func palette_button(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.button)
+
+## Ported from Libraries/LibGfx/Palette.h:104 Gfx::Palette::button_text.
+pub func palette_button_text(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.button_text)
+
+## Ported from Libraries/LibGfx/Palette.h:105 Gfx::Palette::threed_highlight.
+pub func palette_threed_highlight(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.threed_highlight)
+
+## Ported from Libraries/LibGfx/Palette.h:106 Gfx::Palette::threed_shadow1.
+pub func palette_threed_shadow1(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.threed_shadow1)
+
+## Ported from Libraries/LibGfx/Palette.h:107 Gfx::Palette::threed_shadow2.
+pub func palette_threed_shadow2(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.threed_shadow2)
+
+## Ported from Libraries/LibGfx/Palette.h:108 Gfx::Palette::hover_highlight.
+pub func palette_hover_highlight(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.hover_highlight)
+
+## Ported from Libraries/LibGfx/Palette.h:109 Gfx::Palette::rubber_band_fill.
+pub func palette_rubber_band_fill(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.rubber_band_fill)
+
+## Ported from Libraries/LibGfx/Palette.h:110 Gfx::Palette::rubber_band_border.
+pub func palette_rubber_band_border(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.rubber_band_border)
+
+## Ported from Libraries/LibGfx/Palette.h:111 Gfx::Palette::gutter.
+pub func palette_gutter(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.gutter)
+
+## Ported from Libraries/LibGfx/Palette.h:112 Gfx::Palette::gutter_border.
+pub func palette_gutter_border(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.gutter_border)
+
+## Ported from Libraries/LibGfx/Palette.h:113 Gfx::Palette::ruler.
+pub func palette_ruler(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.ruler)
+
+## Ported from Libraries/LibGfx/Palette.h:114 Gfx::Palette::ruler_border.
+pub func palette_ruler_border(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.ruler_border)
+
+## Ported from Libraries/LibGfx/Palette.h:115 Gfx::Palette::ruler_active_text.
+pub func palette_ruler_active_text(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.ruler_active_text)
+
+## Ported from Libraries/LibGfx/Palette.h:116 Gfx::Palette::ruler_inactive_text.
+pub func palette_ruler_inactive_text(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.ruler_inactive_text)
+
+## Ported from Libraries/LibGfx/Palette.h:117 Gfx::Palette::text_cursor.
+pub func palette_text_cursor(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.text_cursor)
+
+## Ported from Libraries/LibGfx/Palette.h:118 Gfx::Palette::focus_outline.
+pub func palette_focus_outline(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.focus_outline)
+
+## Ported from Libraries/LibGfx/Palette.h:119 Gfx::Palette::tray.
+pub func palette_tray(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.tray)
+
+## Ported from Libraries/LibGfx/Palette.h:120 Gfx::Palette::tray_text.
+pub func palette_tray_text(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.tray_text)
+
+## Ported from Libraries/LibGfx/Palette.h:122 Gfx::Palette::link.
+pub func palette_link(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.link)
+
+## Ported from Libraries/LibGfx/Palette.h:123 Gfx::Palette::active_link.
+pub func palette_active_link(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.active_link)
+
+## Ported from Libraries/LibGfx/Palette.h:124 Gfx::Palette::visited_link.
+pub func palette_visited_link(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.visited_link)
+
+## Ported from Libraries/LibGfx/Palette.h:126 Gfx::Palette::syntax_comment.
+pub func palette_syntax_comment(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.syntax_comment)
+
+## Ported from Libraries/LibGfx/Palette.h:127 Gfx::Palette::syntax_number.
+pub func palette_syntax_number(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.syntax_number)
+
+## Ported from Libraries/LibGfx/Palette.h:128 Gfx::Palette::syntax_string.
+pub func palette_syntax_string(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.syntax_string)
+
+## Ported from Libraries/LibGfx/Palette.h:129 Gfx::Palette::syntax_identifier.
+pub func palette_syntax_identifier(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.syntax_identifier)
+
+## Ported from Libraries/LibGfx/Palette.h:130 Gfx::Palette::syntax_type.
+pub func palette_syntax_type(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.syntax_type)
+
+## Ported from Libraries/LibGfx/Palette.h:131 Gfx::Palette::syntax_punctuation.
+pub func palette_syntax_punctuation(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.syntax_punctuation)
+
+## Ported from Libraries/LibGfx/Palette.h:132 Gfx::Palette::syntax_operator.
+pub func palette_syntax_operator(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.syntax_operator)
+
+## Ported from Libraries/LibGfx/Palette.h:133 Gfx::Palette::syntax_keyword.
+pub func palette_syntax_keyword(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.syntax_keyword)
+
+## Ported from Libraries/LibGfx/Palette.h:134 Gfx::Palette::syntax_control_keyword.
+pub func palette_syntax_control_keyword(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.syntax_control_keyword)
+
+## Ported from Libraries/LibGfx/Palette.h:135 Gfx::Palette::syntax_preprocessor_statement.
+pub func palette_syntax_preprocessor_statement(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.syntax_preprocessor_statement)
+
+## Ported from Libraries/LibGfx/Palette.h:136 Gfx::Palette::syntax_preprocessor_value.
+pub func palette_syntax_preprocessor_value(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.syntax_preprocessor_value)
+
+## Ported from Libraries/LibGfx/Palette.h:137 Gfx::Palette::syntax_function.
+pub func palette_syntax_function(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.syntax_function)
+
+## Ported from Libraries/LibGfx/Palette.h:138 Gfx::Palette::syntax_variable.
+pub func palette_syntax_variable(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.syntax_variable)
+
+## Ported from Libraries/LibGfx/Palette.h:139 Gfx::Palette::syntax_custom_type.
+pub func palette_syntax_custom_type(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.syntax_custom_type)
+
+## Ported from Libraries/LibGfx/Palette.h:140 Gfx::Palette::syntax_namespace.
+pub func palette_syntax_namespace(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.syntax_namespace)
+
+## Ported from Libraries/LibGfx/Palette.h:141 Gfx::Palette::syntax_member.
+pub func palette_syntax_member(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.syntax_member)
+
+## Ported from Libraries/LibGfx/Palette.h:142 Gfx::Palette::syntax_parameter.
+pub func palette_syntax_parameter(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.syntax_parameter)
+
+## Ported from Libraries/LibGfx/Palette.h:144 Gfx::Palette::background.
+pub func palette_background(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.color_scheme_background)
+
+## Ported from Libraries/LibGfx/Palette.h:145 Gfx::Palette::foreground.
+pub func palette_foreground(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.color_scheme_foreground)
+
+## Ported from Libraries/LibGfx/Palette.h:147 Gfx::Palette::black.
+pub func palette_black(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.black)
+
+## Ported from Libraries/LibGfx/Palette.h:148 Gfx::Palette::red.
+pub func palette_red(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.red)
+
+## Ported from Libraries/LibGfx/Palette.h:149 Gfx::Palette::green.
+pub func palette_green(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.green)
+
+## Ported from Libraries/LibGfx/Palette.h:150 Gfx::Palette::yellow.
+pub func palette_yellow(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.yellow)
+
+## Ported from Libraries/LibGfx/Palette.h:151 Gfx::Palette::blue.
+pub func palette_blue(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.blue)
+
+## Ported from Libraries/LibGfx/Palette.h:152 Gfx::Palette::magenta.
+pub func palette_magenta(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.magenta)
+
+## Ported from Libraries/LibGfx/Palette.h:153 Gfx::Palette::cyan.
+pub func palette_cyan(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.cyan)
+
+## Ported from Libraries/LibGfx/Palette.h:154 Gfx::Palette::white.
+pub func palette_white(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.white)
+
+## Ported from Libraries/LibGfx/Palette.h:156 Gfx::Palette::bright_black.
+pub func palette_bright_black(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.bright_black)
+
+## Ported from Libraries/LibGfx/Palette.h:157 Gfx::Palette::bright_red.
+pub func palette_bright_red(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.bright_red)
+
+## Ported from Libraries/LibGfx/Palette.h:158 Gfx::Palette::bright_green.
+pub func palette_bright_green(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.bright_green)
+
+## Ported from Libraries/LibGfx/Palette.h:159 Gfx::Palette::bright_yellow.
+pub func palette_bright_yellow(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.bright_yellow)
+
+## Ported from Libraries/LibGfx/Palette.h:160 Gfx::Palette::bright_blue.
+pub func palette_bright_blue(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.bright_blue)
+
+## Ported from Libraries/LibGfx/Palette.h:161 Gfx::Palette::bright_magenta.
+pub func palette_bright_magenta(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.bright_magenta)
+
+## Ported from Libraries/LibGfx/Palette.h:162 Gfx::Palette::bright_cyan.
+pub func palette_bright_cyan(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.bright_cyan)
+
+## Ported from Libraries/LibGfx/Palette.h:163 Gfx::Palette::bright_white.
+pub func palette_bright_white(this: const Palette*) -> Color:
+    return palette_color(this, ColorRole.bright_white)
+
+## Ported from Libraries/LibGfx/Palette.h:165 Gfx::Palette::title_alignment.
+pub func palette_title_alignment(this: const Palette*) -> TextAlignment:
+    return palette_alignment(this, AlignmentRole.title_alignment)
+
+## Ported from Libraries/LibGfx/Palette.h:167 Gfx::Palette::bold_text_as_bright.
+pub func palette_bold_text_as_bright(this: const Palette*) -> bool:
+    return palette_flag(this, FlagRole.bold_text_as_bright)
+
+## Ported from Libraries/LibGfx/Palette.h:168 Gfx::Palette::is_dark.
+pub func palette_is_dark(this: const Palette*) -> bool:
+    return palette_flag(this, FlagRole.is_dark)
+
+## Ported from Libraries/LibGfx/Palette.h:169 Gfx::Palette::title_buttons_icon_only.
+pub func palette_title_buttons_icon_only(this: const Palette*) -> bool:
+    return palette_flag(this, FlagRole.title_buttons_icon_only)
+
+## Ported from Libraries/LibGfx/Palette.h:171 Gfx::Palette::window_border_thickness.
+pub func palette_window_border_thickness(this: const Palette*) -> i32:
+    return palette_metric(this, MetricRole.border_thickness)
+
+## Ported from Libraries/LibGfx/Palette.h:172 Gfx::Palette::window_border_radius.
+pub func palette_window_border_radius(this: const Palette*) -> i32:
+    return palette_metric(this, MetricRole.border_radius)
+
+## Ported from Libraries/LibGfx/Palette.h:173 Gfx::Palette::window_title_height.
+pub func palette_window_title_height(this: const Palette*) -> i32:
+    return palette_metric(this, MetricRole.title_height)
+
+## Ported from Libraries/LibGfx/Palette.h:174 Gfx::Palette::window_title_button_width.
+pub func palette_window_title_button_width(this: const Palette*) -> i32:
+    return palette_metric(this, MetricRole.title_button_width)
+
+## Ported from Libraries/LibGfx/Palette.h:175 Gfx::Palette::window_title_button_height.
+pub func palette_window_title_button_height(this: const Palette*) -> i32:
+    return palette_metric(this, MetricRole.title_button_height)
+
+## Ported from Libraries/LibGfx/Palette.h:177 Gfx::Palette::title_button_icons_path.
+pub func palette_title_button_icons_path(this: const Palette*) -> ak.ByteString:
+    return palette_path(this, PathRole.title_button_icons)
+
+## Ported from Libraries/LibGfx/Palette.h:178 Gfx::Palette::active_window_shadow_path.
+pub func palette_active_window_shadow_path(this: const Palette*) -> ak.ByteString:
+    return palette_path(this, PathRole.active_window_shadow)
+
+## Ported from Libraries/LibGfx/Palette.h:179 Gfx::Palette::inactive_window_shadow_path.
+pub func palette_inactive_window_shadow_path(this: const Palette*) -> ak.ByteString:
+    return palette_path(this, PathRole.inactive_window_shadow)
+
+## Ported from Libraries/LibGfx/Palette.h:180 Gfx::Palette::menu_shadow_path.
+pub func palette_menu_shadow_path(this: const Palette*) -> ak.ByteString:
+    return palette_path(this, PathRole.menu_shadow)
+
+## Ported from Libraries/LibGfx/Palette.h:181 Gfx::Palette::taskbar_shadow_path.
+pub func palette_taskbar_shadow_path(this: const Palette*) -> ak.ByteString:
+    return palette_path(this, PathRole.taskbar_shadow)
+
+## Ported from Libraries/LibGfx/Palette.h:182 Gfx::Palette::tooltip_shadow_path.
+pub func palette_tooltip_shadow_path(this: const Palette*) -> ak.ByteString:
+    return palette_path(this, PathRole.tooltip_shadow)
+
+## Ported from Libraries/LibGfx/Palette.h:183 Gfx::Palette::color_scheme_path.
+pub func palette_color_scheme_path(this: const Palette*) -> ak.ByteString:
+    return palette_path(this, PathRole.color_scheme)
+
+# mark: Roles and the implementation ============================================================
+
+## Ported from Libraries/LibGfx/Palette.h:185 Gfx::Palette::color.
+pub func palette_color(this: const Palette*, role: ColorRole) -> Color:
+    return palette_impl_color(this.m_impl, role)
+
+## Ported from Libraries/LibGfx/Palette.h:186 Gfx::Palette::alignment.
+pub func palette_alignment(this: const Palette*, role: AlignmentRole) -> TextAlignment:
+    return palette_impl_alignment(this.m_impl, role)
+
+## Ported from Libraries/LibGfx/Palette.h:187 Gfx::Palette::flag.
+pub func palette_flag(this: const Palette*, role: FlagRole) -> bool:
+    return palette_impl_flag(this.m_impl, role)
+
+## Ported from Libraries/LibGfx/Palette.h:188 Gfx::Palette::metric.
+pub func palette_metric(this: const Palette*, role: MetricRole) -> i32:
+    return palette_impl_metric(this.m_impl, role)
+
+## Ported from Libraries/LibGfx/Palette.h:189 Gfx::Palette::path.
+pub func palette_path(this: const Palette*, role: PathRole) -> ak.ByteString:
+    return palette_impl_path(this.m_impl, role)
+
+## Ported from Libraries/LibGfx/Palette.h:197 Gfx::Palette::theme.
+pub func palette_theme(this: const Palette*) -> const SystemTheme*:
+    return palette_impl_theme(this.m_impl)
+
+## Ported from Libraries/LibGfx/Palette.h:199 Gfx::Palette::impl.
+pub func palette_impl(this: Palette*) -> PaletteImpl*:
+    return this.m_impl
+
+## Ported from Libraries/LibGfx/Palette.h:200 Gfx::Palette::impl.
+pub func palette_impl_const(this: const Palette*) -> const PaletteImpl*:
+    return this.m_impl

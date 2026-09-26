@@ -1,0 +1,170 @@
+#==============================================================================================
+#
+#   size_css_pixels - Gfx::Size<Web::CSSPixels> (CSSPixelSize)
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Size.h (lines 16-223) for T = CSSPixels, in the order of
+#       size_int.lucb. Arithmetic is CSSPixels' (saturating, fixed point), spelled with its
+#       methods (pixel_units.lucb); a comparison with a literal 0 compares with CSSPixels(0), as
+#       C++'s implicit conversion does.
+#
+#       Not here: `to_byte_string` (Size.cpp defines it only for int and float) and
+#       `to_rounded` (round_to takes a floating-point value).
+#
+#==============================================================================================
+
+# mark: Construction and access =================================================================
+
+## Ported from Libraries/LibGfx/Size.h:21 Gfx::Size::Size<T> for CssPixelSize.
+pub func css_pixel_size_construct(this: CssPixelSize*, w: CssPixels, h: CssPixels):
+    this.m_width = w
+    this.m_height = h
+
+## Ported from Libraries/LibGfx/Size.h:28 Gfx::Size::Size<T>(U width, U height) for CssPixelSize, with U a signed integer.
+pub func css_pixel_size_construct_int(this: CssPixelSize*, width: i64, height: i64):
+    this.m_width = css_pixels_from_int(width)
+    this.m_height = css_pixels_from_int(height)
+
+## Ported from Libraries/LibGfx/Size.h:41 Gfx::Size::width for CssPixelSize.
+pub func css_pixel_size_width(this: const CssPixelSize*) -> CssPixels:
+    return this.m_width
+
+## Ported from Libraries/LibGfx/Size.h:42 Gfx::Size::height for CssPixelSize.
+pub func css_pixel_size_height(this: const CssPixelSize*) -> CssPixels:
+    return this.m_height
+
+## Ported from Libraries/LibGfx/Size.h:43 Gfx::Size::area for CssPixelSize.
+pub func css_pixel_size_area(this: const CssPixelSize*) -> CssPixels:
+    return css_pixel_size_width(this).mul(css_pixel_size_height(this))
+
+## Ported from Libraries/LibGfx/Size.h:45 Gfx::Size::set_width for CssPixelSize.
+pub func css_pixel_size_set_width(this: CssPixelSize*, w: CssPixels):
+    this.m_width = w
+
+## Ported from Libraries/LibGfx/Size.h:46 Gfx::Size::set_height for CssPixelSize.
+pub func css_pixel_size_set_height(this: CssPixelSize*, h: CssPixels):
+    this.m_height = h
+
+## Ported from Libraries/LibGfx/Size.h:48 Gfx::Size::is_empty for CssPixelSize.
+pub func css_pixel_size_is_empty(this: const CssPixelSize*) -> bool:
+    return this.m_width.le(css_pixels_from_int(0)) or this.m_height.le(css_pixels_from_int(0))
+
+# mark: Scaling =================================================================================
+
+## Ported from Libraries/LibGfx/Size.h:50 Gfx::Size::scale_by for CssPixelSize.
+pub func css_pixel_size_scale_by_css_pixels_css_pixels(this: CssPixelSize*, dx: CssPixels, dy: CssPixels):
+    this.m_width = this.m_width.mul(dx)
+    this.m_height = this.m_height.mul(dy)
+
+## Ported from Libraries/LibGfx/Size.h:56 Gfx::Size::scale_by for CssPixelSize.
+pub func css_pixel_size_scale_by_css_pixels(this: CssPixelSize*, dboth: CssPixels):
+    css_pixel_size_scale_by_css_pixels_css_pixels(this, dboth, dboth)
+
+## Ported from Libraries/LibGfx/Size.h:57 Gfx::Size::scale_by for CssPixelSize.
+pub func css_pixel_size_scale_by_css_pixel_point(this: CssPixelSize*, s: CssPixelPoint):
+    css_pixel_size_scale_by_css_pixels_css_pixels(this, css_pixel_point_x(&s), css_pixel_point_y(&s))
+
+## Ported from Libraries/LibGfx/Size.h:59 Gfx::Size::scaled for CssPixelSize.
+pub func css_pixel_size_scaled_css_pixels_css_pixels(this: const CssPixelSize*, dx: CssPixels, dy: CssPixels) -> CssPixelSize:
+    var size = *this
+    css_pixel_size_scale_by_css_pixels_css_pixels(&size, dx, dy)
+    return size
+
+## Ported from Libraries/LibGfx/Size.h:66 Gfx::Size::scaled for CssPixelSize.
+pub func css_pixel_size_scaled_css_pixels(this: const CssPixelSize*, dboth: CssPixels) -> CssPixelSize:
+    var size = *this
+    css_pixel_size_scale_by_css_pixels(&size, dboth)
+    return size
+
+## Ported from Libraries/LibGfx/Size.h:73 Gfx::Size::scaled for CssPixelSize.
+pub func css_pixel_size_scaled_css_pixel_point(this: const CssPixelSize*, s: CssPixelPoint) -> CssPixelSize:
+    var size = *this
+    css_pixel_size_scale_by_css_pixel_point(&size, s)
+    return size
+
+## Ported from Libraries/LibGfx/Size.h:80 Gfx::Size::aspect_ratio for CssPixelSize.
+pub func css_pixel_size_aspect_ratio(this: const CssPixelSize*) -> f32:
+    assert(not eq_css_pixels_int(css_pixel_size_height(this), 0))
+    return css_pixel_size_width(this).to_float() / css_pixel_size_height(this).to_float()
+
+# Horizontal means preserve the width, Vertical means preserve the height.
+## Ported from Libraries/LibGfx/Size.h:87 Gfx::Size::match_aspect_ratio for CssPixelSize.
+pub func css_pixel_size_match_aspect_ratio(this: const CssPixelSize*, aspect_ratio: f32, side_to_preserve: Orientation) -> CssPixelSize:
+    assert(aspect_ratio != 0.0)
+    var matched = *this
+    let height_corresponding_to_width = css_pixels_from_f32(css_pixel_size_width(this).to_float() / aspect_ratio)
+    let width_corresponding_to_height = css_pixels_from_f32(css_pixel_size_height(this).to_float() * aspect_ratio)
+
+    if side_to_preserve == Orientation.vertical:
+        matched.m_width = width_corresponding_to_height
+    elif side_to_preserve == Orientation.horizontal:
+        matched.m_height = height_corresponding_to_width
+    return matched
+
+## Ported from Libraries/LibGfx/Size.h:106 Gfx::Size::contains for CssPixelSize (U = CSSPixels).
+pub func css_pixel_size_contains(this: const CssPixelSize*, other: CssPixelSize) -> bool:
+    return other.m_width.le(this.m_width) and other.m_height.le(this.m_height)
+
+# mark: Operators ===============================================================================
+
+## Ported from Libraries/LibGfx/Size.h:112 Gfx::Size::operator== for CssPixelSize (U = CSSPixels).
+pub func css_pixel_size_eq(this: const CssPixelSize*, other: CssPixelSize) -> bool:
+    return css_pixel_size_width(this) == css_pixel_size_width(&other) and css_pixel_size_height(this) == css_pixel_size_height(&other)
+
+## Ported from Libraries/LibGfx/Size.h:117 Gfx::Size::operator-= for CssPixelSize.
+pub func css_pixel_size_sub_assign(this: CssPixelSize*, other: CssPixelSize) -> CssPixelSize*:
+    this.m_width = this.m_width.sub(other.m_width)
+    this.m_height = this.m_height.sub(other.m_height)
+    return this
+
+## Ported from Libraries/LibGfx/Size.h:124 Gfx::Size::operator+= for CssPixelSize.
+pub func css_pixel_size_add_assign(this: CssPixelSize*, other: CssPixelSize) -> CssPixelSize*:
+    this.m_width = this.m_width.add(other.m_width)
+    this.m_height = this.m_height.add(other.m_height)
+    return this
+
+## Ported from Libraries/LibGfx/Size.h:131 Gfx::Size::operator* for CssPixelSize.
+pub func css_pixel_size_mul(this: const CssPixelSize*, factor: CssPixels) -> CssPixelSize:
+    return CssPixelSize(this.m_width.mul(factor), this.m_height.mul(factor))
+
+## Ported from Libraries/LibGfx/Size.h:133 Gfx::Size::operator*= for CssPixelSize.
+pub func css_pixel_size_mul_assign(this: CssPixelSize*, factor: CssPixels) -> CssPixelSize*:
+    this.m_width = this.m_width.mul(factor)
+    this.m_height = this.m_height.mul(factor)
+    return this
+
+# mark: Orientation =============================================================================
+
+## Ported from Libraries/LibGfx/Size.h:140 Gfx::Size::primary_size_for_orientation for CssPixelSize.
+pub func css_pixel_size_primary_size_for_orientation(this: const CssPixelSize*, orientation: Orientation) -> CssPixels:
+    return css_pixel_size_height(this) if orientation == Orientation.vertical else css_pixel_size_width(this)
+
+## Ported from Libraries/LibGfx/Size.h:145 Gfx::Size::set_primary_size_for_orientation for CssPixelSize.
+pub func css_pixel_size_set_primary_size_for_orientation(this: CssPixelSize*, orientation: Orientation, value: CssPixels):
+    if orientation == Orientation.vertical:
+        css_pixel_size_set_height(this, value)
+    else:
+        css_pixel_size_set_width(this, value)
+
+## Ported from Libraries/LibGfx/Size.h:154 Gfx::Size::secondary_size_for_orientation for CssPixelSize.
+pub func css_pixel_size_secondary_size_for_orientation(this: const CssPixelSize*, orientation: Orientation) -> CssPixels:
+    return css_pixel_size_width(this) if orientation == Orientation.vertical else css_pixel_size_height(this)
+
+## Ported from Libraries/LibGfx/Size.h:159 Gfx::Size::set_secondary_size_for_orientation for CssPixelSize.
+pub func css_pixel_size_set_secondary_size_for_orientation(this: CssPixelSize*, orientation: Orientation, value: CssPixels):
+    if orientation == Orientation.vertical:
+        css_pixel_size_set_width(this, value)
+    else:
+        css_pixel_size_set_height(this, value)
+
+# mark: Conversions =============================================================================
+
+## Ported from Libraries/LibGfx/Size.h:170 Gfx::Size::to_type<int> for CssPixelSize (and the
+## converting constructor Size<int>(CSSPixelSize), Size.h:35): CSSPixels' explicit operator int.
+pub func css_pixel_size_to_type_i32(this: const CssPixelSize*) -> IntSize:
+    return IntSize(css_pixel_size_width(this).to_int(), css_pixel_size_height(this).to_int())
+
+## Ported from Libraries/LibGfx/Size.h:170 Gfx::Size::to_type<float> for CssPixelSize (and the
+## converting constructor Size<float>(CSSPixelSize), Size.h:35): CSSPixels' explicit operator float.
+pub func css_pixel_size_to_type_f32(this: const CssPixelSize*) -> FloatSize:
+    return FloatSize(css_pixel_size_width(this).to_float(), css_pixel_size_height(this).to_float())

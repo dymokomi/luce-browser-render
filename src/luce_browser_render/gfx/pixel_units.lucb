@@ -1,0 +1,549 @@
+#==============================================================================================
+#
+#   pixel_units - CSSPixels, CSSPixelFraction and DevicePixels
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibWeb/PixelUnits.h (lines 1-559; PixelUnits.cpp holds only the IPC
+#       encoders, which are not ported). CSSPixels is a fixed-point number with 6 fractional
+#       bits whose arithmetic saturates; CSSPixelFraction keeps a quotient exact until it is
+#       converted back.
+#
+#       DevicePixels is `AK::DistinctNumeric<int>` in the donor; the skeleton maps it to i32
+#       (so DevicePixelRect is Gfx::Rect<int>), and its operator templates are plain i32
+#       operations here. C++ templates over the other operand's type are instantiated for the
+#       widest type of their kind: `_int` takes i64 (every signed Integral), `_f32`/`_f64`
+#       are the float and double overloads.
+#
+#       The operators on CSSPixels are also reachable as one-line methods on the struct
+#       (`a.add(b)`, `a.lt(b)`, types_pixel_units.lucb).
+#
+#==============================================================================================
+
+# AK/Debug.h: LIBWEB_CSS_DEBUG is 0 in the donor's build.
+let libweb_css_debug = false
+
+# mark: DevicePixels ============================================================================
+
+## Ported from Libraries/LibWeb/PixelUnits.h:29 Web::operator==(DevicePixels, T).
+pub func eq_i32(left: i32, right: i64) -> bool:
+    return (i64)left == right
+
+## Ported from Libraries/LibWeb/PixelUnits.h:32 Web::operator!=(DevicePixels, T).
+pub func ne(left: i32, right: i64) -> bool:
+    return (i64)left != right
+
+## Ported from Libraries/LibWeb/PixelUnits.h:35 Web::operator>(DevicePixels, T).
+pub func gt_i32(left: i32, right: i64) -> bool:
+    return (i64)left > right
+
+## Ported from Libraries/LibWeb/PixelUnits.h:38 Web::operator<(DevicePixels, T).
+pub func lt_distinct_numeric(left: i32, right: i64) -> bool:
+    return (i64)left < right
+
+## Ported from Libraries/LibWeb/PixelUnits.h:41 Web::operator>=(DevicePixels, T).
+pub func ge(left: i32, right: i64) -> bool:
+    return (i64)left >= right
+
+## Ported from Libraries/LibWeb/PixelUnits.h:44 Web::operator<=(DevicePixels, T).
+pub func le(left: i32, right: i64) -> bool:
+    return (i64)left <= right
+
+## Ported from Libraries/LibWeb/PixelUnits.h:47 Web::operator*(DevicePixels, T).
+pub func mul_i32(left: i32, right: i32) -> i32:
+    return left * right
+
+## Ported from Libraries/LibWeb/PixelUnits.h:49 Web::operator*(T, DevicePixels).
+pub func mul_t_i32(left: i32, right: i32) -> i32:
+    return mul_i32(right, left)
+
+## Ported from Libraries/LibWeb/PixelUnits.h:52 Web::operator/(DevicePixels, T).
+pub func div_i32(left: i32, right: i32) -> i32:
+    return left // right
+
+## Ported from Libraries/LibWeb/PixelUnits.h:55 Web::operator%(DevicePixels, T).
+pub func rem(left: i32, right: i32) -> i32:
+    return left % right
+
+# mark: CSSPixels construction ==================================================================
+
+## Ported from Libraries/LibWeb/PixelUnits.h:76 Web::CSSPixels::CSSPixels<Signed I>(I value).
+## The value saturates at the integer range CSSPixels can hold.
+pub func css_pixels_from_int(value: i64) -> CssPixels:
+    var result: CssPixels
+    if value > (i64)css_pixels_max_integer_value:
+        result.m_value = ak.i32_max
+    elif value < (i64)css_pixels_min_integer_value:
+        result.m_value = ak.i32_min
+    else:
+        result.m_value = (i32)value << css_pixels_fractional_bits
+    return result
+
+## Ported from Libraries/LibWeb/PixelUnits.h:87 Web::CSSPixels::CSSPixels<FloatingPoint F>(F value), for float.
+pub func css_pixels_from_f32(value: f32) -> CssPixels:
+    return css_pixels_nearest_value_for_f32(value)
+
+## Ported from Libraries/LibWeb/PixelUnits.h:87 Web::CSSPixels::CSSPixels<FloatingPoint F>(F value), for double.
+pub func css_pixels_from_f64(value: f64) -> CssPixels:
+    return css_pixels_nearest_value_for_f64(value)
+
+## Ported from Libraries/LibWeb/PixelUnits.h:93 Web::CSSPixels::nearest_value_for, for float.
+pub func css_pixels_nearest_value_for_f32(value: f32) -> CssPixels:
+    var raw_value: i32 = 0
+    if value == value:
+        raw_value = ak.clamp_to_i32_f32(value * (f32)css_pixels_fixed_point_denominator)
+    # Note: The resolution of CSSPixels is 0.015625, so care must be taken when converting
+    # floats/doubles to CSSPixels as small values (such as scale factors) can underflow to zero,
+    # or otherwise produce inaccurate results (when scaled back up).
+    if raw_value == 0 and value != 0.0:
+        if libweb_css_debug:
+            ak.dbgln("CSSPixels: Conversion from float or double underflowed to zero")
+    return css_pixels_from_raw(raw_value)
+
+## Ported from Libraries/LibWeb/PixelUnits.h:93 Web::CSSPixels::nearest_value_for, for double.
+pub func css_pixels_nearest_value_for_f64(value: f64) -> CssPixels:
+    var raw_value: i32 = 0
+    if value == value:
+        raw_value = ak.clamp_to_i32_f64(value * (f64)css_pixels_fixed_point_denominator)
+    # Note: The resolution of CSSPixels is 0.015625, so care must be taken when converting
+    # floats/doubles to CSSPixels as small values (such as scale factors) can underflow to zero,
+    # or otherwise produce inaccurate results (when scaled back up).
+    if raw_value == 0 and value != 0.0:
+        if libweb_css_debug:
+            ak.dbgln("CSSPixels: Conversion from float or double underflowed to zero")
+    return css_pixels_from_raw(raw_value)
+
+## Ported from Libraries/LibWeb/PixelUnits.h:107 Web::CSSPixels::floored_value_for, for float.
+pub func css_pixels_floored_value_for_f32(value: f32) -> CssPixels:
+    var raw_value: i32 = 0
+    if value == value:
+        raw_value = ak.clamp_to_i32_f32(ak.rounding_floor_f32(value * (f32)css_pixels_fixed_point_denominator))
+    return css_pixels_from_raw(raw_value)
+
+## Ported from Libraries/LibWeb/PixelUnits.h:107 Web::CSSPixels::floored_value_for, for double.
+pub func css_pixels_floored_value_for_f64(value: f64) -> CssPixels:
+    var raw_value: i32 = 0
+    if value == value:
+        raw_value = ak.clamp_to_i32_f64(ak.rounding_floor_f64(value * (f64)css_pixels_fixed_point_denominator))
+    return css_pixels_from_raw(raw_value)
+
+## Ported from Libraries/LibWeb/PixelUnits.h:116 Web::CSSPixels::CSSPixels<Unsigned U>(U value).
+pub func css_pixels_from_unsigned(value: u64) -> CssPixels:
+    var result: CssPixels
+    if value > (u64)css_pixels_max_integer_value:
+        result.m_value = ak.i32_max
+    else:
+        result.m_value = (i32)value << css_pixels_fractional_bits
+    return result
+
+## Ported from Libraries/LibWeb/PixelUnits.h:124 Web::CSSPixels::from_raw.
+pub func css_pixels_from_raw(value: i32) -> CssPixels:
+    var res: CssPixels
+    css_pixels_set_raw_value(&res, value)
+    return res
+
+## Ported from Libraries/LibWeb/PixelUnits.h:131 Web::CSSPixels::min.
+pub func css_pixels_min() -> CssPixels:
+    return css_pixels_from_raw(ak.i32_min)
+
+## Ported from Libraries/LibWeb/PixelUnits.h:136 Web::CSSPixels::max.
+pub func css_pixels_max() -> CssPixels:
+    return css_pixels_from_raw(ak.i32_max)
+
+## Ported from Libraries/LibWeb/PixelUnits.h:141 Web::CSSPixels::smallest_positive_value.
+pub func css_pixels_smallest_positive_value() -> CssPixels:
+    return css_pixels_from_raw(1)
+
+# mark: CSSPixels conversions ===================================================================
+
+## Ported from Libraries/LibWeb/PixelUnits.h:146 Web::CSSPixels::to_float.
+pub func css_pixels_to_float_const(this: const CssPixels*) -> f32:
+    return (f32)this.m_value / (f32)css_pixels_fixed_point_denominator
+
+## Ported from Libraries/LibWeb/PixelUnits.h:147 Web::CSSPixels::to_double.
+pub func css_pixels_to_double_const(this: const CssPixels*) -> f64:
+    return (f64)this.m_value / (f64)css_pixels_fixed_point_denominator
+
+## Ported from Libraries/LibWeb/PixelUnits.h:148 Web::CSSPixels::to_int.
+pub func css_pixels_to_int_const(this: const CssPixels*) -> i32:
+    return this.m_value // css_pixels_fixed_point_denominator
+
+## Ported from Libraries/LibWeb/PixelUnits.h:150 Web::CSSPixels::raw_value.
+pub func css_pixels_raw_value(this: const CssPixels*) -> i32:
+    return this.m_value
+
+## Ported from Libraries/LibWeb/PixelUnits.h:151 Web::CSSPixels::set_raw_value.
+pub func css_pixels_set_raw_value(this: CssPixels*, value: i32):
+    this.m_value = value
+
+## Ported from Libraries/LibWeb/PixelUnits.h:153 Web::CSSPixels::might_be_saturated.
+pub func css_pixels_might_be_saturated(this: const CssPixels*) -> bool:
+    return css_pixels_raw_value(this) == ak.i32_max or css_pixels_raw_value(this) == ak.i32_min
+
+## Ported from Libraries/LibWeb/PixelUnits.h:157 Web::CSSPixels::operator double.
+pub func css_pixels_to_double_const_2(this: const CssPixels*) -> f64:
+    return css_pixels_to_double_const(this)
+
+## Ported from Libraries/LibWeb/PixelUnits.h:158 Web::CSSPixels::operator float.
+pub func css_pixels_to_float_const_2(this: const CssPixels*) -> f32:
+    return css_pixels_to_float_const(this)
+
+## Ported from Libraries/LibWeb/PixelUnits.h:159 Web::CSSPixels::operator int.
+pub func css_pixels_to_int_const_2(this: const CssPixels*) -> i32:
+    return css_pixels_to_int_const(this)
+
+# mark: CSSPixels operators =====================================================================
+
+## Ported from Libraries/LibWeb/PixelUnits.h:161 Web::CSSPixels::operator++.
+pub func css_pixels_inc(this: CssPixels*) -> CssPixels*:
+    this.m_value = ak.saturating_add_i32(this.m_value, css_pixels_fixed_point_denominator)
+    return this
+
+## Ported from Libraries/LibWeb/PixelUnits.h:166 Web::CSSPixels::operator--.
+pub func css_pixels_dec(this: CssPixels*) -> CssPixels*:
+    this.m_value = ak.saturating_sub_i32(this.m_value, css_pixels_fixed_point_denominator)
+    return this
+
+## Ported from Libraries/LibWeb/PixelUnits.h:172 Web::CSSPixels::operator<=>.
+pub func css_pixels_cmp(this: const CssPixels*, other: CssPixels) -> i32:
+    if css_pixels_raw_value(this) > css_pixels_raw_value(&other):
+        return 1
+    if css_pixels_raw_value(this) < css_pixels_raw_value(&other):
+        return -1
+    return 0
+
+## Ported from Libraries/LibWeb/PixelUnits.h:181 Web::CSSPixels::operator+ (unary).
+pub func css_pixels_add(this: const CssPixels*) -> CssPixels:
+    return css_pixels_from_raw(css_pixels_raw_value(this))
+
+## Ported from Libraries/LibWeb/PixelUnits.h:182 Web::CSSPixels::operator- (unary).
+pub func css_pixels_neg(this: const CssPixels*) -> CssPixels:
+    # -INT_MIN is undefined in C++; it wraps on every target the donor runs on.
+    return css_pixels_from_raw(-%css_pixels_raw_value(this))
+
+## Ported from Libraries/LibWeb/PixelUnits.h:184 Web::CSSPixels::operator+.
+pub func css_pixels_add_css_pixels(this: const CssPixels*, other: CssPixels) -> CssPixels:
+    return css_pixels_from_raw(ak.saturating_add_i32(css_pixels_raw_value(this), css_pixels_raw_value(&other)))
+
+## Ported from Libraries/LibWeb/PixelUnits.h:189 Web::CSSPixels::operator-.
+pub func css_pixels_sub(this: const CssPixels*, other: CssPixels) -> CssPixels:
+    return css_pixels_from_raw(ak.saturating_sub_i32(css_pixels_raw_value(this), css_pixels_raw_value(&other)))
+
+## Ported from Libraries/LibWeb/PixelUnits.h:194 Web::CSSPixels::operator*.
+pub func css_pixels_mul_css_pixels(this: const CssPixels*, other: CssPixels) -> CssPixels:
+    var value: i64 = css_pixels_raw_value(this)
+    value *= (i64)css_pixels_raw_value(&other)
+
+    var int_value = ak.clamp_to_i32_i64(value >> css_pixels_fractional_bits)
+
+    # Rounding:
+    # If last bit cut off was 1:
+    if (value & ((i64)1 << (css_pixels_fractional_bits - 1))) != 0:
+        # If any bit after was 1 as well
+        if (value & (i64)(css_pixels_radix_mask >> 1)) != 0:
+            # We need to round away from 0
+            int_value = ak.saturating_add_i32(int_value, 1)
+        else:
+            # Otherwise we round to the next even value
+            # Which means we add the least significant bit of the raw integer value
+            int_value = ak.saturating_add_i32(int_value, int_value & 1)
+
+    return css_pixels_from_raw(int_value)
+
+## Ported from Libraries/LibWeb/PixelUnits.h:394 Web::CSSPixels::operator*(CSSPixelFraction).
+pub func css_pixels_mul_css_pixel_fraction(this: const CssPixels*, other: CssPixelFraction) -> CssPixels:
+    var wide_value: i64 = css_pixels_raw_value(this)
+    wide_value *= (i64)css_pixels_raw_value(&other.m_numerator)
+    wide_value = wide_value // (i64)css_pixels_raw_value(&other.m_denominator)
+    return css_pixels_from_raw(ak.clamp_to_i32_i64(wide_value))
+
+## Ported from Libraries/LibWeb/PixelUnits.h:402 Web::CSSPixels::operator/(CSSPixels).
+pub func css_pixels_div_css_pixels(this: const CssPixels*, other: CssPixels) -> CssPixelFraction:
+    var fraction: CssPixelFraction
+    css_pixel_fraction_construct_css_pixels(&fraction, *this, other)
+    return fraction
+
+## Ported from Libraries/LibWeb/PixelUnits.h:406 Web::CSSPixels::operator/(CSSPixelFraction).
+pub func css_pixels_div_css_pixel_fraction(this: const CssPixels*, other: CssPixelFraction) -> CssPixels:
+    var wide_value: i64 = css_pixels_raw_value(this)
+    wide_value *= (i64)css_pixels_raw_value(&other.m_denominator)
+    wide_value = wide_value // (i64)css_pixels_raw_value(&other.m_numerator)
+    return css_pixels_from_raw(ak.clamp_to_i32_i64(wide_value))
+
+## Ported from Libraries/LibWeb/PixelUnits.h:222 Web::CSSPixels::operator+=.
+pub func css_pixels_add_assign(this: CssPixels*, other: CssPixels) -> CssPixels*:
+    *this = css_pixels_add_css_pixels(this, other)
+    return this
+
+## Ported from Libraries/LibWeb/PixelUnits.h:227 Web::CSSPixels::operator-=.
+pub func css_pixels_sub_assign(this: CssPixels*, other: CssPixels) -> CssPixels*:
+    *this = css_pixels_sub(this, other)
+    return this
+
+## Ported from Libraries/LibWeb/PixelUnits.h:232 Web::CSSPixels::operator*=.
+pub func css_pixels_mul_assign_css_pixels(this: CssPixels*, other: CssPixels) -> CssPixels*:
+    *this = css_pixels_mul_css_pixels(this, other)
+    return this
+
+## Ported from Libraries/LibWeb/PixelUnits.h:237 Web::CSSPixels::operator*=(CSSPixelFraction).
+pub func css_pixels_mul_assign_css_pixel_fraction(this: CssPixels*, other: CssPixelFraction) -> CssPixels*:
+    *this = css_pixels_mul_css_pixel_fraction(this, other)
+    return this
+
+## Ported from Libraries/LibWeb/PixelUnits.h:242 Web::CSSPixels::operator/=.
+pub func css_pixels_div_assign(this: CssPixels*, other: CssPixels) -> CssPixels*:
+    # donor bug: operator/= multiplies.
+    *this = css_pixels_mul_css_pixels(this, other)
+    return this
+
+## Ported from Libraries/LibWeb/PixelUnits.h:248 Web::CSSPixels::abs.
+pub func css_pixels_abs(this: const CssPixels*) -> CssPixels:
+    # ::abs(INT_MIN) is undefined in C++; like __builtin_abs it wraps.
+    return css_pixels_from_raw(ak.abs_i32(this.m_value))
+
+## Ported from Libraries/LibWeb/PixelUnits.h:250 Web::CSSPixels::scale_by(float).
+pub func css_pixels_scale_by_f32(this: CssPixels*, value: f32) -> CssPixels*:
+    *this = css_pixels_from_f32(css_pixels_to_float_const(this) * value)
+    return this
+
+## Ported from Libraries/LibWeb/PixelUnits.h:256 Web::CSSPixels::scale_by(double).
+pub func css_pixels_scale_by_f64(this: CssPixels*, value: f64) -> CssPixels*:
+    *this = css_pixels_from_f64(css_pixels_to_double_const(this) * value)
+    return this
+
+## Ported from Libraries/LibWeb/PixelUnits.h:262 Web::CSSPixels::scaled(float).
+pub func css_pixels_scaled_f32(this: const CssPixels*, value: f32) -> CssPixels:
+    var result = *this
+    discard(css_pixels_scale_by_f32(&result, value))
+    return result
+
+## Ported from Libraries/LibWeb/PixelUnits.h:269 Web::CSSPixels::scaled(double).
+pub func css_pixels_scaled_f64(this: const CssPixels*, value: f64) -> CssPixels:
+    var result = *this
+    discard(css_pixels_scale_by_f64(&result, value))
+    return result
+
+# mark: CSSPixels with other number types =======================================================
+
+## Ported from Libraries/LibWeb/PixelUnits.h:281 Web::operator==(CSSPixels, Integral T).
+pub func eq_css_pixels_int(left: CssPixels, right: i64) -> bool:
+    return left == css_pixels_from_int(right)
+
+## Ported from Libraries/LibWeb/PixelUnits.h:282 Web::operator==(CSSPixels, float).
+pub func eq_css_pixels_f32(left: CssPixels, right: f32) -> bool:
+    return css_pixels_to_float_const(&left) == right
+
+## Ported from Libraries/LibWeb/PixelUnits.h:283 Web::operator==(CSSPixels, double).
+pub func eq_css_pixels_f64(left: CssPixels, right: f64) -> bool:
+    return css_pixels_to_double_const(&left) == right
+
+## Ported from Libraries/LibWeb/PixelUnits.h:286 Web::operator>(CSSPixels, Integral T).
+pub func gt_css_pixels_int(left: CssPixels, right: i64) -> bool:
+    return css_pixels_cmp(&left, css_pixels_from_int(right)) > 0
+
+## Ported from Libraries/LibWeb/PixelUnits.h:287 Web::operator>(CSSPixels, float).
+pub func gt_css_pixels_f32(left: CssPixels, right: f32) -> bool:
+    return css_pixels_to_float_const(&left) > right
+
+## Ported from Libraries/LibWeb/PixelUnits.h:288 Web::operator>(CSSPixels, double).
+pub func gt_css_pixels_f64(left: CssPixels, right: f64) -> bool:
+    return css_pixels_to_double_const(&left) > right
+
+## Ported from Libraries/LibWeb/PixelUnits.h:291 Web::operator<(CSSPixels, Integral T).
+pub func lt_int(left: CssPixels, right: i64) -> bool:
+    return css_pixels_cmp(&left, css_pixels_from_int(right)) < 0
+
+## Ported from Libraries/LibWeb/PixelUnits.h:292 Web::operator<(CSSPixels, float).
+pub func lt_f32(left: CssPixels, right: f32) -> bool:
+    return css_pixels_to_float_const(&left) < right
+
+## Ported from Libraries/LibWeb/PixelUnits.h:293 Web::operator<(CSSPixels, double).
+pub func lt_f64(left: CssPixels, right: f64) -> bool:
+    return css_pixels_to_double_const(&left) < right
+
+## Ported from Libraries/LibWeb/PixelUnits.h:296 Web::operator*(CSSPixels, Integral T).
+pub func mul_css_pixels_int(left: CssPixels, right: i64) -> CssPixels:
+    return css_pixels_mul_css_pixels(&left, css_pixels_from_int(right))
+
+## Ported from Libraries/LibWeb/PixelUnits.h:297 Web::operator*(CSSPixels, float).
+pub func mul_css_pixels_f32(left: CssPixels, right: f32) -> f32:
+    return css_pixels_to_float_const(&left) * right
+
+## Ported from Libraries/LibWeb/PixelUnits.h:298 Web::operator*(CSSPixels, double).
+pub func mul_css_pixels_f64(left: CssPixels, right: f64) -> f64:
+    return css_pixels_to_double_const(&left) * right
+
+## Ported from Libraries/LibWeb/PixelUnits.h:301 Web::operator*(Integral T, CSSPixels).
+pub func mul_int_css_pixels(left: i64, right: CssPixels) -> CssPixels:
+    let left_pixels = css_pixels_from_int(left)
+    return css_pixels_mul_css_pixels(&left_pixels, right)
+
+## Ported from Libraries/LibWeb/PixelUnits.h:302 Web::operator*(float, CSSPixels).
+pub func mul_f32(left: f32, right: CssPixels) -> f32:
+    return css_pixels_to_float_const(&right) * left
+
+## Ported from Libraries/LibWeb/PixelUnits.h:303 Web::operator*(double, CSSPixels).
+pub func mul_f64(left: f64, right: CssPixels) -> f64:
+    return css_pixels_to_double_const(&right) * left
+
+# mark: CSSPixelFraction ========================================================================
+
+## Ported from Libraries/LibWeb/PixelUnits.h:307 Web::CSSPixelFraction::CSSPixelFraction(CSSPixels, CSSPixels).
+pub func css_pixel_fraction_construct_css_pixels(this: CssPixelFraction*, numerator: CssPixels, denominator: CssPixels):
+    this.m_numerator = numerator
+    this.m_denominator = denominator
+    assert(not eq_css_pixels_int(denominator, 0))
+
+## Ported from Libraries/LibWeb/PixelUnits.h:314 Web::CSSPixelFraction::CSSPixelFraction(CSSPixels).
+pub func css_pixel_fraction_construct(this: CssPixelFraction*, value: CssPixels):
+    this.m_numerator = value
+    this.m_denominator = css_pixels_from_int(1)
+
+## Ported from Libraries/LibWeb/PixelUnits.h:321 Web::CSSPixelFraction::CSSPixelFraction<Signed I>(I, I).
+pub func css_pixel_fraction_construct_int(this: CssPixelFraction*, numerator: i64, denominator: i64 = 1):
+    this.m_numerator = css_pixels_from_int(numerator)
+    this.m_denominator = css_pixels_from_int(denominator)
+    assert(denominator != 0)
+
+## Ported from Libraries/LibWeb/PixelUnits.h:330 Web::CSSPixelFraction::CSSPixelFraction<FloatingPoint F>(F, F), for double.
+pub func css_pixel_fraction_construct_f64(this: CssPixelFraction*, numerator: f64, denominator: f64 = 1.0):
+    var numerator_ = numerator
+    var denominator_ = denominator
+    if eq_css_pixels_int(css_pixels_nearest_value_for_f64(denominator_), 0):
+        numerator_ = numerator_ / denominator_
+        denominator_ = 1.0
+
+    this.m_numerator = css_pixels_from_f64(numerator_)
+    this.m_denominator = css_pixels_from_f64(denominator_)
+
+    assert(denominator_ != 0.0)
+
+## Ported from Libraries/LibWeb/PixelUnits.h:342 Web::CSSPixelFraction::operator CSSPixels.
+pub func css_pixel_fraction_to_css_pixels(this: const CssPixelFraction*) -> CssPixels:
+    var wide_value: i64 = css_pixels_raw_value(&this.m_numerator)
+    wide_value = wide_value << css_pixels_fractional_bits
+    wide_value = wide_value // (i64)css_pixels_raw_value(&this.m_denominator)
+    return css_pixels_from_raw(ak.clamp_to_i32_i64(wide_value))
+
+## Ported from Libraries/LibWeb/PixelUnits.h:350 Web::CSSPixelFraction::operator-(CSSPixels).
+pub func css_pixel_fraction_sub(this: const CssPixelFraction*, other: CssPixels) -> CssPixels:
+    let value = css_pixel_fraction_to_css_pixels(this)
+    return css_pixels_sub(&value, other)
+
+## Ported from Libraries/LibWeb/PixelUnits.h:354 Web::CSSPixelFraction::operator+(CSSPixels).
+pub func css_pixel_fraction_add(this: const CssPixelFraction*, other: CssPixels) -> CssPixels:
+    let value = css_pixel_fraction_to_css_pixels(this)
+    return css_pixels_add_css_pixels(&value, other)
+
+## Ported from Libraries/LibWeb/PixelUnits.h:359 Web::CSSPixelFraction::operator- (unary).
+pub func css_pixel_fraction_neg(this: const CssPixelFraction*) -> CssPixelFraction:
+    let numerator = css_pixel_fraction_numerator(this)
+    var fraction: CssPixelFraction
+    css_pixel_fraction_construct_css_pixels(&fraction, css_pixels_neg(&numerator), css_pixel_fraction_denominator(this))
+    return fraction
+
+## Ported from Libraries/LibWeb/PixelUnits.h:364 Web::CSSPixelFraction::operator<=>(CSSPixelFraction).
+pub func css_pixel_fraction_cmp_css_pixel_fraction(this: const CssPixelFraction*, other: CssPixelFraction) -> i32:
+    let left = (i64)css_pixels_raw_value(&this.m_numerator) * (i64)css_pixels_raw_value(&other.m_denominator)
+    let right = (i64)css_pixels_raw_value(&other.m_numerator) * (i64)css_pixels_raw_value(&this.m_denominator)
+    if left > right:
+        return 1
+    if left < right:
+        return -1
+    return 0
+
+## Ported from Libraries/LibWeb/PixelUnits.h:376 Web::CSSPixelFraction::operator<=><Signed I>(I).
+pub func css_pixel_fraction_cmp_int(this: const CssPixelFraction*, other: i64) -> i32:
+    var other_fraction: CssPixelFraction
+    css_pixel_fraction_construct_int(&other_fraction, other)
+    return css_pixel_fraction_cmp_css_pixel_fraction(this, other_fraction)
+
+## Ported from Libraries/LibWeb/PixelUnits.h:381 Web::CSSPixelFraction::numerator.
+pub func css_pixel_fraction_numerator(this: const CssPixelFraction*) -> CssPixels:
+    return this.m_numerator
+
+## Ported from Libraries/LibWeb/PixelUnits.h:382 Web::CSSPixelFraction::denominator.
+pub func css_pixel_fraction_denominator(this: const CssPixelFraction*) -> CssPixels:
+    return this.m_denominator
+
+## Ported from Libraries/LibWeb/PixelUnits.h:384 Web::CSSPixelFraction::to_float.
+pub func css_pixel_fraction_to_float(this: const CssPixelFraction*) -> f32:
+    return css_pixels_to_float_const(&this.m_numerator) / css_pixels_to_float_const(&this.m_denominator)
+
+## Ported from Libraries/LibWeb/PixelUnits.h:385 Web::CSSPixelFraction::to_double.
+pub func css_pixel_fraction_to_double(this: const CssPixelFraction*) -> f64:
+    return css_pixels_to_double_const(&this.m_numerator) / css_pixels_to_double_const(&this.m_denominator)
+
+## Ported from Libraries/LibWeb/PixelUnits.h:386 Web::CSSPixelFraction::to_int.
+pub func css_pixel_fraction_to_int(this: const CssPixelFraction*) -> i32:
+    let value = css_pixel_fraction_to_css_pixels(this)
+    return css_pixels_to_int_const(&value)
+
+## Ported from Libraries/LibWeb/PixelUnits.h:387 Web::CSSPixelFraction::might_be_saturated.
+pub func css_pixel_fraction_might_be_saturated(this: const CssPixelFraction*) -> bool:
+    let value = css_pixel_fraction_to_css_pixels(this)
+    return css_pixels_might_be_saturated(&value)
+
+## Ported from Libraries/LibWeb/PixelUnits.h:415 Web::operator/(CSSPixels, Integral T).
+pub func div_css_pixels_int(left: CssPixels, right: i64) -> CssPixelFraction:
+    return css_pixels_div_css_pixels(&left, css_pixels_from_int(right))
+
+## Ported from Libraries/LibWeb/PixelUnits.h:416 Web::operator/(CSSPixels, float).
+pub func div_css_pixels_f32(left: CssPixels, right: f32) -> f32:
+    return css_pixels_to_float_const(&left) / right
+
+## Ported from Libraries/LibWeb/PixelUnits.h:417 Web::operator/(CSSPixels, double).
+pub func div_css_pixels_f64(left: CssPixels, right: f64) -> f64:
+    return css_pixels_to_double_const(&left) / right
+
+# mark: Free functions ==========================================================================
+
+## Ported from Libraries/LibWeb/PixelUnits.h:429 abs(Web::CSSPixels).
+pub func abs_css_pixels(value: CssPixels) -> CssPixels:
+    return css_pixels_abs(&value)
+
+## Ported from Libraries/LibWeb/PixelUnits.h:434 floor(Web::CSSPixels).
+pub func floor(value: CssPixels) -> CssPixels:
+    return css_pixels_from_raw(css_pixels_raw_value(&value) & ~css_pixels_radix_mask)
+
+## Ported from Libraries/LibWeb/PixelUnits.h:439 ceil(Web::CSSPixels).
+pub func ceil(value: CssPixels) -> CssPixels:
+    let floor_value = css_pixels_raw_value(&value) & ~css_pixels_radix_mask
+    # The addition overflows (undefined in C++, wrapping in practice) only within 1px of the
+    # largest value.
+    let ceil_value = floor_value +% (css_pixels_fixed_point_denominator if (css_pixels_raw_value(&value) & css_pixels_radix_mask) != 0 else 0)
+    return css_pixels_from_raw(ceil_value)
+
+## Ported from Libraries/LibWeb/PixelUnits.h:446 round(Web::CSSPixels).
+pub func round(value: CssPixels) -> CssPixels:
+    # FIXME: Maybe do this with bit-fiddling instead
+    if gt_css_pixels_int(value, 0):
+        return floor(css_pixels_add_css_pixels(&value, css_pixels_from_raw(css_pixels_fixed_point_denominator >> 1)))  # 0.5
+    return ceil(css_pixels_sub(&value, css_pixels_from_raw(css_pixels_fixed_point_denominator >> 1)))  # 0.5
+
+## Ported from Libraries/LibWeb/PixelUnits.h:454 sqrt(Web::CSSPixels).
+pub func sqrt(value: CssPixels) -> CssPixels:
+    return css_pixels_nearest_value_for_f32(ak.sqrt_f32(css_pixels_to_float_const(&value)))
+
+## Ported from Libraries/LibWeb/PixelUnits.h:459 abs(Web::DevicePixels).
+pub func abs_i32(value: i32) -> i32:
+    return ak.abs_i32(value)
+
+## Ported from Libraries/LibWeb/PixelUnits.h:464 square_distance_between.
+pub func square_distance_between(a: CssPixelPoint, b: CssPixelPoint) -> CssPixels:
+    let delta_x = abs_css_pixels(css_pixel_point_x(&a).sub(css_pixel_point_x(&b)))
+    let delta_y = abs_css_pixels(css_pixel_point_y(&a).sub(css_pixel_point_y(&b)))
+    return delta_x.mul(delta_x).add(delta_y.mul(delta_y))
+
+## Ported from Libraries/LibWeb/PixelUnits.h:471 constrained.
+pub func constrained(point: CssPixelPoint, rect: CssPixelRect) -> CssPixelPoint:
+    return CssPixelPoint(
+        ak.clamp(css_pixel_point_x(&point), css_pixel_rect_left(&rect), css_pixel_rect_right(&rect).sub(css_pixels_from_int(1))),
+        ak.clamp(css_pixel_point_y(&point), css_pixel_rect_top(&rect), css_pixel_rect_bottom(&rect).sub(css_pixels_from_int(1))),
+    )
+
+## Ported from Libraries/LibWeb/PixelUnits.h:481 Web::CSSPixelRect::to_rounded<Web::CSSPixels>.
+pub func css_pixel_rect_to_rounded(this: const CssPixelRect*) -> CssPixelRect:
+    return CssPixelRect(
+        CssPixelPoint(round(css_pixel_rect_x(this)), round(css_pixel_rect_y(this))),
+        CssPixelSize(round(css_pixel_rect_width(this)), round(css_pixel_rect_height(this))),
+    )

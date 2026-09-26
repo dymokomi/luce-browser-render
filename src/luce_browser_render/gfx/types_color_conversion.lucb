@@ -8,6 +8,9 @@
 #       (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the generator
 #       could not map.
 #
+#       Fixed by hand (r08): color_components_init_fields runs the C++ default member
+#       initializers ({ 0, 0, 0 } and alpha 1), which the generator left untranslated.
+#
 #==============================================================================================
 
 # mark: ColorComponents =========================================================================
@@ -19,6 +22,5 @@ pub struct ColorComponents:
 
 ## The non-zero default member initializers of Gfx::ColorComponents; the constructor runs them first.
 pub func color_components_init_fields(this: ColorComponents*):
-    # m_components: C++ default 0 , 0 , 0 (not translated by the generator)
-    # m_alpha: C++ default 1 (not translated by the generator)
-    return
+    this.m_components = [0.0, 0.0, 0.0]
+    this.m_alpha = 1.0

@@ -1,0 +1,297 @@
+#==============================================================================================
+#
+#   point_float - Gfx::Point<float> (FloatPoint)
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Point.h (lines 20-281) and Point.cpp (lines 14-51) for T = float.
+#       The class template is instantiated per type (DESIGN.md §2.8): point_int.lucb and
+#       point_css_pixels.lucb hold the other two instantiations, function for function.
+#
+#       Member templates over a second type U are instantiated for the types phase 1 uses:
+#       the converting constructor `Point(Point<U>)` and `to_type<U>()` are `to_type_i32` and
+#       `to_type_css_pixels`; `to_rounded<int>`, `to_ceiled<int>` and `to_floored<int>` are the
+#       `_i32` functions. The Bezier helpers of Point.h (linear/quadratic/cubic_interpolate)
+#       compile only for a floating-point T and are here.
+#
+#==============================================================================================
+
+# mark: Construction and access =================================================================
+
+## Ported from Libraries/LibGfx/Point.h:24 Gfx::Point::Point<T> for FloatPoint.
+pub func float_point_construct(this: FloatPoint*, x: f32, y: f32):
+    this.m_x = x
+    this.m_y = y
+
+## Ported from Libraries/LibGfx/Point.h:31 Gfx::Point::Point<T>(U x, U y) for FloatPoint, with U = int.
+pub func float_point_construct_i32(this: FloatPoint*, x: i32, y: i32):
+    this.m_x = (f32)x
+    this.m_y = (f32)y
+
+## Ported from Libraries/LibGfx/Point.h:44 Gfx::Point::x for FloatPoint.
+pub func float_point_x(this: const FloatPoint*) -> f32:
+    return this.m_x
+
+## Ported from Libraries/LibGfx/Point.h:45 Gfx::Point::y for FloatPoint.
+pub func float_point_y(this: const FloatPoint*) -> f32:
+    return this.m_y
+
+## Ported from Libraries/LibGfx/Point.h:47 Gfx::Point::set_x for FloatPoint.
+pub func float_point_set_x(this: FloatPoint*, x: f32):
+    this.m_x = x
+
+## Ported from Libraries/LibGfx/Point.h:48 Gfx::Point::set_y for FloatPoint.
+pub func float_point_set_y(this: FloatPoint*, y: f32):
+    this.m_y = y
+
+## Ported from Libraries/LibGfx/Point.h:50 Gfx::Point::is_zero for FloatPoint.
+pub func float_point_is_zero(this: const FloatPoint*) -> bool:
+    return this.m_x == 0.0 and this.m_y == 0.0
+
+# mark: Translation and scaling =================================================================
+
+## Ported from Libraries/LibGfx/Point.h:52 Gfx::Point::translate_by for FloatPoint.
+pub func float_point_translate_by_f32_f32(this: FloatPoint*, dx: f32, dy: f32):
+    this.m_x += dx
+    this.m_y += dy
+
+## Ported from Libraries/LibGfx/Point.h:58 Gfx::Point::translate_by for FloatPoint.
+pub func float_point_translate_by_f32(this: FloatPoint*, dboth: f32):
+    float_point_translate_by_f32_f32(this, dboth, dboth)
+
+## Ported from Libraries/LibGfx/Point.h:59 Gfx::Point::translate_by for FloatPoint.
+pub func float_point_translate_by_float_point(this: FloatPoint*, delta: FloatPoint):
+    float_point_translate_by_f32_f32(this, float_point_x(&delta), float_point_y(&delta))
+
+## Ported from Libraries/LibGfx/Point.h:61 Gfx::Point::scale_by for FloatPoint.
+pub func float_point_scale_by_f32_f32(this: FloatPoint*, dx: f32, dy: f32):
+    this.m_x *= dx
+    this.m_y *= dy
+
+## Ported from Libraries/LibGfx/Point.h:67 Gfx::Point::scale_by for FloatPoint.
+pub func float_point_scale_by_f32(this: FloatPoint*, dboth: f32):
+    float_point_scale_by_f32_f32(this, dboth, dboth)
+
+## Ported from Libraries/LibGfx/Point.h:68 Gfx::Point::scale_by for FloatPoint.
+pub func float_point_scale_by_float_point(this: FloatPoint*, delta: FloatPoint):
+    float_point_scale_by_f32_f32(this, float_point_x(&delta), float_point_y(&delta))
+
+## Ported from Libraries/LibGfx/Point.h:70 Gfx::Point::translated for FloatPoint.
+pub func float_point_translated_float_point(this: const FloatPoint*, delta: FloatPoint) -> FloatPoint:
+    var point = *this
+    float_point_translate_by_float_point(&point, delta)
+    return point
+
+## Ported from Libraries/LibGfx/Point.h:77 Gfx::Point::translated for FloatPoint.
+pub func float_point_translated_f32_f32(this: const FloatPoint*, dx: f32, dy: f32) -> FloatPoint:
+    var point = *this
+    float_point_translate_by_f32_f32(&point, dx, dy)
+    return point
+
+## Ported from Libraries/LibGfx/Point.h:84 Gfx::Point::translated for FloatPoint.
+pub func float_point_translated_f32(this: const FloatPoint*, dboth: f32) -> FloatPoint:
+    var point = *this
+    float_point_translate_by_f32_f32(&point, dboth, dboth)
+    return point
+
+## Ported from Libraries/LibGfx/Point.h:91 Gfx::Point::scaled for FloatPoint.
+pub func float_point_scaled_f32(this: const FloatPoint*, dboth: f32) -> FloatPoint:
+    var point = *this
+    float_point_scale_by_f32(&point, dboth)
+    return point
+
+## Ported from Libraries/LibGfx/Point.h:98 Gfx::Point::scaled for FloatPoint.
+pub func float_point_scaled_float_point(this: const FloatPoint*, delta: FloatPoint) -> FloatPoint:
+    var point = *this
+    float_point_scale_by_float_point(&point, delta)
+    return point
+
+## Ported from Libraries/LibGfx/Point.h:105 Gfx::Point::scaled for FloatPoint.
+pub func float_point_scaled_f32_f32(this: const FloatPoint*, sx: f32, sy: f32) -> FloatPoint:
+    var point = *this
+    float_point_scale_by_f32_f32(&point, sx, sy)
+    return point
+
+## Ported from Libraries/LibGfx/Point.cpp:16 Gfx::Point::constrain for FloatPoint.
+pub func float_point_constrain(this: FloatPoint*, rect: FloatRect):
+    this.m_x = ak.clamp_f32(float_point_x(this), float_rect_left(&rect), float_rect_right(&rect) - 1.0)
+    this.m_y = ak.clamp_f32(float_point_y(this), float_rect_top(&rect), float_rect_bottom(&rect) - 1.0)
+
+## Ported from Libraries/LibGfx/Point.h:113 Gfx::Point::constrained for FloatPoint.
+pub func float_point_constrained(this: const FloatPoint*, rect: FloatRect) -> FloatPoint:
+    var point = *this
+    float_point_constrain(&point, rect)
+    return point
+
+## Ported from Libraries/LibGfx/Point.h:120 Gfx::Point::moved_left for FloatPoint.
+pub func float_point_moved_left(this: const FloatPoint*, amount: f32) -> FloatPoint:
+    return FloatPoint(float_point_x(this) - amount, float_point_y(this))
+
+## Ported from Libraries/LibGfx/Point.h:121 Gfx::Point::moved_right for FloatPoint.
+pub func float_point_moved_right(this: const FloatPoint*, amount: f32) -> FloatPoint:
+    return FloatPoint(float_point_x(this) + amount, float_point_y(this))
+
+## Ported from Libraries/LibGfx/Point.h:122 Gfx::Point::moved_up for FloatPoint.
+pub func float_point_moved_up(this: const FloatPoint*, amount: f32) -> FloatPoint:
+    return FloatPoint(float_point_x(this), float_point_y(this) - amount)
+
+## Ported from Libraries/LibGfx/Point.h:123 Gfx::Point::moved_down for FloatPoint.
+pub func float_point_moved_down(this: const FloatPoint*, amount: f32) -> FloatPoint:
+    return FloatPoint(float_point_x(this), float_point_y(this) + amount)
+
+# mark: Operators ===============================================================================
+
+## Ported from Libraries/LibGfx/Point.h:126 Gfx::Point::operator== for FloatPoint (U = int).
+pub func float_point_eq(this: const FloatPoint*, other: FloatPoint) -> bool:
+    return float_point_x(this) == float_point_x(&other) and float_point_y(this) == float_point_y(&other)
+
+## Ported from Libraries/LibGfx/Point.h:131 Gfx::Point::operator+ for FloatPoint.
+pub func float_point_add(this: const FloatPoint*, other: FloatPoint) -> FloatPoint:
+    return FloatPoint(this.m_x + other.m_x, this.m_y + other.m_y)
+
+## Ported from Libraries/LibGfx/Point.h:133 Gfx::Point::operator+= for FloatPoint.
+pub func float_point_add_assign(this: FloatPoint*, other: FloatPoint) -> FloatPoint*:
+    this.m_x += other.m_x
+    this.m_y += other.m_y
+    return this
+
+## Ported from Libraries/LibGfx/Point.h:140 Gfx::Point::operator- (unary) for FloatPoint.
+pub func float_point_neg(this: const FloatPoint*) -> FloatPoint:
+    return FloatPoint(-this.m_x, -this.m_y)
+
+## Ported from Libraries/LibGfx/Point.h:142 Gfx::Point::operator- for FloatPoint.
+pub func float_point_sub(this: const FloatPoint*, other: FloatPoint) -> FloatPoint:
+    return FloatPoint(this.m_x - other.m_x, this.m_y - other.m_y)
+
+## Ported from Libraries/LibGfx/Point.h:144 Gfx::Point::operator-= for FloatPoint.
+pub func float_point_sub_assign(this: FloatPoint*, other: FloatPoint) -> FloatPoint*:
+    this.m_x -= other.m_x
+    this.m_y -= other.m_y
+    return this
+
+## Ported from Libraries/LibGfx/Point.h:151 Gfx::Point::operator* for FloatPoint.
+pub func float_point_mul(this: const FloatPoint*, factor: f32) -> FloatPoint:
+    return FloatPoint(this.m_x * factor, this.m_y * factor)
+
+## Ported from Libraries/LibGfx/Point.h:153 Gfx::Point::operator*= for FloatPoint.
+pub func float_point_mul_assign(this: FloatPoint*, factor: f32) -> FloatPoint*:
+    this.m_x *= factor
+    this.m_y *= factor
+    return this
+
+## Ported from Libraries/LibGfx/Point.h:160 Gfx::Point::operator/ for FloatPoint.
+pub func float_point_div(this: const FloatPoint*, factor: f32) -> FloatPoint:
+    return FloatPoint(this.m_x / factor, this.m_y / factor)
+
+## Ported from Libraries/LibGfx/Point.h:162 Gfx::Point::operator/= for FloatPoint.
+pub func float_point_div_assign(this: FloatPoint*, factor: f32) -> FloatPoint*:
+    this.m_x = this.m_x / factor
+    this.m_y = this.m_y / factor
+    return this
+
+# mark: Orientation and distances ===============================================================
+
+## Ported from Libraries/LibGfx/Point.h:169 Gfx::Point::primary_offset_for_orientation for FloatPoint.
+pub func float_point_primary_offset_for_orientation(this: const FloatPoint*, orientation: Orientation) -> f32:
+    return float_point_y(this) if orientation == Orientation.vertical else float_point_x(this)
+
+## Ported from Libraries/LibGfx/Point.h:174 Gfx::Point::set_primary_offset_for_orientation for FloatPoint.
+pub func float_point_set_primary_offset_for_orientation(this: FloatPoint*, orientation: Orientation, value: f32):
+    if orientation == Orientation.vertical:
+        float_point_set_y(this, value)
+    else:
+        float_point_set_x(this, value)
+
+## Ported from Libraries/LibGfx/Point.h:183 Gfx::Point::secondary_offset_for_orientation for FloatPoint.
+pub func float_point_secondary_offset_for_orientation(this: const FloatPoint*, orientation: Orientation) -> f32:
+    return float_point_x(this) if orientation == Orientation.vertical else float_point_y(this)
+
+## Ported from Libraries/LibGfx/Point.h:188 Gfx::Point::set_secondary_offset_for_orientation for FloatPoint.
+pub func float_point_set_secondary_offset_for_orientation(this: FloatPoint*, orientation: Orientation, value: f32):
+    if orientation == Orientation.vertical:
+        float_point_set_x(this, value)
+    else:
+        float_point_set_y(this, value)
+
+## Ported from Libraries/LibGfx/Point.h:197 Gfx::Point::dx_relative_to for FloatPoint.
+pub func float_point_dx_relative_to(this: const FloatPoint*, other: FloatPoint) -> f32:
+    return float_point_x(this) - float_point_x(&other)
+
+## Ported from Libraries/LibGfx/Point.h:202 Gfx::Point::dy_relative_to for FloatPoint.
+pub func float_point_dy_relative_to(this: const FloatPoint*, other: FloatPoint) -> f32:
+    return float_point_y(this) - float_point_y(&other)
+
+# Returns pixels moved from other in either direction
+## Ported from Libraries/LibGfx/Point.h:208 Gfx::Point::pixels_moved for FloatPoint.
+pub func float_point_pixels_moved(this: const FloatPoint*, other: FloatPoint) -> f32:
+    return ak.max_f32(ak.abs_f32(float_point_dx_relative_to(this, other)), ak.abs_f32(float_point_dy_relative_to(this, other)))
+
+## Ported from Libraries/LibGfx/Point.h:213 Gfx::Point::distance_from for FloatPoint.
+pub func float_point_distance_from(this: const FloatPoint*, other: FloatPoint) -> f32:
+    if float_point_eq(this, other):
+        return 0.0
+    return ak.trigonometry_hypot_f32(this.m_x - other.m_x, this.m_y - other.m_y)
+
+## Ported from Libraries/LibGfx/Point.h:220 Gfx::Point::absolute_relative_distance_to for FloatPoint.
+pub func float_point_absolute_relative_distance_to(this: const FloatPoint*, other: FloatPoint) -> FloatPoint:
+    return FloatPoint(ak.abs_f32(float_point_dx_relative_to(this, other)), ak.abs_f32(float_point_dy_relative_to(this, other)))
+
+## Ported from Libraries/LibGfx/Point.cpp:23 Gfx::Point::end_point_for_aspect_ratio for FloatPoint.
+pub func float_point_end_point_for_aspect_ratio(this: const FloatPoint*, previous_end_point: FloatPoint, aspect_ratio: f32) -> FloatPoint:
+    assert(aspect_ratio > 0.0)
+    let x_sign: f32 = 1.0 if float_point_x(&previous_end_point) >= float_point_x(this) else -1.0
+    let y_sign: f32 = 1.0 if float_point_y(&previous_end_point) >= float_point_y(this) else -1.0
+    var dx = ak.abs_f32(float_point_x(&previous_end_point) - float_point_x(this))
+    var dy = ak.abs_f32(float_point_y(&previous_end_point) - float_point_y(this))
+    if dx > dy:
+        dy = dx / aspect_ratio
+    else:
+        dx = dy * aspect_ratio
+    return FloatPoint(float_point_x(this) + x_sign * dx, float_point_y(this) + y_sign * dy)
+
+# mark: Conversions =============================================================================
+
+## Ported from Libraries/LibGfx/Point.h:229 Gfx::Point::to_type<int> for FloatPoint (and the
+## converting constructor Point<int>(FloatPoint), Point.h:38).
+pub func float_point_to_type_i32(this: const FloatPoint*) -> IntPoint:
+    return IntPoint((i32)float_point_x(this), (i32)float_point_y(this))
+
+## Ported from Libraries/LibGfx/Point.h:229 Gfx::Point::to_type<CSSPixels> for FloatPoint (and the
+## converting constructor Point<CSSPixels>(FloatPoint), Point.h:38).
+pub func float_point_to_type_css_pixels(this: const FloatPoint*) -> CssPixelPoint:
+    return CssPixelPoint(css_pixels_from_f32(float_point_x(this)), css_pixels_from_f32(float_point_y(this)))
+
+## Ported from Libraries/LibGfx/Point.h:235 Gfx::Point::to_rounded<int> for FloatPoint (C's roundf).
+pub func float_point_to_rounded_i32(this: const FloatPoint*) -> IntPoint:
+    return IntPoint((i32)math32.round(float_point_x(this)), (i32)math32.round(float_point_y(this)))
+
+## Ported from Libraries/LibGfx/Point.h:242 Gfx::Point::to_ceiled<int> for FloatPoint.
+pub func float_point_to_ceiled_i32(this: const FloatPoint*) -> IntPoint:
+    return IntPoint((i32)ak.rounding_ceil_f32(float_point_x(this)), (i32)ak.rounding_ceil_f32(float_point_y(this)))
+
+## Ported from Libraries/LibGfx/Point.h:249 Gfx::Point::to_floored<int> for FloatPoint.
+pub func float_point_to_floored_i32(this: const FloatPoint*) -> IntPoint:
+    return IntPoint((i32)ak.rounding_floor_f32(float_point_x(this)), (i32)ak.rounding_floor_f32(float_point_y(this)))
+
+## Ported from Libraries/LibGfx/Point.cpp:45 Gfx::Point::to_byte_string for FloatPoint.
+pub func float_point_to_byte_string(this: const FloatPoint*) -> ak.ByteString:
+    let arguments = [ak.arg_f32(float_point_x(this)), ak.arg_f32(float_point_y(this))]
+    var params = ak.type_erased_format_params_create(arguments)
+    return ak.byte_string_vformatted(ak.sv("[{},{}]"), &params)
+
+## Ported from Libraries/LibGfx/Point.h:312 AK::Traits<Gfx::Point<T>>::hash for FloatPoint.
+pub func float_point_hash(point: const FloatPoint*) -> u32:
+    return ak.pair_int_hash(ak.u32_hash(float_point_x(point).bits()), ak.u32_hash(float_point_y(point).bits()))
+
+# mark: Interpolation ===========================================================================
+
+## Ported from Libraries/LibGfx/Point.h:264 Gfx::linear_interpolate (T = float).
+pub func linear_interpolate(p1: FloatPoint, p2: FloatPoint, t: f32) -> FloatPoint:
+    return FloatPoint(float_point_x(&p1) + t * (float_point_x(&p2) - float_point_x(&p1)), float_point_y(&p1) + t * (float_point_y(&p2) - float_point_y(&p1)))
+
+## Ported from Libraries/LibGfx/Point.h:270 Gfx::quadratic_interpolate (T = float).
+pub func quadratic_interpolate(p1: FloatPoint, p2: FloatPoint, c1: FloatPoint, t: f32) -> FloatPoint:
+    return linear_interpolate(linear_interpolate(p1, c1, t), linear_interpolate(c1, p2, t), t)
+
+## Ported from Libraries/LibGfx/Point.h:276 Gfx::cubic_interpolate (T = float).
+pub func cubic_interpolate(p1: FloatPoint, p2: FloatPoint, c1: FloatPoint, c2: FloatPoint, t: f32) -> FloatPoint:
+    return linear_interpolate(quadratic_interpolate(p1, c1, c2, t), quadratic_interpolate(c1, c2, p2, t), t)

@@ -8,13 +8,62 @@
 #       by the skeleton generator (DESIGN.md §4.4). Regenerate rather than edit, except to
 #       fill a field the generator could not map.
 #
+#       Fixed by hand (r08): Skia is replaced in this port, so the unmapped
+#       `sk_sp<SkColorSpace>` of ColorSpaceImpl is a nullable pointer to SkColorSpace, a
+#       stand-in holding what Skia's SkColorSpace holds: the skcms transfer function (g, a, b,
+#       c, d, e, f) and the row-major 3x3 gamut matrix to XYZ D50. The stand-in structs
+#       mirror skcms.h and include/core/SkColorSpace.h; color_space.lucb ports the Skia and
+#       skcms code that builds them.
+#
 #==============================================================================================
+
+# mark: Skia stand-ins ==========================================================================
+
+## skcms_TransferFunction (modules/skcms/src/skcms_public.h): the seven parameters of a
+## transfer function, `g` first, as skcms stores them.
+pub struct SkcmsTransferFunction:
+    pub var g: f32
+    pub var a: f32
+    pub var b: f32
+    pub var c: f32
+    pub var d: f32
+    pub var e: f32
+    pub var f: f32
+
+## One row of an skcms_Matrix3x3.
+pub type SkcmsMatrix3x3Row = f32[3]
+
+## skcms_Matrix3x3 (modules/skcms/src/skcms_public.h): a row-major 3x3 matrix.
+pub struct SkcmsMatrix3x3:
+    pub var vals: SkcmsMatrix3x3Row[3]
+
+## SkColorSpacePrimaries (include/core/SkColorSpace.h): the xy chromaticities of the three
+## primaries and the white point.
+pub struct SkColorSpacePrimaries:
+    pub var fRX: f32
+    pub var fRY: f32
+    pub var fGX: f32
+    pub var fGY: f32
+    pub var fBX: f32
+    pub var fBY: f32
+    pub var fWX: f32
+    pub var fWY: f32
+
+## SkColorSpace (include/core/SkColorSpace.h), reduced to the two values that define it: the
+## transfer function and the gamut. Skia's lazily computed inverse fields and hashes are not
+## kept.
+pub struct SkColorSpace:
+    pub var fTransferFn: SkcmsTransferFunction
+    pub var fToXYZD50: SkcmsMatrix3x3
+
+## sk_sp<SkColorSpace>: a nullable reference to a color space (managed, no reference count).
+pub type SkSpSkColorSpace = SkColorSpace*?
 
 # mark: ColorSpaceImpl ==========================================================================
 
 ## Gfx::Details::ColorSpaceImpl (Libraries/LibGfx/ColorSpace.cpp:20).
 pub struct ColorSpaceImpl:
-    pub var color_space: void*?  # unmapped: sk_sp<SkColorSpace>
+    pub var color_space: SkSpSkColorSpace
 
 # mark: ColorSpace ==============================================================================
 

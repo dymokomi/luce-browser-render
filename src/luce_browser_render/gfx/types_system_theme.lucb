@@ -8,6 +8,9 @@
 #       (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the generator
 #       could not map.
 #
+#       Fixed by hand (r08): SystemTheme was opaque; Palette reads and writes it through
+#       an AnonymousBuffer, so its fields (SystemTheme.h lines 283-289) are declared here.
+#
 #==============================================================================================
 
 ## Gfx::ColorRole (Libraries/LibGfx/SystemTheme.h:145).
@@ -154,6 +157,13 @@ pub enum PathRole as i32:
     color_scheme = 7
     count = 8
 
-## Gfx::SystemTheme (Libraries/LibGfx/SystemTheme.h:283): opaque in this phase (not in the phase-1 closure).
+## One path of a SystemTheme: `char path[256]`, NUL-terminated.
+pub type SystemThemePath = u8[256]
+
+## Gfx::SystemTheme (Libraries/LibGfx/SystemTheme.h:283).
 pub struct SystemTheme:
-    pub var opaque_: u8
+    pub var color: u32[99]  # BGRA8888 color[(int)ColorRole::__Count]
+    pub var alignment: TextAlignment[2]  # Gfx::TextAlignment alignment[(int)AlignmentRole::__Count]
+    pub var flag: bool[4]  # bool flag[(int)FlagRole::__Count]
+    pub var metric: i32[6]  # int metric[(int)MetricRole::__Count]
+    pub var path: SystemThemePath[8]  # char path[(int)PathRole::__Count][256]; // TODO: PATH_MAX?

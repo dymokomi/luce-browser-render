@@ -1,0 +1,279 @@
+#==============================================================================================
+#
+#   matrix - Gfx::Matrix<4, float> (FloatMatrix4x4) and the Matrix4x4 helpers
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Matrix.h (lines 16-251) for N = 4, T = float, and of
+#       Libraries/LibGfx/Matrix4x4.h (lines 16-98) for T = float. `operator[](row, col)` is
+#       `float_matrix4_x4_at`. first_minor builds a Matrix<N - 1> and takes its determinant,
+#       recursively; the 3x3, 2x2 and 1x1 instantiations that recursion reaches are the private
+#       `matrix3_*`/`matrix2_*` functions below, over plain arrays, with the same loops.
+#
+#       Matrix4x4.h's helpers are `static` in the header, so every includer (LibWeb among them)
+#       may call them; they stay public here. Vector3/Vector4 are FloatVector3/FloatVector4
+#       (types_vector_n.lucb).
+#
+#==============================================================================================
+
+# mark: Matrix<4, float> ========================================================================
+
+## Ported from Libraries/LibGfx/Matrix.h:25 Gfx::Matrix::Matrix(std::initializer_list<T>) for FloatMatrix4X4:
+## the 16 elements in row-major order.
+pub func float_matrix4_x4_construct(this: FloatMatrix4X4*, elements: const f32[]):
+    assert(elements.length == 4 * 4)
+    var i: usize = 0
+    for element in elements:
+        this.m_elements[i // 4][i % 4] = element
+        i += 1
+
+## Ported from Libraries/LibGfx/Matrix.h:62 Gfx::Matrix::elements (const) for FloatMatrix4X4.
+# workaround: compiler-issues/const_array_pointer_drops_const (`const f32[4][4]*` loses its const).
+pub func float_matrix4_x4_elements_const(this: const FloatMatrix4X4*) -> const (f32[4][4])*:
+    return &this.m_elements
+
+## Ported from Libraries/LibGfx/Matrix.h:63 Gfx::Matrix::elements for FloatMatrix4X4.
+pub func float_matrix4_x4_elements(this: FloatMatrix4X4*) -> f32[4][4]*:
+    return &this.m_elements
+
+## Ported from Libraries/LibGfx/Matrix.h:65 Gfx::Matrix::operator[](row, col) (const) for FloatMatrix4X4.
+pub func float_matrix4_x4_at_const(this: const FloatMatrix4X4*, row: usize, col: usize) -> f32:
+    return this.m_elements[row][col]
+
+## Ported from Libraries/LibGfx/Matrix.h:66 Gfx::Matrix::operator[](row, col) for FloatMatrix4X4.
+pub func float_matrix4_x4_at(this: FloatMatrix4X4*, row: usize, col: usize) -> f32*:
+    return &this.m_elements[row][col]
+
+## Ported from Libraries/LibGfx/Matrix.h:68 Gfx::Matrix::operator*(Matrix) for FloatMatrix4X4.
+pub func float_matrix4_x4_mul(this: const FloatMatrix4X4*, other: FloatMatrix4X4) -> FloatMatrix4X4:
+    var product: FloatMatrix4X4
+    for i: usize in 0..<4:
+        for j: usize in 0..<4:
+            product.m_elements[i][j] = (this.m_elements[i][0] * other.m_elements[0][j]
+                + this.m_elements[i][1] * other.m_elements[1][j]
+                + this.m_elements[i][2] * other.m_elements[2][j]
+                + this.m_elements[i][3] * other.m_elements[3][j])
+    return product
+
+## Ported from Libraries/LibGfx/Matrix.h:103 Gfx::Matrix::operator+ for FloatMatrix4X4.
+pub func float_matrix4_x4_add(this: const FloatMatrix4X4*, other: FloatMatrix4X4) -> FloatMatrix4X4:
+    var sum: FloatMatrix4X4
+    for i: usize in 0..<4:
+        for j: usize in 0..<4:
+            sum.m_elements[i][j] = this.m_elements[i][j] + other.m_elements[i][j]
+    return sum
+
+## Ported from Libraries/LibGfx/Matrix.h:113 Gfx::Matrix::operator/(T) for FloatMatrix4X4.
+pub func float_matrix4_x4_div(this: const FloatMatrix4X4*, divisor: f32) -> FloatMatrix4X4:
+    var division: FloatMatrix4X4
+    for i: usize in 0..<4:
+        for j: usize in 0..<4:
+            division.m_elements[i][j] = this.m_elements[i][j] / divisor
+    return division
+
+## Ported from Libraries/LibGfx/Matrix.h:138 Gfx::Matrix::adjugate for FloatMatrix4X4.
+pub func float_matrix4_x4_adjugate(this: const FloatMatrix4X4*) -> FloatMatrix4X4:
+    var adjugate: FloatMatrix4X4
+    for i: usize in 0..<4:
+        for j: usize in 0..<4:
+            let sign: i32 = 1 if (i + j) % 2 == 0 else -1
+            adjugate.m_elements[j][i] = (f32)sign * float_matrix4_x4_first_minor(this, i, j)
+    return adjugate
+
+## Ported from Libraries/LibGfx/Matrix.h:153 Gfx::Matrix::determinant for FloatMatrix4X4.
+pub func float_matrix4_x4_determinant(this: const FloatMatrix4X4*) -> f32:
+    var result: f32 = 0.0
+    var sign: i32 = 1
+    for j: usize in 0..<4:
+        result += (f32)sign * this.m_elements[0][j] * float_matrix4_x4_first_minor(this, 0, j)
+        sign *= -1
+    return result
+
+## Ported from Libraries/LibGfx/Matrix.h:168 Gfx::Matrix::first_minor for FloatMatrix4X4.
+pub func float_matrix4_x4_first_minor(this: const FloatMatrix4X4*, skip_row: usize, skip_column: usize) -> f32:
+    assert(skip_row < 4)
+    assert(skip_column < 4)
+
+    var first_minor: f32[3][3]
+    let new_size: usize = 4 - 1
+    var k: usize = 0
+
+    for i: usize in 0..<4:
+        for j: usize in 0..<4:
+            if i == skip_row or j == skip_column:
+                continue
+
+            first_minor[k // new_size][k % new_size] = this.m_elements[i][j]
+            k += 1
+
+    return matrix3_determinant(first_minor)
+
+## Ported from Libraries/LibGfx/Matrix.h:191 Gfx::Matrix::identity for FloatMatrix4X4.
+pub func float_matrix4_x4_identity() -> FloatMatrix4X4:
+    var result: FloatMatrix4X4
+    for i: usize in 0..<4:
+        for j: usize in 0..<4:
+            if i == j:
+                result.m_elements[i][j] = 1.0
+            else:
+                result.m_elements[i][j] = 0.0
+    return result
+
+## Ported from Libraries/LibGfx/Matrix.h:205 Gfx::Matrix::inverse for FloatMatrix4X4.
+pub func float_matrix4_x4_inverse(this: const FloatMatrix4X4*) -> FloatMatrix4X4:
+    let adjugate = float_matrix4_x4_adjugate(this)
+    return float_matrix4_x4_div(&adjugate, float_matrix4_x4_determinant(this))
+
+## Ported from Libraries/LibGfx/Matrix.h:210 Gfx::Matrix::transpose for FloatMatrix4X4.
+pub func float_matrix4_x4_transpose(this: const FloatMatrix4X4*) -> FloatMatrix4X4:
+    var result: FloatMatrix4X4
+    for i: usize in 0..<4:
+        for j: usize in 0..<4:
+            result.m_elements[i][j] = this.m_elements[j][i]
+    return result
+
+## Ported from Libraries/LibGfx/Matrix.h:231 Gfx::Matrix::is_invertible for FloatMatrix4X4.
+pub func float_matrix4_x4_is_invertible(this: const FloatMatrix4X4*) -> bool:
+    return float_matrix4_x4_determinant(this) != 0.0
+
+## Ported from Libraries/LibGfx/Matrix.h:236 Gfx::Matrix::is_identity for FloatMatrix4X4.
+pub func float_matrix4_x4_is_identity(this: const FloatMatrix4X4*) -> bool:
+    for i: usize in 0..<4:
+        for j: usize in 0..<4:
+            let expected: f32 = 1.0 if i == j else 0.0
+            if this.m_elements[i][j] != expected:
+                return false
+    return true
+
+# mark: Matrix<3, float>, Matrix<2, float> ======================================================
+
+# Ported from Libraries/LibGfx/Matrix.h:153 Gfx::Matrix::determinant for N = 3.
+func matrix3_determinant(m: f32[3][3]) -> f32:
+    var result: f32 = 0.0
+    var sign: i32 = 1
+    for j: usize in 0..<3:
+        result += (f32)sign * m[0][j] * matrix3_first_minor(m, 0, j)
+        sign *= -1
+    return result
+
+# Ported from Libraries/LibGfx/Matrix.h:168 Gfx::Matrix::first_minor for N = 3.
+func matrix3_first_minor(m: f32[3][3], skip_row: usize, skip_column: usize) -> f32:
+    assert(skip_row < 3)
+    assert(skip_column < 3)
+
+    var first_minor: f32[2][2]
+    let new_size: usize = 3 - 1
+    var k: usize = 0
+
+    for i: usize in 0..<3:
+        for j: usize in 0..<3:
+            if i == skip_row or j == skip_column:
+                continue
+
+            first_minor[k // new_size][k % new_size] = m[i][j]
+            k += 1
+
+    return matrix2_determinant(first_minor)
+
+# Ported from Libraries/LibGfx/Matrix.h:153 Gfx::Matrix::determinant for N = 2.
+func matrix2_determinant(m: f32[2][2]) -> f32:
+    var result: f32 = 0.0
+    var sign: i32 = 1
+    for j: usize in 0..<2:
+        result += (f32)sign * m[0][j] * matrix2_first_minor(m, 0, j)
+        sign *= -1
+    return result
+
+# Ported from Libraries/LibGfx/Matrix.h:168 Gfx::Matrix::first_minor for N = 2; the 1x1 minor's
+# determinant (Matrix.h:155, N == 1) is its one element.
+func matrix2_first_minor(m: f32[2][2], skip_row: usize, skip_column: usize) -> f32:
+    assert(skip_row < 2)
+    assert(skip_column < 2)
+
+    var first_minor: f32[1][1]
+    let new_size: usize = 2 - 1
+    var k: usize = 0
+
+    for i: usize in 0..<2:
+        for j: usize in 0..<2:
+            if i == skip_row or j == skip_column:
+                continue
+
+            first_minor[k // new_size][k % new_size] = m[i][j]
+            k += 1
+
+    return first_minor[0][0]
+
+# mark: Matrix4x4.h =============================================================================
+
+## Ported from Libraries/LibGfx/Matrix4x4.h:21 Gfx::operator*(Matrix4x4<T>, Vector4<T>), for float.
+pub func mul_float_matrix4_x4_float_vector4(m: FloatMatrix4X4, v: FloatVector4) -> FloatVector4:
+    return FloatVector4([
+        v.m_data[0] * m.m_elements[0][0] + v.m_data[1] * m.m_elements[0][1] + v.m_data[2] * m.m_elements[0][2] + v.m_data[3] * m.m_elements[0][3],
+        v.m_data[0] * m.m_elements[1][0] + v.m_data[1] * m.m_elements[1][1] + v.m_data[2] * m.m_elements[1][2] + v.m_data[3] * m.m_elements[1][3],
+        v.m_data[0] * m.m_elements[2][0] + v.m_data[1] * m.m_elements[2][1] + v.m_data[2] * m.m_elements[2][2] + v.m_data[3] * m.m_elements[2][3],
+        v.m_data[0] * m.m_elements[3][0] + v.m_data[1] * m.m_elements[3][1] + v.m_data[2] * m.m_elements[3][2] + v.m_data[3] * m.m_elements[3][3],
+    ])
+
+# FIXME: this is a specific Matrix4x4 * Vector3 interaction that implies W=1; maybe move this out of LibGfx
+#        or replace a Matrix4x4 * Vector4 operation?
+## Ported from Libraries/LibGfx/Matrix4x4.h:33 Gfx::transform_point, for float.
+pub func transform_point(m: FloatMatrix4X4, p: FloatVector3) -> FloatVector3:
+    return FloatVector3([
+        p.m_data[0] * m.m_elements[0][0] + p.m_data[1] * m.m_elements[0][1] + p.m_data[2] * m.m_elements[0][2] + m.m_elements[0][3],
+        p.m_data[0] * m.m_elements[1][0] + p.m_data[1] * m.m_elements[1][1] + p.m_data[2] * m.m_elements[1][2] + m.m_elements[1][3],
+        p.m_data[0] * m.m_elements[2][0] + p.m_data[1] * m.m_elements[2][1] + p.m_data[2] * m.m_elements[2][2] + m.m_elements[2][3],
+    ])
+
+## Ported from Libraries/LibGfx/Matrix4x4.h:42 Gfx::translation_matrix, for float.
+pub func translation_matrix(p: FloatVector3) -> FloatMatrix4X4:
+    var matrix: FloatMatrix4X4
+    float_matrix4_x4_construct(&matrix, [
+        1.0, 0.0, 0.0, p.m_data[0],
+        0.0, 1.0, 0.0, p.m_data[1],
+        0.0, 0.0, 1.0, p.m_data[2],
+        0.0, 0.0, 0.0, 1.0,
+    ])
+    return matrix
+
+## Ported from Libraries/LibGfx/Matrix4x4.h:52 Gfx::scale_matrix, for float.
+pub func scale_matrix(s: FloatVector3) -> FloatMatrix4X4:
+    var matrix: FloatMatrix4X4
+    float_matrix4_x4_construct(&matrix, [
+        s.m_data[0], 0.0, 0.0, 0.0,
+        0.0, s.m_data[1], 0.0, 0.0,
+        0.0, 0.0, s.m_data[2], 0.0,
+        0.0, 0.0, 0.0, 1.0,
+    ])
+    return matrix
+
+## Ported from Libraries/LibGfx/Matrix4x4.h:62 Gfx::rotation_matrix, for float.
+pub func rotation_matrix(axis: FloatVector3, angle: f32) -> FloatMatrix4X4:
+    var c_: f32
+    var s: f32
+    ak.trigonometry_sincos_f32(angle, &s, &c_)
+
+    if ak.abs_f32(c_) < ak.f32_epsilon:
+        c_ = 0.0
+
+    if ak.abs_f32(s) < ak.f32_epsilon:
+        s = 0.0
+
+    let t = 1.0 - c_
+    let x = axis.m_data[0]
+    let y = axis.m_data[1]
+    let z = axis.m_data[2]
+
+    var matrix: FloatMatrix4X4
+    float_matrix4_x4_construct(&matrix, [
+        t * x * x + c_, t * x * y - z * s, t * x * z + y * s, 0.0,
+        t * x * y + z * s, t * y * y + c_, t * y * z - x * s, 0.0,
+        t * x * z - y * s, t * y * z + x * s, t * z * z + c_, 0.0,
+        0.0, 0.0, 0.0, 1.0,
+    ])
+    return matrix
+
+## Ported from Libraries/LibGfx/Matrix4x4.h:86 Gfx::extract_2d_affine_transform, for float.
+pub func extract_2d_affine_transform(m: FloatMatrix4X4) -> AffineTransform:
+    var transform: AffineTransform
+    affine_transform_construct_f32(&transform, m.m_elements[0][0], m.m_elements[1][0], m.m_elements[0][1], m.m_elements[1][1], m.m_elements[0][3], m.m_elements[1][3])
+    return transform

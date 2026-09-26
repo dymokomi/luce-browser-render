@@ -1,0 +1,149 @@
+#==============================================================================================
+#
+#   tests_rect - Tests/LibGfx/TestRect.cpp, and the geometry tests' helpers
+#
+#   DESCRIPTION:
+#       Port of Tests/LibGfx/TestRect.cpp (lines 1-68), every case, plus the container
+#       overloads of Rect::contains and Rect::intersects. The helpers at the top build rects,
+#       points, transforms and matrices as the C++ initializers do; tests_geometry.lucb and
+#       tests_affine_transform.lucb use them too.
+#
+#       Each test's body is a noinline function the test block calls, so that the test
+#       runner's `main` does not inline every body (# workaround:
+#       compiler-issues/ranges_facts_cubic).
+#
+#==============================================================================================
+
+# mark: Helpers =================================================================================
+
+# Gfx::IntRect { x, y, width, height }.
+func test_irect(x: i32, y: i32, width: i32, height: i32) -> DevicePixelRect:
+    return DevicePixelRect(IntPoint(x, y), IntSize(width, height))
+
+# Gfx::FloatRect { x, y, width, height }.
+func test_frect(x: f32, y: f32, width: f32, height: f32) -> FloatRect:
+    return FloatRect(FloatPoint(x, y), FloatSize(width, height))
+
+# Web::CSSPixels(double).
+func test_px(value: f64) -> CssPixels:
+    return css_pixels_from_f64(value)
+
+# Web::CSSPixelPoint(CSSPixels(x), CSSPixels(y)).
+func test_cpoint(x: f64, y: f64) -> CssPixelPoint:
+    return CssPixelPoint(test_px(x), test_px(y))
+
+# Web::CSSPixelRect(CSSPixels(x), CSSPixels(y), CSSPixels(width), CSSPixels(height)).
+func test_crect(x: f64, y: f64, width: f64, height: f64) -> CssPixelRect:
+    return CssPixelRect(test_cpoint(x, y), CssPixelSize(test_px(width), test_px(height)))
+
+# Gfx::AffineTransform(): the identity.
+func test_affine_identity() -> AffineTransform:
+    var transform: AffineTransform
+    affine_transform_construct(&transform)
+    return transform
+
+# Gfx::AffineTransform(a, b, c, d, e, f).
+func test_affine(a: f32, b: f32, c_: f32, d: f32, e: f32, f: f32) -> AffineTransform:
+    var transform: AffineTransform
+    affine_transform_construct_f32(&transform, a, b, c_, d, e, f)
+    return transform
+
+# The 4x4 matrix tests_affine_transform.lucb works on (sample_matrix() in its C++ oracle).
+func test_sample_matrix() -> FloatMatrix4X4:
+    var matrix: FloatMatrix4X4
+    float_matrix4_x4_construct(&matrix, [2.0, 1.0, 0.5, 3.0, -1.0, 4.0, 0.25, 1.0, 0.0, 2.0, 5.0, -2.0, 1.5, 0.0, 1.0, 1.0])
+    return matrix
+
+# mark: TestRect.cpp ============================================================================
+
+test "rect: int_rect_right_and_bottom":
+    test_rect_int_rect_right_and_bottom()
+
+noinline func test_rect_int_rect_right_and_bottom():
+    let rect = test_irect(2, 3, 4, 5)
+    assert(device_pixel_rect_right(&rect) == 6)
+    assert(device_pixel_rect_bottom(&rect) == 8)
+
+test "rect: float_rect_right_and_bottom":
+    test_rect_float_rect_right_and_bottom()
+
+noinline func test_rect_float_rect_right_and_bottom():
+    let rect = test_frect(1.0, 2.0, 3.5, 4.5)
+    # EXPECT_APPROXIMATE: within 0.0000005.
+    assert(ak.abs_f32(float_rect_right(&rect) - 4.5) < 0.0000005)
+    assert(ak.abs_f32(float_rect_bottom(&rect) - 6.5) < 0.0000005)
+
+test "rect: rect_contains_vertically":
+    test_rect_rect_contains_vertically()
+
+noinline func test_rect_rect_contains_vertically():
+    let rect = test_frect(0.0, 0.0, 100.0, 100.0)
+    assert(float_rect_contains_vertically(&rect, 99.0))
+    assert(not float_rect_contains_vertically(&rect, 100.0))
+
+test "rect: rect_unite":
+    test_rect_rect_unite()
+
+noinline func test_rect_rect_unite():
+    var rect_a = test_irect(10, 10, 100, 100)
+    let rect_b = test_irect(50, 50, 60, 70)
+
+    device_pixel_rect_unite(&rect_a, rect_b)
+
+    assert(device_pixel_rect_left(&rect_a) == 10)
+    assert(device_pixel_rect_right(&rect_a) == 110)
+    assert(device_pixel_rect_top(&rect_a) == 10)
+    assert(device_pixel_rect_bottom(&rect_a) == 120)
+
+test "rect: rect_unite_horizontally":
+    test_rect_rect_unite_horizontally()
+
+noinline func test_rect_rect_unite_horizontally():
+    var rect_a = test_irect(10, 10, 1000, 100)
+    let rect_b = test_irect(0, 0, 100, 1000)
+
+    device_pixel_rect_unite_horizontally(&rect_a, rect_b)
+
+    assert(device_pixel_rect_left(&rect_a) == 0)
+    assert(device_pixel_rect_right(&rect_a) == 1010)
+    assert(device_pixel_rect_top(&rect_a) == 10)
+    assert(device_pixel_rect_bottom(&rect_a) == 110)
+
+test "rect: rect_unite_vertically":
+    test_rect_rect_unite_vertically()
+
+noinline func test_rect_rect_unite_vertically():
+    var rect_a = test_irect(10, 10, 1000, 1000)
+    let rect_b = test_irect(0, 0, 100, 100)
+
+    device_pixel_rect_unite_vertically(&rect_a, rect_b)
+
+    assert(device_pixel_rect_top(&rect_a) == 0)
+    assert(device_pixel_rect_bottom(&rect_a) == 1010)
+    assert(device_pixel_rect_left(&rect_a) == 10)
+    assert(device_pixel_rect_right(&rect_a) == 1010)
+
+# mark: Container overloads =====================================================================
+
+test "rect: contains_container":
+    test_rect_contains_container()
+
+noinline func test_rect_contains_container():
+    let rect = test_irect(0, 0, 10, 10)
+    let inside = [test_irect(1, 1, 2, 2), test_irect(0, 0, 10, 10)]
+    let partly_outside = [test_irect(1, 1, 2, 2), test_irect(5, 5, 10, 10)]
+    var none_: const DevicePixelRect[]
+    assert(device_pixel_rect_contains_t_container(&rect, inside))
+    assert(not device_pixel_rect_contains_t_container(&rect, partly_outside))
+    # An empty container is not contained: `have_any` stays false.
+    assert(not device_pixel_rect_contains_t_container(&rect, none_))
+
+test "rect: intersects_container":
+    test_rect_intersects_container()
+
+noinline func test_rect_intersects_container():
+    let rect = test_crect(0.0, 0.0, 1.0, 1.0)
+    let apart = [test_crect(1.0, 0.0, 1.0, 1.0), test_crect(-1.0, -1.0, 1.0, 1.0)]
+    let one_overlapping = [test_crect(1.0, 0.0, 1.0, 1.0), test_crect(0.984375, 0.5, 1.0, 1.0)]
+    assert(not css_pixel_rect_intersects_t_container(&rect, apart))
+    assert(css_pixel_rect_intersects_t_container(&rect, one_overlapping))

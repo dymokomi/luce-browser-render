@@ -1,0 +1,234 @@
+#==============================================================================================
+#
+#   point_css_pixels - Gfx::Point<Web::CSSPixels> (CSSPixelPoint)
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Point.h (lines 20-261) for T = CSSPixels, in the order of
+#       point_int.lucb. Arithmetic is CSSPixels' (saturating, fixed point), spelled with its
+#       methods (`a.add(b)`, pixel_units.lucb).
+#
+#       Not here, because the donor cannot use them for CSSPixels either: `constrain`,
+#       `constrained`, `end_point_for_aspect_ratio` and `to_byte_string` are defined in
+#       Point.cpp, which instantiates only Point<int> and Point<float> (PixelUnits.h has its own
+#       `constrained`); `pixels_moved`, `distance_from` and `absolute_relative_distance_to` call
+#       AK::abs or AK::hypot<float>, which do not accept a CSSPixels; `to_rounded` calls
+#       roundf and `to_ceiled`/`to_floored` require a floating-point T.
+#
+#==============================================================================================
+
+# mark: Construction and access =================================================================
+
+## Ported from Libraries/LibGfx/Point.h:24 Gfx::Point::Point<T> for CssPixelPoint.
+pub func css_pixel_point_construct(this: CssPixelPoint*, x: CssPixels, y: CssPixels):
+    this.m_x = x
+    this.m_y = y
+
+## Ported from Libraries/LibGfx/Point.h:31 Gfx::Point::Point<T>(U x, U y) for CssPixelPoint, with U a signed integer.
+pub func css_pixel_point_construct_int(this: CssPixelPoint*, x: i64, y: i64):
+    this.m_x = css_pixels_from_int(x)
+    this.m_y = css_pixels_from_int(y)
+
+## Ported from Libraries/LibGfx/Point.h:44 Gfx::Point::x for CssPixelPoint.
+pub func css_pixel_point_x(this: const CssPixelPoint*) -> CssPixels:
+    return this.m_x
+
+## Ported from Libraries/LibGfx/Point.h:45 Gfx::Point::y for CssPixelPoint.
+pub func css_pixel_point_y(this: const CssPixelPoint*) -> CssPixels:
+    return this.m_y
+
+## Ported from Libraries/LibGfx/Point.h:47 Gfx::Point::set_x for CssPixelPoint.
+pub func css_pixel_point_set_x(this: CssPixelPoint*, x: CssPixels):
+    this.m_x = x
+
+## Ported from Libraries/LibGfx/Point.h:48 Gfx::Point::set_y for CssPixelPoint.
+pub func css_pixel_point_set_y(this: CssPixelPoint*, y: CssPixels):
+    this.m_y = y
+
+## Ported from Libraries/LibGfx/Point.h:50 Gfx::Point::is_zero for CssPixelPoint.
+pub func css_pixel_point_is_zero(this: const CssPixelPoint*) -> bool:
+    return eq_css_pixels_int(this.m_x, 0) and eq_css_pixels_int(this.m_y, 0)
+
+# mark: Translation and scaling =================================================================
+
+## Ported from Libraries/LibGfx/Point.h:52 Gfx::Point::translate_by for CssPixelPoint.
+pub func css_pixel_point_translate_by_css_pixels_css_pixels(this: CssPixelPoint*, dx: CssPixels, dy: CssPixels):
+    this.m_x = this.m_x.add(dx)
+    this.m_y = this.m_y.add(dy)
+
+## Ported from Libraries/LibGfx/Point.h:58 Gfx::Point::translate_by for CssPixelPoint.
+pub func css_pixel_point_translate_by_css_pixels(this: CssPixelPoint*, dboth: CssPixels):
+    css_pixel_point_translate_by_css_pixels_css_pixels(this, dboth, dboth)
+
+## Ported from Libraries/LibGfx/Point.h:59 Gfx::Point::translate_by for CssPixelPoint.
+pub func css_pixel_point_translate_by_css_pixel_point(this: CssPixelPoint*, delta: CssPixelPoint):
+    css_pixel_point_translate_by_css_pixels_css_pixels(this, css_pixel_point_x(&delta), css_pixel_point_y(&delta))
+
+## Ported from Libraries/LibGfx/Point.h:61 Gfx::Point::scale_by for CssPixelPoint.
+pub func css_pixel_point_scale_by_css_pixels_css_pixels(this: CssPixelPoint*, dx: CssPixels, dy: CssPixels):
+    this.m_x = this.m_x.mul(dx)
+    this.m_y = this.m_y.mul(dy)
+
+## Ported from Libraries/LibGfx/Point.h:67 Gfx::Point::scale_by for CssPixelPoint.
+pub func css_pixel_point_scale_by_css_pixels(this: CssPixelPoint*, dboth: CssPixels):
+    css_pixel_point_scale_by_css_pixels_css_pixels(this, dboth, dboth)
+
+## Ported from Libraries/LibGfx/Point.h:68 Gfx::Point::scale_by for CssPixelPoint.
+pub func css_pixel_point_scale_by_css_pixel_point(this: CssPixelPoint*, delta: CssPixelPoint):
+    css_pixel_point_scale_by_css_pixels_css_pixels(this, css_pixel_point_x(&delta), css_pixel_point_y(&delta))
+
+## Ported from Libraries/LibGfx/Point.h:70 Gfx::Point::translated for CssPixelPoint.
+pub func css_pixel_point_translated_css_pixel_point(this: const CssPixelPoint*, delta: CssPixelPoint) -> CssPixelPoint:
+    var point = *this
+    css_pixel_point_translate_by_css_pixel_point(&point, delta)
+    return point
+
+## Ported from Libraries/LibGfx/Point.h:77 Gfx::Point::translated for CssPixelPoint.
+pub func css_pixel_point_translated_css_pixels_css_pixels(this: const CssPixelPoint*, dx: CssPixels, dy: CssPixels) -> CssPixelPoint:
+    var point = *this
+    css_pixel_point_translate_by_css_pixels_css_pixels(&point, dx, dy)
+    return point
+
+## Ported from Libraries/LibGfx/Point.h:84 Gfx::Point::translated for CssPixelPoint.
+pub func css_pixel_point_translated_css_pixels(this: const CssPixelPoint*, dboth: CssPixels) -> CssPixelPoint:
+    var point = *this
+    css_pixel_point_translate_by_css_pixels_css_pixels(&point, dboth, dboth)
+    return point
+
+## Ported from Libraries/LibGfx/Point.h:91 Gfx::Point::scaled for CssPixelPoint.
+pub func css_pixel_point_scaled_css_pixels(this: const CssPixelPoint*, dboth: CssPixels) -> CssPixelPoint:
+    var point = *this
+    css_pixel_point_scale_by_css_pixels(&point, dboth)
+    return point
+
+## Ported from Libraries/LibGfx/Point.h:98 Gfx::Point::scaled for CssPixelPoint.
+pub func css_pixel_point_scaled_css_pixel_point(this: const CssPixelPoint*, delta: CssPixelPoint) -> CssPixelPoint:
+    var point = *this
+    css_pixel_point_scale_by_css_pixel_point(&point, delta)
+    return point
+
+## Ported from Libraries/LibGfx/Point.h:105 Gfx::Point::scaled for CssPixelPoint.
+pub func css_pixel_point_scaled_css_pixels_css_pixels(this: const CssPixelPoint*, sx: CssPixels, sy: CssPixels) -> CssPixelPoint:
+    var point = *this
+    css_pixel_point_scale_by_css_pixels_css_pixels(&point, sx, sy)
+    return point
+
+## Ported from Libraries/LibGfx/Point.h:120 Gfx::Point::moved_left for CssPixelPoint.
+pub func css_pixel_point_moved_left(this: const CssPixelPoint*, amount: CssPixels) -> CssPixelPoint:
+    return CssPixelPoint(css_pixel_point_x(this).sub(amount), css_pixel_point_y(this))
+
+## Ported from Libraries/LibGfx/Point.h:121 Gfx::Point::moved_right for CssPixelPoint.
+pub func css_pixel_point_moved_right(this: const CssPixelPoint*, amount: CssPixels) -> CssPixelPoint:
+    return CssPixelPoint(css_pixel_point_x(this).add(amount), css_pixel_point_y(this))
+
+## Ported from Libraries/LibGfx/Point.h:122 Gfx::Point::moved_up for CssPixelPoint.
+pub func css_pixel_point_moved_up(this: const CssPixelPoint*, amount: CssPixels) -> CssPixelPoint:
+    return CssPixelPoint(css_pixel_point_x(this), css_pixel_point_y(this).sub(amount))
+
+## Ported from Libraries/LibGfx/Point.h:123 Gfx::Point::moved_down for CssPixelPoint.
+pub func css_pixel_point_moved_down(this: const CssPixelPoint*, amount: CssPixels) -> CssPixelPoint:
+    return CssPixelPoint(css_pixel_point_x(this), css_pixel_point_y(this).add(amount))
+
+# mark: Operators ===============================================================================
+
+## Ported from Libraries/LibGfx/Point.h:126 Gfx::Point::operator== for CssPixelPoint (U = CSSPixels).
+pub func css_pixel_point_eq(this: const CssPixelPoint*, other: CssPixelPoint) -> bool:
+    return css_pixel_point_x(this) == css_pixel_point_x(&other) and css_pixel_point_y(this) == css_pixel_point_y(&other)
+
+## Ported from Libraries/LibGfx/Point.h:131 Gfx::Point::operator+ for CssPixelPoint.
+pub func css_pixel_point_add(this: const CssPixelPoint*, other: CssPixelPoint) -> CssPixelPoint:
+    return CssPixelPoint(this.m_x.add(other.m_x), this.m_y.add(other.m_y))
+
+## Ported from Libraries/LibGfx/Point.h:133 Gfx::Point::operator+= for CssPixelPoint.
+pub func css_pixel_point_add_assign(this: CssPixelPoint*, other: CssPixelPoint) -> CssPixelPoint*:
+    this.m_x = this.m_x.add(other.m_x)
+    this.m_y = this.m_y.add(other.m_y)
+    return this
+
+## Ported from Libraries/LibGfx/Point.h:140 Gfx::Point::operator- (unary) for CssPixelPoint.
+pub func css_pixel_point_neg(this: const CssPixelPoint*) -> CssPixelPoint:
+    return CssPixelPoint(this.m_x.neg(), this.m_y.neg())
+
+## Ported from Libraries/LibGfx/Point.h:142 Gfx::Point::operator- for CssPixelPoint.
+pub func css_pixel_point_sub(this: const CssPixelPoint*, other: CssPixelPoint) -> CssPixelPoint:
+    return CssPixelPoint(this.m_x.sub(other.m_x), this.m_y.sub(other.m_y))
+
+## Ported from Libraries/LibGfx/Point.h:144 Gfx::Point::operator-= for CssPixelPoint.
+pub func css_pixel_point_sub_assign(this: CssPixelPoint*, other: CssPixelPoint) -> CssPixelPoint*:
+    this.m_x = this.m_x.sub(other.m_x)
+    this.m_y = this.m_y.sub(other.m_y)
+    return this
+
+## Ported from Libraries/LibGfx/Point.h:151 Gfx::Point::operator* for CssPixelPoint.
+pub func css_pixel_point_mul(this: const CssPixelPoint*, factor: CssPixels) -> CssPixelPoint:
+    return CssPixelPoint(this.m_x.mul(factor), this.m_y.mul(factor))
+
+## Ported from Libraries/LibGfx/Point.h:153 Gfx::Point::operator*= for CssPixelPoint.
+pub func css_pixel_point_mul_assign(this: CssPixelPoint*, factor: CssPixels) -> CssPixelPoint*:
+    this.m_x = this.m_x.mul(factor)
+    this.m_y = this.m_y.mul(factor)
+    return this
+
+## Ported from Libraries/LibGfx/Point.h:160 Gfx::Point::operator/ for CssPixelPoint: each
+## CSSPixelFraction quotient converts back to CSSPixels.
+pub func css_pixel_point_div(this: const CssPixelPoint*, factor: CssPixels) -> CssPixelPoint:
+    let x_fraction = this.m_x.div(factor)
+    let y_fraction = this.m_y.div(factor)
+    return CssPixelPoint(css_pixel_fraction_to_css_pixels(&x_fraction), css_pixel_fraction_to_css_pixels(&y_fraction))
+
+## Ported from Libraries/LibGfx/Point.h:162 Gfx::Point::operator/= for CssPixelPoint.
+pub func css_pixel_point_div_assign(this: CssPixelPoint*, factor: CssPixels) -> CssPixelPoint*:
+    # donor bug: CSSPixels::operator/= multiplies, so this multiplies too.
+    discard(css_pixels_div_assign(&this.m_x, factor))
+    discard(css_pixels_div_assign(&this.m_y, factor))
+    return this
+
+# mark: Orientation and distances ===============================================================
+
+## Ported from Libraries/LibGfx/Point.h:169 Gfx::Point::primary_offset_for_orientation for CssPixelPoint.
+pub func css_pixel_point_primary_offset_for_orientation(this: const CssPixelPoint*, orientation: Orientation) -> CssPixels:
+    return css_pixel_point_y(this) if orientation == Orientation.vertical else css_pixel_point_x(this)
+
+## Ported from Libraries/LibGfx/Point.h:174 Gfx::Point::set_primary_offset_for_orientation for CssPixelPoint.
+pub func css_pixel_point_set_primary_offset_for_orientation(this: CssPixelPoint*, orientation: Orientation, value: CssPixels):
+    if orientation == Orientation.vertical:
+        css_pixel_point_set_y(this, value)
+    else:
+        css_pixel_point_set_x(this, value)
+
+## Ported from Libraries/LibGfx/Point.h:183 Gfx::Point::secondary_offset_for_orientation for CssPixelPoint.
+pub func css_pixel_point_secondary_offset_for_orientation(this: const CssPixelPoint*, orientation: Orientation) -> CssPixels:
+    return css_pixel_point_x(this) if orientation == Orientation.vertical else css_pixel_point_y(this)
+
+## Ported from Libraries/LibGfx/Point.h:188 Gfx::Point::set_secondary_offset_for_orientation for CssPixelPoint.
+pub func css_pixel_point_set_secondary_offset_for_orientation(this: CssPixelPoint*, orientation: Orientation, value: CssPixels):
+    if orientation == Orientation.vertical:
+        css_pixel_point_set_x(this, value)
+    else:
+        css_pixel_point_set_y(this, value)
+
+## Ported from Libraries/LibGfx/Point.h:197 Gfx::Point::dx_relative_to for CssPixelPoint.
+pub func css_pixel_point_dx_relative_to(this: const CssPixelPoint*, other: CssPixelPoint) -> CssPixels:
+    return css_pixel_point_x(this).sub(css_pixel_point_x(&other))
+
+## Ported from Libraries/LibGfx/Point.h:202 Gfx::Point::dy_relative_to for CssPixelPoint.
+pub func css_pixel_point_dy_relative_to(this: const CssPixelPoint*, other: CssPixelPoint) -> CssPixels:
+    return css_pixel_point_y(this).sub(css_pixel_point_y(&other))
+
+# mark: Conversions =============================================================================
+
+## Ported from Libraries/LibGfx/Point.h:229 Gfx::Point::to_type<int> for CssPixelPoint (and the
+## converting constructor Point<int>(CSSPixelPoint), Point.h:38): CSSPixels' explicit operator int.
+pub func css_pixel_point_to_type_i32(this: const CssPixelPoint*) -> IntPoint:
+    return IntPoint(css_pixel_point_x(this).to_int(), css_pixel_point_y(this).to_int())
+
+## Ported from Libraries/LibGfx/Point.h:229 Gfx::Point::to_type<float> for CssPixelPoint (and the
+## converting constructor Point<float>(CSSPixelPoint), Point.h:38): CSSPixels' explicit operator float.
+pub func css_pixel_point_to_type_f32(this: const CssPixelPoint*) -> FloatPoint:
+    return FloatPoint(css_pixel_point_x(this).to_float(), css_pixel_point_y(this).to_float())
+
+## Ported from Libraries/LibGfx/Point.h:312 AK::Traits<Gfx::Point<T>>::hash for CssPixelPoint.
+pub func css_pixel_point_hash(point: const CssPixelPoint*) -> u32:
+    let x = css_pixel_point_x(point)
+    let y = css_pixel_point_y(point)
+    var traits: CssPixelsTraits
+    return ak.pair_int_hash(traits.hash_of(&x), traits.hash_of(&y))

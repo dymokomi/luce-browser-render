@@ -1,0 +1,403 @@
+#==============================================================================================
+#
+#   color_conversion_3 - polar forms, HSL and HWB, and the predefined RGB spaces both ways
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/ColorConversion.cpp (lines 308-670): rectangular and polar
+#       forms (Oklab/OkLCh, Lab/LCh), XYZ D50 to Lab, sRGB to HSL and HWB and back, and the
+#       transfer functions and matrices of Display P3, A98 RGB, ProPhoto RGB and Rec. 2020.
+#       color_conversion_2 has the first part of the file.
+#
+#       As there: the lambdas are private functions named after their enclosing function,
+#       `pow(float, double)` is libm's double pow (math.pow), `abs(float)` is fabsf and
+#       sqrtf, atan2f, cosf, sinf and fabsf are luce-std's math32 (libm).
+#
+#==============================================================================================
+
+# mark: Polar forms =============================================================================
+
+## Ported from Libraries/LibGfx/ColorConversion.cpp:308 Gfx::rectangular_to_polar.
+func rectangular_to_polar(components: ColorComponents) -> ColorComponents:
+    let a = color_components_at_const(&components, 1)
+    let b = color_components_at_const(&components, 2)
+
+    let chroma = math32.sqrt(a * a + b * b)
+    var hue = math32.atan2(b, a) * 180.0 / ak.pi_f32
+    if hue < 0.0:
+        hue += 360.0
+
+    return color_components_new(color_components_at_const(&components, 0), chroma, hue, color_components_alpha(&components))
+
+## Ported from Libraries/LibGfx/ColorConversion.cpp:321 Gfx::polar_to_rectangular.
+func polar_to_rectangular(components: ColorComponents) -> ColorComponents:
+    let chroma = color_components_at_const(&components, 1)
+    let hue_radians = color_components_at_const(&components, 2) * ak.pi_f32 / 180.0
+
+    return color_components_new(
+        color_components_at_const(&components, 0),
+        chroma * math32.cos(hue_radians),
+        chroma * math32.sin(hue_radians),
+        color_components_alpha(&components),
+    )
+
+## Ported from Libraries/LibGfx/ColorConversion.cpp:335 Gfx::oklab_to_oklch.
+# https://drafts.csswg.org/css-color-4/#lab-to-lch
+pub func oklab_to_oklch(components: ColorComponents) -> ColorComponents:
+    return rectangular_to_polar(components)
+
+## Ported from Libraries/LibGfx/ColorConversion.cpp:338 Gfx::oklch_to_oklab.
+# https://drafts.csswg.org/css-color-4/#lch-to-lab
+pub func oklch_to_oklab(components: ColorComponents) -> ColorComponents:
+    return polar_to_rectangular(components)
+
+# mark: Lab =====================================================================================
+
+## The `f` lambda of xyz50_to_lab (ColorConversion.cpp:351).
+func xyz50_to_lab_f(value: f32) -> f32:
+    if (f64)value > lab_epsilon:
+        return math32.cbrt(value)
+    return (f32)((lab_kappa * (f64)value + 16.0) / 116.0)
+
+## Ported from Libraries/LibGfx/ColorConversion.cpp:341 Gfx::xyz50_to_lab.
+# https://drafts.csswg.org/css-color-4/#color-conversion-code
+pub func xyz50_to_lab(components: ColorComponents) -> ColorComponents:
+    # kappa, epsilon and the D50 white are the lab_* constants of color_conversion_2.
+    let fx = xyz50_to_lab_f(color_components_at_const(&components, 0) / lab_x_n)
+    let fy = xyz50_to_lab_f(color_components_at_const(&components, 1) / lab_y_n)
+    let fz = xyz50_to_lab_f(color_components_at_const(&components, 2) / lab_z_n)
+
+    return color_components_new(
+        116.0 * fy - 16.0,
+        500.0 * (fx - fy),
+        200.0 * (fy - fz),
+        color_components_alpha(&components),
+    )
+
+## Ported from Libraries/LibGfx/ColorConversion.cpp:370 Gfx::lab_to_lch.
+# https://drafts.csswg.org/css-color-4/#lab-to-lch
+pub func lab_to_lch(components: ColorComponents) -> ColorComponents:
+    return rectangular_to_polar(components)
+
+## Ported from Libraries/LibGfx/ColorConversion.cpp:373 Gfx::lch_to_lab.
+# https://drafts.csswg.org/css-color-4/#lch-to-lab
+pub func lch_to_lab(components: ColorComponents) -> ColorComponents:
+    return polar_to_rectangular(components)
+
+# mark: HSL and HWB =============================================================================
+
+## Ported from Libraries/LibGfx/ColorConversion.cpp:376 Gfx::srgb_to_hsl.
+# https://drafts.csswg.org/css-color-4/#rgb-to-hsl
+pub func srgb_to_hsl(components: ColorComponents) -> ColorComponents:
+    let red = color_components_at_const(&components, 0)
+    let green = color_components_at_const(&components, 1)
+    let blue = color_components_at_const(&components, 2)
+
+    let maximum = ak.max_f32(ak.max_f32(red, green), blue)
+    let minimum = ak.min_f32(ak.min_f32(red, green), blue)
+    let chroma = maximum - minimum
+    let lightness = (minimum + maximum) / 2.0
+
+    var hue: f32 = 0.0
+    var saturation: f32 = 0.0
+
+    if chroma != 0.0:
+        if lightness == 0.0 or lightness == 1.0:
+            saturation = 0.0
+        else:
+            saturation = (maximum - lightness) / ak.min_f32(lightness, 1.0 - lightness)
+
+        if maximum == red:
+            hue = (green - blue) / chroma + (6.0 if green < blue else 0.0)
+        elif maximum == green:
+            hue = (blue - red) / chroma + 2.0
+        else:
+            hue = (red - green) / chroma + 4.0
+        hue *= 60.0
+
+        if saturation < 0.0:
+            hue += 180.0
+            saturation = math32.abs(saturation)
+
+        if hue >= 360.0:
+            hue -= 360.0
+
+    return color_components_new(hue, saturation, lightness, color_components_alpha(&components))
+
+## Ported from Libraries/LibGfx/ColorConversion.cpp:417 Gfx::hwb_to_srgb.
+# https://drafts.csswg.org/css-color-4/#hwb-to-rgb
+pub func hwb_to_srgb(components: ColorComponents) -> ColorComponents:
+    let hue = color_components_at_const(&components, 0)
+    let whiteness = color_components_at_const(&components, 1)
+    let blackness = color_components_at_const(&components, 2)
+
+    if whiteness + blackness >= 1.0:
+        let gray = whiteness / (whiteness + blackness)
+        return color_components_new(gray, gray, gray, color_components_alpha(&components))
+
+    let rgb = hsl_to_srgb(color_components_new(hue, 1.0, 0.5, color_components_alpha(&components)))
+    let scale = 1.0 - whiteness - blackness
+
+    return color_components_new(
+        color_components_at_const(&rgb, 0) * scale + whiteness,
+        color_components_at_const(&rgb, 1) * scale + whiteness,
+        color_components_at_const(&rgb, 2) * scale + whiteness,
+        color_components_alpha(&components),
+    )
+
+## Ported from Libraries/LibGfx/ColorConversion.cpp:440 Gfx::srgb_to_hwb.
+# https://drafts.csswg.org/css-color-4/#rgb-to-hwb
+pub func srgb_to_hwb(components: ColorComponents) -> ColorComponents:
+    let red = color_components_at_const(&components, 0)
+    let green = color_components_at_const(&components, 1)
+    let blue = color_components_at_const(&components, 2)
+
+    let maximum = ak.max_f32(ak.max_f32(red, green), blue)
+    let minimum = ak.min_f32(ak.min_f32(red, green), blue)
+    let chroma = maximum - minimum
+
+    var hue: f32 = 0.0
+    if chroma != 0.0:
+        if maximum == red:
+            hue = ((green - blue) / chroma) + (6.0 if green < blue else 0.0)
+        elif maximum == green:
+            hue = (blue - red) / chroma + 2.0
+        else:
+            hue = (red - green) / chroma + 4.0
+        hue *= 60.0
+        if hue >= 360.0:
+            hue -= 360.0
+
+    return color_components_new(hue, minimum, 1.0 - maximum, color_components_alpha(&components))
+
+# mark: Display P3 ==============================================================================
+
+## The `to_gamma` lambda of linear_display_p3_to_display_p3 (ColorConversion.cpp:470).
+func linear_display_p3_to_display_p3_to_gamma(c: f32) -> f32:
+    let sign: f32 = -1.0 if c < 0.0 else 1.0
+    let absolute = math32.abs(c)
+
+    if absolute > 0.0031308:
+        return sign * (f32)(1.055 * math.pow((f64)absolute, 1.0 / 2.4) - 0.055)
+
+    return 12.92 * c
+
+## Ported from Libraries/LibGfx/ColorConversion.cpp:468 Gfx::linear_display_p3_to_display_p3.
+# https://drafts.csswg.org/css-color-4/#predefined-display-p3
+# https://drafts.csswg.org/css-color-4/#color-conversion-code
+pub func linear_display_p3_to_display_p3(components: ColorComponents) -> ColorComponents:
+    return color_components_new(
+        linear_display_p3_to_display_p3_to_gamma(color_components_at_const(&components, 0)),
+        linear_display_p3_to_display_p3_to_gamma(color_components_at_const(&components, 1)),
+        linear_display_p3_to_display_p3_to_gamma(color_components_at_const(&components, 2)),
+        color_components_alpha(&components),
+    )
+
+## Ported from Libraries/LibGfx/ColorConversion.cpp:485 Gfx::xyz65_to_linear_display_p3.
+# https://drafts.csswg.org/css-color-4/#predefined-display-p3-linear
+# https://drafts.csswg.org/css-color-4/#color-conversion-code
+pub func xyz65_to_linear_display_p3(components: ColorComponents) -> ColorComponents:
+    let x = color_components_at_const(&components, 0)
+    let y = color_components_at_const(&components, 1)
+    let z = color_components_at_const(&components, 2)
+    return color_components_new(
+        2.4934969119 * x - 0.9313836179 * y - 0.4027107845 * z,
+        -0.8294889696 * x + 1.7626640603 * y + 0.0236246858 * z,
+        0.0358458302 * x - 0.0761723893 * y + 0.9568845240 * z,
+        color_components_alpha(&components),
+    )
+
+# mark: A98 RGB =================================================================================
+
+## The `to_linear` lambda of a98_rgb_to_linear_a98_rgb (ColorConversion.cpp:502).
+func a98_rgb_to_linear_a98_rgb_to_linear(c: f32) -> f32:
+    let sign: f32 = -1.0 if c < 0.0 else 1.0
+    return sign * (f32)math.pow((f64)math32.abs(c), 563.0 / 256.0)
+
+## Ported from Libraries/LibGfx/ColorConversion.cpp:500 Gfx::a98_rgb_to_linear_a98_rgb.
+# https://drafts.csswg.org/css-color-4/#predefined-a98-rgb
+# https://drafts.csswg.org/css-color-4/#color-conversion-code
+pub func a98_rgb_to_linear_a98_rgb(components: ColorComponents) -> ColorComponents:
+    return color_components_new(
+        a98_rgb_to_linear_a98_rgb_to_linear(color_components_at_const(&components, 0)),
+        a98_rgb_to_linear_a98_rgb_to_linear(color_components_at_const(&components, 1)),
+        a98_rgb_to_linear_a98_rgb_to_linear(color_components_at_const(&components, 2)),
+        color_components_alpha(&components),
+    )
+
+## The `to_gamma` lambda of linear_a98_rgb_to_a98_rgb (ColorConversion.cpp:514).
+func linear_a98_rgb_to_a98_rgb_to_gamma(c: f32) -> f32:
+    let sign: f32 = -1.0 if c < 0.0 else 1.0
+    return sign * (f32)math.pow((f64)math32.abs(c), 256.0 / 563.0)
+
+## Ported from Libraries/LibGfx/ColorConversion.cpp:512 Gfx::linear_a98_rgb_to_a98_rgb.
+# https://drafts.csswg.org/css-color-4/#predefined-a98-rgb
+# https://drafts.csswg.org/css-color-4/#color-conversion-code
+pub func linear_a98_rgb_to_a98_rgb(components: ColorComponents) -> ColorComponents:
+    return color_components_new(
+        linear_a98_rgb_to_a98_rgb_to_gamma(color_components_at_const(&components, 0)),
+        linear_a98_rgb_to_a98_rgb_to_gamma(color_components_at_const(&components, 1)),
+        linear_a98_rgb_to_a98_rgb_to_gamma(color_components_at_const(&components, 2)),
+        color_components_alpha(&components),
+    )
+
+## Ported from Libraries/LibGfx/ColorConversion.cpp:524 Gfx::linear_a98_rgb_to_xyz65.
+# https://drafts.csswg.org/css-color-4/#predefined-a98-rgb
+# https://drafts.csswg.org/css-color-4/#color-conversion-code
+pub func linear_a98_rgb_to_xyz65(components: ColorComponents) -> ColorComponents:
+    let red = color_components_at_const(&components, 0)
+    let green = color_components_at_const(&components, 1)
+    let blue = color_components_at_const(&components, 2)
+    return color_components_new(
+        0.57666904 * red + 0.18555824 * green + 0.18822865 * blue,
+        0.29734498 * red + 0.62736357 * green + 0.07529146 * blue,
+        0.02703136 * red + 0.07068885 * green + 0.99133754 * blue,
+        color_components_alpha(&components),
+    )
+
+## Ported from Libraries/LibGfx/ColorConversion.cpp:539 Gfx::xyz65_to_linear_a98_rgb.
+# https://drafts.csswg.org/css-color-4/#predefined-a98-rgb
+# https://drafts.csswg.org/css-color-4/#color-conversion-code
+pub func xyz65_to_linear_a98_rgb(components: ColorComponents) -> ColorComponents:
+    let x = color_components_at_const(&components, 0)
+    let y = color_components_at_const(&components, 1)
+    let z = color_components_at_const(&components, 2)
+    return color_components_new(
+        2.0415879038 * x - 0.5650069743 * y - 0.3473784579 * z,
+        -0.9692436363 * x + 1.8759675015 * y + 0.0415550574 * z,
+        0.0134442806 * x - 0.1183623922 * y + 1.0151749944 * z,
+        color_components_alpha(&components),
+    )
+
+# mark: ProPhoto RGB ============================================================================
+
+## The `to_linear` lambda of prophoto_rgb_to_linear_prophoto_rgb (ColorConversion.cpp:556).
+func prophoto_rgb_to_linear_prophoto_rgb_to_linear(c: f32) -> f32:
+    let sign: f32 = -1.0 if c < 0.0 else 1.0
+    let absolute = math32.abs(c)
+    if absolute <= 16.0 / 512.0:
+        return c / 16.0
+    return sign * (f32)math.pow((f64)absolute, 1.8)
+
+## Ported from Libraries/LibGfx/ColorConversion.cpp:554 Gfx::prophoto_rgb_to_linear_prophoto_rgb.
+# https://drafts.csswg.org/css-color-4/#predefined-prophoto-rgb
+# https://drafts.csswg.org/css-color-4/#color-conversion-code
+pub func prophoto_rgb_to_linear_prophoto_rgb(components: ColorComponents) -> ColorComponents:
+    return color_components_new(
+        prophoto_rgb_to_linear_prophoto_rgb_to_linear(color_components_at_const(&components, 0)),
+        prophoto_rgb_to_linear_prophoto_rgb_to_linear(color_components_at_const(&components, 1)),
+        prophoto_rgb_to_linear_prophoto_rgb_to_linear(color_components_at_const(&components, 2)),
+        color_components_alpha(&components),
+    )
+
+## The `to_gamma` lambda of linear_prophoto_rgb_to_prophoto_rgb (ColorConversion.cpp:571).
+func linear_prophoto_rgb_to_prophoto_rgb_to_gamma(c: f32) -> f32:
+    let sign: f32 = -1.0 if c < 0.0 else 1.0
+    let absolute = math32.abs(c)
+    if absolute <= 1.0 / 512.0:
+        return c * 16.0
+    return sign * (f32)math.pow((f64)absolute, 1.0 / 1.8)
+
+## Ported from Libraries/LibGfx/ColorConversion.cpp:569 Gfx::linear_prophoto_rgb_to_prophoto_rgb.
+# https://drafts.csswg.org/css-color-4/#predefined-prophoto-rgb
+# https://drafts.csswg.org/css-color-4/#color-conversion-code
+pub func linear_prophoto_rgb_to_prophoto_rgb(components: ColorComponents) -> ColorComponents:
+    return color_components_new(
+        linear_prophoto_rgb_to_prophoto_rgb_to_gamma(color_components_at_const(&components, 0)),
+        linear_prophoto_rgb_to_prophoto_rgb_to_gamma(color_components_at_const(&components, 1)),
+        linear_prophoto_rgb_to_prophoto_rgb_to_gamma(color_components_at_const(&components, 2)),
+        color_components_alpha(&components),
+    )
+
+## Ported from Libraries/LibGfx/ColorConversion.cpp:584 Gfx::linear_prophoto_rgb_to_xyz50.
+# https://drafts.csswg.org/css-color-4/#predefined-prophoto-rgb
+# https://drafts.csswg.org/css-color-4/#color-conversion-code
+pub func linear_prophoto_rgb_to_xyz50(components: ColorComponents) -> ColorComponents:
+    let red = color_components_at_const(&components, 0)
+    let green = color_components_at_const(&components, 1)
+    let blue = color_components_at_const(&components, 2)
+    return color_components_new(
+        0.79776664 * red + 0.13518130 * green + 0.03134773 * blue,
+        0.28807483 * red + 0.71183523 * green + 0.00008994 * blue,
+        0.00000000 * red + 0.00000000 * green + 0.82510460 * blue,
+        color_components_alpha(&components),
+    )
+
+## Ported from Libraries/LibGfx/ColorConversion.cpp:599 Gfx::xyz50_to_linear_prophoto_rgb.
+# https://drafts.csswg.org/css-color-4/#predefined-prophoto-rgb
+# https://drafts.csswg.org/css-color-4/#color-conversion-code
+pub func xyz50_to_linear_prophoto_rgb(components: ColorComponents) -> ColorComponents:
+    let x = color_components_at_const(&components, 0)
+    let y = color_components_at_const(&components, 1)
+    let z = color_components_at_const(&components, 2)
+    return color_components_new(
+        1.3457989731 * x - 0.2555802200 * y - 0.0511188540 * z,
+        -0.5446224939 * x + 1.5082327413 * y + 0.0205274474 * z,
+        0.0000000000 * x + 0.0000000000 * y + 1.2119675456 * z,
+        color_components_alpha(&components),
+    )
+
+# mark: Rec. 2020 ===============================================================================
+
+## The `to_linear` lambda of rec2020_to_linear_rec2020 (ColorConversion.cpp:616).
+func rec2020_to_linear_rec2020_to_linear(c: f32) -> f32:
+    let sign: f32 = -1.0 if c < 0.0 else 1.0
+    let absolute = math32.abs(c)
+
+    return sign * (f32)math.pow((f64)absolute, 2.4)
+
+## Ported from Libraries/LibGfx/ColorConversion.cpp:614 Gfx::rec2020_to_linear_rec2020.
+# https://drafts.csswg.org/css-color-4/#predefined-rec2020
+# https://drafts.csswg.org/css-color-4/#color-conversion-code
+pub func rec2020_to_linear_rec2020(components: ColorComponents) -> ColorComponents:
+    return color_components_new(
+        rec2020_to_linear_rec2020_to_linear(color_components_at_const(&components, 0)),
+        rec2020_to_linear_rec2020_to_linear(color_components_at_const(&components, 1)),
+        rec2020_to_linear_rec2020_to_linear(color_components_at_const(&components, 2)),
+        color_components_alpha(&components),
+    )
+
+## The `to_gamma` lambda of linear_rec2020_to_rec2020 (ColorConversion.cpp:630).
+func linear_rec2020_to_rec2020_to_gamma(c: f32) -> f32:
+    let sign: f32 = -1.0 if c < 0.0 else 1.0
+    let absolute = math32.abs(c)
+
+    return sign * (f32)math.pow((f64)absolute, 1.0 / 2.4)
+
+## Ported from Libraries/LibGfx/ColorConversion.cpp:628 Gfx::linear_rec2020_to_rec2020.
+# https://drafts.csswg.org/css-color-4/#predefined-rec2020
+# https://drafts.csswg.org/css-color-4/#color-conversion-code
+pub func linear_rec2020_to_rec2020(components: ColorComponents) -> ColorComponents:
+    return color_components_new(
+        linear_rec2020_to_rec2020_to_gamma(color_components_at_const(&components, 0)),
+        linear_rec2020_to_rec2020_to_gamma(color_components_at_const(&components, 1)),
+        linear_rec2020_to_rec2020_to_gamma(color_components_at_const(&components, 2)),
+        color_components_alpha(&components),
+    )
+
+## Ported from Libraries/LibGfx/ColorConversion.cpp:642 Gfx::linear_rec2020_to_xyz65.
+# https://drafts.csswg.org/css-color-4/#predefined-rec2020
+# https://drafts.csswg.org/css-color-4/#color-conversion-code
+pub func linear_rec2020_to_xyz65(components: ColorComponents) -> ColorComponents:
+    let red = color_components_at_const(&components, 0)
+    let green = color_components_at_const(&components, 1)
+    let blue = color_components_at_const(&components, 2)
+    return color_components_new(
+        0.63695805 * red + 0.14461690 * green + 0.16888098 * blue,
+        0.26270021 * red + 0.67799807 * green + 0.05930172 * blue,
+        0.00000000 * red + 0.02807269 * green + 1.06098506 * blue,
+        color_components_alpha(&components),
+    )
+
+## Ported from Libraries/LibGfx/ColorConversion.cpp:657 Gfx::xyz65_to_linear_rec2020.
+# https://drafts.csswg.org/css-color-4/#predefined-rec2020
+# https://drafts.csswg.org/css-color-4/#color-conversion-code
+pub func xyz65_to_linear_rec2020(components: ColorComponents) -> ColorComponents:
+    let x = color_components_at_const(&components, 0)
+    let y = color_components_at_const(&components, 1)
+    let z = color_components_at_const(&components, 2)
+    return color_components_new(
+        1.7166511880 * x - 0.3556707838 * y - 0.2533662814 * z,
+        -0.6666843518 * x + 1.6164812366 * y + 0.0157685458 * z,
+        0.0176398574 * x - 0.0427706133 * y + 0.9421031212 * z,
+        color_components_alpha(&components),
+    )

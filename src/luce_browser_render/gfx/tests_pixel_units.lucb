@@ -1,0 +1,609 @@
+#==============================================================================================
+#
+#   tests_pixel_units - CSSPixels, CSSPixelFraction and DevicePixels, pinned to the donor
+#
+#   DESCRIPTION:
+#       Values computed by the donor's PixelUnits.h (Ladybird 47c82b38d0, compiled locally)
+#       for the cases Tests/LibWeb/TestCSSPixels.cpp does not cover: float conversions and
+#       their rounding, saturation, the fraction arithmetic, the free functions and the hash.
+#       Raw values are the fixed-point integers (1px = 64).
+#
+#       Each test's body is a noinline function the test block calls, so that the test
+#       runner's `main` does not inline every body (# workaround:
+#       compiler-issues/ranges_facts_cubic).
+#
+#==============================================================================================
+
+test "pixel_units: nearest_f32_0_3":
+    test_pixel_units_nearest_f32_0_3()
+
+# C++:  CSSPixels::nearest_value_for(0.3f).raw_value()
+noinline func test_pixel_units_nearest_f32_0_3():
+    assert((i64)(css_pixels_nearest_value_for_f32(0.3).raw_value()) == 19)
+
+test "pixel_units: nearest_f32_minus_0_3":
+    test_pixel_units_nearest_f32_minus_0_3()
+
+# C++:  CSSPixels::nearest_value_for(-0.3f).raw_value()
+noinline func test_pixel_units_nearest_f32_minus_0_3():
+    assert((i64)(css_pixels_nearest_value_for_f32(-0.3).raw_value()) == -19)
+
+test "pixel_units: nearest_f32_half_raw":
+    test_pixel_units_nearest_f32_half_raw()
+
+# C++:  CSSPixels::nearest_value_for(0.0234375f).raw_value()
+noinline func test_pixel_units_nearest_f32_half_raw():
+    assert((i64)(css_pixels_nearest_value_for_f32(0.0234375).raw_value()) == 2)
+
+test "pixel_units: nearest_f32_half_raw_even":
+    test_pixel_units_nearest_f32_half_raw_even()
+
+# C++:  CSSPixels::nearest_value_for(0.0078125f).raw_value()
+noinline func test_pixel_units_nearest_f32_half_raw_even():
+    assert((i64)(css_pixels_nearest_value_for_f32(0.0078125).raw_value()) == 0)
+
+test "pixel_units: nearest_f32_huge":
+    test_pixel_units_nearest_f32_huge()
+
+# C++:  CSSPixels::nearest_value_for(1e10f).raw_value()
+noinline func test_pixel_units_nearest_f32_huge():
+    assert((i64)(css_pixels_nearest_value_for_f32(1e10).raw_value()) == 2147483647)
+
+test "pixel_units: nearest_f32_minus_huge":
+    test_pixel_units_nearest_f32_minus_huge()
+
+# C++:  CSSPixels::nearest_value_for(-1e10f).raw_value()
+noinline func test_pixel_units_nearest_f32_minus_huge():
+    assert((i64)(css_pixels_nearest_value_for_f32(-1e10).raw_value()) == -2147483648)
+
+test "pixel_units: nearest_f32_nan":
+    test_pixel_units_nearest_f32_nan()
+
+# C++:  CSSPixels::nearest_value_for(NAN).raw_value()
+noinline func test_pixel_units_nearest_f32_nan():
+    assert((i64)(css_pixels_nearest_value_for_f32(f32.bits(0x7fc00000)).raw_value()) == 0)
+
+test "pixel_units: nearest_f64_1_2345":
+    test_pixel_units_nearest_f64_1_2345()
+
+# C++:  CSSPixels::nearest_value_for(1.2345).raw_value()
+noinline func test_pixel_units_nearest_f64_1_2345():
+    assert((i64)(css_pixels_nearest_value_for_f64(1.2345).raw_value()) == 79)
+
+test "pixel_units: nearest_f64_minus_2_5_raw":
+    test_pixel_units_nearest_f64_minus_2_5_raw()
+
+# C++:  CSSPixels::nearest_value_for(-0.0390625).raw_value()
+noinline func test_pixel_units_nearest_f64_minus_2_5_raw():
+    assert((i64)(css_pixels_nearest_value_for_f64(-0.0390625).raw_value()) == -2)
+
+test "pixel_units: floored_f32_0_3":
+    test_pixel_units_floored_f32_0_3()
+
+# C++:  CSSPixels::floored_value_for(0.3f).raw_value()
+noinline func test_pixel_units_floored_f32_0_3():
+    assert((i64)(css_pixels_floored_value_for_f32(0.3).raw_value()) == 19)
+
+test "pixel_units: floored_f32_minus_0_3":
+    test_pixel_units_floored_f32_minus_0_3()
+
+# C++:  CSSPixels::floored_value_for(-0.3f).raw_value()
+noinline func test_pixel_units_floored_f32_minus_0_3():
+    assert((i64)(css_pixels_floored_value_for_f32(-0.3).raw_value()) == -20)
+
+test "pixel_units: floored_f64_minus_1_01":
+    test_pixel_units_floored_f64_minus_1_01()
+
+# C++:  CSSPixels::floored_value_for(-1.01).raw_value()
+noinline func test_pixel_units_floored_f64_minus_1_01():
+    assert((i64)(css_pixels_floored_value_for_f64(-1.01).raw_value()) == -65)
+
+test "pixel_units: from_int_big":
+    test_pixel_units_from_int_big()
+
+# C++:  CSSPixels((i64)100000000).raw_value()
+noinline func test_pixel_units_from_int_big():
+    assert((i64)(css_pixels_from_int(100000000).raw_value()) == 2147483647)
+
+test "pixel_units: from_int_minus_big":
+    test_pixel_units_from_int_minus_big()
+
+# C++:  CSSPixels((i64)-100000000).raw_value()
+noinline func test_pixel_units_from_int_minus_big():
+    assert((i64)(css_pixels_from_int(-100000000).raw_value()) == -2147483648)
+
+test "pixel_units: from_int_max_integer":
+    test_pixel_units_from_int_max_integer()
+
+# C++:  CSSPixels(CSSPixels::max_integer_value).raw_value()
+noinline func test_pixel_units_from_int_max_integer():
+    assert((i64)(css_pixels_from_int(css_pixels_max_integer_value).raw_value()) == 2147483584)
+
+test "pixel_units: from_int_minus_7":
+    test_pixel_units_from_int_minus_7()
+
+# C++:  CSSPixels(-7).raw_value()
+noinline func test_pixel_units_from_int_minus_7():
+    assert((i64)(css_pixels_from_int(-7).raw_value()) == -448)
+
+test "pixel_units: from_unsigned_big":
+    test_pixel_units_from_unsigned_big()
+
+# C++:  CSSPixels((u32)4000000000u).raw_value()
+noinline func test_pixel_units_from_unsigned_big():
+    assert((i64)(css_pixels_from_unsigned(4000000000).raw_value()) == 2147483647)
+
+test "pixel_units: from_unsigned_12":
+    test_pixel_units_from_unsigned_12()
+
+# C++:  CSSPixels((u32)12u).raw_value()
+noinline func test_pixel_units_from_unsigned_12():
+    assert((i64)(css_pixels_from_unsigned(12).raw_value()) == 768)
+
+test "pixel_units: to_int_negative":
+    test_pixel_units_to_int_negative()
+
+# C++:  CSSPixels::from_raw(-100).to_int()
+noinline func test_pixel_units_to_int_negative():
+    assert((i64)(css_pixels_from_raw(-100).to_int()) == -1)
+
+test "pixel_units: to_float_raw_1":
+    test_pixel_units_to_float_raw_1()
+
+# C++:  CSSPixels::from_raw(1).to_float()
+noinline func test_pixel_units_to_float_raw_1():
+    assert((css_pixels_from_raw(1).to_float()).bits() == 0x3c800000)  # 0.015625
+
+test "pixel_units: to_double_raw_minus_97":
+    test_pixel_units_to_double_raw_minus_97()
+
+# C++:  CSSPixels::from_raw(-97).to_double()
+noinline func test_pixel_units_to_double_raw_minus_97():
+    assert((css_pixels_from_raw(-97).to_double()).bits() == 0xbff8400000000000)  # -1.515625
+
+test "pixel_units: smallest_positive":
+    test_pixel_units_smallest_positive()
+
+# C++:  CSSPixels::smallest_positive_value().raw_value()
+noinline func test_pixel_units_smallest_positive():
+    assert((i64)(css_pixels_smallest_positive_value().raw_value()) == 1)
+
+test "pixel_units: min_is_saturated":
+    test_pixel_units_min_is_saturated()
+
+# C++:  CSSPixels::min().might_be_saturated()
+noinline func test_pixel_units_min_is_saturated():
+    assert((css_pixels_min().might_be_saturated()) == true)
+
+test "pixel_units: max_raw":
+    test_pixel_units_max_raw()
+
+# C++:  CSSPixels::max().raw_value()
+noinline func test_pixel_units_max_raw():
+    assert((i64)(css_pixels_max().raw_value()) == 2147483647)
+
+test "pixel_units: increment":
+    test_pixel_units_increment()
+
+# C++: CSSPixels a = CSSPixels::from_raw(5); ++a; a.raw_value()
+noinline func test_pixel_units_increment():
+    var a = css_pixels_from_raw(5)
+    discard(css_pixels_inc(&a))
+    assert((i64)(a.raw_value()) == 69)
+
+test "pixel_units: decrement_saturates":
+    test_pixel_units_decrement_saturates()
+
+# C++: CSSPixels a = CSSPixels::min(); --a; a.raw_value()
+noinline func test_pixel_units_decrement_saturates():
+    var a = css_pixels_min()
+    discard(css_pixels_dec(&a))
+    assert((i64)(a.raw_value()) == -2147483648)
+
+test "pixel_units: cmp_less":
+    test_pixel_units_cmp_less()
+
+# C++:  (CSSPixels(1) <=> CSSPixels(2))
+noinline func test_pixel_units_cmp_less():
+    assert((i64)(css_pixels_from_int(1).cmp(css_pixels_from_int(2))) == -1)
+
+test "pixel_units: cmp_equal":
+    test_pixel_units_cmp_equal()
+
+# C++:  (CSSPixels(2) <=> CSSPixels(2))
+noinline func test_pixel_units_cmp_equal():
+    assert((i64)(css_pixels_from_int(2).cmp(css_pixels_from_int(2))) == 0)
+
+test "pixel_units: unary_minus":
+    test_pixel_units_unary_minus()
+
+# C++:  (-CSSPixels::from_raw(77)).raw_value()
+noinline func test_pixel_units_unary_minus():
+    assert((i64)(css_pixels_from_raw(77).neg().raw_value()) == -77)
+
+test "pixel_units: unary_plus":
+    test_pixel_units_unary_plus()
+
+# C++:  (+CSSPixels::from_raw(-77)).raw_value()
+noinline func test_pixel_units_unary_plus():
+    let v = css_pixels_from_raw(-77)
+    assert((i64)(css_pixels_add(&v).raw_value()) == -77)
+
+test "pixel_units: mul_negative_rounding":
+    test_pixel_units_mul_negative_rounding()
+
+# C++:  (CSSPixels::from_raw(-65) * CSSPixels::from_raw(96)).raw_value()
+noinline func test_pixel_units_mul_negative_rounding():
+    assert((i64)(css_pixels_from_raw(-65).mul(css_pixels_from_raw(96)).raw_value()) == -98)
+
+test "pixel_units: mul_round_to_even_down":
+    test_pixel_units_mul_round_to_even_down()
+
+# C++:  (CSSPixels::from_raw(0b1000001) * CSSPixels::from_raw(0b100000)).raw_value()
+noinline func test_pixel_units_mul_round_to_even_down():
+    assert((i64)(css_pixels_from_raw(0b1000001).mul(css_pixels_from_raw(0b100000)).raw_value()) == 32)
+
+test "pixel_units: mul_saturates":
+    test_pixel_units_mul_saturates()
+
+# C++:  (CSSPixels(100000) * CSSPixels(100000)).raw_value()
+noinline func test_pixel_units_mul_saturates():
+    assert((i64)(css_pixels_from_int(100000).mul(css_pixels_from_int(100000)).raw_value()) == 2147483647)
+
+test "pixel_units: sub_saturates":
+    test_pixel_units_sub_saturates()
+
+# C++:  (CSSPixels::min() - CSSPixels(1)).raw_value()
+noinline func test_pixel_units_sub_saturates():
+    assert((i64)(css_pixels_min().sub(css_pixels_from_int(1)).raw_value()) == -2147483648)
+
+test "pixel_units: div_assign_multiplies":
+    test_pixel_units_div_assign_multiplies()
+
+# C++: CSSPixels a(6); a /= CSSPixels(2); a.raw_value()
+noinline func test_pixel_units_div_assign_multiplies():
+    var a = css_pixels_from_int(6)
+    discard(css_pixels_div_assign(&a, css_pixels_from_int(2)))
+    assert((i64)(a.raw_value()) == 768)
+
+test "pixel_units: mul_assign_fraction":
+    test_pixel_units_mul_assign_fraction()
+
+# C++: CSSPixels a(10); a *= CSSPixels(1) / CSSPixels(3); a.raw_value()
+noinline func test_pixel_units_mul_assign_fraction():
+    var a = css_pixels_from_int(10)
+    discard(css_pixels_mul_assign_css_pixel_fraction(&a, css_pixels_from_int(1).div(css_pixels_from_int(3))))
+    assert((i64)(a.raw_value()) == 213)
+
+test "pixel_units: div_by_fraction":
+    test_pixel_units_div_by_fraction()
+
+# C++:  (CSSPixels(10) / (CSSPixels(1) / CSSPixels(3))).raw_value()
+noinline func test_pixel_units_div_by_fraction():
+    assert((i64)(css_pixels_from_int(10).div_fraction(css_pixels_from_int(1).div(css_pixels_from_int(3))).raw_value()) == 1920)
+
+test "pixel_units: fraction_to_css_pixels":
+    test_pixel_units_fraction_to_css_pixels()
+
+# C++:  CSSPixels(CSSPixels(10) / CSSPixels(3)).raw_value()
+noinline func test_pixel_units_fraction_to_css_pixels():
+    let f = css_pixels_from_int(10).div(css_pixels_from_int(3))
+    assert((i64)(css_pixel_fraction_to_css_pixels(&f).raw_value()) == 213)
+
+test "pixel_units: fraction_negative":
+    test_pixel_units_fraction_negative()
+
+# C++:  CSSPixels(CSSPixels(-10) / CSSPixels(3)).raw_value()
+noinline func test_pixel_units_fraction_negative():
+    let f = css_pixels_from_int(-10).div(css_pixels_from_int(3))
+    assert((i64)(css_pixel_fraction_to_css_pixels(&f).raw_value()) == -213)
+
+test "pixel_units: fraction_neg":
+    test_pixel_units_fraction_neg()
+
+# C++: auto f = -(CSSPixels(10) / CSSPixels(3)); CSSPixels(f).raw_value()
+noinline func test_pixel_units_fraction_neg():
+    let g = css_pixels_from_int(10).div(css_pixels_from_int(3))
+    let f = css_pixel_fraction_neg(&g)
+    assert((i64)(css_pixel_fraction_to_css_pixels(&f).raw_value()) == -213)
+
+test "pixel_units: fraction_minus":
+    test_pixel_units_fraction_minus()
+
+# C++:  ((CSSPixels(10) / CSSPixels(3)) - CSSPixels(1)).raw_value()
+noinline func test_pixel_units_fraction_minus():
+    let f = css_pixels_from_int(10).div(css_pixels_from_int(3))
+    assert((i64)(css_pixel_fraction_sub(&f, css_pixels_from_int(1)).raw_value()) == 149)
+
+test "pixel_units: fraction_plus":
+    test_pixel_units_fraction_plus()
+
+# C++:  ((CSSPixels(10) / CSSPixels(3)) + CSSPixels(1)).raw_value()
+noinline func test_pixel_units_fraction_plus():
+    let f = css_pixels_from_int(10).div(css_pixels_from_int(3))
+    assert((i64)(css_pixel_fraction_add(&f, css_pixels_from_int(1)).raw_value()) == 277)
+
+test "pixel_units: fraction_cmp_equal":
+    test_pixel_units_fraction_cmp_equal()
+
+# C++:  ((CSSPixels(1) / CSSPixels(3)) <=> (CSSPixels(2) / CSSPixels(6)))
+noinline func test_pixel_units_fraction_cmp_equal():
+    let f = css_pixels_from_int(1).div(css_pixels_from_int(3))
+    assert((i64)(css_pixel_fraction_cmp_css_pixel_fraction(&f, css_pixels_from_int(2).div(css_pixels_from_int(6)))) == 0)
+
+test "pixel_units: fraction_cmp_int":
+    test_pixel_units_fraction_cmp_int()
+
+# C++:  ((CSSPixels(7) / CSSPixels(3)) <=> 2)
+noinline func test_pixel_units_fraction_cmp_int():
+    let f = css_pixels_from_int(7).div(css_pixels_from_int(3))
+    assert((i64)(css_pixel_fraction_cmp_int(&f, 2)) == 1)
+
+test "pixel_units: fraction_to_float":
+    test_pixel_units_fraction_to_float()
+
+# C++:  (CSSPixels(1) / CSSPixels(3)).to_float()
+noinline func test_pixel_units_fraction_to_float():
+    let f = css_pixels_from_int(1).div(css_pixels_from_int(3))
+    assert((css_pixel_fraction_to_float(&f)).bits() == 0x3eaaaaab)  # 0.333333343
+
+test "pixel_units: fraction_to_double":
+    test_pixel_units_fraction_to_double()
+
+# C++:  (CSSPixels(1) / CSSPixels(3)).to_double()
+noinline func test_pixel_units_fraction_to_double():
+    let f = css_pixels_from_int(1).div(css_pixels_from_int(3))
+    assert((css_pixel_fraction_to_double(&f)).bits() == 0x3fd5555555555555)  # 0.33333333333333331
+
+test "pixel_units: fraction_to_int":
+    test_pixel_units_fraction_to_int()
+
+# C++:  (CSSPixels(-7) / CSSPixels(2)).to_int()
+noinline func test_pixel_units_fraction_to_int():
+    let f = css_pixels_from_int(-7).div(css_pixels_from_int(2))
+    assert((i64)(css_pixel_fraction_to_int(&f)) == -3)
+
+test "pixel_units: fraction_from_ints":
+    test_pixel_units_fraction_from_ints()
+
+# C++: CSSPixelFraction f(7, 2); CSSPixels(f).raw_value()
+noinline func test_pixel_units_fraction_from_ints():
+    var f: CssPixelFraction
+    css_pixel_fraction_construct_int(&f, 7, 2)
+    assert((i64)(css_pixel_fraction_to_css_pixels(&f).raw_value()) == 224)
+
+test "pixel_units: fraction_from_doubles_tiny_denominator":
+    test_pixel_units_fraction_from_doubles_tiny_denominator()
+
+# C++: CSSPixelFraction f(1.0, 0.001); CSSPixels(f).raw_value()
+noinline func test_pixel_units_fraction_from_doubles_tiny_denominator():
+    var f: CssPixelFraction
+    css_pixel_fraction_construct_f64(&f, 1.0, 0.001)
+    assert((i64)(css_pixel_fraction_to_css_pixels(&f).raw_value()) == 64000)
+
+test "pixel_units: fraction_saturated":
+    test_pixel_units_fraction_saturated()
+
+# C++:  (CSSPixels::from_raw(0x3FFFFFFF) / CSSPixels(0.25)).might_be_saturated()
+noinline func test_pixel_units_fraction_saturated():
+    let f = css_pixels_from_raw(0x3FFFFFFF).div(css_pixels_from_f64(0.25))
+    assert((css_pixel_fraction_might_be_saturated(&f)) == true)
+
+test "pixel_units: scaled_f32":
+    test_pixel_units_scaled_f32()
+
+# C++:  CSSPixels(3).scaled(0.3f).raw_value()
+noinline func test_pixel_units_scaled_f32():
+    let v = css_pixels_from_int(3)
+    assert((i64)(css_pixels_scaled_f32(&v, 0.3).raw_value()) == 58)
+
+test "pixel_units: scaled_f64":
+    test_pixel_units_scaled_f64()
+
+# C++:  CSSPixels(3).scaled(1.0 / 3.0).raw_value()
+noinline func test_pixel_units_scaled_f64():
+    let v = css_pixels_from_int(3)
+    assert((i64)(css_pixels_scaled_f64(&v, 1.0 / 3.0).raw_value()) == 64)
+
+test "pixel_units: eq_float":
+    test_pixel_units_eq_float()
+
+# C++:  (CSSPixels::from_raw(96) == 1.5f)
+noinline func test_pixel_units_eq_float():
+    assert((eq_css_pixels_f32(css_pixels_from_raw(96), 1.5)) == true)
+
+test "pixel_units: eq_double":
+    test_pixel_units_eq_double()
+
+# C++:  (CSSPixels::from_raw(97) == 1.5)
+noinline func test_pixel_units_eq_double():
+    assert((eq_css_pixels_f64(css_pixels_from_raw(97), 1.5)) == false)
+
+test "pixel_units: gt_int":
+    test_pixel_units_gt_int()
+
+# C++:  (CSSPixels::from_raw(65) > 1)
+noinline func test_pixel_units_gt_int():
+    assert((gt_css_pixels_int(css_pixels_from_raw(65), 1)) == true)
+
+test "pixel_units: gt_float":
+    test_pixel_units_gt_float()
+
+# C++:  (CSSPixels::from_raw(64) > 1.0f)
+noinline func test_pixel_units_gt_float():
+    assert((gt_css_pixels_f32(css_pixels_from_raw(64), 1.0)) == false)
+
+test "pixel_units: lt_int":
+    test_pixel_units_lt_int()
+
+# C++:  (CSSPixels::from_raw(-1) < 0)
+noinline func test_pixel_units_lt_int():
+    assert((lt_int(css_pixels_from_raw(-1), 0)) == true)
+
+test "pixel_units: lt_double":
+    test_pixel_units_lt_double()
+
+# C++:  (CSSPixels::from_raw(-1) < -0.01)
+noinline func test_pixel_units_lt_double():
+    assert((lt_f64(css_pixels_from_raw(-1), -0.01)) == true)
+
+test "pixel_units: mul_int":
+    test_pixel_units_mul_int()
+
+# C++:  (CSSPixels::from_raw(33) * 3).raw_value()
+noinline func test_pixel_units_mul_int():
+    assert((i64)(mul_css_pixels_int(css_pixels_from_raw(33), 3).raw_value()) == 99)
+
+test "pixel_units: mul_float":
+    test_pixel_units_mul_float()
+
+# C++:  (CSSPixels::from_raw(33) * 0.1f)
+noinline func test_pixel_units_mul_float():
+    assert((mul_css_pixels_f32(css_pixels_from_raw(33), 0.1)).bits() == 0x3d533333)  # 0.0515624993
+
+test "pixel_units: int_mul":
+    test_pixel_units_int_mul()
+
+# C++:  (3 * CSSPixels::from_raw(33)).raw_value()
+noinline func test_pixel_units_int_mul():
+    assert((i64)(mul_int_css_pixels(3, css_pixels_from_raw(33)).raw_value()) == 99)
+
+test "pixel_units: double_mul":
+    test_pixel_units_double_mul()
+
+# C++:  (0.1 * CSSPixels::from_raw(33))
+noinline func test_pixel_units_double_mul():
+    assert((mul_f64(0.1, css_pixels_from_raw(33))).bits() == 0x3faa666666666667)  # 0.051562500000000004
+
+test "pixel_units: div_int":
+    test_pixel_units_div_int()
+
+# C++:  CSSPixels(CSSPixels(10) / 4).raw_value()
+noinline func test_pixel_units_div_int():
+    let f = div_css_pixels_int(css_pixels_from_int(10), 4)
+    assert((i64)(css_pixel_fraction_to_css_pixels(&f).raw_value()) == 160)
+
+test "pixel_units: div_float":
+    test_pixel_units_div_float()
+
+# C++:  (CSSPixels(10) / 3.0f)
+noinline func test_pixel_units_div_float():
+    assert((div_css_pixels_f32(css_pixels_from_int(10), 3.0)).bits() == 0x40555555)  # 3.33333325
+
+test "pixel_units: abs_negative":
+    test_pixel_units_abs_negative()
+
+# C++:  abs(CSSPixels::from_raw(-5)).raw_value()
+noinline func test_pixel_units_abs_negative():
+    assert((i64)(abs_css_pixels(css_pixels_from_raw(-5)).raw_value()) == 5)
+
+test "pixel_units: floor_negative_raw":
+    test_pixel_units_floor_negative_raw()
+
+# C++:  floor(CSSPixels::from_raw(-1)).raw_value()
+noinline func test_pixel_units_floor_negative_raw():
+    assert((i64)(floor(css_pixels_from_raw(-1)).raw_value()) == -64)
+
+test "pixel_units: ceil_negative_raw":
+    test_pixel_units_ceil_negative_raw()
+
+# C++:  ceil(CSSPixels::from_raw(-65)).raw_value()
+noinline func test_pixel_units_ceil_negative_raw():
+    assert((i64)(ceil(css_pixels_from_raw(-65)).raw_value()) == -64)
+
+test "pixel_units: round_half_negative":
+    test_pixel_units_round_half_negative()
+
+# C++:  round(CSSPixels::from_raw(-32)).raw_value()
+noinline func test_pixel_units_round_half_negative():
+    assert((i64)(round(css_pixels_from_raw(-32)).raw_value()) == -64)
+
+test "pixel_units: round_just_below_half":
+    test_pixel_units_round_just_below_half()
+
+# C++:  round(CSSPixels::from_raw(31)).raw_value()
+noinline func test_pixel_units_round_just_below_half():
+    assert((i64)(round(css_pixels_from_raw(31)).raw_value()) == 0)
+
+test "pixel_units: sqrt_2":
+    test_pixel_units_sqrt_2()
+
+# C++:  sqrt(CSSPixels(2)).raw_value()
+noinline func test_pixel_units_sqrt_2():
+    assert((i64)(sqrt(css_pixels_from_int(2)).raw_value()) == 91)
+
+test "pixel_units: square_distance_between":
+    test_pixel_units_square_distance_between()
+
+# C++: square_distance_between(CSSPixelPoint(1, 2), CSSPixelPoint(CSSPixels(4.5), CSSPixels(-2))).raw_value()
+noinline func test_pixel_units_square_distance_between():
+    assert((i64)(square_distance_between(CssPixelPoint(css_pixels_from_int(1), css_pixels_from_int(2)), CssPixelPoint(css_pixels_from_f64(4.5), css_pixels_from_int(-2))).raw_value()) == 1808)
+
+test "pixel_units: constrained_x":
+    test_pixel_units_constrained_x()
+
+# C++: p.x().raw_value()
+noinline func test_pixel_units_constrained_x():
+    let p = constrained(CssPixelPoint(css_pixels_from_int(100), css_pixels_from_int(-5)), CssPixelRect(CssPixelPoint(css_pixels_from_int(0), css_pixels_from_int(0)), CssPixelSize(css_pixels_from_int(10), css_pixels_from_int(10))))
+    assert((i64)(css_pixel_point_x(&p).raw_value()) == 576)
+
+test "pixel_units: constrained_y":
+    test_pixel_units_constrained_y()
+
+# C++: p.y().raw_value()
+noinline func test_pixel_units_constrained_y():
+    let p = constrained(CssPixelPoint(css_pixels_from_int(100), css_pixels_from_int(-5)), CssPixelRect(CssPixelPoint(css_pixels_from_int(0), css_pixels_from_int(0)), CssPixelSize(css_pixels_from_int(10), css_pixels_from_int(10))))
+    assert((i64)(css_pixel_point_y(&p).raw_value()) == 0)
+
+test "pixel_units: rect_to_rounded":
+    test_pixel_units_rect_to_rounded()
+
+# C++: r.x().raw_value() * 1000000 + r.y().raw_value() * 10000 + r.width().raw_value() * 100 + r.height().raw_value()
+noinline func test_pixel_units_rect_to_rounded():
+    let source = CssPixelRect(CssPixelPoint(css_pixels_from_f64(1.5), css_pixels_from_f64(-1.5)), CssPixelSize(css_pixels_from_f64(0.49), css_pixels_from_f64(2.51)))
+    let r = css_pixel_rect_to_rounded(&source)
+    assert((i64)((i64)css_pixel_rect_x(&r).raw_value() * 1000000 + (i64)css_pixel_rect_y(&r).raw_value() * 10000 + (i64)css_pixel_rect_width(&r).raw_value() * 100 + (i64)css_pixel_rect_height(&r).raw_value()) == 126720192)
+
+test "pixel_units: hash":
+    test_pixel_units_hash()
+
+# C++:  Traits<CSSPixels>::hash(CSSPixels(3))
+noinline func test_pixel_units_hash():
+    var traits: CssPixelsTraits
+    let v = css_pixels_from_int(3)
+    assert((i64)(traits.hash_of(&v)) == 2813460772)
+
+test "pixel_units: device_pixels_div":
+    test_pixel_units_device_pixels_div()
+
+# C++:  (DevicePixels(-7) / 2).value()
+noinline func test_pixel_units_device_pixels_div():
+    assert((i64)(div_i32(-7, 2)) == -3)
+
+test "pixel_units: device_pixels_rem":
+    test_pixel_units_device_pixels_rem()
+
+# C++:  (DevicePixels(-7) % 2).value()
+noinline func test_pixel_units_device_pixels_rem():
+    assert((i64)(rem(-7, 2)) == -1)
+
+test "pixel_units: device_pixels_mul":
+    test_pixel_units_device_pixels_mul()
+
+# C++:  (3 * DevicePixels(-7)).value()
+noinline func test_pixel_units_device_pixels_mul():
+    assert((i64)(mul_t_i32(3, -7)) == -21)
+
+test "pixel_units: device_pixels_abs":
+    test_pixel_units_device_pixels_abs()
+
+# C++:  abs(DevicePixels(-7)).value()
+noinline func test_pixel_units_device_pixels_abs():
+    assert((i64)(abs_i32(-7)) == 7)
+
+test "pixel_units: device_pixels_lt":
+    test_pixel_units_device_pixels_lt()
+
+# C++:  (DevicePixels(-7) < 0)
+noinline func test_pixel_units_device_pixels_lt():
+    assert((lt_distinct_numeric(-7, 0)) == true)

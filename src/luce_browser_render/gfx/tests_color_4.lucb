@@ -1,0 +1,733 @@
+#==============================================================================================
+#
+#   tests_color_4 - tests of ColorSpace, Palette and AnonymousBuffer
+#
+#   DESCRIPTION:
+#       ColorSpace::from_cicp for every color primaries value 0-23 with the transfer
+#       characteristics 1-18 that matter (and a reserved one), pinned to the transfer function and
+#       XYZ D50 matrix of the SkColorSpace the donor builds (printed by a C++ program linked against
+#       the donor's LibGfx and Skia), and the error messages; the default and ICC constructors;
+#       Palette over a SystemTheme in an AnonymousBuffer: every named accessor reads its own role,
+#       and the setters copy the theme before writing (see palette_1).
+#
+#       Each test's body is a noinline function the test block calls, so that the test
+#       runner's `main` does not inline every body (# workaround:
+#       compiler-issues/ranges_facts_cubic).
+#
+#==============================================================================================
+
+# mark: ColorSpace ==============================================================================
+
+## One from_cicp case: the code points, and the C++ result: an error message, or the
+## transfer function { g, a, b, c, d, e, f } and the row-major XYZ D50 matrix as float bits.
+struct CicpCase:
+    var primaries: u8
+    var transfer: u8
+    var error_message: str
+    var bits: u32[16]
+
+## The from_cicp cases, as the donor computes them.
+let cicp_cases: CicpCase[336] = [
+    CicpCase(primaries = 0, transfer = 1, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 0, transfer = 2, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 0, transfer = 4, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 0, transfer = 5, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 0, transfer = 7, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 0, transfer = 8, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 0, transfer = 9, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 0, transfer = 11, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 0, transfer = 12, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 0, transfer = 13, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 0, transfer = 16, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 0, transfer = 17, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 0, transfer = 18, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 0, transfer = 3, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 1, transfer = 1, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3edf4400, 0x3ec53200, 0x3e128000, 0x3e63d400, 0x3f378500, 0x3d784000, 0x3c640000, 0x3dc6d000, 0x3f36cf00]),
+    CicpCase(primaries = 1, transfer = 2, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3edf4400, 0x3ec53200, 0x3e128000, 0x3e63d400, 0x3f378500, 0x3d784000, 0x3c640000, 0x3dc6d000, 0x3f36cf00]),
+    CicpCase(primaries = 1, transfer = 4, error_message = "", bits = [0x400ccccd, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3edf3f16, 0x3ec52bf3, 0x3e128676, 0x3e63d171, 0x3f378698, 0x3d7850fc, 0x3c642b71, 0x3dc6d83b, 0x3f36d541]),
+    CicpCase(primaries = 1, transfer = 5, error_message = "", bits = [0x40333333, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3edf3f16, 0x3ec52bf3, 0x3e128676, 0x3e63d171, 0x3f378698, 0x3d7850fc, 0x3c642b71, 0x3dc6d83b, 0x3f36d541]),
+    CicpCase(primaries = 1, transfer = 7, error_message = "", bits = [0x400e38e4, 0x3f664def, 0x3dcd9087, 0x3e800000, 0x3dbaf455, 0x00000000, 0x00000000, 0x3edf3f16, 0x3ec52bf3, 0x3e128676, 0x3e63d171, 0x3f378698, 0x3d7850fc, 0x3c642b71, 0x3dc6d83b, 0x3f36d541]),
+    CicpCase(primaries = 1, transfer = 8, error_message = "", bits = [0x3f800000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3edf4400, 0x3ec53200, 0x3e128000, 0x3e63d400, 0x3f378500, 0x3d784000, 0x3c640000, 0x3dc6d000, 0x3f36cf00]),
+    CicpCase(primaries = 1, transfer = 9, error_message = "Logarithmic transfer characteristics are unsupported.", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 1, transfer = 11, error_message = "", bits = [0x4019999a, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3edf3f16, 0x3ec52bf3, 0x3e128676, 0x3e63d171, 0x3f378698, 0x3d7850fc, 0x3c642b71, 0x3dc6d83b, 0x3f36d541]),
+    CicpCase(primaries = 1, transfer = 12, error_message = "BT.1361 transfer characteristics are not supported.", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 1, transfer = 13, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3edf4400, 0x3ec53200, 0x3e128000, 0x3e63d400, 0x3f378500, 0x3d784000, 0x3c640000, 0x3dc6d000, 0x3f36cf00]),
+    CicpCase(primaries = 1, transfer = 16, error_message = "", bits = [0xc0a00000, 0x434b0000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3edf3f16, 0x3ec52bf3, 0x3e128676, 0x3e63d171, 0x3f378698, 0x3d7850fc, 0x3c642b71, 0x3dc6d83b, 0x3f36d541]),
+    CicpCase(primaries = 1, transfer = 17, error_message = "", bits = [0x40266666, 0x3f845cc0, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3edf3f16, 0x3ec52bf3, 0x3e128676, 0x3e63d171, 0x3f378698, 0x3d7850fc, 0x3c642b71, 0x3dc6d83b, 0x3f36d541]),
+    CicpCase(primaries = 1, transfer = 18, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3edf4400, 0x3ec53200, 0x3e128000, 0x3e63d400, 0x3f378500, 0x3d784000, 0x3c640000, 0x3dc6d000, 0x3f36cf00]),
+    CicpCase(primaries = 1, transfer = 3, error_message = "Illegal transfer characteristics", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 2, transfer = 1, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3edf4400, 0x3ec53200, 0x3e128000, 0x3e63d400, 0x3f378500, 0x3d784000, 0x3c640000, 0x3dc6d000, 0x3f36cf00]),
+    CicpCase(primaries = 2, transfer = 2, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3edf4400, 0x3ec53200, 0x3e128000, 0x3e63d400, 0x3f378500, 0x3d784000, 0x3c640000, 0x3dc6d000, 0x3f36cf00]),
+    CicpCase(primaries = 2, transfer = 4, error_message = "", bits = [0x400ccccd, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3edf3f16, 0x3ec52bf3, 0x3e128676, 0x3e63d171, 0x3f378698, 0x3d7850fc, 0x3c642b71, 0x3dc6d83b, 0x3f36d541]),
+    CicpCase(primaries = 2, transfer = 5, error_message = "", bits = [0x40333333, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3edf3f16, 0x3ec52bf3, 0x3e128676, 0x3e63d171, 0x3f378698, 0x3d7850fc, 0x3c642b71, 0x3dc6d83b, 0x3f36d541]),
+    CicpCase(primaries = 2, transfer = 7, error_message = "", bits = [0x400e38e4, 0x3f664def, 0x3dcd9087, 0x3e800000, 0x3dbaf455, 0x00000000, 0x00000000, 0x3edf3f16, 0x3ec52bf3, 0x3e128676, 0x3e63d171, 0x3f378698, 0x3d7850fc, 0x3c642b71, 0x3dc6d83b, 0x3f36d541]),
+    CicpCase(primaries = 2, transfer = 8, error_message = "", bits = [0x3f800000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3edf4400, 0x3ec53200, 0x3e128000, 0x3e63d400, 0x3f378500, 0x3d784000, 0x3c640000, 0x3dc6d000, 0x3f36cf00]),
+    CicpCase(primaries = 2, transfer = 9, error_message = "Logarithmic transfer characteristics are unsupported.", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 2, transfer = 11, error_message = "", bits = [0x4019999a, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3edf3f16, 0x3ec52bf3, 0x3e128676, 0x3e63d171, 0x3f378698, 0x3d7850fc, 0x3c642b71, 0x3dc6d83b, 0x3f36d541]),
+    CicpCase(primaries = 2, transfer = 12, error_message = "BT.1361 transfer characteristics are not supported.", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 2, transfer = 13, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3edf4400, 0x3ec53200, 0x3e128000, 0x3e63d400, 0x3f378500, 0x3d784000, 0x3c640000, 0x3dc6d000, 0x3f36cf00]),
+    CicpCase(primaries = 2, transfer = 16, error_message = "", bits = [0xc0a00000, 0x434b0000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3edf3f16, 0x3ec52bf3, 0x3e128676, 0x3e63d171, 0x3f378698, 0x3d7850fc, 0x3c642b71, 0x3dc6d83b, 0x3f36d541]),
+    CicpCase(primaries = 2, transfer = 17, error_message = "", bits = [0x40266666, 0x3f845cc0, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3edf3f16, 0x3ec52bf3, 0x3e128676, 0x3e63d171, 0x3f378698, 0x3d7850fc, 0x3c642b71, 0x3dc6d83b, 0x3f36d541]),
+    CicpCase(primaries = 2, transfer = 18, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3edf4400, 0x3ec53200, 0x3e128000, 0x3e63d400, 0x3f378500, 0x3d784000, 0x3c640000, 0x3dc6d000, 0x3f36cf00]),
+    CicpCase(primaries = 2, transfer = 3, error_message = "Illegal transfer characteristics", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 3, transfer = 1, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 3, transfer = 2, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 3, transfer = 4, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 3, transfer = 5, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 3, transfer = 7, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 3, transfer = 8, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 3, transfer = 9, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 3, transfer = 11, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 3, transfer = 12, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 3, transfer = 13, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 3, transfer = 16, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 3, transfer = 17, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 3, transfer = 18, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 3, transfer = 3, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 4, transfer = 1, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3f226aef, 0x3e3d9162, 0x3e141f63, 0x3e9f3a6e, 0x3f176b64, 0x3dc7bb3d, 0xba9b207c, 0x3d636490, 0x3f45583d]),
+    CicpCase(primaries = 4, transfer = 2, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3f226aef, 0x3e3d9162, 0x3e141f63, 0x3e9f3a6e, 0x3f176b64, 0x3dc7bb3d, 0xba9b207c, 0x3d636490, 0x3f45583d]),
+    CicpCase(primaries = 4, transfer = 4, error_message = "", bits = [0x400ccccd, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3f226aef, 0x3e3d9162, 0x3e141f63, 0x3e9f3a6e, 0x3f176b64, 0x3dc7bb3d, 0xba9b207c, 0x3d636490, 0x3f45583d]),
+    CicpCase(primaries = 4, transfer = 5, error_message = "", bits = [0x40333333, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3f226aef, 0x3e3d9162, 0x3e141f63, 0x3e9f3a6e, 0x3f176b64, 0x3dc7bb3d, 0xba9b207c, 0x3d636490, 0x3f45583d]),
+    CicpCase(primaries = 4, transfer = 7, error_message = "", bits = [0x400e38e4, 0x3f664def, 0x3dcd9087, 0x3e800000, 0x3dbaf455, 0x00000000, 0x00000000, 0x3f226aef, 0x3e3d9162, 0x3e141f63, 0x3e9f3a6e, 0x3f176b64, 0x3dc7bb3d, 0xba9b207c, 0x3d636490, 0x3f45583d]),
+    CicpCase(primaries = 4, transfer = 8, error_message = "", bits = [0x3f800000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3f226aef, 0x3e3d9162, 0x3e141f63, 0x3e9f3a6e, 0x3f176b64, 0x3dc7bb3d, 0xba9b207c, 0x3d636490, 0x3f45583d]),
+    CicpCase(primaries = 4, transfer = 9, error_message = "Logarithmic transfer characteristics are unsupported.", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 4, transfer = 11, error_message = "", bits = [0x4019999a, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3f226aef, 0x3e3d9162, 0x3e141f63, 0x3e9f3a6e, 0x3f176b64, 0x3dc7bb3d, 0xba9b207c, 0x3d636490, 0x3f45583d]),
+    CicpCase(primaries = 4, transfer = 12, error_message = "BT.1361 transfer characteristics are not supported.", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 4, transfer = 13, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3f226aef, 0x3e3d9162, 0x3e141f63, 0x3e9f3a6e, 0x3f176b64, 0x3dc7bb3d, 0xba9b207c, 0x3d636490, 0x3f45583d]),
+    CicpCase(primaries = 4, transfer = 16, error_message = "", bits = [0xc0a00000, 0x434b0000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3f226aef, 0x3e3d9162, 0x3e141f63, 0x3e9f3a6e, 0x3f176b64, 0x3dc7bb3d, 0xba9b207c, 0x3d636490, 0x3f45583d]),
+    CicpCase(primaries = 4, transfer = 17, error_message = "", bits = [0x40266666, 0x3f845cc0, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3f226aef, 0x3e3d9162, 0x3e141f63, 0x3e9f3a6e, 0x3f176b64, 0x3dc7bb3d, 0xba9b207c, 0x3d636490, 0x3f45583d]),
+    CicpCase(primaries = 4, transfer = 18, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3f226aef, 0x3e3d9162, 0x3e141f63, 0x3e9f3a6e, 0x3f176b64, 0x3dc7bb3d, 0xba9b207c, 0x3d636490, 0x3f45583d]),
+    CicpCase(primaries = 4, transfer = 3, error_message = "Illegal transfer characteristics", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 5, transfer = 1, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3ee91431, 0x3ebc3401, 0x3e10cc14, 0x3e6dda16, 0x3f353346, 0x3d756349, 0x3c6e380e, 0x3dd6d699, 0x3f34ad42]),
+    CicpCase(primaries = 5, transfer = 2, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3ee91431, 0x3ebc3401, 0x3e10cc14, 0x3e6dda16, 0x3f353346, 0x3d756349, 0x3c6e380e, 0x3dd6d699, 0x3f34ad42]),
+    CicpCase(primaries = 5, transfer = 4, error_message = "", bits = [0x400ccccd, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3ee91431, 0x3ebc3401, 0x3e10cc14, 0x3e6dda16, 0x3f353346, 0x3d756349, 0x3c6e380e, 0x3dd6d699, 0x3f34ad42]),
+    CicpCase(primaries = 5, transfer = 5, error_message = "", bits = [0x40333333, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3ee91431, 0x3ebc3401, 0x3e10cc14, 0x3e6dda16, 0x3f353346, 0x3d756349, 0x3c6e380e, 0x3dd6d699, 0x3f34ad42]),
+    CicpCase(primaries = 5, transfer = 7, error_message = "", bits = [0x400e38e4, 0x3f664def, 0x3dcd9087, 0x3e800000, 0x3dbaf455, 0x00000000, 0x00000000, 0x3ee91431, 0x3ebc3401, 0x3e10cc14, 0x3e6dda16, 0x3f353346, 0x3d756349, 0x3c6e380e, 0x3dd6d699, 0x3f34ad42]),
+    CicpCase(primaries = 5, transfer = 8, error_message = "", bits = [0x3f800000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3ee91431, 0x3ebc3401, 0x3e10cc14, 0x3e6dda16, 0x3f353346, 0x3d756349, 0x3c6e380e, 0x3dd6d699, 0x3f34ad42]),
+    CicpCase(primaries = 5, transfer = 9, error_message = "Logarithmic transfer characteristics are unsupported.", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 5, transfer = 11, error_message = "", bits = [0x4019999a, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3ee91431, 0x3ebc3401, 0x3e10cc14, 0x3e6dda16, 0x3f353346, 0x3d756349, 0x3c6e380e, 0x3dd6d699, 0x3f34ad42]),
+    CicpCase(primaries = 5, transfer = 12, error_message = "BT.1361 transfer characteristics are not supported.", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 5, transfer = 13, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3ee91431, 0x3ebc3401, 0x3e10cc14, 0x3e6dda16, 0x3f353346, 0x3d756349, 0x3c6e380e, 0x3dd6d699, 0x3f34ad42]),
+    CicpCase(primaries = 5, transfer = 16, error_message = "", bits = [0xc0a00000, 0x434b0000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3ee91431, 0x3ebc3401, 0x3e10cc14, 0x3e6dda16, 0x3f353346, 0x3d756349, 0x3c6e380e, 0x3dd6d699, 0x3f34ad42]),
+    CicpCase(primaries = 5, transfer = 17, error_message = "", bits = [0x40266666, 0x3f845cc0, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3ee91431, 0x3ebc3401, 0x3e10cc14, 0x3e6dda16, 0x3f353346, 0x3d756349, 0x3c6e380e, 0x3dd6d699, 0x3f34ad42]),
+    CicpCase(primaries = 5, transfer = 18, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3ee91431, 0x3ebc3401, 0x3e10cc14, 0x3e6dda16, 0x3f353346, 0x3d756349, 0x3c6e380e, 0x3dd6d699, 0x3f34ad42]),
+    CicpCase(primaries = 5, transfer = 3, error_message = "Illegal transfer characteristics", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 6, transfer = 1, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3ed5227f, 0x3ec94f44, 0x3e1e78f7, 0x3e62fd9a, 0x3f3409c1, 0x3d99b6da, 0x3c5fabe4, 0x3dbb151f, 0x3f385fa4]),
+    CicpCase(primaries = 6, transfer = 2, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3ed5227f, 0x3ec94f44, 0x3e1e78f7, 0x3e62fd9a, 0x3f3409c1, 0x3d99b6da, 0x3c5fabe4, 0x3dbb151f, 0x3f385fa4]),
+    CicpCase(primaries = 6, transfer = 4, error_message = "", bits = [0x400ccccd, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3ed5227f, 0x3ec94f44, 0x3e1e78f7, 0x3e62fd9a, 0x3f3409c1, 0x3d99b6da, 0x3c5fabe4, 0x3dbb151f, 0x3f385fa4]),
+    CicpCase(primaries = 6, transfer = 5, error_message = "", bits = [0x40333333, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3ed5227f, 0x3ec94f44, 0x3e1e78f7, 0x3e62fd9a, 0x3f3409c1, 0x3d99b6da, 0x3c5fabe4, 0x3dbb151f, 0x3f385fa4]),
+    CicpCase(primaries = 6, transfer = 7, error_message = "", bits = [0x400e38e4, 0x3f664def, 0x3dcd9087, 0x3e800000, 0x3dbaf455, 0x00000000, 0x00000000, 0x3ed5227f, 0x3ec94f44, 0x3e1e78f7, 0x3e62fd9a, 0x3f3409c1, 0x3d99b6da, 0x3c5fabe4, 0x3dbb151f, 0x3f385fa4]),
+    CicpCase(primaries = 6, transfer = 8, error_message = "", bits = [0x3f800000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3ed5227f, 0x3ec94f44, 0x3e1e78f7, 0x3e62fd9a, 0x3f3409c1, 0x3d99b6da, 0x3c5fabe4, 0x3dbb151f, 0x3f385fa4]),
+    CicpCase(primaries = 6, transfer = 9, error_message = "Logarithmic transfer characteristics are unsupported.", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 6, transfer = 11, error_message = "", bits = [0x4019999a, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3ed5227f, 0x3ec94f44, 0x3e1e78f7, 0x3e62fd9a, 0x3f3409c1, 0x3d99b6da, 0x3c5fabe4, 0x3dbb151f, 0x3f385fa4]),
+    CicpCase(primaries = 6, transfer = 12, error_message = "BT.1361 transfer characteristics are not supported.", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 6, transfer = 13, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3ed5227f, 0x3ec94f44, 0x3e1e78f7, 0x3e62fd9a, 0x3f3409c1, 0x3d99b6da, 0x3c5fabe4, 0x3dbb151f, 0x3f385fa4]),
+    CicpCase(primaries = 6, transfer = 16, error_message = "", bits = [0xc0a00000, 0x434b0000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3ed5227f, 0x3ec94f44, 0x3e1e78f7, 0x3e62fd9a, 0x3f3409c1, 0x3d99b6da, 0x3c5fabe4, 0x3dbb151f, 0x3f385fa4]),
+    CicpCase(primaries = 6, transfer = 17, error_message = "", bits = [0x40266666, 0x3f845cc0, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3ed5227f, 0x3ec94f44, 0x3e1e78f7, 0x3e62fd9a, 0x3f3409c1, 0x3d99b6da, 0x3c5fabe4, 0x3dbb151f, 0x3f385fa4]),
+    CicpCase(primaries = 6, transfer = 18, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3ed5227f, 0x3ec94f44, 0x3e1e78f7, 0x3e62fd9a, 0x3f3409c1, 0x3d99b6da, 0x3c5fabe4, 0x3dbb151f, 0x3f385fa4]),
+    CicpCase(primaries = 6, transfer = 3, error_message = "Illegal transfer characteristics", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 7, transfer = 1, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3ed5227f, 0x3ec94f44, 0x3e1e78f7, 0x3e62fd9a, 0x3f3409c1, 0x3d99b6da, 0x3c5fabe4, 0x3dbb151f, 0x3f385fa4]),
+    CicpCase(primaries = 7, transfer = 2, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3ed5227f, 0x3ec94f44, 0x3e1e78f7, 0x3e62fd9a, 0x3f3409c1, 0x3d99b6da, 0x3c5fabe4, 0x3dbb151f, 0x3f385fa4]),
+    CicpCase(primaries = 7, transfer = 4, error_message = "", bits = [0x400ccccd, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3ed5227f, 0x3ec94f44, 0x3e1e78f7, 0x3e62fd9a, 0x3f3409c1, 0x3d99b6da, 0x3c5fabe4, 0x3dbb151f, 0x3f385fa4]),
+    CicpCase(primaries = 7, transfer = 5, error_message = "", bits = [0x40333333, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3ed5227f, 0x3ec94f44, 0x3e1e78f7, 0x3e62fd9a, 0x3f3409c1, 0x3d99b6da, 0x3c5fabe4, 0x3dbb151f, 0x3f385fa4]),
+    CicpCase(primaries = 7, transfer = 7, error_message = "", bits = [0x400e38e4, 0x3f664def, 0x3dcd9087, 0x3e800000, 0x3dbaf455, 0x00000000, 0x00000000, 0x3ed5227f, 0x3ec94f44, 0x3e1e78f7, 0x3e62fd9a, 0x3f3409c1, 0x3d99b6da, 0x3c5fabe4, 0x3dbb151f, 0x3f385fa4]),
+    CicpCase(primaries = 7, transfer = 8, error_message = "", bits = [0x3f800000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3ed5227f, 0x3ec94f44, 0x3e1e78f7, 0x3e62fd9a, 0x3f3409c1, 0x3d99b6da, 0x3c5fabe4, 0x3dbb151f, 0x3f385fa4]),
+    CicpCase(primaries = 7, transfer = 9, error_message = "Logarithmic transfer characteristics are unsupported.", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 7, transfer = 11, error_message = "", bits = [0x4019999a, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3ed5227f, 0x3ec94f44, 0x3e1e78f7, 0x3e62fd9a, 0x3f3409c1, 0x3d99b6da, 0x3c5fabe4, 0x3dbb151f, 0x3f385fa4]),
+    CicpCase(primaries = 7, transfer = 12, error_message = "BT.1361 transfer characteristics are not supported.", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 7, transfer = 13, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3ed5227f, 0x3ec94f44, 0x3e1e78f7, 0x3e62fd9a, 0x3f3409c1, 0x3d99b6da, 0x3c5fabe4, 0x3dbb151f, 0x3f385fa4]),
+    CicpCase(primaries = 7, transfer = 16, error_message = "", bits = [0xc0a00000, 0x434b0000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3ed5227f, 0x3ec94f44, 0x3e1e78f7, 0x3e62fd9a, 0x3f3409c1, 0x3d99b6da, 0x3c5fabe4, 0x3dbb151f, 0x3f385fa4]),
+    CicpCase(primaries = 7, transfer = 17, error_message = "", bits = [0x40266666, 0x3f845cc0, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3ed5227f, 0x3ec94f44, 0x3e1e78f7, 0x3e62fd9a, 0x3f3409c1, 0x3d99b6da, 0x3c5fabe4, 0x3dbb151f, 0x3f385fa4]),
+    CicpCase(primaries = 7, transfer = 18, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3ed5227f, 0x3ec94f44, 0x3e1e78f7, 0x3e62fd9a, 0x3f3409c1, 0x3d99b6da, 0x3c5fabe4, 0x3dbb151f, 0x3f385fa4]),
+    CicpCase(primaries = 7, transfer = 3, error_message = "Illegal transfer characteristics", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 8, transfer = 1, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3f10cd7e, 0x3e81faaa, 0x3e143136, 0x3e8749f2, 0x3f2f60ae, 0x3d4fa5b0, 0xbaad6920, 0x3d613f77, 0x3f4583b2]),
+    CicpCase(primaries = 8, transfer = 2, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3f10cd7e, 0x3e81faaa, 0x3e143136, 0x3e8749f2, 0x3f2f60ae, 0x3d4fa5b0, 0xbaad6920, 0x3d613f77, 0x3f4583b2]),
+    CicpCase(primaries = 8, transfer = 4, error_message = "", bits = [0x400ccccd, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3f10cd7e, 0x3e81faaa, 0x3e143136, 0x3e8749f2, 0x3f2f60ae, 0x3d4fa5b0, 0xbaad6920, 0x3d613f77, 0x3f4583b2]),
+    CicpCase(primaries = 8, transfer = 5, error_message = "", bits = [0x40333333, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3f10cd7e, 0x3e81faaa, 0x3e143136, 0x3e8749f2, 0x3f2f60ae, 0x3d4fa5b0, 0xbaad6920, 0x3d613f77, 0x3f4583b2]),
+    CicpCase(primaries = 8, transfer = 7, error_message = "", bits = [0x400e38e4, 0x3f664def, 0x3dcd9087, 0x3e800000, 0x3dbaf455, 0x00000000, 0x00000000, 0x3f10cd7e, 0x3e81faaa, 0x3e143136, 0x3e8749f2, 0x3f2f60ae, 0x3d4fa5b0, 0xbaad6920, 0x3d613f77, 0x3f4583b2]),
+    CicpCase(primaries = 8, transfer = 8, error_message = "", bits = [0x3f800000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3f10cd7e, 0x3e81faaa, 0x3e143136, 0x3e8749f2, 0x3f2f60ae, 0x3d4fa5b0, 0xbaad6920, 0x3d613f77, 0x3f4583b2]),
+    CicpCase(primaries = 8, transfer = 9, error_message = "Logarithmic transfer characteristics are unsupported.", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 8, transfer = 11, error_message = "", bits = [0x4019999a, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3f10cd7e, 0x3e81faaa, 0x3e143136, 0x3e8749f2, 0x3f2f60ae, 0x3d4fa5b0, 0xbaad6920, 0x3d613f77, 0x3f4583b2]),
+    CicpCase(primaries = 8, transfer = 12, error_message = "BT.1361 transfer characteristics are not supported.", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 8, transfer = 13, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3f10cd7e, 0x3e81faaa, 0x3e143136, 0x3e8749f2, 0x3f2f60ae, 0x3d4fa5b0, 0xbaad6920, 0x3d613f77, 0x3f4583b2]),
+    CicpCase(primaries = 8, transfer = 16, error_message = "", bits = [0xc0a00000, 0x434b0000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3f10cd7e, 0x3e81faaa, 0x3e143136, 0x3e8749f2, 0x3f2f60ae, 0x3d4fa5b0, 0xbaad6920, 0x3d613f77, 0x3f4583b2]),
+    CicpCase(primaries = 8, transfer = 17, error_message = "", bits = [0x40266666, 0x3f845cc0, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3f10cd7e, 0x3e81faaa, 0x3e143136, 0x3e8749f2, 0x3f2f60ae, 0x3d4fa5b0, 0xbaad6920, 0x3d613f77, 0x3f4583b2]),
+    CicpCase(primaries = 8, transfer = 18, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3f10cd7e, 0x3e81faaa, 0x3e143136, 0x3e8749f2, 0x3f2f60ae, 0x3d4fa5b0, 0xbaad6920, 0x3d613f77, 0x3f4583b2]),
+    CicpCase(primaries = 8, transfer = 3, error_message = "Illegal transfer characteristics", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 9, transfer = 1, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3f2c67cd, 0x3e29a2fd, 0x3e001a46, 0x3e8edd73, 0x3f2ce2f2, 0x3d3ae53d, 0xbafd26a0, 0x3cf5974a, 0x3f4c12cf]),
+    CicpCase(primaries = 9, transfer = 2, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3f2c67cd, 0x3e29a2fd, 0x3e001a46, 0x3e8edd73, 0x3f2ce2f2, 0x3d3ae53d, 0xbafd26a0, 0x3cf5974a, 0x3f4c12cf]),
+    CicpCase(primaries = 9, transfer = 4, error_message = "", bits = [0x400ccccd, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3f2c67cd, 0x3e29a2fd, 0x3e001a46, 0x3e8edd73, 0x3f2ce2f2, 0x3d3ae53d, 0xbafd26a0, 0x3cf5974a, 0x3f4c12cf]),
+    CicpCase(primaries = 9, transfer = 5, error_message = "", bits = [0x40333333, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3f2c67cd, 0x3e29a2fd, 0x3e001a46, 0x3e8edd73, 0x3f2ce2f2, 0x3d3ae53d, 0xbafd26a0, 0x3cf5974a, 0x3f4c12cf]),
+    CicpCase(primaries = 9, transfer = 7, error_message = "", bits = [0x400e38e4, 0x3f664def, 0x3dcd9087, 0x3e800000, 0x3dbaf455, 0x00000000, 0x00000000, 0x3f2c67cd, 0x3e29a2fd, 0x3e001a46, 0x3e8edd73, 0x3f2ce2f2, 0x3d3ae53d, 0xbafd26a0, 0x3cf5974a, 0x3f4c12cf]),
+    CicpCase(primaries = 9, transfer = 8, error_message = "", bits = [0x3f800000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3f2c67cd, 0x3e29a2fd, 0x3e001a46, 0x3e8edd73, 0x3f2ce2f2, 0x3d3ae53d, 0xbafd26a0, 0x3cf5974a, 0x3f4c12cf]),
+    CicpCase(primaries = 9, transfer = 9, error_message = "Logarithmic transfer characteristics are unsupported.", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 9, transfer = 11, error_message = "", bits = [0x4019999a, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3f2c67cd, 0x3e29a2fd, 0x3e001a46, 0x3e8edd73, 0x3f2ce2f2, 0x3d3ae53d, 0xbafd26a0, 0x3cf5974a, 0x3f4c12cf]),
+    CicpCase(primaries = 9, transfer = 12, error_message = "BT.1361 transfer characteristics are not supported.", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 9, transfer = 13, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3f2c67cd, 0x3e29a2fd, 0x3e001a46, 0x3e8edd73, 0x3f2ce2f2, 0x3d3ae53d, 0xbafd26a0, 0x3cf5974a, 0x3f4c12cf]),
+    CicpCase(primaries = 9, transfer = 16, error_message = "", bits = [0xc0a00000, 0x434b0000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3f2c67cd, 0x3e29a2fd, 0x3e001a46, 0x3e8edd73, 0x3f2ce2f2, 0x3d3ae53d, 0xbafd26a0, 0x3cf5974a, 0x3f4c12cf]),
+    CicpCase(primaries = 9, transfer = 17, error_message = "", bits = [0x40266666, 0x3f845cc0, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3f2c67cd, 0x3e29a2fd, 0x3e001a46, 0x3e8edd73, 0x3f2ce2f2, 0x3d3ae53d, 0xbafd26a0, 0x3cf5974a, 0x3f4c12cf]),
+    CicpCase(primaries = 9, transfer = 18, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3f2c67cd, 0x3e29a2fd, 0x3e001a46, 0x3e8edd73, 0x3f2ce2f2, 0x3d3ae53d, 0xbafd26a0, 0x3cf5974a, 0x3f4c12cf]),
+    CicpCase(primaries = 9, transfer = 3, error_message = "Illegal transfer characteristics", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 10, transfer = 1, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x3f800000]),
+    CicpCase(primaries = 10, transfer = 2, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x3f800000]),
+    CicpCase(primaries = 10, transfer = 4, error_message = "", bits = [0x400ccccd, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x3f800000]),
+    CicpCase(primaries = 10, transfer = 5, error_message = "", bits = [0x40333333, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x3f800000]),
+    CicpCase(primaries = 10, transfer = 7, error_message = "", bits = [0x400e38e4, 0x3f664def, 0x3dcd9087, 0x3e800000, 0x3dbaf455, 0x00000000, 0x00000000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x3f800000]),
+    CicpCase(primaries = 10, transfer = 8, error_message = "", bits = [0x3f800000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x3f800000]),
+    CicpCase(primaries = 10, transfer = 9, error_message = "Logarithmic transfer characteristics are unsupported.", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 10, transfer = 11, error_message = "", bits = [0x4019999a, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x3f800000]),
+    CicpCase(primaries = 10, transfer = 12, error_message = "BT.1361 transfer characteristics are not supported.", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 10, transfer = 13, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x3f800000]),
+    CicpCase(primaries = 10, transfer = 16, error_message = "", bits = [0xc0a00000, 0x434b0000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x3f800000]),
+    CicpCase(primaries = 10, transfer = 17, error_message = "", bits = [0x40266666, 0x3f845cc0, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x3f800000]),
+    CicpCase(primaries = 10, transfer = 18, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x3f800000]),
+    CicpCase(primaries = 10, transfer = 3, error_message = "Illegal transfer characteristics", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 11, transfer = 1, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3ef8e802, 0x3ea5ce02, 0x3e1df06f, 0x3e681e03, 0x3f35d7e3, 0x3d8104ec, 0xba51d9bc, 0x3d311acc, 0x3f4863c0]),
+    CicpCase(primaries = 11, transfer = 2, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3ef8e802, 0x3ea5ce02, 0x3e1df06f, 0x3e681e03, 0x3f35d7e3, 0x3d8104ec, 0xba51d9bc, 0x3d311acc, 0x3f4863c0]),
+    CicpCase(primaries = 11, transfer = 4, error_message = "", bits = [0x400ccccd, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3ef8e802, 0x3ea5ce02, 0x3e1df06f, 0x3e681e03, 0x3f35d7e3, 0x3d8104ec, 0xba51d9bc, 0x3d311acc, 0x3f4863c0]),
+    CicpCase(primaries = 11, transfer = 5, error_message = "", bits = [0x40333333, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3ef8e802, 0x3ea5ce02, 0x3e1df06f, 0x3e681e03, 0x3f35d7e3, 0x3d8104ec, 0xba51d9bc, 0x3d311acc, 0x3f4863c0]),
+    CicpCase(primaries = 11, transfer = 7, error_message = "", bits = [0x400e38e4, 0x3f664def, 0x3dcd9087, 0x3e800000, 0x3dbaf455, 0x00000000, 0x00000000, 0x3ef8e802, 0x3ea5ce02, 0x3e1df06f, 0x3e681e03, 0x3f35d7e3, 0x3d8104ec, 0xba51d9bc, 0x3d311acc, 0x3f4863c0]),
+    CicpCase(primaries = 11, transfer = 8, error_message = "", bits = [0x3f800000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3ef8e802, 0x3ea5ce02, 0x3e1df06f, 0x3e681e03, 0x3f35d7e3, 0x3d8104ec, 0xba51d9bc, 0x3d311acc, 0x3f4863c0]),
+    CicpCase(primaries = 11, transfer = 9, error_message = "Logarithmic transfer characteristics are unsupported.", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 11, transfer = 11, error_message = "", bits = [0x4019999a, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3ef8e802, 0x3ea5ce02, 0x3e1df06f, 0x3e681e03, 0x3f35d7e3, 0x3d8104ec, 0xba51d9bc, 0x3d311acc, 0x3f4863c0]),
+    CicpCase(primaries = 11, transfer = 12, error_message = "BT.1361 transfer characteristics are not supported.", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 11, transfer = 13, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3ef8e802, 0x3ea5ce02, 0x3e1df06f, 0x3e681e03, 0x3f35d7e3, 0x3d8104ec, 0xba51d9bc, 0x3d311acc, 0x3f4863c0]),
+    CicpCase(primaries = 11, transfer = 16, error_message = "", bits = [0xc0a00000, 0x434b0000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3ef8e802, 0x3ea5ce02, 0x3e1df06f, 0x3e681e03, 0x3f35d7e3, 0x3d8104ec, 0xba51d9bc, 0x3d311acc, 0x3f4863c0]),
+    CicpCase(primaries = 11, transfer = 17, error_message = "", bits = [0x40266666, 0x3f845cc0, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3ef8e802, 0x3ea5ce02, 0x3e1df06f, 0x3e681e03, 0x3f35d7e3, 0x3d8104ec, 0xba51d9bc, 0x3d311acc, 0x3f4863c0]),
+    CicpCase(primaries = 11, transfer = 18, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3ef8e802, 0x3ea5ce02, 0x3e1df06f, 0x3e681e03, 0x3f35d7e3, 0x3d8104ec, 0xba51d9bc, 0x3d311acc, 0x3f4863c0]),
+    CicpCase(primaries = 11, transfer = 3, error_message = "Illegal transfer characteristics", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 12, transfer = 1, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3f03ddbc, 0x3e957c67, 0x3e20ecbe, 0x3e76f860, 0x3f313668, 0x3d885c11, 0xba898c54, 0x3d2b8c34, 0x3f48ccfa]),
+    CicpCase(primaries = 12, transfer = 2, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3f03ddbc, 0x3e957c67, 0x3e20ecbe, 0x3e76f860, 0x3f313668, 0x3d885c11, 0xba898c54, 0x3d2b8c34, 0x3f48ccfa]),
+    CicpCase(primaries = 12, transfer = 4, error_message = "", bits = [0x400ccccd, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3f03ddbc, 0x3e957c67, 0x3e20ecbe, 0x3e76f860, 0x3f313668, 0x3d885c11, 0xba898c54, 0x3d2b8c34, 0x3f48ccfa]),
+    CicpCase(primaries = 12, transfer = 5, error_message = "", bits = [0x40333333, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3f03ddbc, 0x3e957c67, 0x3e20ecbe, 0x3e76f860, 0x3f313668, 0x3d885c11, 0xba898c54, 0x3d2b8c34, 0x3f48ccfa]),
+    CicpCase(primaries = 12, transfer = 7, error_message = "", bits = [0x400e38e4, 0x3f664def, 0x3dcd9087, 0x3e800000, 0x3dbaf455, 0x00000000, 0x00000000, 0x3f03ddbc, 0x3e957c67, 0x3e20ecbe, 0x3e76f860, 0x3f313668, 0x3d885c11, 0xba898c54, 0x3d2b8c34, 0x3f48ccfa]),
+    CicpCase(primaries = 12, transfer = 8, error_message = "", bits = [0x3f800000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3f03ddbc, 0x3e957c67, 0x3e20ecbe, 0x3e76f860, 0x3f313668, 0x3d885c11, 0xba898c54, 0x3d2b8c34, 0x3f48ccfa]),
+    CicpCase(primaries = 12, transfer = 9, error_message = "Logarithmic transfer characteristics are unsupported.", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 12, transfer = 11, error_message = "", bits = [0x4019999a, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3f03ddbc, 0x3e957c67, 0x3e20ecbe, 0x3e76f860, 0x3f313668, 0x3d885c11, 0xba898c54, 0x3d2b8c34, 0x3f48ccfa]),
+    CicpCase(primaries = 12, transfer = 12, error_message = "BT.1361 transfer characteristics are not supported.", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 12, transfer = 13, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3f03ddbc, 0x3e957c67, 0x3e20ecbe, 0x3e76f860, 0x3f313668, 0x3d885c11, 0xba898c54, 0x3d2b8c34, 0x3f48ccfa]),
+    CicpCase(primaries = 12, transfer = 16, error_message = "", bits = [0xc0a00000, 0x434b0000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3f03ddbc, 0x3e957c67, 0x3e20ecbe, 0x3e76f860, 0x3f313668, 0x3d885c11, 0xba898c54, 0x3d2b8c34, 0x3f48ccfa]),
+    CicpCase(primaries = 12, transfer = 17, error_message = "", bits = [0x40266666, 0x3f845cc0, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3f03ddbc, 0x3e957c67, 0x3e20ecbe, 0x3e76f860, 0x3f313668, 0x3d885c11, 0xba898c54, 0x3d2b8c34, 0x3f48ccfa]),
+    CicpCase(primaries = 12, transfer = 18, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3f03ddbc, 0x3e957c67, 0x3e20ecbe, 0x3e76f860, 0x3f313668, 0x3d885c11, 0xba898c54, 0x3d2b8c34, 0x3f48ccfa]),
+    CicpCase(primaries = 12, transfer = 3, error_message = "Illegal transfer characteristics", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 13, transfer = 1, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 13, transfer = 2, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 13, transfer = 4, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 13, transfer = 5, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 13, transfer = 7, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 13, transfer = 8, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 13, transfer = 9, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 13, transfer = 11, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 13, transfer = 12, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 13, transfer = 13, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 13, transfer = 16, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 13, transfer = 17, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 13, transfer = 18, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 13, transfer = 3, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 14, transfer = 1, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 14, transfer = 2, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 14, transfer = 4, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 14, transfer = 5, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 14, transfer = 7, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 14, transfer = 8, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 14, transfer = 9, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 14, transfer = 11, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 14, transfer = 12, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 14, transfer = 13, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 14, transfer = 16, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 14, transfer = 17, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 14, transfer = 18, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 14, transfer = 3, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 15, transfer = 1, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 15, transfer = 2, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 15, transfer = 4, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 15, transfer = 5, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 15, transfer = 7, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 15, transfer = 8, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 15, transfer = 9, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 15, transfer = 11, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 15, transfer = 12, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 15, transfer = 13, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 15, transfer = 16, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 15, transfer = 17, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 15, transfer = 18, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 15, transfer = 3, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 16, transfer = 1, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 16, transfer = 2, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 16, transfer = 4, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 16, transfer = 5, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 16, transfer = 7, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 16, transfer = 8, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 16, transfer = 9, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 16, transfer = 11, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 16, transfer = 12, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 16, transfer = 13, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 16, transfer = 16, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 16, transfer = 17, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 16, transfer = 18, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 16, transfer = 3, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 17, transfer = 1, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 17, transfer = 2, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 17, transfer = 4, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 17, transfer = 5, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 17, transfer = 7, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 17, transfer = 8, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 17, transfer = 9, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 17, transfer = 11, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 17, transfer = 12, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 17, transfer = 13, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 17, transfer = 16, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 17, transfer = 17, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 17, transfer = 18, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 17, transfer = 3, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 18, transfer = 1, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 18, transfer = 2, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 18, transfer = 4, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 18, transfer = 5, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 18, transfer = 7, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 18, transfer = 8, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 18, transfer = 9, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 18, transfer = 11, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 18, transfer = 12, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 18, transfer = 13, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 18, transfer = 16, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 18, transfer = 17, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 18, transfer = 18, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 18, transfer = 3, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 19, transfer = 1, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 19, transfer = 2, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 19, transfer = 4, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 19, transfer = 5, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 19, transfer = 7, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 19, transfer = 8, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 19, transfer = 9, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 19, transfer = 11, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 19, transfer = 12, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 19, transfer = 13, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 19, transfer = 16, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 19, transfer = 17, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 19, transfer = 18, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 19, transfer = 3, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 20, transfer = 1, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 20, transfer = 2, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 20, transfer = 4, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 20, transfer = 5, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 20, transfer = 7, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 20, transfer = 8, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 20, transfer = 9, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 20, transfer = 11, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 20, transfer = 12, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 20, transfer = 13, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 20, transfer = 16, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 20, transfer = 17, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 20, transfer = 18, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 20, transfer = 3, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 21, transfer = 1, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 21, transfer = 2, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 21, transfer = 4, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 21, transfer = 5, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 21, transfer = 7, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 21, transfer = 8, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 21, transfer = 9, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 21, transfer = 11, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 21, transfer = 12, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 21, transfer = 13, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 21, transfer = 16, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 21, transfer = 17, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 21, transfer = 18, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 21, transfer = 3, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 22, transfer = 1, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3ee89400, 0x3eb4e453, 0x3e206bd2, 0x3e77b2b1, 0x3f2c7401, 0x3dacfa9c, 0x3c741376, 0x3db9a4c0, 0x3f383c11]),
+    CicpCase(primaries = 22, transfer = 2, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3ee89400, 0x3eb4e453, 0x3e206bd2, 0x3e77b2b1, 0x3f2c7401, 0x3dacfa9c, 0x3c741376, 0x3db9a4c0, 0x3f383c11]),
+    CicpCase(primaries = 22, transfer = 4, error_message = "", bits = [0x400ccccd, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3ee89400, 0x3eb4e453, 0x3e206bd2, 0x3e77b2b1, 0x3f2c7401, 0x3dacfa9c, 0x3c741376, 0x3db9a4c0, 0x3f383c11]),
+    CicpCase(primaries = 22, transfer = 5, error_message = "", bits = [0x40333333, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3ee89400, 0x3eb4e453, 0x3e206bd2, 0x3e77b2b1, 0x3f2c7401, 0x3dacfa9c, 0x3c741376, 0x3db9a4c0, 0x3f383c11]),
+    CicpCase(primaries = 22, transfer = 7, error_message = "", bits = [0x400e38e4, 0x3f664def, 0x3dcd9087, 0x3e800000, 0x3dbaf455, 0x00000000, 0x00000000, 0x3ee89400, 0x3eb4e453, 0x3e206bd2, 0x3e77b2b1, 0x3f2c7401, 0x3dacfa9c, 0x3c741376, 0x3db9a4c0, 0x3f383c11]),
+    CicpCase(primaries = 22, transfer = 8, error_message = "", bits = [0x3f800000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3ee89400, 0x3eb4e453, 0x3e206bd2, 0x3e77b2b1, 0x3f2c7401, 0x3dacfa9c, 0x3c741376, 0x3db9a4c0, 0x3f383c11]),
+    CicpCase(primaries = 22, transfer = 9, error_message = "Logarithmic transfer characteristics are unsupported.", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 22, transfer = 11, error_message = "", bits = [0x4019999a, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3ee89400, 0x3eb4e453, 0x3e206bd2, 0x3e77b2b1, 0x3f2c7401, 0x3dacfa9c, 0x3c741376, 0x3db9a4c0, 0x3f383c11]),
+    CicpCase(primaries = 22, transfer = 12, error_message = "BT.1361 transfer characteristics are not supported.", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 22, transfer = 13, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3ee89400, 0x3eb4e453, 0x3e206bd2, 0x3e77b2b1, 0x3f2c7401, 0x3dacfa9c, 0x3c741376, 0x3db9a4c0, 0x3f383c11]),
+    CicpCase(primaries = 22, transfer = 16, error_message = "", bits = [0xc0a00000, 0x434b0000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3ee89400, 0x3eb4e453, 0x3e206bd2, 0x3e77b2b1, 0x3f2c7401, 0x3dacfa9c, 0x3c741376, 0x3db9a4c0, 0x3f383c11]),
+    CicpCase(primaries = 22, transfer = 17, error_message = "", bits = [0x40266666, 0x3f845cc0, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x3ee89400, 0x3eb4e453, 0x3e206bd2, 0x3e77b2b1, 0x3f2c7401, 0x3dacfa9c, 0x3c741376, 0x3db9a4c0, 0x3f383c11]),
+    CicpCase(primaries = 22, transfer = 18, error_message = "", bits = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000, 0x3ee89400, 0x3eb4e453, 0x3e206bd2, 0x3e77b2b1, 0x3f2c7401, 0x3dacfa9c, 0x3c741376, 0x3db9a4c0, 0x3f383c11]),
+    CicpCase(primaries = 22, transfer = 3, error_message = "Illegal transfer characteristics", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 23, transfer = 1, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 23, transfer = 2, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 23, transfer = 4, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 23, transfer = 5, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 23, transfer = 7, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 23, transfer = 8, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 23, transfer = 9, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 23, transfer = 11, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 23, transfer = 12, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 23, transfer = 13, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 23, transfer = 16, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 23, transfer = 17, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 23, transfer = 18, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+    CicpCase(primaries = 23, transfer = 3, error_message = "Illegal color primaries", bits = [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000]),
+]
+
+## The transfer function and matrix of a color space as float bits, in CicpCase's order.
+func color_space_bits(color_space: const SkColorSpace*) -> u32[16]:
+    let tf = color_space.fTransferFn
+    let values: f32[16] = [
+        tf.g, tf.a, tf.b, tf.c, tf.d, tf.e, tf.f,
+        color_space.fToXYZD50.vals[0][0], color_space.fToXYZD50.vals[0][1], color_space.fToXYZD50.vals[0][2],
+        color_space.fToXYZD50.vals[1][0], color_space.fToXYZD50.vals[1][1], color_space.fToXYZD50.vals[1][2],
+        color_space.fToXYZD50.vals[2][0], color_space.fToXYZD50.vals[2][1], color_space.fToXYZD50.vals[2][2],
+    ]
+    var bits: u32[16]
+    for i in 0..<16:
+        let value = values[i]
+        bits[i] = value.bits()
+    return bits
+
+test "from_cicp":
+    test_from_cicp()
+
+noinline func test_from_cicp():
+    for test_case in cicp_cases:
+        let cicp = MediaCodingIndependentCodePoints(
+            m_color_primaries = (MediaColorPrimaries)test_case.primaries,
+            m_transfer_characteristics = (MediaTransferCharacteristics)test_case.transfer,
+            m_matrix_coefficients = MediaMatrixCoefficients.bt709,
+            m_video_full_range_flag = MediaVideoFullRangeFlag.full,
+        )
+        var failed = false
+        var color_space = color_space_from_cicp(cicp) catch failure:
+            failed = true
+            if failure.message != test_case.error_message:
+                print(f"cicp {test_case.primaries} {test_case.transfer}: error {failure.message}, expected {test_case.error_message}")
+            assert(failure.message == test_case.error_message)
+            continue
+        if test_case.error_message.length != 0:
+            print(f"cicp {test_case.primaries} {test_case.transfer}: no error, expected {test_case.error_message}")
+        assert(not failed and test_case.error_message.length == 0)
+        let sk = *color_space_color_space_sk_sp(&color_space) else trap("null color space")
+        let bits = color_space_bits(sk)
+        if bits != test_case.bits:
+            print(f"cicp {test_case.primaries} {test_case.transfer}: bits differ")
+            for i in 0..<16:
+                if bits[i] != test_case.bits[i]: print(f"    [{i}] got {hex(bits[i])}, expected {hex(test_case.bits[i])}")
+        assert(bits == test_case.bits)
+
+test "color space constructors":
+    test_color_space_constructors()
+
+noinline func test_color_space_constructors():
+    var color_space: ColorSpace = ---
+    color_space_construct(&color_space)
+    assert(*color_space_color_space_sk_sp(&color_space) == none)
+    let empty: u8[1] = [0]
+    var loaded = color_space_load_from_icc_bytes(empty[0..<0]) else trap("empty profile")
+    assert(*color_space_color_space_sk_sp(&loaded) == none)
+    var failed = false
+    discard(color_space_load_from_icc_bytes(empty) catch failure:
+        assert(failure.message == "Failed to parse the ICC profile")
+        failed = true
+        recover loaded)
+    assert(failed)
+    let impl = new ColorSpaceImpl(color_space = none) else trap("out of memory")
+    var wrapped: ColorSpace = ---
+    color_space_construct_color_space_impl(&wrapped, impl)
+    assert(wrapped.m_color_space == impl)
+
+# mark: Palette and AnonymousBuffer =============================================================
+
+test "anonymous buffer":
+    test_anonymous_buffer()
+
+noinline func test_anonymous_buffer():
+    let invalid = CoreAnonymousBuffer(m_impl = none)
+    assert(not core_anonymous_buffer_is_valid(&invalid))
+    assert(core_anonymous_buffer_size(&invalid) == 0 and core_anonymous_buffer_data(&invalid) == none)
+    let empty = core_anonymous_buffer_create_with_size(0) else trap("create")
+    assert(core_anonymous_buffer_is_valid(&empty) and core_anonymous_buffer_size(&empty) == 0 and core_anonymous_buffer_data(&empty) == none)
+    let buffer = core_anonymous_buffer_create_with_size(100) else trap("create")
+    assert(core_anonymous_buffer_size(&buffer) == 100)
+    let data = core_anonymous_buffer_data(&buffer) else trap("no data")
+    let bytes = u8[]((u8*)data, 100)
+    for byte in bytes: assert(byte == 0)
+
+## A Palette over a new SystemTheme whose every color, alignment, flag, metric and path is
+## derived from its role, so that each accessor can be checked against the role it reads.
+func palette_with_role_values() -> Palette:
+    let buffer = core_anonymous_buffer_create_with_size(sizeof(SystemTheme)) else trap("create")
+    let impl = palette_impl_create_with_anonymous_buffer(buffer)
+    let theme = (SystemTheme*)palette_impl_theme(impl)
+    for i in 0..<99: theme.color[i] = 0xff000000 | (u32)i
+    theme.alignment[1] = TextAlignment.bottom_left
+    theme.flag[1] = true
+    theme.flag[3] = true
+    for i in 0..<6: theme.metric[i] = (i32)i * 10
+    for i in 0..<8:
+        theme.path[i][0] = '/'
+        theme.path[i][1] = (u8)((u8)'a' + (u8)i)
+    var palette: Palette = ---
+    palette_construct(&palette, impl)
+    return palette
+
+test "palette accessors":
+    test_palette_accessors()
+
+noinline func test_palette_accessors():
+    let palette = palette_with_role_values()
+    let c0 = palette_accent(&palette)
+    assert(color_value(&c0) == (0xff000000 | (u32)ColorRole.accent))
+    let c1 = palette_window(&palette)
+    assert(color_value(&c1) == (0xff000000 | (u32)ColorRole.window))
+    let c2 = palette_window_text(&palette)
+    assert(color_value(&c2) == (0xff000000 | (u32)ColorRole.window_text))
+    let c3 = palette_selection(&palette)
+    assert(color_value(&c3) == (0xff000000 | (u32)ColorRole.selection))
+    let c4 = palette_selection_text(&palette)
+    assert(color_value(&c4) == (0xff000000 | (u32)ColorRole.selection_text))
+    let c5 = palette_inactive_selection(&palette)
+    assert(color_value(&c5) == (0xff000000 | (u32)ColorRole.inactive_selection))
+    let c6 = palette_inactive_selection_text(&palette)
+    assert(color_value(&c6) == (0xff000000 | (u32)ColorRole.inactive_selection_text))
+    let c7 = palette_desktop_background(&palette)
+    assert(color_value(&c7) == (0xff000000 | (u32)ColorRole.desktop_background))
+    let c8 = palette_active_window_border1(&palette)
+    assert(color_value(&c8) == (0xff000000 | (u32)ColorRole.active_window_border1))
+    let c9 = palette_active_window_border2(&palette)
+    assert(color_value(&c9) == (0xff000000 | (u32)ColorRole.active_window_border2))
+    let c10 = palette_active_window_title(&palette)
+    assert(color_value(&c10) == (0xff000000 | (u32)ColorRole.active_window_title))
+    let c11 = palette_active_window_title_stripes(&palette)
+    assert(color_value(&c11) == (0xff000000 | (u32)ColorRole.active_window_title_stripes))
+    let c12 = palette_active_window_title_shadow(&palette)
+    assert(color_value(&c12) == (0xff000000 | (u32)ColorRole.active_window_title_shadow))
+    let c13 = palette_inactive_window_border1(&palette)
+    assert(color_value(&c13) == (0xff000000 | (u32)ColorRole.inactive_window_border1))
+    let c14 = palette_inactive_window_border2(&palette)
+    assert(color_value(&c14) == (0xff000000 | (u32)ColorRole.inactive_window_border2))
+    let c15 = palette_inactive_window_title(&palette)
+    assert(color_value(&c15) == (0xff000000 | (u32)ColorRole.inactive_window_title))
+    let c16 = palette_inactive_window_title_stripes(&palette)
+    assert(color_value(&c16) == (0xff000000 | (u32)ColorRole.inactive_window_title_stripes))
+    let c17 = palette_inactive_window_title_shadow(&palette)
+    assert(color_value(&c17) == (0xff000000 | (u32)ColorRole.inactive_window_title_shadow))
+    let c18 = palette_moving_window_border1(&palette)
+    assert(color_value(&c18) == (0xff000000 | (u32)ColorRole.moving_window_border1))
+    let c19 = palette_moving_window_border2(&palette)
+    assert(color_value(&c19) == (0xff000000 | (u32)ColorRole.moving_window_border2))
+    let c20 = palette_moving_window_title(&palette)
+    assert(color_value(&c20) == (0xff000000 | (u32)ColorRole.moving_window_title))
+    let c21 = palette_moving_window_title_stripes(&palette)
+    assert(color_value(&c21) == (0xff000000 | (u32)ColorRole.moving_window_title_stripes))
+    let c22 = palette_moving_window_title_shadow(&palette)
+    assert(color_value(&c22) == (0xff000000 | (u32)ColorRole.moving_window_title_shadow))
+    let c23 = palette_highlight_window_border1(&palette)
+    assert(color_value(&c23) == (0xff000000 | (u32)ColorRole.highlight_window_border1))
+    let c24 = palette_highlight_window_border2(&palette)
+    assert(color_value(&c24) == (0xff000000 | (u32)ColorRole.highlight_window_border2))
+    let c25 = palette_highlight_window_title(&palette)
+    assert(color_value(&c25) == (0xff000000 | (u32)ColorRole.highlight_window_title))
+    let c26 = palette_highlight_window_title_stripes(&palette)
+    assert(color_value(&c26) == (0xff000000 | (u32)ColorRole.highlight_window_title_stripes))
+    let c27 = palette_highlight_window_title_shadow(&palette)
+    assert(color_value(&c27) == (0xff000000 | (u32)ColorRole.highlight_window_title_shadow))
+    let c28 = palette_highlight_searching(&palette)
+    assert(color_value(&c28) == (0xff000000 | (u32)ColorRole.highlight_searching))
+    let c29 = palette_highlight_searching_text(&palette)
+    assert(color_value(&c29) == (0xff000000 | (u32)ColorRole.highlight_searching_text))
+    let c30 = palette_menu_stripe(&palette)
+    assert(color_value(&c30) == (0xff000000 | (u32)ColorRole.menu_stripe))
+    let c31 = palette_menu_base(&palette)
+    assert(color_value(&c31) == (0xff000000 | (u32)ColorRole.menu_base))
+    let c32 = palette_menu_base_text(&palette)
+    assert(color_value(&c32) == (0xff000000 | (u32)ColorRole.menu_base_text))
+    let c33 = palette_menu_selection(&palette)
+    assert(color_value(&c33) == (0xff000000 | (u32)ColorRole.menu_selection))
+    let c34 = palette_menu_selection_text(&palette)
+    assert(color_value(&c34) == (0xff000000 | (u32)ColorRole.menu_selection_text))
+    let c35 = palette_base(&palette)
+    assert(color_value(&c35) == (0xff000000 | (u32)ColorRole.base))
+    let c36 = palette_base_text(&palette)
+    assert(color_value(&c36) == (0xff000000 | (u32)ColorRole.base_text))
+    let c37 = palette_disabled_text_front(&palette)
+    assert(color_value(&c37) == (0xff000000 | (u32)ColorRole.disabled_text_front))
+    let c38 = palette_disabled_text_back(&palette)
+    assert(color_value(&c38) == (0xff000000 | (u32)ColorRole.disabled_text_back))
+    let c39 = palette_button(&palette)
+    assert(color_value(&c39) == (0xff000000 | (u32)ColorRole.button))
+    let c40 = palette_button_text(&palette)
+    assert(color_value(&c40) == (0xff000000 | (u32)ColorRole.button_text))
+    let c41 = palette_threed_highlight(&palette)
+    assert(color_value(&c41) == (0xff000000 | (u32)ColorRole.threed_highlight))
+    let c42 = palette_threed_shadow1(&palette)
+    assert(color_value(&c42) == (0xff000000 | (u32)ColorRole.threed_shadow1))
+    let c43 = palette_threed_shadow2(&palette)
+    assert(color_value(&c43) == (0xff000000 | (u32)ColorRole.threed_shadow2))
+    let c44 = palette_hover_highlight(&palette)
+    assert(color_value(&c44) == (0xff000000 | (u32)ColorRole.hover_highlight))
+    let c45 = palette_rubber_band_fill(&palette)
+    assert(color_value(&c45) == (0xff000000 | (u32)ColorRole.rubber_band_fill))
+    let c46 = palette_rubber_band_border(&palette)
+    assert(color_value(&c46) == (0xff000000 | (u32)ColorRole.rubber_band_border))
+    let c47 = palette_gutter(&palette)
+    assert(color_value(&c47) == (0xff000000 | (u32)ColorRole.gutter))
+    let c48 = palette_gutter_border(&palette)
+    assert(color_value(&c48) == (0xff000000 | (u32)ColorRole.gutter_border))
+    let c49 = palette_ruler(&palette)
+    assert(color_value(&c49) == (0xff000000 | (u32)ColorRole.ruler))
+    let c50 = palette_ruler_border(&palette)
+    assert(color_value(&c50) == (0xff000000 | (u32)ColorRole.ruler_border))
+    let c51 = palette_ruler_active_text(&palette)
+    assert(color_value(&c51) == (0xff000000 | (u32)ColorRole.ruler_active_text))
+    let c52 = palette_ruler_inactive_text(&palette)
+    assert(color_value(&c52) == (0xff000000 | (u32)ColorRole.ruler_inactive_text))
+    let c53 = palette_text_cursor(&palette)
+    assert(color_value(&c53) == (0xff000000 | (u32)ColorRole.text_cursor))
+    let c54 = palette_focus_outline(&palette)
+    assert(color_value(&c54) == (0xff000000 | (u32)ColorRole.focus_outline))
+    let c55 = palette_tray(&palette)
+    assert(color_value(&c55) == (0xff000000 | (u32)ColorRole.tray))
+    let c56 = palette_tray_text(&palette)
+    assert(color_value(&c56) == (0xff000000 | (u32)ColorRole.tray_text))
+    let c57 = palette_link(&palette)
+    assert(color_value(&c57) == (0xff000000 | (u32)ColorRole.link))
+    let c58 = palette_active_link(&palette)
+    assert(color_value(&c58) == (0xff000000 | (u32)ColorRole.active_link))
+    let c59 = palette_visited_link(&palette)
+    assert(color_value(&c59) == (0xff000000 | (u32)ColorRole.visited_link))
+    let c60 = palette_syntax_comment(&palette)
+    assert(color_value(&c60) == (0xff000000 | (u32)ColorRole.syntax_comment))
+    let c61 = palette_syntax_number(&palette)
+    assert(color_value(&c61) == (0xff000000 | (u32)ColorRole.syntax_number))
+    let c62 = palette_syntax_string(&palette)
+    assert(color_value(&c62) == (0xff000000 | (u32)ColorRole.syntax_string))
+    let c63 = palette_syntax_identifier(&palette)
+    assert(color_value(&c63) == (0xff000000 | (u32)ColorRole.syntax_identifier))
+    let c64 = palette_syntax_type(&palette)
+    assert(color_value(&c64) == (0xff000000 | (u32)ColorRole.syntax_type))
+    let c65 = palette_syntax_punctuation(&palette)
+    assert(color_value(&c65) == (0xff000000 | (u32)ColorRole.syntax_punctuation))
+    let c66 = palette_syntax_operator(&palette)
+    assert(color_value(&c66) == (0xff000000 | (u32)ColorRole.syntax_operator))
+    let c67 = palette_syntax_keyword(&palette)
+    assert(color_value(&c67) == (0xff000000 | (u32)ColorRole.syntax_keyword))
+    let c68 = palette_syntax_control_keyword(&palette)
+    assert(color_value(&c68) == (0xff000000 | (u32)ColorRole.syntax_control_keyword))
+    let c69 = palette_syntax_preprocessor_statement(&palette)
+    assert(color_value(&c69) == (0xff000000 | (u32)ColorRole.syntax_preprocessor_statement))
+    let c70 = palette_syntax_preprocessor_value(&palette)
+    assert(color_value(&c70) == (0xff000000 | (u32)ColorRole.syntax_preprocessor_value))
+    let c71 = palette_syntax_function(&palette)
+    assert(color_value(&c71) == (0xff000000 | (u32)ColorRole.syntax_function))
+    let c72 = palette_syntax_variable(&palette)
+    assert(color_value(&c72) == (0xff000000 | (u32)ColorRole.syntax_variable))
+    let c73 = palette_syntax_custom_type(&palette)
+    assert(color_value(&c73) == (0xff000000 | (u32)ColorRole.syntax_custom_type))
+    let c74 = palette_syntax_namespace(&palette)
+    assert(color_value(&c74) == (0xff000000 | (u32)ColorRole.syntax_namespace))
+    let c75 = palette_syntax_member(&palette)
+    assert(color_value(&c75) == (0xff000000 | (u32)ColorRole.syntax_member))
+    let c76 = palette_syntax_parameter(&palette)
+    assert(color_value(&c76) == (0xff000000 | (u32)ColorRole.syntax_parameter))
+    let c77 = palette_background(&palette)
+    assert(color_value(&c77) == (0xff000000 | (u32)ColorRole.color_scheme_background))
+    let c78 = palette_foreground(&palette)
+    assert(color_value(&c78) == (0xff000000 | (u32)ColorRole.color_scheme_foreground))
+    let c79 = palette_black(&palette)
+    assert(color_value(&c79) == (0xff000000 | (u32)ColorRole.black))
+    let c80 = palette_red(&palette)
+    assert(color_value(&c80) == (0xff000000 | (u32)ColorRole.red))
+    let c81 = palette_green(&palette)
+    assert(color_value(&c81) == (0xff000000 | (u32)ColorRole.green))
+    let c82 = palette_yellow(&palette)
+    assert(color_value(&c82) == (0xff000000 | (u32)ColorRole.yellow))
+    let c83 = palette_blue(&palette)
+    assert(color_value(&c83) == (0xff000000 | (u32)ColorRole.blue))
+    let c84 = palette_magenta(&palette)
+    assert(color_value(&c84) == (0xff000000 | (u32)ColorRole.magenta))
+    let c85 = palette_cyan(&palette)
+    assert(color_value(&c85) == (0xff000000 | (u32)ColorRole.cyan))
+    let c86 = palette_white(&palette)
+    assert(color_value(&c86) == (0xff000000 | (u32)ColorRole.white))
+    let c87 = palette_bright_black(&palette)
+    assert(color_value(&c87) == (0xff000000 | (u32)ColorRole.bright_black))
+    let c88 = palette_bright_red(&palette)
+    assert(color_value(&c88) == (0xff000000 | (u32)ColorRole.bright_red))
+    let c89 = palette_bright_green(&palette)
+    assert(color_value(&c89) == (0xff000000 | (u32)ColorRole.bright_green))
+    let c90 = palette_bright_yellow(&palette)
+    assert(color_value(&c90) == (0xff000000 | (u32)ColorRole.bright_yellow))
+    let c91 = palette_bright_blue(&palette)
+    assert(color_value(&c91) == (0xff000000 | (u32)ColorRole.bright_blue))
+    let c92 = palette_bright_magenta(&palette)
+    assert(color_value(&c92) == (0xff000000 | (u32)ColorRole.bright_magenta))
+    let c93 = palette_bright_cyan(&palette)
+    assert(color_value(&c93) == (0xff000000 | (u32)ColorRole.bright_cyan))
+    let c94 = palette_bright_white(&palette)
+    assert(color_value(&c94) == (0xff000000 | (u32)ColorRole.bright_white))
+    assert(palette_title_alignment(&palette) == TextAlignment.bottom_left)
+    assert(palette_bold_text_as_bright(&palette) == ((u32)FlagRole.bold_text_as_bright != 2))
+    assert(palette_is_dark(&palette) == ((u32)FlagRole.is_dark != 2))
+    assert(palette_title_buttons_icon_only(&palette) == ((u32)FlagRole.title_buttons_icon_only != 2))
+    assert(palette_window_border_thickness(&palette) == (i32)MetricRole.border_thickness * 10)
+    assert(palette_window_border_radius(&palette) == (i32)MetricRole.border_radius * 10)
+    assert(palette_window_title_height(&palette) == (i32)MetricRole.title_height * 10)
+    assert(palette_window_title_button_width(&palette) == (i32)MetricRole.title_button_width * 10)
+    assert(palette_window_title_button_height(&palette) == (i32)MetricRole.title_button_height * 10)
+    let title_button_icons_path = palette_title_button_icons_path(&palette)
+    assert(ak.byte_string_length(&title_button_icons_path) == 2 and ak.byte_string_bytes(&title_button_icons_path)[1] == (u8)((u8)'a' + (u8)PathRole.title_button_icons))
+    let active_window_shadow_path = palette_active_window_shadow_path(&palette)
+    assert(ak.byte_string_length(&active_window_shadow_path) == 2 and ak.byte_string_bytes(&active_window_shadow_path)[1] == (u8)((u8)'a' + (u8)PathRole.active_window_shadow))
+    let inactive_window_shadow_path = palette_inactive_window_shadow_path(&palette)
+    assert(ak.byte_string_length(&inactive_window_shadow_path) == 2 and ak.byte_string_bytes(&inactive_window_shadow_path)[1] == (u8)((u8)'a' + (u8)PathRole.inactive_window_shadow))
+    let menu_shadow_path = palette_menu_shadow_path(&palette)
+    assert(ak.byte_string_length(&menu_shadow_path) == 2 and ak.byte_string_bytes(&menu_shadow_path)[1] == (u8)((u8)'a' + (u8)PathRole.menu_shadow))
+    let taskbar_shadow_path = palette_taskbar_shadow_path(&palette)
+    assert(ak.byte_string_length(&taskbar_shadow_path) == 2 and ak.byte_string_bytes(&taskbar_shadow_path)[1] == (u8)((u8)'a' + (u8)PathRole.taskbar_shadow))
+    let tooltip_shadow_path = palette_tooltip_shadow_path(&palette)
+    assert(ak.byte_string_length(&tooltip_shadow_path) == 2 and ak.byte_string_bytes(&tooltip_shadow_path)[1] == (u8)((u8)'a' + (u8)PathRole.tooltip_shadow))
+    let color_scheme_path = palette_color_scheme_path(&palette)
+    assert(ak.byte_string_length(&color_scheme_path) == 2 and ak.byte_string_bytes(&color_scheme_path)[1] == (u8)((u8)'a' + (u8)PathRole.color_scheme))
+    let impl = palette_impl_const(&palette)
+    let base = palette_impl_color(impl, ColorRole.base)
+    assert(color_value(&base) == 0xff000008)
+    assert(palette_theme(&palette).metric[5] == 50)
+
+test "palette setters":
+    test_palette_setters()
+
+noinline func test_palette_setters():
+    var palette = palette_with_role_values()
+    let original = palette_impl(&palette)
+    palette_set_color(&palette, ColorRole.accent, color_new_u8_u8_u8(1, 2, 3))
+    let accent = palette_accent(&palette)
+    assert(color_value(&accent) == 0xff010203)
+    # The setter copied the theme: the original PaletteImpl is unchanged.
+    assert(palette_impl(&palette) != original)
+    let original_accent = palette_impl_color(original, ColorRole.accent)
+    assert(color_value(&original_accent) == 0xff000001)
+    palette_set_alignment(&palette, AlignmentRole.title_alignment, TextAlignment.top_right)
+    assert(palette_title_alignment(&palette) == TextAlignment.top_right)
+    palette_set_flag(&palette, FlagRole.is_dark, true)
+    assert(palette_is_dark(&palette))
+    palette_set_flag(&palette, FlagRole.is_dark, false)
+    assert(not palette_is_dark(&palette))
+    palette_set_metric(&palette, MetricRole.title_height, -7)
+    assert(palette_window_title_height(&palette) == -7)
+    palette_set_path(&palette, PathRole.menu_shadow, ak.byte_string_from_str("/res/menu-shadow.png"))
+    let menu_shadow = palette_menu_shadow_path(&palette)
+    assert(string_view_is(ak.byte_string_view(&menu_shadow), "/res/menu-shadow.png"))
+    # A path of 300 characters keeps its first 255 and a NUL.
+    var builder = ak.string_builder_new()
+    ak.string_builder_append_repeated_u8(&builder, 'x', 300)
+    palette_set_path(&palette, PathRole.color_scheme, ak.string_builder_to_byte_string(&builder))
+    let color_scheme = palette_color_scheme_path(&palette)
+    assert(ak.byte_string_length(&color_scheme) == 255)
+    # Every other value survived the copies.
+    let base = palette_base(&palette)
+    assert(color_value(&base) == 0xff000008)
+    assert(palette_window_border_thickness(&palette) == 10)
+    assert(string_view_is(ak.byte_string_view(&menu_shadow), "/res/menu-shadow.png"))
+    let clone = palette_impl_clone(palette_impl_const(&palette))
+    let cloned_accent = palette_impl_color(clone, ColorRole.accent)
+    assert(color_value(&cloned_accent) == 0xff010203)
+    let replacement = core_anonymous_buffer_create_with_size(sizeof(SystemTheme)) else trap("create")
+    palette_impl_replace_internal_buffer(clone, replacement)
+    let replaced_accent = palette_impl_color(clone, ColorRole.accent)
+    assert(color_value(&replaced_accent) == 0)

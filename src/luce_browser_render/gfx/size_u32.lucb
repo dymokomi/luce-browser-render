@@ -1,0 +1,162 @@
+#==============================================================================================
+#
+#   size_u32 - Gfx::Size<u32> (SizeOfU32, also DevicePixelSize)
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Size.h (lines 16-223) for T = u32 (HTMLVideoElement's intrinsic
+#       dimensions). The class template is instantiated per type (DESIGN.md §2.8): size_int.lucb,
+#       size_float.lucb and size_css_pixels.lucb hold the other instantiations.
+#
+#       Unsigned arithmetic wraps, as in C++. Member templates over a second type U are
+#       instantiated for the types phase 1 uses: `to_type<U>()` is `to_type_i32` and
+#       `to_type_css_pixels`. Not here: `scale_by(Point<u32>)` and `scaled(Point<u32>)` (nothing
+#       instantiates Point<u32>), `to_byte_string` (Size.cpp defines it only for int and float)
+#       and `to_rounded` (round_to takes a floating-point value).
+#
+#==============================================================================================
+
+# mark: Construction and access =================================================================
+
+## Ported from Libraries/LibGfx/Size.h:21 Gfx::Size::Size<T> for SizeOfU32.
+pub func size_of_u32_construct(this: SizeOfU32*, w: u32, h: u32):
+    this.m_width = w
+    this.m_height = h
+
+## Ported from Libraries/LibGfx/Size.h:28 Gfx::Size::Size<T>(U width, U height) for SizeOfU32, with U = int.
+pub func size_of_u32_construct_i32(this: SizeOfU32*, width: i32, height: i32):
+    this.m_width = (u32)width
+    this.m_height = (u32)height
+
+## Ported from Libraries/LibGfx/Size.h:41 Gfx::Size::width for SizeOfU32.
+pub func size_of_u32_width(this: const SizeOfU32*) -> u32:
+    return this.m_width
+
+## Ported from Libraries/LibGfx/Size.h:42 Gfx::Size::height for SizeOfU32.
+pub func size_of_u32_height(this: const SizeOfU32*) -> u32:
+    return this.m_height
+
+## Ported from Libraries/LibGfx/Size.h:43 Gfx::Size::area for SizeOfU32.
+pub func size_of_u32_area(this: const SizeOfU32*) -> u32:
+    return size_of_u32_width(this) *% size_of_u32_height(this)
+
+## Ported from Libraries/LibGfx/Size.h:45 Gfx::Size::set_width for SizeOfU32.
+pub func size_of_u32_set_width(this: SizeOfU32*, w: u32):
+    this.m_width = w
+
+## Ported from Libraries/LibGfx/Size.h:46 Gfx::Size::set_height for SizeOfU32.
+pub func size_of_u32_set_height(this: SizeOfU32*, h: u32):
+    this.m_height = h
+
+## Ported from Libraries/LibGfx/Size.h:48 Gfx::Size::is_empty for SizeOfU32.
+pub func size_of_u32_is_empty(this: const SizeOfU32*) -> bool:
+    return this.m_width <= 0 or this.m_height <= 0
+
+# mark: Scaling =================================================================================
+
+## Ported from Libraries/LibGfx/Size.h:50 Gfx::Size::scale_by for SizeOfU32.
+pub func size_of_u32_scale_by_u32_u32(this: SizeOfU32*, dx: u32, dy: u32):
+    this.m_width = this.m_width *% dx
+    this.m_height = this.m_height *% dy
+
+## Ported from Libraries/LibGfx/Size.h:56 Gfx::Size::scale_by for SizeOfU32.
+pub func size_of_u32_scale_by_u32(this: SizeOfU32*, dboth: u32):
+    size_of_u32_scale_by_u32_u32(this, dboth, dboth)
+
+## Ported from Libraries/LibGfx/Size.h:59 Gfx::Size::scaled for SizeOfU32.
+pub func size_of_u32_scaled_u32_u32(this: const SizeOfU32*, dx: u32, dy: u32) -> SizeOfU32:
+    var size = *this
+    size_of_u32_scale_by_u32_u32(&size, dx, dy)
+    return size
+
+## Ported from Libraries/LibGfx/Size.h:66 Gfx::Size::scaled for SizeOfU32.
+pub func size_of_u32_scaled_u32(this: const SizeOfU32*, dboth: u32) -> SizeOfU32:
+    var size = *this
+    size_of_u32_scale_by_u32(&size, dboth)
+    return size
+
+## Ported from Libraries/LibGfx/Size.h:80 Gfx::Size::aspect_ratio for SizeOfU32.
+pub func size_of_u32_aspect_ratio(this: const SizeOfU32*) -> f32:
+    assert(size_of_u32_height(this) != 0)
+    return (f32)size_of_u32_width(this) / (f32)size_of_u32_height(this)
+
+# Horizontal means preserve the width, Vertical means preserve the height.
+## Ported from Libraries/LibGfx/Size.h:87 Gfx::Size::match_aspect_ratio for SizeOfU32.
+pub func size_of_u32_match_aspect_ratio(this: const SizeOfU32*, aspect_ratio: f32, side_to_preserve: Orientation) -> SizeOfU32:
+    assert(aspect_ratio != 0.0)
+    var matched = *this
+    let height_corresponding_to_width = (u32)((f32)size_of_u32_width(this) / aspect_ratio)
+    let width_corresponding_to_height = (u32)((f32)size_of_u32_height(this) * aspect_ratio)
+
+    if side_to_preserve == Orientation.vertical:
+        matched.m_width = width_corresponding_to_height
+    elif side_to_preserve == Orientation.horizontal:
+        matched.m_height = height_corresponding_to_width
+    return matched
+
+## Ported from Libraries/LibGfx/Size.h:106 Gfx::Size::contains for SizeOfU32 (U = int).
+pub func size_of_u32_contains(this: const SizeOfU32*, other: SizeOfU32) -> bool:
+    return other.m_width <= this.m_width and other.m_height <= this.m_height
+
+# mark: Operators ===============================================================================
+
+## Ported from Libraries/LibGfx/Size.h:112 Gfx::Size::operator== for SizeOfU32 (U = int).
+pub func size_of_u32_eq(this: const SizeOfU32*, other: SizeOfU32) -> bool:
+    return size_of_u32_width(this) == size_of_u32_width(&other) and size_of_u32_height(this) == size_of_u32_height(&other)
+
+## Ported from Libraries/LibGfx/Size.h:117 Gfx::Size::operator-= for SizeOfU32.
+pub func size_of_u32_sub_assign(this: SizeOfU32*, other: SizeOfU32) -> SizeOfU32*:
+    this.m_width = this.m_width -% other.m_width
+    this.m_height = this.m_height -% other.m_height
+    return this
+
+## Ported from Libraries/LibGfx/Size.h:124 Gfx::Size::operator+= for SizeOfU32.
+pub func size_of_u32_add_assign(this: SizeOfU32*, other: SizeOfU32) -> SizeOfU32*:
+    this.m_width = this.m_width +% other.m_width
+    this.m_height = this.m_height +% other.m_height
+    return this
+
+## Ported from Libraries/LibGfx/Size.h:131 Gfx::Size::operator* for SizeOfU32.
+pub func size_of_u32_mul(this: const SizeOfU32*, factor: u32) -> SizeOfU32:
+    return SizeOfU32(this.m_width *% factor, this.m_height *% factor)
+
+## Ported from Libraries/LibGfx/Size.h:133 Gfx::Size::operator*= for SizeOfU32.
+pub func size_of_u32_mul_assign(this: SizeOfU32*, factor: u32) -> SizeOfU32*:
+    this.m_width = this.m_width *% factor
+    this.m_height = this.m_height *% factor
+    return this
+
+# mark: Orientation =============================================================================
+
+## Ported from Libraries/LibGfx/Size.h:140 Gfx::Size::primary_size_for_orientation for SizeOfU32.
+pub func size_of_u32_primary_size_for_orientation(this: const SizeOfU32*, orientation: Orientation) -> u32:
+    return size_of_u32_height(this) if orientation == Orientation.vertical else size_of_u32_width(this)
+
+## Ported from Libraries/LibGfx/Size.h:145 Gfx::Size::set_primary_size_for_orientation for SizeOfU32.
+pub func size_of_u32_set_primary_size_for_orientation(this: SizeOfU32*, orientation: Orientation, value: u32):
+    if orientation == Orientation.vertical:
+        size_of_u32_set_height(this, value)
+    else:
+        size_of_u32_set_width(this, value)
+
+## Ported from Libraries/LibGfx/Size.h:154 Gfx::Size::secondary_size_for_orientation for SizeOfU32.
+pub func size_of_u32_secondary_size_for_orientation(this: const SizeOfU32*, orientation: Orientation) -> u32:
+    return size_of_u32_width(this) if orientation == Orientation.vertical else size_of_u32_height(this)
+
+## Ported from Libraries/LibGfx/Size.h:159 Gfx::Size::set_secondary_size_for_orientation for SizeOfU32.
+pub func size_of_u32_set_secondary_size_for_orientation(this: SizeOfU32*, orientation: Orientation, value: u32):
+    if orientation == Orientation.vertical:
+        size_of_u32_set_width(this, value)
+    else:
+        size_of_u32_set_height(this, value)
+
+# mark: Conversions =============================================================================
+
+## Ported from Libraries/LibGfx/Size.h:170 Gfx::Size::to_type<int> for Size<u32> (and the
+## converting constructor Size<int>(Size<u32>), Size.h:35).
+pub func size_of_u32_to_type_i32(this: const SizeOfU32*) -> IntSize:
+    return IntSize((i32)size_of_u32_width(this), (i32)size_of_u32_height(this))
+
+## Ported from Libraries/LibGfx/Size.h:170 Gfx::Size::to_type<CSSPixels> for Size<u32> (and the
+## converting constructor Size<CSSPixels>(Size<u32>), Size.h:35).
+pub func size_of_u32_to_type_css_pixels(this: const SizeOfU32*) -> CssPixelSize:
+    return CssPixelSize(css_pixels_from_unsigned(size_of_u32_width(this)), css_pixels_from_unsigned(size_of_u32_height(this)))

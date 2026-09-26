@@ -1,0 +1,284 @@
+#==============================================================================================
+#
+#   affine_transform - Gfx::AffineTransform: 2D affine transforms
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/AffineTransform.h (lines 17-89) and AffineTransform.cpp
+#       (lines 1-261). The six values are the matrix
+#
+#           | a c e |
+#           | b d f |
+#           | 0 0 1 |
+#
+#       The member template `map` is specialized in the donor for IntPoint, FloatPoint,
+#       IntSize, FloatSize, FloatRect and IntRect; each specialization is its own function
+#       here (`affine_transform_map_<scalar>_<type>`).
+#
+#==============================================================================================
+
+# mark: Construction and queries ================================================================
+
+## Ported from Libraries/LibGfx/AffineTransform.h:19 Gfx::AffineTransform::AffineTransform: the identity.
+pub func affine_transform_construct(this: AffineTransform*):
+    this.m_values = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+
+## Ported from Libraries/LibGfx/AffineTransform.h:24 Gfx::AffineTransform::AffineTransform(a, b, c, d, e, f).
+pub func affine_transform_construct_f32(this: AffineTransform*, a: f32, b: f32, c_: f32, d: f32, e: f32, f: f32):
+    this.m_values = [a, b, c_, d, e, f]
+
+## Ported from Libraries/LibGfx/AffineTransform.h:29 Gfx::AffineTransform::is_identity.
+pub func affine_transform_is_identity(this: const AffineTransform*) -> bool:
+    return (this.m_values[0] == 1.0 and this.m_values[1] == 0.0 and this.m_values[2] == 0.0
+        and this.m_values[3] == 1.0 and this.m_values[4] == 0.0 and this.m_values[5] == 0.0)
+
+## Ported from Libraries/LibGfx/AffineTransform.h:34 Gfx::AffineTransform::is_identity_or_translation.
+pub func affine_transform_is_identity_or_translation(this: const AffineTransform*) -> bool:
+    return this.m_values[0] == 1.0 and this.m_values[1] == 0.0 and this.m_values[2] == 0.0 and this.m_values[3] == 1.0
+
+## Ported from Libraries/LibGfx/AffineTransform.h:39 Gfx::AffineTransform::is_identity_or_translation_or_scale.
+pub func affine_transform_is_identity_or_translation_or_scale(this: const AffineTransform*) -> bool:
+    return this.m_values[1] == 0.0 and this.m_values[2] == 0.0
+
+## Ported from Libraries/LibGfx/AffineTransform.h:57 Gfx::AffineTransform::a.
+pub func affine_transform_a(this: const AffineTransform*) -> f32:
+    return this.m_values[0]
+
+## Ported from Libraries/LibGfx/AffineTransform.h:58 Gfx::AffineTransform::b.
+pub func affine_transform_b(this: const AffineTransform*) -> f32:
+    return this.m_values[1]
+
+## Ported from Libraries/LibGfx/AffineTransform.h:59 Gfx::AffineTransform::c.
+pub func affine_transform_c(this: const AffineTransform*) -> f32:
+    return this.m_values[2]
+
+## Ported from Libraries/LibGfx/AffineTransform.h:60 Gfx::AffineTransform::d.
+pub func affine_transform_d(this: const AffineTransform*) -> f32:
+    return this.m_values[3]
+
+## Ported from Libraries/LibGfx/AffineTransform.h:61 Gfx::AffineTransform::e.
+pub func affine_transform_e(this: const AffineTransform*) -> f32:
+    return this.m_values[4]
+
+## Ported from Libraries/LibGfx/AffineTransform.h:62 Gfx::AffineTransform::f.
+pub func affine_transform_f(this: const AffineTransform*) -> f32:
+    return this.m_values[5]
+
+# mark: Scale and translation ===================================================================
+
+## Ported from Libraries/LibGfx/AffineTransform.cpp:15 Gfx::AffineTransform::x_scale.
+pub func affine_transform_x_scale(this: const AffineTransform*) -> f32:
+    return ak.trigonometry_hypot_f32(this.m_values[0], this.m_values[1])
+
+## Ported from Libraries/LibGfx/AffineTransform.cpp:20 Gfx::AffineTransform::y_scale.
+pub func affine_transform_y_scale(this: const AffineTransform*) -> f32:
+    return ak.trigonometry_hypot_f32(this.m_values[2], this.m_values[3])
+
+## Ported from Libraries/LibGfx/AffineTransform.cpp:25 Gfx::AffineTransform::scale.
+pub func affine_transform_scale(this: const AffineTransform*) -> FloatPoint:
+    return FloatPoint(affine_transform_x_scale(this), affine_transform_y_scale(this))
+
+## Ported from Libraries/LibGfx/AffineTransform.cpp:30 Gfx::AffineTransform::x_translation.
+pub func affine_transform_x_translation(this: const AffineTransform*) -> f32:
+    return affine_transform_e(this)
+
+## Ported from Libraries/LibGfx/AffineTransform.cpp:35 Gfx::AffineTransform::y_translation.
+pub func affine_transform_y_translation(this: const AffineTransform*) -> f32:
+    return affine_transform_f(this)
+
+## Ported from Libraries/LibGfx/AffineTransform.cpp:40 Gfx::AffineTransform::translation.
+pub func affine_transform_translation(this: const AffineTransform*) -> FloatPoint:
+    return FloatPoint(affine_transform_x_translation(this), affine_transform_y_translation(this))
+
+## Ported from Libraries/LibGfx/AffineTransform.cpp:45 Gfx::AffineTransform::scale(float, float).
+pub func affine_transform_scale_f32(this: AffineTransform*, sx: f32, sy: f32) -> AffineTransform*:
+    this.m_values[0] *= sx
+    this.m_values[1] *= sx
+    this.m_values[2] *= sy
+    this.m_values[3] *= sy
+    return this
+
+## Ported from Libraries/LibGfx/AffineTransform.cpp:54 Gfx::AffineTransform::scale(FloatPoint).
+pub func affine_transform_scale_float_point(this: AffineTransform*, s: FloatPoint) -> AffineTransform*:
+    return affine_transform_scale_f32(this, float_point_x(&s), float_point_y(&s))
+
+## Ported from Libraries/LibGfx/AffineTransform.cpp:59 Gfx::AffineTransform::set_scale(float, float).
+pub func affine_transform_set_scale_f32(this: AffineTransform*, sx: f32, sy: f32) -> AffineTransform*:
+    this.m_values[0] = sx
+    this.m_values[1] = 0.0
+    this.m_values[2] = 0.0
+    this.m_values[3] = sy
+    return this
+
+## Ported from Libraries/LibGfx/AffineTransform.cpp:68 Gfx::AffineTransform::set_scale(FloatPoint).
+pub func affine_transform_set_scale_float_point(this: AffineTransform*, s: FloatPoint) -> AffineTransform*:
+    return affine_transform_set_scale_f32(this, float_point_x(&s), float_point_y(&s))
+
+## Ported from Libraries/LibGfx/AffineTransform.cpp:73 Gfx::AffineTransform::skew_radians.
+pub func affine_transform_skew_radians(this: AffineTransform*, x_radians: f32, y_radians: f32) -> AffineTransform*:
+    var skew_transform: AffineTransform
+    affine_transform_construct_f32(&skew_transform, 1.0, ak.trigonometry_tan_f32(y_radians), ak.trigonometry_tan_f32(x_radians), 1.0, 0.0, 0.0)
+    discard(affine_transform_multiply(this, skew_transform))
+    return this
+
+## Ported from Libraries/LibGfx/AffineTransform.cpp:80 Gfx::AffineTransform::translate(float, float).
+pub func affine_transform_translate_f32(this: AffineTransform*, tx: f32, ty: f32) -> AffineTransform*:
+    if affine_transform_is_identity_or_translation(this):
+        this.m_values[4] += tx
+        this.m_values[5] += ty
+        return this
+    this.m_values[4] += tx * this.m_values[0] + ty * this.m_values[2]
+    this.m_values[5] += tx * this.m_values[1] + ty * this.m_values[3]
+    return this
+
+## Ported from Libraries/LibGfx/AffineTransform.cpp:92 Gfx::AffineTransform::translate(FloatPoint).
+pub func affine_transform_translate_float_point(this: AffineTransform*, t: FloatPoint) -> AffineTransform*:
+    return affine_transform_translate_f32(this, float_point_x(&t), float_point_y(&t))
+
+## Ported from Libraries/LibGfx/AffineTransform.cpp:97 Gfx::AffineTransform::set_translation(float, float).
+pub func affine_transform_set_translation_f32(this: AffineTransform*, tx: f32, ty: f32) -> AffineTransform*:
+    this.m_values[4] = tx
+    this.m_values[5] = ty
+    return this
+
+## Ported from Libraries/LibGfx/AffineTransform.cpp:104 Gfx::AffineTransform::set_translation(FloatPoint).
+pub func affine_transform_set_translation_float_point(this: AffineTransform*, t: FloatPoint) -> AffineTransform*:
+    return affine_transform_set_translation_f32(this, float_point_x(&t), float_point_y(&t))
+
+# mark: Composition and inversion ===============================================================
+
+## Ported from Libraries/LibGfx/AffineTransform.cpp:109 Gfx::AffineTransform::multiply.
+pub func affine_transform_multiply(this: AffineTransform*, other: AffineTransform) -> AffineTransform*:
+    if affine_transform_is_identity(&other):
+        return this
+    var result: AffineTransform
+    affine_transform_construct(&result)
+    result.m_values[0] = affine_transform_a(&other) * affine_transform_a(this) + affine_transform_b(&other) * affine_transform_c(this)
+    result.m_values[1] = affine_transform_a(&other) * affine_transform_b(this) + affine_transform_b(&other) * affine_transform_d(this)
+    result.m_values[2] = affine_transform_c(&other) * affine_transform_a(this) + affine_transform_d(&other) * affine_transform_c(this)
+    result.m_values[3] = affine_transform_c(&other) * affine_transform_b(this) + affine_transform_d(&other) * affine_transform_d(this)
+    result.m_values[4] = affine_transform_e(&other) * affine_transform_a(this) + affine_transform_f(&other) * affine_transform_c(this) + affine_transform_e(this)
+    result.m_values[5] = affine_transform_e(&other) * affine_transform_b(this) + affine_transform_f(&other) * affine_transform_d(this) + affine_transform_f(this)
+    *this = result
+    return this
+
+## Ported from Libraries/LibGfx/AffineTransform.cpp:124 Gfx::AffineTransform::rotate_radians.
+pub func affine_transform_rotate_radians(this: AffineTransform*, radians: f32) -> AffineTransform*:
+    var sin_angle: f32
+    var cos_angle: f32
+    ak.trigonometry_sincos_f32(radians, &sin_angle, &cos_angle)
+    var rotation: AffineTransform
+    affine_transform_construct_f32(&rotation, cos_angle, sin_angle, -sin_angle, cos_angle, 0.0, 0.0)
+    discard(affine_transform_multiply(this, rotation))
+    return this
+
+## Ported from Libraries/LibGfx/AffineTransform.cpp:134 Gfx::AffineTransform::determinant.
+pub func affine_transform_determinant(this: const AffineTransform*) -> f32:
+    return affine_transform_a(this) * affine_transform_d(this) - affine_transform_b(this) * affine_transform_c(this)
+
+## Ported from Libraries/LibGfx/AffineTransform.cpp:139 Gfx::AffineTransform::inverse.
+pub func affine_transform_inverse(this: const AffineTransform*) -> AffineTransform?:
+    let det = affine_transform_determinant(this)
+    if det == 0.0:
+        return none
+    var inverse: AffineTransform
+    affine_transform_construct_f32(
+        &inverse,
+        affine_transform_d(this) / det,
+        -affine_transform_b(this) / det,
+        -affine_transform_c(this) / det,
+        affine_transform_a(this) / det,
+        (affine_transform_c(this) * affine_transform_f(this) - affine_transform_d(this) * affine_transform_e(this)) / det,
+        (affine_transform_b(this) * affine_transform_e(this) - affine_transform_a(this) * affine_transform_f(this)) / det,
+    )
+    return inverse
+
+# mark: Mapping =================================================================================
+
+## Ported from Libraries/LibGfx/AffineTransform.cpp:154 Gfx::AffineTransform::map(float, float, float&, float&).
+pub func affine_transform_map(this: const AffineTransform*, unmapped_x: f32, unmapped_y: f32, mapped_x: f32*, mapped_y: f32*):
+    *mapped_x = affine_transform_a(this) * unmapped_x + affine_transform_c(this) * unmapped_y + affine_transform_e(this)
+    *mapped_y = affine_transform_b(this) * unmapped_x + affine_transform_d(this) * unmapped_y + affine_transform_f(this)
+
+## Ported from Libraries/LibGfx/AffineTransform.cpp:161 Gfx::AffineTransform::map<int>(IntPoint).
+pub func affine_transform_map_i32_int_point(this: const AffineTransform*, point: IntPoint) -> IntPoint:
+    var mapped_x: f32
+    var mapped_y: f32
+    affine_transform_map(this, (f32)int_point_x(&point), (f32)int_point_y(&point), &mapped_x, &mapped_y)
+    return IntPoint(ak.rounding_round_to_f32_i32(mapped_x), ak.rounding_round_to_f32_i32(mapped_y))
+
+## Ported from Libraries/LibGfx/AffineTransform.cpp:170 Gfx::AffineTransform::map<float>(FloatPoint).
+pub func affine_transform_map_f32_float_point(this: const AffineTransform*, point: FloatPoint) -> FloatPoint:
+    var mapped_x: f32
+    var mapped_y: f32
+    affine_transform_map(this, float_point_x(&point), float_point_y(&point), &mapped_x, &mapped_y)
+    return FloatPoint(mapped_x, mapped_y)
+
+## Ported from Libraries/LibGfx/AffineTransform.cpp:179 Gfx::AffineTransform::map<int>(IntSize).
+pub func affine_transform_map_i32_int_size(this: const AffineTransform*, size: IntSize) -> IntSize:
+    return IntSize(
+        ak.rounding_round_to_f32_i32((f32)int_size_width(&size) * affine_transform_x_scale(this)),
+        ak.rounding_round_to_f32_i32((f32)int_size_height(&size) * affine_transform_y_scale(this)),
+    )
+
+## Ported from Libraries/LibGfx/AffineTransform.cpp:188 Gfx::AffineTransform::map<float>(FloatSize).
+pub func affine_transform_map_f32_float_size(this: const AffineTransform*, size: FloatSize) -> FloatSize:
+    return FloatSize(float_size_width(&size) * affine_transform_x_scale(this), float_size_height(&size) * affine_transform_y_scale(this))
+
+# Ported from Libraries/LibGfx/AffineTransform.cpp:194 Gfx::smallest_of (only instantiated for float).
+func smallest_of(p1: f32, p2: f32, p3: f32, p4: f32) -> f32:
+    return ak.min_f32(ak.min_f32(p1, p2), ak.min_f32(p3, p4))
+
+# Ported from Libraries/LibGfx/AffineTransform.cpp:200 Gfx::largest_of (only instantiated for float).
+func largest_of(p1: f32, p2: f32, p3: f32, p4: f32) -> f32:
+    return ak.max_f32(ak.max_f32(p1, p2), ak.max_f32(p3, p4))
+
+## Ported from Libraries/LibGfx/AffineTransform.cpp:206 Gfx::AffineTransform::map<float>(FloatRect).
+pub func affine_transform_map_f32_float_rect(this: const AffineTransform*, rect: FloatRect) -> FloatRect:
+    if affine_transform_is_identity(this):
+        return rect
+    if affine_transform_is_identity_or_translation(this):
+        return float_rect_translated_f32_f32(&rect, affine_transform_e(this), affine_transform_f(this))
+    let p1 = affine_transform_map_f32_float_point(this, float_rect_top_left(&rect))
+    let p2 = affine_transform_map_f32_float_point(this, float_rect_top_right(&rect))
+    let p3 = affine_transform_map_f32_float_point(this, float_rect_bottom_right(&rect))
+    let p4 = affine_transform_map_f32_float_point(this, float_rect_bottom_left(&rect))
+    let left = smallest_of(float_point_x(&p1), float_point_x(&p2), float_point_x(&p3), float_point_x(&p4))
+    let top = smallest_of(float_point_y(&p1), float_point_y(&p2), float_point_y(&p3), float_point_y(&p4))
+    let right = largest_of(float_point_x(&p1), float_point_x(&p2), float_point_x(&p3), float_point_x(&p4))
+    let bottom = largest_of(float_point_y(&p1), float_point_y(&p2), float_point_y(&p3), float_point_y(&p4))
+    return FloatRect(FloatPoint(left, top), FloatSize(right - left, bottom - top))
+
+## Ported from Libraries/LibGfx/AffineTransform.cpp:226 Gfx::AffineTransform::map<int>(IntRect).
+pub func affine_transform_map_i32_device_pixel_rect(this: const AffineTransform*, rect: DevicePixelRect) -> DevicePixelRect:
+    return enclosing_int_rect(affine_transform_map_f32_float_rect(this, device_pixel_rect_to_type_f32(&rect)))
+
+## Ported from Libraries/LibGfx/AffineTransform.cpp:231 Gfx::AffineTransform::map_to_quad.
+pub func affine_transform_map_to_quad(this: const AffineTransform*, rect: FloatRect) -> FloatQuad:
+    return FloatQuad(
+        affine_transform_map_f32_float_point(this, float_rect_top_left(&rect)),
+        affine_transform_map_f32_float_point(this, float_rect_top_right(&rect)),
+        affine_transform_map_f32_float_point(this, float_rect_bottom_right(&rect)),
+        affine_transform_map_f32_float_point(this, float_rect_bottom_left(&rect)),
+    )
+
+# mark: Rotation and 4x4 matrix =================================================================
+
+## Ported from Libraries/LibGfx/AffineTransform.cpp:241 Gfx::AffineTransform::rotation.
+pub func affine_transform_rotation(this: const AffineTransform*) -> f32:
+    var rotation = ak.trigonometry_atan2_f32(affine_transform_b(this), affine_transform_a(this))
+    while rotation < -ak.pi_f32:
+        rotation += 2.0 * ak.pi_f32
+    while rotation > ak.pi_f32:
+        rotation -= 2.0 * ak.pi_f32
+    return rotation
+
+## Ported from Libraries/LibGfx/AffineTransform.cpp:251 Gfx::AffineTransform::to_matrix.
+pub func affine_transform_to_matrix(this: const AffineTransform*) -> FloatMatrix4X4:
+    var matrix: FloatMatrix4X4
+    float_matrix4_x4_construct(&matrix, [
+        affine_transform_a(this), affine_transform_c(this), 0.0, affine_transform_e(this),
+        affine_transform_b(this), affine_transform_d(this), 0.0, affine_transform_f(this),
+        0.0, 0.0, 1.0, 0.0,
+        0.0, 0.0, 0.0, 1.0,
+    ])
+    return matrix

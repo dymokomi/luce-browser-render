@@ -1,0 +1,119 @@
+#==============================================================================================
+#
+#   tests_quad - Tests/LibGfx/TestQuad.cpp
+#
+#   DESCRIPTION:
+#       Port of Tests/LibGfx/TestQuad.cpp (lines 1-105), every case. The donor tests Quad<u8>
+#       and Quad<int>; the port instantiates only Quad<float> (the type AffineTransform
+#       produces), so the same coordinates are floats here. Every intermediate value of these
+#       cases is an exact small integer, so the float instantiation computes what the integer
+#       ones do.
+#
+#       Each test's body is a noinline function the test block calls, so that the test
+#       runner's `main` does not inline every body (# workaround:
+#       compiler-issues/ranges_facts_cubic).
+#
+#==============================================================================================
+
+test "quad: quad_points":
+    test_quad_quad_points()
+
+noinline func test_quad_quad_points():
+    let quad_x_left: f32 = 1.0
+    let quad_x_right: f32 = 5.0
+    let quad_y_top: f32 = 10.0
+    let quad_y_bottom: f32 = 6.0
+
+    let left_bottom = FloatPoint(quad_x_left, quad_y_bottom)
+    let left_top = FloatPoint(quad_x_left, quad_y_top)
+    let right_bottom = FloatPoint(quad_x_right, quad_y_bottom)
+    let right_top = FloatPoint(quad_x_right, quad_y_top)
+
+    var quad: FloatQuad
+    float_quad_construct(&quad, left_bottom, left_top, right_bottom, right_top)
+    assert(float_point_eq(&left_bottom, float_quad_p1(&quad)))
+    assert(float_point_eq(&left_top, float_quad_p2(&quad)))
+    assert(float_point_eq(&right_bottom, float_quad_p3(&quad)))
+    assert(float_point_eq(&right_top, float_quad_p4(&quad)))
+
+test "quad: quad_bounding_rect":
+    test_quad_quad_bounding_rect()
+
+noinline func test_quad_quad_bounding_rect():
+    let quad_width: f32 = 5.0
+    let quad_height: f32 = 4.0
+    let quad_x_left: f32 = 0.0
+    let quad_y_top: f32 = 6.0
+
+    let quad_x_right = quad_x_left + quad_width
+    let quad_y_bottom = quad_y_top + quad_height
+
+    let left_bottom = FloatPoint(quad_x_left, quad_y_bottom)
+    let left_top = FloatPoint(quad_x_left, quad_y_top)
+    let right_bottom = FloatPoint(quad_x_right, quad_y_bottom)
+    let right_top = FloatPoint(quad_x_right, quad_y_top)
+    var quad: FloatQuad
+    float_quad_construct(&quad, left_bottom, left_top, right_top, right_bottom)
+
+    let bounding_rect = float_quad_bounding_rect(&quad)
+    assert(float_rect_x(&bounding_rect) == quad_x_left)
+    assert(float_rect_y(&bounding_rect) == quad_y_top)
+    assert(float_rect_width(&bounding_rect) == quad_width)
+    assert(float_rect_height(&bounding_rect) == quad_height)
+
+test "quad: quad_contains":
+    test_quad_quad_contains()
+
+noinline func test_quad_quad_contains():
+    let quad_width: f32 = 5.0
+    let quad_height: f32 = 4.0
+    let quad_x_left: f32 = 0.0
+    let quad_y_top: f32 = 6.0
+
+    let quad_x_right = quad_x_left + quad_width
+    let quad_y_bottom = quad_y_top + quad_height
+
+    let left_bottom = FloatPoint(quad_x_left, quad_y_bottom)
+    let left_top = FloatPoint(quad_x_left, quad_y_top)
+    let right_bottom = FloatPoint(quad_x_right, quad_y_bottom)
+    let right_top = FloatPoint(quad_x_right, quad_y_top)
+    var quad: FloatQuad
+    float_quad_construct(&quad, left_bottom, left_top, right_top, right_bottom)
+
+    let in_bounds_point = FloatPoint(1.0, 7.0)
+    assert(float_quad_contains(&quad, in_bounds_point) == true)
+
+    let out_bounds_point = FloatPoint(7.0, 12.0)
+    assert(float_quad_contains(&quad, out_bounds_point) == false)
+
+test "quad: quad_contains_boundary_points":
+    test_quad_quad_contains_boundary_points()
+
+noinline func test_quad_quad_contains_boundary_points():
+    let p1 = FloatPoint(0.0, 0.0)
+    let p2 = FloatPoint(2.0, 0.0)
+    let p3 = FloatPoint(2.0, 2.0)
+    let p4 = FloatPoint(0.0, 2.0)
+    var square_quad: FloatQuad
+    float_quad_construct(&square_quad, p1, p2, p3, p4)
+    let square_quad_as_rect = float_quad_bounding_rect(&square_quad)
+
+    let point_at_top_left_vertex = p1
+    let point_on_top_edge = FloatPoint(1.0, 0.0)
+    assert(float_quad_contains(&square_quad, point_at_top_left_vertex) == float_rect_contains_float_point(&square_quad_as_rect, point_at_top_left_vertex))
+    assert(float_quad_contains(&square_quad, point_on_top_edge) == float_rect_contains_float_point(&square_quad_as_rect, point_on_top_edge))
+
+    let point_at_top_right_vertex = p2
+    let point_on_right_edge = FloatPoint(2.0, 1.0)
+    assert(float_quad_contains(&square_quad, point_at_top_right_vertex) == float_rect_contains_float_point(&square_quad_as_rect, point_at_top_right_vertex))
+    assert(float_quad_contains(&square_quad, point_on_right_edge) == float_rect_contains_float_point(&square_quad_as_rect, point_on_right_edge))
+
+    let point_at_bottom_left_vertex = p4
+    let point_on_bottom_edge = FloatPoint(1.0, 2.0)
+    assert(float_quad_contains(&square_quad, point_at_bottom_left_vertex) == float_rect_contains_float_point(&square_quad_as_rect, point_at_bottom_left_vertex))
+    assert(float_quad_contains(&square_quad, point_on_bottom_edge) == float_rect_contains_float_point(&square_quad_as_rect, point_on_bottom_edge))
+
+    let point_at_bottom_right_vertex = p3
+    let point_on_left_edge = FloatPoint(0.0, 1.0)
+    assert(float_quad_contains(&square_quad, point_at_bottom_right_vertex) == float_rect_contains_float_point(&square_quad_as_rect, point_at_bottom_right_vertex))
+    assert(float_quad_contains(&square_quad, point_on_left_edge) == float_rect_contains_float_point(&square_quad_as_rect, point_on_left_edge))

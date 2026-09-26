@@ -1,0 +1,372 @@
+#==============================================================================================
+#
+#   rect_float_1 - Gfx::Rect<float> (FloatRect): construction to orientation
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Rect.h (lines 19-347) for T = float; rect_float_2.lucb has the
+#       rest of the class. The class template is instantiated per type (DESIGN.md §2.8):
+#       rect_int_* and rect_css_pixels_* hold the other instantiations, function for function.
+#
+#       Member templates over a second type U are instantiated for the types phase 1 uses: the
+#       constructors from `Point<U>`/`Size<U>` and from `Rect<U>` are the `to_type_*` functions
+#       of the other instantiations; `contains(Container)` and `intersects(Container)` take a
+#       span of rects.
+#
+#==============================================================================================
+
+# mark: Construction and access =================================================================
+
+## Ported from Libraries/LibGfx/Rect.h:24 Gfx::Rect::Rect<T> for FloatRect.
+pub func float_rect_construct_f32(this: FloatRect*, x: f32, y: f32, width: f32, height: f32):
+    this.m_location = FloatPoint(x, y)
+    this.m_size = FloatSize(width, height)
+
+## Ported from Libraries/LibGfx/Rect.h:31 Gfx::Rect::Rect<T>(U x, U y, U width, U height) for FloatRect, with U = int.
+pub func float_rect_construct_i32(this: FloatRect*, x: i32, y: i32, width: i32, height: i32):
+    float_point_construct_i32(&this.m_location, x, y)
+    float_size_construct_i32(&this.m_size, width, height)
+
+## Ported from Libraries/LibGfx/Rect.h:37 Gfx::Rect::Rect<T> for FloatRect.
+pub func float_rect_construct_float_point(this: FloatRect*, location: FloatPoint, size: FloatSize):
+    this.m_location = location
+    this.m_size = size
+
+## Ported from Libraries/LibGfx/Rect.h:57 Gfx::Rect::x for FloatRect.
+pub func float_rect_x(this: const FloatRect*) -> f32:
+    return float_point_x(&this.m_location)
+
+## Ported from Libraries/LibGfx/Rect.h:58 Gfx::Rect::y for FloatRect.
+pub func float_rect_y(this: const FloatRect*) -> f32:
+    return float_point_y(&this.m_location)
+
+## Ported from Libraries/LibGfx/Rect.h:59 Gfx::Rect::width for FloatRect.
+pub func float_rect_width(this: const FloatRect*) -> f32:
+    return float_size_width(&this.m_size)
+
+## Ported from Libraries/LibGfx/Rect.h:60 Gfx::Rect::height for FloatRect.
+pub func float_rect_height(this: const FloatRect*) -> f32:
+    return float_size_height(&this.m_size)
+
+## Ported from Libraries/LibGfx/Rect.h:62 Gfx::Rect::set_x for FloatRect.
+pub func float_rect_set_x(this: FloatRect*, x: f32):
+    float_point_set_x(&this.m_location, x)
+
+## Ported from Libraries/LibGfx/Rect.h:63 Gfx::Rect::set_y for FloatRect.
+pub func float_rect_set_y(this: FloatRect*, y: f32):
+    float_point_set_y(&this.m_location, y)
+
+## Ported from Libraries/LibGfx/Rect.h:64 Gfx::Rect::set_width for FloatRect.
+pub func float_rect_set_width(this: FloatRect*, width: f32):
+    float_size_set_width(&this.m_size, width)
+
+## Ported from Libraries/LibGfx/Rect.h:65 Gfx::Rect::set_height for FloatRect.
+pub func float_rect_set_height(this: FloatRect*, height: f32):
+    float_size_set_height(&this.m_size, height)
+
+## Ported from Libraries/LibGfx/Rect.h:67 Gfx::Rect::location for FloatRect.
+pub func float_rect_location(this: const FloatRect*) -> FloatPoint:
+    return this.m_location
+
+## Ported from Libraries/LibGfx/Rect.h:68 Gfx::Rect::size for FloatRect.
+pub func float_rect_size(this: const FloatRect*) -> FloatSize:
+    return this.m_size
+
+## Ported from Libraries/LibGfx/Rect.h:70 Gfx::Rect::is_empty for FloatRect.
+pub func float_rect_is_empty(this: const FloatRect*) -> bool:
+    return float_rect_width(this) <= 0.0 or float_rect_height(this) <= 0.0
+
+# mark: Translation and scaling =================================================================
+
+## Ported from Libraries/LibGfx/Rect.h:72 Gfx::Rect::translate_by for FloatRect.
+pub func float_rect_translate_by_f32_f32(this: FloatRect*, dx: f32, dy: f32):
+    float_point_translate_by_f32_f32(&this.m_location, dx, dy)
+
+## Ported from Libraries/LibGfx/Rect.h:73 Gfx::Rect::translate_by for FloatRect.
+pub func float_rect_translate_by_f32(this: FloatRect*, dboth: f32):
+    float_point_translate_by_f32(&this.m_location, dboth)
+
+## Ported from Libraries/LibGfx/Rect.h:74 Gfx::Rect::translate_by for FloatRect.
+pub func float_rect_translate_by_float_point(this: FloatRect*, delta: FloatPoint):
+    float_point_translate_by_float_point(&this.m_location, delta)
+
+## Ported from Libraries/LibGfx/Rect.h:76 Gfx::Rect::scale_by for FloatRect.
+pub func float_rect_scale_by_f32_f32(this: FloatRect*, dx: f32, dy: f32):
+    float_point_scale_by_f32_f32(&this.m_location, dx, dy)
+    float_size_scale_by_f32_f32(&this.m_size, dx, dy)
+
+## Ported from Libraries/LibGfx/Rect.h:81 Gfx::Rect::scale_by for FloatRect.
+pub func float_rect_scale_by_f32(this: FloatRect*, dboth: f32):
+    float_rect_scale_by_f32_f32(this, dboth, dboth)
+
+## Ported from Libraries/LibGfx/Rect.h:82 Gfx::Rect::scale_by for FloatRect.
+pub func float_rect_scale_by_float_point(this: FloatRect*, delta: FloatPoint):
+    float_rect_scale_by_f32_f32(this, float_point_x(&delta), float_point_y(&delta))
+
+## Ported from Libraries/LibGfx/Rect.h:84 Gfx::Rect::center for FloatRect.
+pub func float_rect_center(this: const FloatRect*) -> FloatPoint:
+    return FloatPoint(float_rect_x(this) + float_rect_width(this) / 2.0, float_rect_y(this) + float_rect_height(this) / 2.0)
+
+## Ported from Libraries/LibGfx/Rect.h:89 Gfx::Rect::set_location for FloatRect.
+pub func float_rect_set_location(this: FloatRect*, location: FloatPoint):
+    this.m_location = location
+
+## Ported from Libraries/LibGfx/Rect.h:94 Gfx::Rect::set_size for FloatRect.
+pub func float_rect_set_size_float_size(this: FloatRect*, size: FloatSize):
+    this.m_size = size
+
+## Ported from Libraries/LibGfx/Rect.h:99 Gfx::Rect::set_size for FloatRect.
+pub func float_rect_set_size_f32(this: FloatRect*, width: f32, height: f32):
+    float_size_set_width(&this.m_size, width)
+    float_size_set_height(&this.m_size, height)
+
+# mark: Inflating and shrinking =================================================================
+
+## Ported from Libraries/LibGfx/Rect.h:105 Gfx::Rect::inflate for FloatRect.
+pub func float_rect_inflate_f32_f32(this: FloatRect*, w: f32, h: f32):
+    float_rect_set_x(this, float_rect_x(this) - w / 2.0)
+    float_rect_set_width(this, float_rect_width(this) + w)
+    float_rect_set_y(this, float_rect_y(this) - h / 2.0)
+    float_rect_set_height(this, float_rect_height(this) + h)
+
+## Ported from Libraries/LibGfx/Rect.h:113 Gfx::Rect::inflate for FloatRect.
+pub func float_rect_inflate_f32_f32_f32(this: FloatRect*, top: f32, right: f32, bottom: f32, left: f32):
+    float_rect_set_x(this, float_rect_x(this) - left)
+    float_rect_set_width(this, float_rect_width(this) + left + right)
+    float_rect_set_y(this, float_rect_y(this) - top)
+    float_rect_set_height(this, float_rect_height(this) + top + bottom)
+
+## Ported from Libraries/LibGfx/Rect.h:121 Gfx::Rect::inflate for FloatRect.
+pub func float_rect_inflate_float_size(this: FloatRect*, size: FloatSize):
+    float_rect_set_x(this, float_rect_x(this) - float_size_width(&size) / 2.0)
+    float_rect_set_width(this, float_rect_width(this) + float_size_width(&size))
+    float_rect_set_y(this, float_rect_y(this) - float_size_height(&size) / 2.0)
+    float_rect_set_height(this, float_rect_height(this) + float_size_height(&size))
+
+## Ported from Libraries/LibGfx/Rect.h:129 Gfx::Rect::shrink for FloatRect.
+pub func float_rect_shrink_f32_f32(this: FloatRect*, w: f32, h: f32):
+    float_rect_set_x(this, float_rect_x(this) + w / 2.0)
+    float_rect_set_width(this, float_rect_width(this) - w)
+    float_rect_set_y(this, float_rect_y(this) + h / 2.0)
+    float_rect_set_height(this, float_rect_height(this) - h)
+
+## Ported from Libraries/LibGfx/Rect.h:137 Gfx::Rect::shrink for FloatRect.
+pub func float_rect_shrink_f32_f32_f32(this: FloatRect*, top: f32, right: f32, bottom: f32, left: f32):
+    float_rect_set_x(this, float_rect_x(this) + left)
+    float_rect_set_width(this, float_rect_width(this) - (left + right))
+    float_rect_set_y(this, float_rect_y(this) + top)
+    float_rect_set_height(this, float_rect_height(this) - (top + bottom))
+
+## Ported from Libraries/LibGfx/Rect.h:145 Gfx::Rect::shrink for FloatRect.
+pub func float_rect_shrink_float_size(this: FloatRect*, size: FloatSize):
+    float_rect_set_x(this, float_rect_x(this) + float_size_width(&size) / 2.0)
+    float_rect_set_width(this, float_rect_width(this) - float_size_width(&size))
+    float_rect_set_y(this, float_rect_y(this) + float_size_height(&size) / 2.0)
+    float_rect_set_height(this, float_rect_height(this) - float_size_height(&size))
+
+## Ported from Libraries/LibGfx/Rect.h:153 Gfx::Rect::translated for FloatRect.
+pub func float_rect_translated_f32_f32(this: const FloatRect*, dx: f32, dy: f32) -> FloatRect:
+    var rect = *this
+    float_rect_translate_by_f32_f32(&rect, dx, dy)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:160 Gfx::Rect::translated for FloatRect.
+pub func float_rect_translated_f32(this: const FloatRect*, dboth: f32) -> FloatRect:
+    var rect = *this
+    float_rect_translate_by_f32(&rect, dboth)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:167 Gfx::Rect::translated for FloatRect.
+pub func float_rect_translated_float_point(this: const FloatRect*, delta: FloatPoint) -> FloatRect:
+    var rect = *this
+    float_rect_translate_by_float_point(&rect, delta)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:174 Gfx::Rect::scaled for FloatRect.
+pub func float_rect_scaled_f32(this: const FloatRect*, dboth: f32) -> FloatRect:
+    var rect = *this
+    float_rect_scale_by_f32(&rect, dboth)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:181 Gfx::Rect::scaled for FloatRect.
+pub func float_rect_scaled_f32_f32(this: const FloatRect*, sx: f32, sy: f32) -> FloatRect:
+    var rect = *this
+    float_rect_scale_by_f32_f32(&rect, sx, sy)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:188 Gfx::Rect::scaled for FloatRect.
+pub func float_rect_scaled_float_point(this: const FloatRect*, s: FloatPoint) -> FloatRect:
+    var rect = *this
+    float_rect_scale_by_float_point(&rect, s)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:195 Gfx::Rect::shrunken for FloatRect.
+pub func float_rect_shrunken_f32_f32(this: const FloatRect*, w: f32, h: f32) -> FloatRect:
+    var rect = *this
+    float_rect_shrink_f32_f32(&rect, w, h)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:202 Gfx::Rect::shrunken for FloatRect.
+pub func float_rect_shrunken_f32_f32_f32(this: const FloatRect*, top: f32, right: f32, bottom: f32, left: f32) -> FloatRect:
+    var rect = *this
+    float_rect_shrink_f32_f32_f32(&rect, top, right, bottom, left)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:209 Gfx::Rect::shrunken for FloatRect.
+pub func float_rect_shrunken_float_size(this: const FloatRect*, size: FloatSize) -> FloatRect:
+    var rect = *this
+    float_rect_shrink_float_size(&rect, size)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:216 Gfx::Rect::inflated for FloatRect.
+pub func float_rect_inflated_f32_f32(this: const FloatRect*, w: f32, h: f32) -> FloatRect:
+    var rect = *this
+    float_rect_inflate_f32_f32(&rect, w, h)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:223 Gfx::Rect::inflated for FloatRect.
+pub func float_rect_inflated_f32_f32_f32(this: const FloatRect*, top: f32, right: f32, bottom: f32, left: f32) -> FloatRect:
+    var rect = *this
+    float_rect_inflate_f32_f32_f32(&rect, top, right, bottom, left)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:230 Gfx::Rect::inflated for FloatRect.
+pub func float_rect_inflated_float_size(this: const FloatRect*, size: FloatSize) -> FloatRect:
+    var rect = *this
+    float_rect_inflate_float_size(&rect, size)
+    return rect
+
+# mark: Taking slices ===========================================================================
+
+## Ported from Libraries/LibGfx/Rect.h:237 Gfx::Rect::take_from_right for FloatRect.
+pub func float_rect_take_from_right(this: FloatRect*, w: f32) -> FloatRect:
+    var w_ = w
+    if w_ > float_rect_width(this):
+        w_ = float_rect_width(this)
+    var rect = *this
+    float_rect_set_width(this, float_rect_width(this) - w_)
+    float_rect_set_x(&rect, float_rect_x(this) + float_rect_width(this))
+    float_rect_set_width(&rect, w_)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:248 Gfx::Rect::take_from_left for FloatRect.
+pub func float_rect_take_from_left(this: FloatRect*, w: f32) -> FloatRect:
+    var w_ = w
+    if w_ > float_rect_width(this):
+        w_ = float_rect_width(this)
+    var rect = *this
+    float_rect_set_x(this, float_rect_x(this) + w_)
+    float_rect_set_width(this, float_rect_width(this) - w_)
+    float_rect_set_width(&rect, w_)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:259 Gfx::Rect::take_from_top for FloatRect.
+pub func float_rect_take_from_top(this: FloatRect*, h: f32) -> FloatRect:
+    var h_ = h
+    if h_ > float_rect_height(this):
+        h_ = float_rect_height(this)
+    var rect = *this
+    float_rect_set_y(this, float_rect_y(this) + h_)
+    float_rect_set_height(this, float_rect_height(this) - h_)
+    float_rect_set_height(&rect, h_)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:270 Gfx::Rect::take_from_bottom for FloatRect.
+pub func float_rect_take_from_bottom(this: FloatRect*, h: f32) -> FloatRect:
+    var h_ = h
+    if h_ > float_rect_height(this):
+        h_ = float_rect_height(this)
+    var rect = *this
+    float_rect_set_height(this, float_rect_height(this) - h_)
+    float_rect_set_y(&rect, float_rect_y(this) + float_rect_height(this))
+    float_rect_set_height(&rect, h_)
+    return rect
+
+# mark: Containment =============================================================================
+
+## Ported from Libraries/LibGfx/Rect.h:281 Gfx::Rect::contains_vertically for FloatRect.
+pub func float_rect_contains_vertically(this: const FloatRect*, y: f32) -> bool:
+    return y >= float_rect_top(this) and y < float_rect_bottom(this)
+
+## Ported from Libraries/LibGfx/Rect.h:286 Gfx::Rect::contains_horizontally for FloatRect.
+pub func float_rect_contains_horizontally(this: const FloatRect*, x: f32) -> bool:
+    return x >= float_rect_left(this) and x < float_rect_right(this)
+
+## Ported from Libraries/LibGfx/Rect.h:291 Gfx::Rect::contains for FloatRect.
+pub func float_rect_contains_f32(this: const FloatRect*, x: f32, y: f32) -> bool:
+    return float_rect_contains_horizontally(this, x) and float_rect_contains_vertically(this, y)
+
+## Ported from Libraries/LibGfx/Rect.h:296 Gfx::Rect::contains for FloatRect.
+pub func float_rect_contains_float_point(this: const FloatRect*, point: FloatPoint) -> bool:
+    return float_rect_contains_f32(this, float_point_x(&point), float_point_y(&point))
+
+## Ported from Libraries/LibGfx/Rect.h:301 Gfx::Rect::contains for FloatRect.
+pub func float_rect_contains_float_rect(this: const FloatRect*, other: FloatRect) -> bool:
+    return (float_rect_left(this) <= float_rect_left(&other)
+        and float_rect_right(this) >= float_rect_right(&other)
+        and float_rect_top(this) <= float_rect_top(&other)
+        and float_rect_bottom(this) >= float_rect_bottom(&other))
+
+## Ported from Libraries/LibGfx/Rect.h:310 Gfx::Rect::contains<Container> for FloatRect.
+pub func float_rect_contains_t_container(this: const FloatRect*, others: const FloatRect[]) -> bool:
+    var have_any = false
+    for other in others:
+        if not float_rect_contains_float_rect(this, other):
+            return false
+        have_any = true
+    return have_any
+
+# mark: Orientation =============================================================================
+
+## Ported from Libraries/LibGfx/Rect.h:321 Gfx::Rect::primary_offset_for_orientation for FloatRect.
+pub func float_rect_primary_offset_for_orientation(this: const FloatRect*, orientation: Orientation) -> f32:
+    return float_point_primary_offset_for_orientation(&this.m_location, orientation)
+
+## Ported from Libraries/LibGfx/Rect.h:322 Gfx::Rect::set_primary_offset_for_orientation for FloatRect.
+pub func float_rect_set_primary_offset_for_orientation(this: FloatRect*, orientation: Orientation, value: f32):
+    float_point_set_primary_offset_for_orientation(&this.m_location, orientation, value)
+
+## Ported from Libraries/LibGfx/Rect.h:323 Gfx::Rect::secondary_offset_for_orientation for FloatRect.
+pub func float_rect_secondary_offset_for_orientation(this: const FloatRect*, orientation: Orientation) -> f32:
+    return float_point_secondary_offset_for_orientation(&this.m_location, orientation)
+
+## Ported from Libraries/LibGfx/Rect.h:324 Gfx::Rect::set_secondary_offset_for_orientation for FloatRect.
+pub func float_rect_set_secondary_offset_for_orientation(this: FloatRect*, orientation: Orientation, value: f32):
+    float_point_set_secondary_offset_for_orientation(&this.m_location, orientation, value)
+
+## Ported from Libraries/LibGfx/Rect.h:325 Gfx::Rect::translate_primary_offset_for_orientation for FloatRect.
+pub func float_rect_translate_primary_offset_for_orientation(this: FloatRect*, orientation: Orientation, delta: f32):
+    float_point_set_primary_offset_for_orientation(&this.m_location, orientation, float_point_primary_offset_for_orientation(&this.m_location, orientation) + delta)
+
+## Ported from Libraries/LibGfx/Rect.h:326 Gfx::Rect::translate_secondary_offset_for_orientation for FloatRect.
+pub func float_rect_translate_secondary_offset_for_orientation(this: FloatRect*, orientation: Orientation, delta: f32):
+    float_point_set_secondary_offset_for_orientation(&this.m_location, orientation, float_point_secondary_offset_for_orientation(&this.m_location, orientation) + delta)
+
+## Ported from Libraries/LibGfx/Rect.h:328 Gfx::Rect::primary_size_for_orientation for FloatRect.
+pub func float_rect_primary_size_for_orientation(this: const FloatRect*, orientation: Orientation) -> f32:
+    return float_size_primary_size_for_orientation(&this.m_size, orientation)
+
+## Ported from Libraries/LibGfx/Rect.h:329 Gfx::Rect::secondary_size_for_orientation for FloatRect.
+pub func float_rect_secondary_size_for_orientation(this: const FloatRect*, orientation: Orientation) -> f32:
+    return float_size_secondary_size_for_orientation(&this.m_size, orientation)
+
+## Ported from Libraries/LibGfx/Rect.h:330 Gfx::Rect::set_primary_size_for_orientation for FloatRect.
+pub func float_rect_set_primary_size_for_orientation(this: FloatRect*, orientation: Orientation, value: f32):
+    float_size_set_primary_size_for_orientation(&this.m_size, orientation, value)
+
+## Ported from Libraries/LibGfx/Rect.h:331 Gfx::Rect::set_secondary_size_for_orientation for FloatRect.
+pub func float_rect_set_secondary_size_for_orientation(this: FloatRect*, orientation: Orientation, value: f32):
+    float_size_set_secondary_size_for_orientation(&this.m_size, orientation, value)
+
+## Ported from Libraries/LibGfx/Rect.h:333 Gfx::Rect::inflate_primary_for_orientation for FloatRect.
+pub func float_rect_inflate_primary_for_orientation(this: FloatRect*, orientation: Orientation, before: f32, after: f32):
+    if orientation == Orientation.horizontal:
+        float_rect_inflate_f32_f32_f32(this, 0.0, after, 0.0, before)
+    else:
+        float_rect_inflate_f32_f32_f32(this, before, 0.0, after, 0.0)
+
+## Ported from Libraries/LibGfx/Rect.h:341 Gfx::Rect::inflate_secondary_for_orientation for FloatRect.
+pub func float_rect_inflate_secondary_for_orientation(this: FloatRect*, orientation: Orientation, before: f32, after: f32):
+    if orientation == Orientation.horizontal:
+        float_rect_inflate_f32_f32_f32(this, before, 0.0, after, 0.0)
+    else:
+        float_rect_inflate_f32_f32_f32(this, 0.0, after, 0.0, before)

@@ -9,6 +9,10 @@ for module in gfx web_fonts display_list; do
     luce-base check "src/luce_browser_render/$module"
 done
 
+# gfx: the region tests (geometry, CSSPixels, color, transforms).
+echo "== luce-base test src/luce_browser_render/gfx"
+luce-base test src/luce_browser_render/gfx
+
 # raster: written by hand (not generated); run its tests once it exists.
 if [ -f src/luce_browser_render/raster/ORDER ]; then
     echo "== luce-base test src/luce_browser_render/raster"

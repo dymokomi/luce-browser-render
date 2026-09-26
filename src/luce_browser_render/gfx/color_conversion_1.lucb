@@ -1,0 +1,228 @@
+#==============================================================================================
+#
+#   color_conversion_1 - ColorComponents and the inline conversions (HSL, HSV, YUV, Oklab)
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/ColorConversion.h (lines 17-220): the ColorComponents
+#       value type and the constexpr conversions between sRGB and HSL, HSV, YUV and Oklab.
+#       ColorConversion.cpp's functions are in color_conversion_2 and color_conversion_3
+#       (DESIGN.md §2.1: inline header functions go with the matching .cpp).
+#
+#       `components[i]` is color_components_at_const; `{ a, b, c, alpha }` is
+#       color_components_new. The libm calls of the C++ (fmodf, cbrtf, lroundf) are
+#       luce-std's math32, which calls the same libm entry points; AK::min, max and clamp on
+#       floats are ak's min_f32, max_f32 and clamp_f32.
+#
+#==============================================================================================
+
+# mark: Helpers =================================================================================
+
+## `ColorComponents { first, second, third, alpha }` as an expression: a ColorComponents
+## built with color_components_construct.
+pub func color_components_new(first: f32, second: f32, third: f32, alpha: f32 = 1.0) -> ColorComponents:
+    var components: ColorComponents
+    color_components_construct(&components, first, second, third, alpha)
+    return components
+
+## libm's lroundf: `x` rounded to the nearest integer, halves away from zero, as a `long`.
+func lroundf(x: f32) -> i64:
+    return (i64)math32.round(x)
+
+# mark: ColorComponents =========================================================================
+
+## Ported from Libraries/LibGfx/ColorConversion.h:20 Gfx::ColorComponents::ColorComponents.
+pub func color_components_construct(this: ColorComponents*, first: f32, second: f32, third: f32, alpha: f32 = 1.0):
+    this.m_components = [first, second, third]
+    this.m_alpha = alpha
+
+## Ported from Libraries/LibGfx/ColorConversion.h:26 Gfx::ColorComponents::operator[].
+pub func color_components_at(this: ColorComponents*, index: usize) -> f32*:
+    return &this.m_components[index]
+
+## Ported from Libraries/LibGfx/ColorConversion.h:27 Gfx::ColorComponents::operator[].
+pub func color_components_at_const(this: const ColorComponents*, index: usize) -> f32:
+    return this.m_components[index]
+
+## Ported from Libraries/LibGfx/ColorConversion.h:29 Gfx::ColorComponents::alpha.
+pub func color_components_alpha(this: const ColorComponents*) -> f32:
+    return this.m_alpha
+
+## Ported from Libraries/LibGfx/ColorConversion.h:30 Gfx::ColorComponents::set_alpha.
+pub func color_components_set_alpha(this: ColorComponents*, alpha: f32):
+    this.m_alpha = alpha
+
+# mark: HSL and HSV =============================================================================
+
+## The `to_rgb` lambda of hsl_to_srgb (ColorConversion.h:54).
+func hsl_to_srgb_to_rgb(h: f32, s: f32, l: f32, offset: f32) -> f32:
+    let k = math32.mod(offset + h / 30.0, 12.0)
+    let a = s * ak.min_f32(l, 1.0 - l)
+    return l - a * ak.max_f32(-1.0, ak.min_f32(ak.min_f32(k - 3.0, 9.0 - k), 1.0))
+
+## Ported from Libraries/LibGfx/ColorConversion.h:40 Gfx::hsl_to_srgb.
+pub func hsl_to_srgb(hsl: ColorComponents) -> ColorComponents:
+    var h = math32.mod(color_components_at_const(&hsl, 0), 360.0)
+    if h < 0.0:
+        h += 360.0
+
+    # NB: Saturation and lightness are intentionally left unclamped. Color interpolation in HSL can produce
+    #     out-of-range s/l when representing colors outside the sRGB gamut, and those values should be able to
+    #     round-trip back to sRGB correctly.
+    let s = color_components_at_const(&hsl, 1)
+    let l = color_components_at_const(&hsl, 2)
+    let a = ak.clamp_f32(color_components_alpha(&hsl), 0.0, 1.0)
+
+    # Algorithm from https://drafts.csswg.org/css-color-3/#hsl-color
+    let r = hsl_to_srgb_to_rgb(h, s, l, 0.0)
+    let g = hsl_to_srgb_to_rgb(h, s, l, 8.0)
+    let b = hsl_to_srgb_to_rgb(h, s, l, 4.0)
+
+    return color_components_new(r, g, b, a)
+
+## Ported from Libraries/LibGfx/ColorConversion.h:67 Gfx::hsv_to_srgb.
+pub func hsv_to_srgb(hsv: ColorComponents) -> ColorComponents:
+    let hue = (f64)color_components_at_const(&hsv, 0)
+    let saturation = (f64)color_components_at_const(&hsv, 1)
+    let value = (f64)color_components_at_const(&hsv, 2)
+
+    let high = (i32)(hue / 60.0) % 6
+    let f = (hue / 60.0) - (f64)high
+    let c1 = value * (1.0 - saturation)
+    let c2 = value * (1.0 - saturation * f)
+    let c3 = value * (1.0 - saturation * (1.0 - f))
+
+    var r: f64 = 0.0
+    var g: f64 = 0.0
+    var b: f64 = 0.0
+
+    match high:
+        0:
+            r = value
+            g = c3
+            b = c1
+        1:
+            r = c2
+            g = value
+            b = c1
+        2:
+            r = c1
+            g = value
+            b = c3
+        3:
+            r = c1
+            g = c2
+            b = value
+        4:
+            r = c3
+            g = c1
+            b = value
+        5:
+            r = value
+            g = c1
+            b = c2
+        _:
+            # No case: the C++ switch leaves r, g and b at 0.
+            r = 0.0
+
+    return color_components_new((f32)r, (f32)g, (f32)b, color_components_alpha(&hsv))
+
+## Ported from Libraries/LibGfx/ColorConversion.h:119 Gfx::srgb_to_hsv.
+pub func srgb_to_hsv(rgb: ColorComponents) -> ColorComponents:
+    let r = color_components_at_const(&rgb, 0)
+    let g = color_components_at_const(&rgb, 1)
+    let b = color_components_at_const(&rgb, 2)
+    let max = ak.max_f32(ak.max_f32(r, g), b)
+    let min = ak.min_f32(ak.min_f32(r, g), b)
+    let chroma = max - min
+
+    var hue: f32 = 0.0
+    if chroma != 0.0:
+        if max == r:
+            hue = (60.0 * ((g - b) / chroma)) + 360.0
+        elif max == g:
+            hue = (60.0 * ((b - r) / chroma)) + 120.0
+        else:
+            hue = (60.0 * ((r - g) / chroma)) + 240.0
+
+    if hue >= 360.0:
+        hue -= 360.0
+
+    let saturation: f32 = chroma / max if max != 0.0 else 0.0
+
+    return color_components_new(hue, saturation, max, color_components_alpha(&rgb))
+
+# mark: YUV =====================================================================================
+
+## Ported from Libraries/LibGfx/ColorConversion.h:147 Gfx::yuv_to_srgb.
+# https://www.itu.int/rec/R-REC-BT.1700-0-200502-I/en Table 4
+pub func yuv_to_srgb(yuv: ColorComponents) -> ColorComponents:
+    let y = color_components_at_const(&yuv, 0)
+    let u = color_components_at_const(&yuv, 1)
+    let v = color_components_at_const(&yuv, 2)
+
+    # Table 4, Items 8 and 9 arithmetically inverted
+    var r = y + v / 0.877
+    var b = y + u / 0.493
+    var g = (y - 0.299 * r - 0.114 * b) / 0.587
+    r = ak.clamp_f32(r, 0.0, 1.0)
+    g = ak.clamp_f32(g, 0.0, 1.0)
+    b = ak.clamp_f32(b, 0.0, 1.0)
+
+    return color_components_new(r, g, b, color_components_alpha(&yuv))
+
+## Ported from Libraries/LibGfx/ColorConversion.h:165 Gfx::srgb_to_yuv.
+# https://www.itu.int/rec/R-REC-BT.1700-0-200502-I/en Table 4
+pub func srgb_to_yuv(rgb: ColorComponents) -> ColorComponents:
+    let r = color_components_at_const(&rgb, 0)
+    let g = color_components_at_const(&rgb, 1)
+    let b = color_components_at_const(&rgb, 2)
+    # Item 8
+    var y = 0.299 * r + 0.587 * g + 0.114 * b
+    # Item 9
+    var u = 0.493 * (b - y)
+    var v = 0.877 * (r - y)
+    y = ak.clamp_f32(y, 0.0, 1.0)
+    u = ak.clamp_f32(u, -1.0, 1.0)
+    v = ak.clamp_f32(v, -1.0, 1.0)
+    return color_components_new(y, u, v, color_components_alpha(&rgb))
+
+# mark: Oklab ===================================================================================
+
+## Ported from Libraries/LibGfx/ColorConversion.h:182 Gfx::oklab_to_linear_srgb.
+# https://bottosson.github.io/posts/oklab/
+pub func oklab_to_linear_srgb(oklab: ColorComponents) -> ColorComponents:
+    let L = color_components_at_const(&oklab, 0)
+    let a = color_components_at_const(&oklab, 1)
+    let b = color_components_at_const(&oklab, 2)
+
+    var l = L + 0.3963377774 * a + 0.2158037573 * b
+    var m = L - 0.1055613458 * a - 0.0638541728 * b
+    var s = L - 0.0894841775 * a - 1.2914855480 * b
+
+    l = l * l * l
+    m = m * m * m
+    s = s * s * s
+
+    let red = 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s
+    let green = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s
+    let blue = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s
+
+    return color_components_new(red, green, blue, color_components_alpha(&oklab))
+
+## Ported from Libraries/LibGfx/ColorConversion.h:204 Gfx::linear_srgb_to_oklab.
+# https://bottosson.github.io/posts/oklab/
+pub func linear_srgb_to_oklab(rgb: ColorComponents) -> ColorComponents:
+    let r = color_components_at_const(&rgb, 0)
+    let g = color_components_at_const(&rgb, 1)
+    let b = color_components_at_const(&rgb, 2)
+
+    let l = math32.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b)
+    let m = math32.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b)
+    let s = math32.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b)
+
+    return color_components_new(
+        0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+        1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+        0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s,
+        color_components_alpha(&rgb),
+    )
