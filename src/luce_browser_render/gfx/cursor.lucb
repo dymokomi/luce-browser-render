@@ -12,8 +12,7 @@
 
 ## Ported from Libraries/LibGfx/Cursor.cpp:14 Gfx::ImageCursor::operator==.
 pub func image_cursor_eq(this: const ImageCursor*, other: ImageCursor) -> bool:
-    return (int_point_eq(&this.hotspot, other.hotspot)
-        and shareable_bitmap_bitmap_const(&this.bitmap) == shareable_bitmap_bitmap_const(&other.bitmap))
+    return (int_point_eq(&this.hotspot, other.hotspot) and shareable_bitmap_bitmap_const(&this.bitmap) == shareable_bitmap_bitmap_const(&other.bitmap))
 
 ## Ported from Libraries/LibGfx/Cursor.h:50 Gfx::standard_cursor_to_string.
 pub func standard_cursor_to_string(cursor: StandardCursor) -> ak.StringView:

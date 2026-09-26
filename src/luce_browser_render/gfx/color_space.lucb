@@ -77,14 +77,9 @@ func skcms_classify(tf: const SkcmsTransferFunction*) -> SkcmsTfType:
                 return SkcmsTfType.invalid
 
     # Basic soundness checks for sRGBish transfer functions.
-    if (skcms_isfinitef(tf.a + tf.b + tf.c + tf.d + tf.e + tf.f + tf.g)
-            # a,c,d,g should be non-negative to make any sense.
-            and tf.a >= 0.0
-            and tf.c >= 0.0
-            and tf.d >= 0.0
-            and tf.g >= 0.0
-            # Raising a negative value to a fractional tf->g produces complex numbers.
-            and tf.a * tf.d + tf.b >= 0.0):
+    if (skcms_isfinitef(tf.a + tf.b + tf.c + tf.d + tf.e + tf.f + tf.g) and tf.a >= 0.0 and tf.c >= 0.0 and tf.d >= 0.0 and tf.g >= 0.0 and tf.a * tf.d + tf.b >= 0.0):
+        # a,c,d,g should be non-negative to make any sense.
+        # Raising a negative value to a fractional tf->g produces complex numbers.
         return SkcmsTfType.srgbish
 
     return SkcmsTfType.invalid
@@ -101,9 +96,7 @@ func skcms_is_zero_to_one(x: f32) -> bool:
 func skcms_mv_mul(m: const SkcmsMatrix3x3*, v: const SkcmsVector3*) -> SkcmsVector3:
     var dst = SkcmsVector3(vals = [0.0, 0.0, 0.0])
     for row in 0..<3:
-        dst.vals[row] = (m.vals[row][0] * v.vals[0]
-            + m.vals[row][1] * v.vals[1]
-            + m.vals[row][2] * v.vals[2])
+        dst.vals[row] = (m.vals[row][0] * v.vals[0] + m.vals[row][1] * v.vals[1] + m.vals[row][2] * v.vals[2])
     return dst
 
 ## Ported from modules/skcms/skcms.cc:1826 skcms_AdaptToXYZD50.
@@ -146,10 +139,7 @@ func skcms_adapt_to_xyzd50(wx: f32, wy: f32, to_xyzd50: SkcmsMatrix3x3*) -> bool
 
 ## Ported from modules/skcms/skcms.cc:1867 skcms_PrimariesToXYZD50.
 func skcms_primaries_to_xyzd50(rx: f32, ry: f32, gx: f32, gy: f32, bx: f32, by: f32, wx: f32, wy: f32, to_xyzd50: SkcmsMatrix3x3*) -> bool:
-    if (not skcms_is_zero_to_one(rx) or not skcms_is_zero_to_one(ry)
-            or not skcms_is_zero_to_one(gx) or not skcms_is_zero_to_one(gy)
-            or not skcms_is_zero_to_one(bx) or not skcms_is_zero_to_one(by)
-            or not skcms_is_zero_to_one(wx) or not skcms_is_zero_to_one(wy)):
+    if (not skcms_is_zero_to_one(rx) or not skcms_is_zero_to_one(ry) or not skcms_is_zero_to_one(gx) or not skcms_is_zero_to_one(gy) or not skcms_is_zero_to_one(bx) or not skcms_is_zero_to_one(by) or not skcms_is_zero_to_one(wx) or not skcms_is_zero_to_one(wy)):
         return false
 
     # First, we need to convert xy values (primaries) to XYZ.
@@ -238,9 +228,7 @@ func skcms_matrix3x3_concat(a: const SkcmsMatrix3x3*, b: const SkcmsMatrix3x3*) 
     var m = SkcmsMatrix3x3(vals = [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
     for r in 0..<3:
         for c in 0..<3:
-            m.vals[r][c] = (a.vals[r][0] * b.vals[0][c]
-                + a.vals[r][1] * b.vals[1][c]
-                + a.vals[r][2] * b.vals[2][c])
+            m.vals[r][c] = (a.vals[r][0] * b.vals[0][c] + a.vals[r][1] * b.vals[1][c] + a.vals[r][2] * b.vals[2][c])
     return m
 
 # mark: Skia constants ==========================================================================
@@ -342,35 +330,19 @@ func sk_transfer_fn_almost_equal(a: f32, b: f32) -> bool:
 
 ## Ported from src/core/SkColorSpacePriv.h:31 is_almost_srgb.
 func sk_is_almost_srgb(coeffs: const SkcmsTransferFunction*) -> bool:
-    return (sk_transfer_fn_almost_equal(sk_named_transfer_fn_srgb.a, coeffs.a)
-        and sk_transfer_fn_almost_equal(sk_named_transfer_fn_srgb.b, coeffs.b)
-        and sk_transfer_fn_almost_equal(sk_named_transfer_fn_srgb.c, coeffs.c)
-        and sk_transfer_fn_almost_equal(sk_named_transfer_fn_srgb.d, coeffs.d)
-        and sk_transfer_fn_almost_equal(sk_named_transfer_fn_srgb.e, coeffs.e)
-        and sk_transfer_fn_almost_equal(sk_named_transfer_fn_srgb.f, coeffs.f)
-        and sk_transfer_fn_almost_equal(sk_named_transfer_fn_srgb.g, coeffs.g))
+    return (sk_transfer_fn_almost_equal(sk_named_transfer_fn_srgb.a, coeffs.a) and sk_transfer_fn_almost_equal(sk_named_transfer_fn_srgb.b, coeffs.b) and sk_transfer_fn_almost_equal(sk_named_transfer_fn_srgb.c, coeffs.c) and sk_transfer_fn_almost_equal(sk_named_transfer_fn_srgb.d, coeffs.d) and sk_transfer_fn_almost_equal(sk_named_transfer_fn_srgb.e, coeffs.e) and sk_transfer_fn_almost_equal(sk_named_transfer_fn_srgb.f, coeffs.f) and sk_transfer_fn_almost_equal(sk_named_transfer_fn_srgb.g, coeffs.g))
 
 ## Ported from src/core/SkColorSpacePriv.h:41 is_almost_2dot2.
 func sk_is_almost_2dot2(coeffs: const SkcmsTransferFunction*) -> bool:
-    return (sk_transfer_fn_almost_equal(1.0, coeffs.a)
-        and sk_transfer_fn_almost_equal(0.0, coeffs.b)
-        and sk_transfer_fn_almost_equal(0.0, coeffs.e)
-        and sk_transfer_fn_almost_equal(2.2, coeffs.g)
-        and coeffs.d <= 0.0)
+    return (sk_transfer_fn_almost_equal(1.0, coeffs.a) and sk_transfer_fn_almost_equal(0.0, coeffs.b) and sk_transfer_fn_almost_equal(0.0, coeffs.e) and sk_transfer_fn_almost_equal(2.2, coeffs.g) and coeffs.d <= 0.0)
 
 ## Ported from src/core/SkColorSpacePriv.h:49 is_almost_linear.
 func sk_is_almost_linear(coeffs: const SkcmsTransferFunction*) -> bool:
     # OutputVal = InputVal ^ 1.0f
-    let linear_exp = (sk_transfer_fn_almost_equal(1.0, coeffs.a)
-        and sk_transfer_fn_almost_equal(0.0, coeffs.b)
-        and sk_transfer_fn_almost_equal(0.0, coeffs.e)
-        and sk_transfer_fn_almost_equal(1.0, coeffs.g)
-        and coeffs.d <= 0.0)
+    let linear_exp = (sk_transfer_fn_almost_equal(1.0, coeffs.a) and sk_transfer_fn_almost_equal(0.0, coeffs.b) and sk_transfer_fn_almost_equal(0.0, coeffs.e) and sk_transfer_fn_almost_equal(1.0, coeffs.g) and coeffs.d <= 0.0)
 
     # OutputVal = 1.0f * InputVal
-    let linear_fn = (sk_transfer_fn_almost_equal(1.0, coeffs.c)
-        and sk_transfer_fn_almost_equal(0.0, coeffs.f)
-        and coeffs.d >= 1.0)
+    let linear_fn = (sk_transfer_fn_almost_equal(1.0, coeffs.c) and sk_transfer_fn_almost_equal(0.0, coeffs.f) and coeffs.d >= 1.0)
 
     return linear_exp or linear_fn
 

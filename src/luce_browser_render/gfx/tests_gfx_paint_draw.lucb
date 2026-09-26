@@ -122,7 +122,6 @@ noinline func test_gfx_paint_painter_rects():
         0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
     ])
 
-
 test "gfx paint: painter clear_rect":
     test_gfx_paint_painter_clear_rect()
 

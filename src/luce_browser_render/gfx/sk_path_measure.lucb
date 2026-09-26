@@ -114,9 +114,8 @@ func sk_measure_cubic_too_curvy(pts: const SkPoint[], tolerance: f32) -> bool:
     let third: f32 = 1.0 / 3.0
     let two_thirds: f32 = 1.0 * 2.0 / 3.0
     return (sk_measure_cheap_dist_exceeds_limit(pts[1], sk_scalar_interp(pts[0].x, pts[3].x, third),
-            sk_scalar_interp(pts[0].y, pts[3].y, third), tolerance) or
-        sk_measure_cheap_dist_exceeds_limit(pts[2], sk_scalar_interp(pts[0].x, pts[3].x, two_thirds),
-            sk_scalar_interp(pts[0].y, pts[3].y, two_thirds), tolerance))
+                                                sk_scalar_interp(pts[0].y, pts[3].y, third), tolerance) or sk_measure_cheap_dist_exceeds_limit(pts[2], sk_scalar_interp(pts[0].x, pts[3].x, two_thirds),
+                                                                                                                                               sk_scalar_interp(pts[0].y, pts[3].y, two_thirds), tolerance))
 
 # puts a cap on the total size of our output, since the client can pass in
 # arbitrarily large values for resScale.
@@ -149,11 +148,11 @@ pub struct SkContourMeasureIter:
 # Appends a segment.
 func sk_measure_append_segment(this: SkContourMeasureIter*, distance: f32, pt_index: u32, kind: u8, t_value: i32):
     ak.vector_append_t(&this.m_segments, SkContourMeasureSegment(distance = distance, pt_index = pt_index,
-        t_value = t_value, kind = kind))
+                                                                 t_value = t_value, kind = kind))
 
 ## Ported from src/core/SkContourMeasure.cpp:229 SkContourMeasureIter::Impl::compute_quad_segs.
 func sk_measure_compute_quad_segs(this: SkContourMeasureIter*, pts: const SkPoint[], distance0: f32, mint: i32,
-        maxt: i32, pt_index: u32, recursion_depth0: i32) -> f32:
+                                  maxt: i32, pt_index: u32, recursion_depth0: i32) -> f32:
     var distance = distance0
     var recursion_depth = recursion_depth0
     if recursion_depth < sk_measure_max_recursion_depth and sk_measure_tspan_big_enough(maxt - mint) != 0 and sk_measure_quad_too_curvy(pts, this.m_tolerance):
@@ -174,7 +173,7 @@ func sk_measure_compute_quad_segs(this: SkContourMeasureIter*, pts: const SkPoin
 
 ## Ported from src/core/SkContourMeasure.cpp:255 SkContourMeasureIter::Impl::compute_conic_segs.
 func sk_measure_compute_conic_segs(this: SkContourMeasureIter*, conic: const SkConic*, distance0: f32, mint: i32,
-        min_pt: SkPoint, maxt: i32, max_pt: SkPoint, pt_index: u32, recursion_depth0: i32) -> f32:
+                                   min_pt: SkPoint, maxt: i32, max_pt: SkPoint, pt_index: u32, recursion_depth0: i32) -> f32:
     var distance = distance0
     var recursion_depth = recursion_depth0
     let halft = (mint + maxt) >> 1
@@ -195,7 +194,7 @@ func sk_measure_compute_conic_segs(this: SkContourMeasureIter*, conic: const SkC
 
 ## Ported from src/core/SkContourMeasure.cpp:284 SkContourMeasureIter::Impl::compute_cubic_segs.
 func sk_measure_compute_cubic_segs(this: SkContourMeasureIter*, pts: const SkPoint[], distance0: f32, mint: i32,
-        maxt: i32, pt_index: u32, recursion_depth0: i32) -> f32:
+                                   maxt: i32, pt_index: u32, recursion_depth0: i32) -> f32:
     var distance = distance0
     var recursion_depth = recursion_depth0
     if recursion_depth < sk_measure_max_recursion_depth and sk_measure_tspan_big_enough(maxt - mint) != 0 and sk_measure_cubic_too_curvy(pts, this.m_tolerance):
@@ -316,9 +315,9 @@ func sk_measure_build_segments(this: SkContourMeasureIter*) -> SkContourMeasure?
 ## (reset): measures the contours of a copy of `path`; a path that is not finite has none.
 pub func sk_contour_measure_iter(path: const SkPath*, force_closed: bool, res_scale: f32 = 1.0) -> SkContourMeasureIter:
     return SkContourMeasureIter(m_path = sk_path_clone(path), m_iter_verb = 0, m_iter_point = 0,
-        m_iter_weight = 0, m_tolerance = sk_cheap_dist_limit * (1.0 / res_scale),
-        m_force_closed = force_closed, m_valid = sk_path_is_finite(path),
-        m_segments = ak.vector_create_atomic[SkContourMeasureSegment](), m_pts = ak.vector_create_atomic[SkPoint]())
+                                m_iter_weight = 0, m_tolerance = sk_cheap_dist_limit * (1.0 / res_scale),
+                                m_force_closed = force_closed, m_valid = sk_path_is_finite(path),
+                                m_segments = ak.vector_create_atomic[SkContourMeasureSegment](), m_pts = ak.vector_create_atomic[SkPoint]())
 
 ## Ported from src/core/SkContourMeasure.cpp:525 SkContourMeasureIter::next: the next contour
 ## with a length, none when there are no more.

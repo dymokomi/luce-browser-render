@@ -310,10 +310,7 @@ pub func css_pixel_rect_contains_css_pixel_point(this: const CssPixelRect*, poin
 
 ## Ported from Libraries/LibGfx/Rect.h:301 Gfx::Rect::contains for CssPixelRect.
 pub func css_pixel_rect_contains_css_pixel_rect(this: const CssPixelRect*, other: CssPixelRect) -> bool:
-    return (css_pixel_rect_left(this).le(css_pixel_rect_left(&other))
-        and css_pixel_rect_right(this).ge(css_pixel_rect_right(&other))
-        and css_pixel_rect_top(this).le(css_pixel_rect_top(&other))
-        and css_pixel_rect_bottom(this).ge(css_pixel_rect_bottom(&other)))
+    return (css_pixel_rect_left(this).le(css_pixel_rect_left(&other)) and css_pixel_rect_right(this).ge(css_pixel_rect_right(&other)) and css_pixel_rect_top(this).le(css_pixel_rect_top(&other)) and css_pixel_rect_bottom(this).ge(css_pixel_rect_bottom(&other)))
 
 ## Ported from Libraries/LibGfx/Rect.h:310 Gfx::Rect::contains<Container> for CssPixelRect.
 pub func css_pixel_rect_contains_t_container(this: const CssPixelRect*, others: const CssPixelRect[]) -> bool:

@@ -303,10 +303,7 @@ pub func device_pixel_rect_contains_int_point(this: const DevicePixelRect*, poin
 
 ## Ported from Libraries/LibGfx/Rect.h:301 Gfx::Rect::contains for DevicePixelRect.
 pub func device_pixel_rect_contains_device_pixel_rect(this: const DevicePixelRect*, other: DevicePixelRect) -> bool:
-    return (device_pixel_rect_left(this) <= device_pixel_rect_left(&other)
-        and device_pixel_rect_right(this) >= device_pixel_rect_right(&other)
-        and device_pixel_rect_top(this) <= device_pixel_rect_top(&other)
-        and device_pixel_rect_bottom(this) >= device_pixel_rect_bottom(&other))
+    return (device_pixel_rect_left(this) <= device_pixel_rect_left(&other) and device_pixel_rect_right(this) >= device_pixel_rect_right(&other) and device_pixel_rect_top(this) <= device_pixel_rect_top(&other) and device_pixel_rect_bottom(this) >= device_pixel_rect_bottom(&other))
 
 ## Ported from Libraries/LibGfx/Rect.h:310 Gfx::Rect::contains<Container> for DevicePixelRect.
 pub func device_pixel_rect_contains_t_container(this: const DevicePixelRect*, others: const DevicePixelRect[]) -> bool:

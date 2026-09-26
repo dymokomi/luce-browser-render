@@ -85,8 +85,8 @@ func cpu_canvas_create(width: u32, height: u32) -> CpuCanvas*:
     let pixmap = raster.Pixmap.new_(width, height) else trap("CpuCanvas: empty size")
     ak.vector_append_t(&canvas.layers, CpuLayer(pixmap = pixmap, effects = CpuLayerEffects()))
     ak.vector_append_t(&canvas.states, CpuCanvasState(transform = raster.Transform.identity(), clip_empty = false,
-        clip_left = 0, clip_top = 0, clip_right = (i32)width, clip_bottom = (i32)height, has_clip_mask = false,
-        owns_clip_mask = false, layer_index = 0, pushes_layer = false))
+                                                      clip_left = 0, clip_top = 0, clip_right = (i32)width, clip_bottom = (i32)height, has_clip_mask = false,
+                                                      owns_clip_mask = false, layer_index = 0, pushes_layer = false))
     return canvas
 
 ## Frees the canvas's pixels, layers and clip masks.
@@ -375,7 +375,7 @@ func cpu_canvas_clip_path(canvas: CpuCanvas*, path: const raster.Path*, fill_rul
         # The clip bounds shrink to the shape's device bounds.
         if let device_bounds = path.bounds().transform(ts):
             cpu_canvas_intersect_clip_bounds(canvas, cpu_f32_to_i32(math32.floor(device_bounds.left())), cpu_f32_to_i32(math32.floor(device_bounds.top())),
-                cpu_f32_to_i32(math32.ceil(device_bounds.right())), cpu_f32_to_i32(math32.ceil(device_bounds.bottom())))
+                                             cpu_f32_to_i32(math32.ceil(device_bounds.right())), cpu_f32_to_i32(math32.ceil(device_bounds.bottom())))
         else:
             cpu_canvas_state(canvas).clip_empty = true
         if cpu_canvas_state(canvas).clip_empty:

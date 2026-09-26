@@ -206,9 +206,9 @@ func sk_contains_winding_mono_quad(pts: const SkPoint[], x: f32, y: f32, on_curv
 
     var roots: f32[2] = [0.0, 0.0]
     let n = sk_find_unit_quad_roots(pts[0].y - 2.0 * pts[1].y + pts[2].y,
-        2.0 * (pts[1].y - pts[0].y),
-        pts[0].y - y,
-        roots[0..])
+                                    2.0 * (pts[1].y - pts[0].y),
+                                    pts[0].y - y,
+                                    roots[0..])
     var xt: f32
     if 0 == n:
         # zero roots are returned only when y0 == y
@@ -327,9 +327,9 @@ func sk_contains_tangent_quad(pts: const SkPoint[], x: f32, y: f32, tangents: ak
         return
     var roots: f32[2] = [0.0, 0.0]
     let n = sk_find_unit_quad_roots(pts[0].y - 2.0 * pts[1].y + pts[2].y,
-        2.0 * (pts[1].y - pts[0].y),
-        pts[0].y - y,
-        roots[0..])
+                                    2.0 * (pts[1].y - pts[0].y),
+                                    pts[0].y - y,
+                                    roots[0..])
     for index in 0..<(usize)n:
         let t = roots[index]
         let c_ = pts[0].x

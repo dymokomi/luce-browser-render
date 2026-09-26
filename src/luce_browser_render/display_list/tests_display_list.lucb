@@ -73,7 +73,7 @@ noinline func test_visual_context_tree_empty_clip_inherited():
     let tree = test_visual_context_tree()
     # A node whose effective clip is empty (what appending an empty ClipData makes).
     ak.vector_append_t(&tree.m_nodes, AccumulatedVisualContextNode(data = .effects_data(value = EffectsData(opacity = 1.0, blend_mode = gfx.CompositingAndBlendingOperator.normal)),
-        parent_index = 3, depth = 4, has_empty_effective_clip = true))
+                                                                   parent_index = 3, depth = 4, has_empty_effective_clip = true))
     let under = accumulated_visual_context_tree_append(tree, .effects_data(value = EffectsData(opacity = 1.0, blend_mode = gfx.CompositingAndBlendingOperator.normal)), 4)
     assert(accumulated_visual_context_tree_has_empty_effective_clip(tree, under))
     assert(not accumulated_visual_context_tree_has_empty_effective_clip(tree, 3))
@@ -113,7 +113,7 @@ noinline func test_visual_context_tree_gated():
         return
     let tree = test_visual_context_tree()
     let radii = CornerRadii(top_left = CornerRadius(horizontal_radius = 1, vertical_radius = 1), top_right = CornerRadius(horizontal_radius = 2, vertical_radius = 2),
-        bottom_right = CornerRadius(horizontal_radius = 3, vertical_radius = 3), bottom_left = CornerRadius(horizontal_radius = 4, vertical_radius = 4))
+                            bottom_right = CornerRadius(horizontal_radius = 3, vertical_radius = 3), bottom_left = CornerRadius(horizontal_radius = 4, vertical_radius = 4))
     let c = accumulated_visual_context_tree_append(tree, .clip_data(value = ClipData(rect = test_rect(1, 2, 30, 40), corner_radii = radii)), 3)
     var builder = ak.string_builder_new()
     accumulated_visual_context_tree_dump(tree, 3, &builder)
@@ -135,7 +135,7 @@ noinline func test_visual_context_tree_gated():
     let inverse = accumulated_visual_context_tree_inverse_transform_point(tree, c, gfx.FloatPoint(m_x = 10.0, m_y = 10.0))
     assert(math32.abs(inverse.m_x - 13.799038) < 0.0001 and math32.abs(inverse.m_y - 8.178204) < 0.0001)
     let viewport = accumulated_visual_context_tree_transform_rect_to_viewport(tree, c,
-        gfx.FloatRect(m_location = gfx.FloatPoint(m_x = 1.0, m_y = 2.0), m_size = gfx.FloatSize(m_width = 3.0, m_height = 4.0)), &snapshot)
+                                                                              gfx.FloatRect(m_location = gfx.FloatPoint(m_x = 1.0, m_y = 2.0), m_size = gfx.FloatSize(m_width = 3.0, m_height = 4.0)), &snapshot)
     assert(math32.abs(viewport.m_location.m_x - 0.0048093796) < 0.0001 and math32.abs(viewport.m_location.m_y + 1.75) < 0.0001)
     assert(math32.abs(viewport.m_size.m_width - 4.5980763) < 0.0001 and math32.abs(viewport.m_size.m_height - 4.964102) < 0.0001)
 
@@ -255,7 +255,7 @@ noinline func test_commands_gated():
 
     var none_radii: CornerRadii
     let shadow = PaintOuterBoxShadow(color = test_color(0, 0, 0, 255), blur_radius = 4, device_content_rect = test_rect(6, 6, 12, 12), content_corner_radii = none_radii,
-        shadow_rect = test_rect(8, 8, 12, 12), shadow_corner_radii = none_radii)
+                                     shadow_rect = test_rect(8, 8, 12, 12), shadow_corner_radii = none_radii)
     assert(paint_outer_box_shadow_bounding_rect(&shadow) == test_rect(0, 0, 28, 28))
     let diagonal = DrawLine(color = test_color(255, 0, 0, 255), from_ = test_point(5, 2), to = test_point(1, 9), thickness = 3, style = gfx.LineStyle.solid, alternate_color = test_color(0, 0, 0, 0))
     assert(draw_line_bounding_rect(&diagonal) == test_rect(0, 1, 7, 10))
@@ -412,10 +412,10 @@ test "corner radii: adjust_corners_for_spread_distance":
 ## CornerRadii { { 4, 6 }, { 1, 0 }, { 8, 8 }, { 3, 12 } } adjusted by `spread`.
 func test_spread_radii(spread: i32) -> i32[8]:
     var radii = CornerRadii(top_left = CornerRadius(horizontal_radius = 4, vertical_radius = 6), top_right = CornerRadius(horizontal_radius = 1, vertical_radius = 0),
-        bottom_right = CornerRadius(horizontal_radius = 8, vertical_radius = 8), bottom_left = CornerRadius(horizontal_radius = 3, vertical_radius = 12))
+                            bottom_right = CornerRadius(horizontal_radius = 8, vertical_radius = 8), bottom_left = CornerRadius(horizontal_radius = 3, vertical_radius = 12))
     corner_radii_adjust_corners_for_spread_distance(&radii, spread)
     return [radii.top_left.horizontal_radius, radii.top_left.vertical_radius, radii.top_right.horizontal_radius, radii.top_right.vertical_radius,
-        radii.bottom_right.horizontal_radius, radii.bottom_right.vertical_radius, radii.bottom_left.horizontal_radius, radii.bottom_left.vertical_radius]
+            radii.bottom_right.horizontal_radius, radii.bottom_right.vertical_radius, radii.bottom_left.horizontal_radius, radii.bottom_left.vertical_radius]
 
 noinline func test_corner_radii_spread():
     # The donor's results.
@@ -433,10 +433,10 @@ noinline func test_corner_radii_contains():
     if not gfx_geometry_is_ported:
         return
     let radii = CornerRadii(top_left = CornerRadius(horizontal_radius = 5, vertical_radius = 5), top_right = CornerRadius(horizontal_radius = 0, vertical_radius = 0),
-        bottom_right = CornerRadius(horizontal_radius = 3, vertical_radius = 6), bottom_left = CornerRadius(horizontal_radius = 0, vertical_radius = 0))
+                            bottom_right = CornerRadius(horizontal_radius = 3, vertical_radius = 6), bottom_left = CornerRadius(horizontal_radius = 0, vertical_radius = 0))
     let rect = test_rect(10, 10, 20, 20)
     let points: gfx.IntPoint[11] = [test_point(10, 10), test_point(11, 11), test_point(12, 12), test_point(13, 11), test_point(29, 10), test_point(29, 29),
-        test_point(28, 28), test_point(27, 29), test_point(30, 30), test_point(15, 15), test_point(9, 15)]
+                                    test_point(28, 28), test_point(27, 29), test_point(30, 30), test_point(15, 15), test_point(9, 15)]
     let expected: bool[11] = [false, false, true, true, true, false, true, true, false, true, false]
     for i in 0..<11usize:
         assert(corner_radii_contains(&radii, points[i], rect) == expected[i])

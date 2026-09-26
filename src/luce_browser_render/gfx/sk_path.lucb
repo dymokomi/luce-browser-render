@@ -77,19 +77,19 @@ let sk_path_initial_last_move_to_index: i32 = ~0
 ## with the default (winding) fill.
 pub func sk_path_create() -> SkPath:
     return SkPath(m_points = ak.vector_create_atomic[SkPoint](),
-        m_verbs = ak.vector_create_atomic[SkPathVerb](),
-        m_conic_weights = ak.vector_create_atomic[f32](),
-        m_last_move_to_index = sk_path_initial_last_move_to_index,
-        m_fill_type = SkPathFillType.winding)
+                  m_verbs = ak.vector_create_atomic[SkPathVerb](),
+                  m_conic_weights = ak.vector_create_atomic[f32](),
+                  m_last_move_to_index = sk_path_initial_last_move_to_index,
+                  m_fill_type = SkPathFillType.winding)
 
 ## Ported from src/core/SkPath_pathref.cpp:70 SkPath::SkPath(const SkPath&): a copy with its
 ## own storage.
 pub func sk_path_clone(this: const SkPath*) -> SkPath:
     return SkPath(m_points = ak.vector_clone(&this.m_points),
-        m_verbs = ak.vector_clone(&this.m_verbs),
-        m_conic_weights = ak.vector_clone(&this.m_conic_weights),
-        m_last_move_to_index = this.m_last_move_to_index,
-        m_fill_type = this.m_fill_type)
+                  m_verbs = ak.vector_clone(&this.m_verbs),
+                  m_conic_weights = ak.vector_clone(&this.m_conic_weights),
+                  m_last_move_to_index = this.m_last_move_to_index,
+                  m_fill_type = this.m_fill_type)
 
 ## Ported from src/core/SkPath_pathref.cpp:131 SkPath::reset (with resetFields).
 pub func sk_path_reset(this: SkPath*):
@@ -248,7 +248,7 @@ pub func sk_path_set_last_pt(this: SkPath*, x: f32, y: f32):
 ## http://www.w3.org/TR/SVG/implnote.html#ArcConversionEndpointToCenter
 ## Note that arcSweep bool value is flipped from the original implementation.
 pub func sk_path_arc_to_rotated(this: SkPath*, rx0: f32, ry0: f32, angle: f32, arc_large: SkPathArcSize,
-        arc_sweep: SkPathDirection, x: f32, y: f32):
+                                arc_sweep: SkPathDirection, x: f32, y: f32):
     sk_path_inject_move_to_if_needed(this)
     var src_pts: SkPoint[2]
     src_pts[0] = sk_path_get_last_pt(this) else trap("VERIFY: arcTo without a last point")
@@ -333,9 +333,7 @@ pub func sk_path_arc_to_rotated(this: SkPath*, rx0: f32, ry0: f32, angle: f32, a
         return
     var start_theta = theta1
     let w = math32.sqrt(0.5 + math32.cos(theta_width) * 0.5)
-    let expect_integers = (sk_scalar_nearly_zero_tol(sk_scalar_pi / 2.0 - sk_scalar_abs(theta_width)) and
-        sk_path_scalar_is_integer(rx) and sk_path_scalar_is_integer(ry) and
-        sk_path_scalar_is_integer(x) and sk_path_scalar_is_integer(y))
+    let expect_integers = (sk_scalar_nearly_zero_tol(sk_scalar_pi / 2.0 - sk_scalar_abs(theta_width)) and sk_path_scalar_is_integer(rx) and sk_path_scalar_is_integer(ry) and sk_path_scalar_is_integer(x) and sk_path_scalar_is_integer(y))
 
     for _i in 0..<segments:
         let end_theta = start_theta + theta_width

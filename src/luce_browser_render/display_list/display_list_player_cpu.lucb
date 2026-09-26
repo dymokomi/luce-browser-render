@@ -71,12 +71,12 @@ func text_blob_path(glyph_run: const web_fonts.GlyphRun*) -> raster.Path?:
                     point_index += 1
                 .quad:
                     builder.quad_to(points[point_index].m_x + origin.m_x, points[point_index].m_y + origin.m_y,
-                        points[point_index + 1].m_x + origin.m_x, points[point_index + 1].m_y + origin.m_y)
+                                    points[point_index + 1].m_x + origin.m_x, points[point_index + 1].m_y + origin.m_y)
                     point_index += 2
                 .cubic:
                     builder.cubic_to(points[point_index].m_x + origin.m_x, points[point_index].m_y + origin.m_y,
-                        points[point_index + 1].m_x + origin.m_x, points[point_index + 1].m_y + origin.m_y,
-                        points[point_index + 2].m_x + origin.m_x, points[point_index + 2].m_y + origin.m_y)
+                                     points[point_index + 1].m_x + origin.m_x, points[point_index + 1].m_y + origin.m_y,
+                                     points[point_index + 2].m_x + origin.m_x, points[point_index + 2].m_y + origin.m_y)
                     point_index += 3
                 .close: builder.close()
                 _: trap("VERIFY_NOT_REACHED")
@@ -400,7 +400,7 @@ func display_list_player_cpu_paint_linear_gradient_impl(base: DisplayListPlayer*
     let matrix = raster.Transform.from_rotate_at(linear_gradient_data.gradient_angle, rect_center.m_x, rect_center.m_y)
 
     var gradient = CpuGradient(geometry = .linear(x0 = start.m_x, y0 = start.m_y, x1 = end.m_x, y1 = end.m_y), stops = stops,
-        tile_mode = CpuTileMode.repeat, premul = true, local_matrix = matrix, linear_to_srgb = false)
+                               tile_mode = CpuTileMode.repeat, premul = true, local_matrix = matrix, linear_to_srgb = false)
     cpu_interpolation(&gradient, linear_gradient_data.interpolation_method)
 
     let draw_rect = cpu_float_rect(rect) else return
@@ -432,7 +432,7 @@ func display_list_player_cpu_paint_radial_gradient_impl(base: DisplayListPlayer*
     let tile_mode = CpuTileMode.repeat if radial_gradient_data.color_stops.repeating else CpuTileMode.clamp
 
     var gradient = CpuGradient(geometry = .radial(cx = center.m_x, cy = center.m_y, radius = size.m_height), stops = stops,
-        tile_mode = tile_mode, premul = true, local_matrix = matrix, linear_to_srgb = false)
+                               tile_mode = tile_mode, premul = true, local_matrix = matrix, linear_to_srgb = false)
     cpu_interpolation(&gradient, radial_gradient_data.interpolation_method)
 
     let draw_rect = cpu_rect(rect) else return
@@ -455,7 +455,7 @@ func display_list_player_cpu_paint_conic_gradient_impl(base: DisplayListPlayer*,
     # matrix.setRotate(-90 + start_angle, center)
     let matrix = raster.Transform.from_rotate_at(-90.0 + conic_gradient_data.start_angle, center.m_x, center.m_y)
     var gradient = CpuGradient(geometry = .sweep(cx = center.m_x, cy = center.m_y), stops = stops,
-        tile_mode = CpuTileMode.repeat, premul = true, local_matrix = matrix, linear_to_srgb = false)
+                               tile_mode = CpuTileMode.repeat, premul = true, local_matrix = matrix, linear_to_srgb = false)
     cpu_interpolation(&gradient, conic_gradient_data.interpolation_method)
 
     let draw_rect = cpu_rect(rect) else return

@@ -181,12 +181,7 @@ pub func color_alpha(this: const Color*) -> u8:
 pub func color_set_alpha(this: Color*, value: u8, alpha_type: AlphaType = AlphaType.unpremultiplied):
     match alpha_type:
         .premultiplied:
-            this.m_value = (
-                ((u32)value << 24)
-                | (((u32)color_red(this) * (u32)value // 255) << 16)
-                | (((u32)color_green(this) * (u32)value // 255) << 8)
-                | ((u32)color_blue(this) * (u32)value // 255)
-            )
+            this.m_value = (((u32)value << 24) | (((u32)color_red(this) * (u32)value // 255) << 16) | (((u32)color_green(this) * (u32)value // 255) << 8) | ((u32)color_blue(this) * (u32)value // 255))
         .unpremultiplied:
             this.m_value = (this.m_value & 0x00ffffff) | ((u32)value << 24)
         _:

@@ -40,7 +40,7 @@ noinline func test_cpu_player_rounded_rect_elliptic():
     let scene = test_scene_new(16, 16)
     defer test_scene_release(&scene)
     let radii = CornerRadii(top_left = CornerRadius(horizontal_radius = 6, vertical_radius = 3), top_right = CornerRadius(horizontal_radius = 2, vertical_radius = 2),
-        bottom_right = CornerRadius(horizontal_radius = 0, vertical_radius = 0), bottom_left = CornerRadius(horizontal_radius = 4, vertical_radius = 8))
+                            bottom_right = CornerRadius(horizontal_radius = 0, vertical_radius = 0), bottom_left = CornerRadius(horizontal_radius = 4, vertical_radius = 8))
     display_list_player_fill_rect_with_rounded_corners(test_scene_player(&scene), FillRectWithRoundedCorners(rect = test_rect(1, 1, 14, 14), color = test_color(0, 128, 0, 255), corner_radii = radii))
     expect_like_skia(&scene, "rounded_rect_elliptic", skia_rounded_rect_elliptic, 40, 30)
 
@@ -178,7 +178,7 @@ noinline func test_cpu_player_radial_gradient():
     defer test_scene_release(&scene)
     let data = RadialGradientData(color_stops = test_red_to_blue_stops(), interpolation_method = .rectangular_color_space(value = css_data.RectangularColorSpace.srgb))
     display_list_player_paint_radial_gradient(test_scene_player(&scene), PaintRadialGradient(rect = test_rect(0, 0, 16, 16), radial_gradient_data = data,
-        center = test_point(8, 8), size = gfx.IntSize(m_width = 8, m_height = 6)))
+                                                                                             center = test_point(8, 8), size = gfx.IntSize(m_width = 8, m_height = 6)))
     expect_like_skia(&scene, "radial_gradient", skia_radial_gradient, 2, 96)
 
 test "cpu player: paint_conic_gradient":
@@ -219,7 +219,7 @@ noinline func test_cpu_player_outer_box_shadow():
     defer test_scene_release(&scene)
     var none_radii: CornerRadii
     display_list_player_paint_outer_box_shadow(test_scene_player(&scene), PaintOuterBoxShadow(color = test_color(0, 0, 0, 255), blur_radius = 4,
-        device_content_rect = test_rect(6, 6, 12, 12), content_corner_radii = none_radii, shadow_rect = test_rect(8, 8, 12, 12), shadow_corner_radii = none_radii))
+                                                                                              device_content_rect = test_rect(6, 6, 12, 12), content_corner_radii = none_radii, shadow_rect = test_rect(8, 8, 12, 12), shadow_corner_radii = none_radii))
     expect_like_skia(&scene, "outer_box_shadow", skia_outer_box_shadow, 2, 48)
 
 test "cpu player: paint_inner_box_shadow":
@@ -230,8 +230,8 @@ noinline func test_cpu_player_inner_box_shadow():
     defer test_scene_release(&scene)
     var none_radii: CornerRadii
     display_list_player_paint_inner_box_shadow(test_scene_player(&scene), PaintInnerBoxShadow(color = test_color(0, 0, 0, 255), blur_radius = 4,
-        device_content_rect = test_rect(4, 4, 16, 16), content_corner_radii = none_radii, outer_shadow_rect = test_rect(0, 0, 24, 24),
-        inner_shadow_rect = test_rect(8, 8, 12, 12), inner_shadow_corner_radii = none_radii))
+                                                                                              device_content_rect = test_rect(4, 4, 16, 16), content_corner_radii = none_radii, outer_shadow_rect = test_rect(0, 0, 24, 24),
+                                                                                              inner_shadow_rect = test_rect(8, 8, 12, 12), inner_shadow_corner_radii = none_radii))
     expect_like_skia(&scene, "inner_box_shadow", skia_inner_box_shadow, 2, 40)
 
 # mark: Ellipses, rects and lines ==============================================================
@@ -270,7 +270,7 @@ noinline func test_cpu_player_draw_line():
     let scene = test_scene_new(16, 16)
     defer test_scene_release(&scene)
     display_list_player_draw_line(test_scene_player(&scene), DrawLine(color = test_color(255, 0, 0, 255), from_ = test_point(1, 2), to = test_point(14, 9), thickness = 2,
-        style = gfx.LineStyle.solid, alternate_color = test_color(0, 0, 0, 0)))
+                                                                      style = gfx.LineStyle.solid, alternate_color = test_color(0, 0, 0, 0)))
     expect_like_skia(&scene, "draw_line", skia_draw_line, 48, 48)
 
 test "cpu player: draw_line dotted and dashed (gated on r08's distance_from)":
@@ -282,11 +282,11 @@ noinline func test_cpu_player_draw_line_styles():
     let dotted = test_scene_new(24, 8)
     defer test_scene_release(&dotted)
     display_list_player_draw_line(test_scene_player(&dotted), DrawLine(color = test_color(255, 0, 0, 255), from_ = test_point(2, 4), to = test_point(21, 4), thickness = 2,
-        style = gfx.LineStyle.dotted, alternate_color = test_color(0, 0, 0, 0)))
+                                                                       style = gfx.LineStyle.dotted, alternate_color = test_color(0, 0, 0, 0)))
     expect_like_skia(&dotted, "draw_line_dotted", skia_draw_line_dotted, 32, 40)
 
     let dashed = test_scene_new(24, 8)
     defer test_scene_release(&dashed)
     display_list_player_draw_line(test_scene_player(&dashed), DrawLine(color = test_color(255, 0, 0, 255), from_ = test_point(2, 4), to = test_point(21, 4), thickness = 2,
-        style = gfx.LineStyle.dashed, alternate_color = test_color(0, 0, 0, 0)))
+                                                                       style = gfx.LineStyle.dashed, alternate_color = test_color(0, 0, 0, 0)))
     expect_like_skia(&dashed, "draw_line_dashed", skia_draw_line_dashed, 32, 16)

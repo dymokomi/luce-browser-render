@@ -53,9 +53,9 @@ pub func font_cascade_list_add_vector(this: FontCascadeList*, font: const Font*,
             highest_code_point = unicode_range_max_code_point(&range)
 
     ak.vector_append_t(&this.m_fonts, FontCascadeListEntry(font = font,
-        range_data = FontCascadeListEntryRangeData(
-            enclosing_range = unicode_range_create(lowest_code_point, highest_code_point),
-            unicode_ranges = unicode_ranges)))
+                                                           range_data = FontCascadeListEntryRangeData(
+        enclosing_range = unicode_range_create(lowest_code_point, highest_code_point),
+        unicode_ranges = unicode_ranges)))
 
 ## Ported from Libraries/LibGfx/FontCascadeList.cpp:37 Gfx::FontCascadeList::add_pending_face.
 # Register an unloaded face covering `unicode_ranges`. The cascade invokes

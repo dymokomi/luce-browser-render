@@ -17,12 +17,12 @@
 ## painting_surface_begin_raster and painting_surface_end_raster: the bitmap's own pixels when
 ## they already have that form, otherwise a buffer converted from and back to the bitmap.
 pub struct PaintingSurfaceImpl:
-    pub var context: SkiaBackendContext*?     # RefPtr<SkiaBackendContext>: always none (no GPU)
+    pub var context: SkiaBackendContext*?  # RefPtr<SkiaBackendContext>: always none (no GPU)
     pub var size: IntSize
-    pub var bitmap: Bitmap*                   # RefPtr<Bitmap>: never null on the CPU path
+    pub var bitmap: Bitmap*  # RefPtr<Bitmap>: never null on the CPU path
     pub var raster_pixels: u8[]
     pub var raster_aliases_bitmap: bool
-    pub var raster_depth: u32                 # begin_raster nesting
+    pub var raster_depth: u32  # begin_raster nesting
 
 ## SkCanvas (Libraries/LibGfx/PaintingSurface.h:29): opaque in this phase (not in the phase-1 closure).
 pub struct SkCanvas:

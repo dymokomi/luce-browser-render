@@ -125,9 +125,9 @@ pub func display_list_recorder_end_masks(this: DisplayListRecorder*, masks: cons
         let mask_kind: gfx.MaskKind? = gfx.MaskKind.luminance if mask.kind == gfx.MaskKind.luminance else none
         display_list_recorder_apply_effects(this, 1.0, gfx.CompositingAndBlendingOperator.destination_in, none, mask_kind)
         display_list_recorder_paint_nested_display_list(this, mask.display_list, mask.rect)
-        display_list_recorder_restore(this) # DstIn layer
-        display_list_recorder_restore(this) # content layer
-        display_list_recorder_restore(this) # clip save
+        display_list_recorder_restore(this)  # DstIn layer
+        display_list_recorder_restore(this)  # content layer
+        display_list_recorder_restore(this)  # clip save
 
 # mark: Rects, paths and ellipses ==============================================================
 
@@ -247,7 +247,7 @@ pub func display_list_recorder_draw_scaled_immutable_bitmap(this: DisplayListRec
 ## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:254 Web::Painting::DisplayListRecorder::draw_repeated_immutable_bitmap.
 pub func display_list_recorder_draw_repeated_immutable_bitmap(this: DisplayListRecorder*, dst_rect: gfx.DevicePixelRect, clip_rect: gfx.DevicePixelRect, bitmap: const gfx.ImmutableBitmap*, scaling_mode: gfx.ScalingMode, repeat_x: bool, repeat_y: bool):
     display_list_recorder_append(this, .draw_repeated_immutable_bitmap(value = DrawRepeatedImmutableBitmap(dst_rect = dst_rect, clip_rect = clip_rect, bitmap = bitmap,
-        scaling_mode = scaling_mode, repeat = DrawRepeatedImmutableBitmapRepeat(x = repeat_x, y = repeat_y))))
+                                                                                                           scaling_mode = scaling_mode, repeat = DrawRepeatedImmutableBitmapRepeat(x = repeat_x, y = repeat_y))))
 
 # mark: Lines and text =========================================================================
 
@@ -335,7 +335,7 @@ pub func display_list_recorder_paint_inner_box_shadow(this: DisplayListRecorder*
 pub func display_list_recorder_paint_text_shadow(this: DisplayListRecorder*, blur_radius: i32, bounding_rect: gfx.DevicePixelRect, text_rect: gfx.DevicePixelRect, glyph_run: const web_fonts.GlyphRun*, glyph_run_scale: f64, color: gfx.Color, draw_location: gfx.FloatPoint):
     web_fonts.glyph_run_ensure_text_blob(glyph_run, (f32)glyph_run_scale)
     display_list_recorder_append(this, .paint_text_shadow(value = PaintTextShadow(glyph_run = glyph_run, shadow_bounding_rect = bounding_rect, text_rect = text_rect,
-        draw_location = draw_location, blur_radius = blur_radius, color = color)))
+                                                                                  draw_location = draw_location, blur_radius = blur_radius, color = color)))
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:373 Web::Painting::DisplayListRecorder::fill_rect_with_rounded_corners.
 pub func display_list_recorder_fill_rect_with_rounded_corners_corner_radii(this: DisplayListRecorder*, rect: gfx.DevicePixelRect, color: gfx.Color, corner_radii: CornerRadii):
@@ -363,7 +363,7 @@ pub func display_list_recorder_fill_rect_with_rounded_corners_i32_i32(this: Disp
 ## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:404 Web::Painting::DisplayListRecorder::paint_scrollbar.
 pub func display_list_recorder_paint_scrollbar(this: DisplayListRecorder*, scroll_frame_index: u64, gutter_rect: gfx.DevicePixelRect, thumb_rect: gfx.DevicePixelRect, scroll_size: f64, thumb_color: gfx.Color, track_color: gfx.Color, vertical: bool):
     display_list_recorder_append(this, .paint_scroll_bar(value = PaintScrollBar(scroll_frame_index = scroll_frame_index, gutter_rect = gutter_rect, thumb_rect = thumb_rect,
-        scroll_size = scroll_size, thumb_color = thumb_color, track_color = track_color, vertical = vertical)))
+                                                                                scroll_size = scroll_size, thumb_color = thumb_color, track_color = track_color, vertical = vertical)))
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:416 Web::Painting::DisplayListRecorder::apply_effects.
 pub func display_list_recorder_apply_effects(this: DisplayListRecorder*, opacity: f32 = 1.0, compositing_and_blending_operator: gfx.CompositingAndBlendingOperator = gfx.CompositingAndBlendingOperator.normal, filter: gfx.Filter? = none, mask_kind: gfx.MaskKind? = none):

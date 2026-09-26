@@ -18,7 +18,7 @@ func test_gradient(stops: const (f32, u32)[], space: CpuColorSpace, premul: bool
         let color: CpuColor4 = [(f32)((rgba >> 24) & 0xff) / 255.0, (f32)((rgba >> 16) & 0xff) / 255.0, (f32)((rgba >> 8) & 0xff) / 255.0, (f32)(rgba & 0xff) / 255.0]
         ak.vector_append_t(&list, CpuGradientStop(position = position, color = color))
     return CpuGradient(geometry = .linear(x0 = 0.0, y0 = 0.0, x1 = 1.0, y1 = 0.0), stops = list, tile_mode = CpuTileMode.clamp, space = space,
-        premul = premul, local_matrix = raster.Transform.identity(), linear_to_srgb = false)
+                       premul = premul, local_matrix = raster.Transform.identity(), linear_to_srgb = false)
 
 ## Whether two floats are within `epsilon`.
 func near(a: f32, b: f32, epsilon: f32) -> bool:
@@ -165,7 +165,7 @@ test "cpu color spaces: every space round-trips":
 
 noinline func test_cpu_color_spaces_round_trip():
     let spaces: CpuColorSpace[12] = [CpuColorSpace.srgb, CpuColorSpace.srgb_linear, CpuColorSpace.lab, CpuColorSpace.oklab, CpuColorSpace.display_p3,
-        CpuColorSpace.a98_rgb, CpuColorSpace.prophoto_rgb, CpuColorSpace.rec2020, CpuColorSpace.hsl, CpuColorSpace.hwb, CpuColorSpace.lch, CpuColorSpace.oklch]
+                                     CpuColorSpace.a98_rgb, CpuColorSpace.prophoto_rgb, CpuColorSpace.rec2020, CpuColorSpace.hsl, CpuColorSpace.hwb, CpuColorSpace.lch, CpuColorSpace.oklch]
     let colors: CpuColor4[4] = [[0.2, 0.4, 0.6, 1.0], [1.0, 1.0, 1.0, 0.5], [0.9, 0.1, 0.05, 1.0], [0.0, 0.7, 0.3, 0.25]]
     for s in 0..<spaces.length:
         for color in colors:

@@ -609,4 +609,3 @@ test "intercepts_lato_bold_92":
 
 test "woff_hash_sans":
     test_body_woff("HashSans", 98, 1024, [0x41800000, 0x41098000, 0x41500000, 0x414cc000, 0x404d0000, 0x3fbc0000], "Hash #1", 7, 0x42b32800)
-

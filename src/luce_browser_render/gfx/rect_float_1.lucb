@@ -301,10 +301,7 @@ pub func float_rect_contains_float_point(this: const FloatRect*, point: FloatPoi
 
 ## Ported from Libraries/LibGfx/Rect.h:301 Gfx::Rect::contains for FloatRect.
 pub func float_rect_contains_float_rect(this: const FloatRect*, other: FloatRect) -> bool:
-    return (float_rect_left(this) <= float_rect_left(&other)
-        and float_rect_right(this) >= float_rect_right(&other)
-        and float_rect_top(this) <= float_rect_top(&other)
-        and float_rect_bottom(this) >= float_rect_bottom(&other))
+    return (float_rect_left(this) <= float_rect_left(&other) and float_rect_right(this) >= float_rect_right(&other) and float_rect_top(this) <= float_rect_top(&other) and float_rect_bottom(this) >= float_rect_bottom(&other))
 
 ## Ported from Libraries/LibGfx/Rect.h:310 Gfx::Rect::contains<Container> for FloatRect.
 pub func float_rect_contains_t_container(this: const FloatRect*, others: const FloatRect[]) -> bool:

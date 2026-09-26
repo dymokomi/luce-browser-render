@@ -40,7 +40,7 @@ pub func css_pixel_point_to_int_point(point: gfx.CssPixelPoint) -> gfx.IntPoint:
 ## `Web::CSSPixelRect::to_type<int>()`: CSSPixels::to_int() per member.
 pub func css_pixel_rect_to_int_rect(rect: gfx.CssPixelRect) -> gfx.DevicePixelRect:
     return gfx.DevicePixelRect(m_location = css_pixel_point_to_int_point(rect.m_location),
-        m_size = gfx.IntSize(m_width = gfx.css_pixels_to_int_const(&rect.m_size.m_width), m_height = gfx.css_pixels_to_int_const(&rect.m_size.m_height)))
+                               m_size = gfx.IntSize(m_width = gfx.css_pixels_to_int_const(&rect.m_size.m_width), m_height = gfx.css_pixels_to_int_const(&rect.m_size.m_height)))
 
 ## `Gfx::FloatRect::to_rounded<int>()`: AK::round_to<int> of x, y, width and height.
 pub func float_rect_to_rounded_int_rect(rect: gfx.FloatRect) -> gfx.DevicePixelRect:

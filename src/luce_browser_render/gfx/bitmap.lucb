@@ -39,7 +39,7 @@ pub func bitmap_format_name(format_: BitmapFormat) -> ak.StringView:
 ## Ported from Libraries/LibGfx/Bitmap.h:38 Gfx::is_valid_bitmap_format.
 pub func is_valid_bitmap_format(format_: u32) -> bool:
     match format_:
-        0, 1, 2, 3, 4: return true      # Invalid, BGRx8888, BGRA8888, RGBx8888, RGBA8888
+        0, 1, 2, 3, 4: return true  # Invalid, BGRx8888, BGRA8888, RGBx8888, RGBA8888
         _: return false
 
 ## Ported from Libraries/LibGfx/Bitmap.cpp:46 Gfx::Bitmap::minimum_pitch.
@@ -56,11 +56,11 @@ func size_would_overflow(format_: BitmapFormat, size: IntSize) -> bool:
     if int_size_width(&size) < 0 or int_size_height(&size) < 0:
         return true
     # This check is a bit arbitrary, but should protect us from most shenanigans:
-    if int_size_width(&size) >= 32767 or int_size_height(&size) >= 32767:     # INT16_MAX
+    if int_size_width(&size) >= 32767 or int_size_height(&size) >= 32767:  # INT16_MAX
         return true
     # In contrast, this check is absolutely necessary:
     let pitch = bitmap_minimum_pitch((usize)int_size_width(&size), format_)
-    return (pitch *? (usize)int_size_height(&size)) == none     # Checked<size_t>::multiplication_would_overflow
+    return (pitch *? (usize)int_size_height(&size)) == none  # Checked<size_t>::multiplication_would_overflow
 
 # mark: Creation ===============================================================================
 
@@ -99,7 +99,8 @@ pub func bitmap_construct_int_size_backing_store(this: Bitmap*, format_: BitmapF
     assert(not size_would_overflow(format_, size))
     assert(this.m_data != none)
     assert(backing_store.size_in_bytes == bitmap_size_in_bytes(this))
-    # m_destruction_callback = [data] { kfree(data); }: the pixels are managed (see the header).
+
+# m_destruction_callback = [data] { kfree(data); }: the pixels are managed (see the header).
 
 ## Ported from Libraries/LibGfx/Bitmap.cpp:116 Gfx::Bitmap::create_wrapper.
 pub func bitmap_create_wrapper(format_: BitmapFormat, alpha_type: AlphaType, size: IntSize, pitch: usize, data: void*?, destruction_callback: ak.Function0[unit]) -> Bitmap*!:
@@ -119,7 +120,8 @@ pub func bitmap_construct_int_size_usize(this: Bitmap*, format_: BitmapFormat, a
     this.m_destruction_callback = destruction_callback
     assert(pitch >= bitmap_minimum_pitch((usize)int_size_width(&size), format_))
     assert(not size_would_overflow(format_, size))
-    # FIXME: assert that `data` is actually long enough!
+
+# FIXME: assert that `data` is actually long enough!
 
 ## Ported from Libraries/LibGfx/Bitmap.cpp:136 Gfx::Bitmap::create_with_anonymous_buffer.
 pub func bitmap_create_with_anonymous_buffer(format_: BitmapFormat, alpha_type: AlphaType, buffer: CoreAnonymousBuffer, size: IntSize) -> Bitmap*!:

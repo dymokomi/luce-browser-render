@@ -74,7 +74,7 @@ pub func scroll_state_snapshot_device_offset_for_index(this: const ScrollStateSn
 # Value N maps directly to m_scroll_frames[N].
 pub func scroll_state_construct(this: ScrollState*):
     var sentinel: ScrollFrame
-    ak.vector_append_t(&this.m_scroll_frames, sentinel) # Sentinel at index 0
+    ak.vector_append_t(&this.m_scroll_frames, sentinel)  # Sentinel at index 0
 
 ## Ported from Libraries/LibWeb/Painting/ScrollState.h:53 Web::Painting::ScrollState::frame_at.
 pub func scroll_state_frame_at_const(this: const ScrollState*, index: u64) -> const ScrollFrame*:
@@ -145,7 +145,7 @@ pub func scroll_state_for_each_sticky_frame(this: ScrollState*) -> ScrollFrameIt
 
 ## Ported from Libraries/LibWeb/Painting/ScrollState.h:97 Web::Painting::ScrollState::clear.
 pub func scroll_state_clear(this: ScrollState*):
-    ak.vector_resize_and_keep_capacity(&this.m_scroll_frames, 1) # Keep sentinel at index 0
+    ak.vector_resize_and_keep_capacity(&this.m_scroll_frames, 1)  # Keep sentinel at index 0
 
 ## Ported from Libraries/LibWeb/Painting/ScrollState.h:105 Web::Painting::ScrollState::snapshot.
 pub func scroll_state_snapshot(this: const ScrollState*, device_pixels_per_css_pixel: f64) -> ScrollStateSnapshot:

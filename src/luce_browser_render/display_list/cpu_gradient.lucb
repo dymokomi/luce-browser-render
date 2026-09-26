@@ -94,7 +94,7 @@ func cpu_gradient_prepare(gradient: const CpuGradient*) -> CpuPreparedGradient:
         ak.vector_append_t(&prepared.colors, stops[count - 1].color)
 
     var prev: f32 = 0.0
-    ak.vector_append_t(&prepared.positions, prev) # force the first pos to 0
+    ak.vector_append_t(&prepared.positions, prev)  # force the first pos to 0
     let start_index: usize = 0 if dummy_first else 1
     let total = count + (1 if dummy_last else 0)
     for i in start_index..<total:
@@ -369,5 +369,5 @@ func cpu_canvas_fill_path_with_gradient(canvas: CpuCanvas*, path: const raster.P
     var paint = raster.Paint()
     paint.anti_alias = anti_alias
     paint.shader = raster.Pattern.new_(shader_pixels.as_ref(), raster.SpreadMode.pad_, raster.FilterQuality.nearest, opacity,
-        ctm_inverse.pre_translate((f32)x0, (f32)y0))
+                                       ctm_inverse.pre_translate((f32)x0, (f32)y0))
     cpu_canvas_fill_path(canvas, path, &paint, fill_rule)

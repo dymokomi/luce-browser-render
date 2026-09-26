@@ -48,10 +48,7 @@ pub func float_matrix4_x4_mul(this: const FloatMatrix4X4*, other: FloatMatrix4X4
     var product: FloatMatrix4X4
     for i: usize in 0..<4:
         for j: usize in 0..<4:
-            product.m_elements[i][j] = (this.m_elements[i][0] * other.m_elements[0][j]
-                + this.m_elements[i][1] * other.m_elements[1][j]
-                + this.m_elements[i][2] * other.m_elements[2][j]
-                + this.m_elements[i][3] * other.m_elements[3][j])
+            product.m_elements[i][j] = (this.m_elements[i][0] * other.m_elements[0][j] + this.m_elements[i][1] * other.m_elements[1][j] + this.m_elements[i][2] * other.m_elements[2][j] + this.m_elements[i][3] * other.m_elements[3][j])
     return product
 
 ## Ported from Libraries/LibGfx/Matrix.h:103 Gfx::Matrix::operator+ for FloatMatrix4X4.

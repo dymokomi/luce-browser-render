@@ -28,8 +28,7 @@ pub func affine_transform_construct_f32(this: AffineTransform*, a: f32, b: f32, 
 
 ## Ported from Libraries/LibGfx/AffineTransform.h:29 Gfx::AffineTransform::is_identity.
 pub func affine_transform_is_identity(this: const AffineTransform*) -> bool:
-    return (this.m_values[0] == 1.0 and this.m_values[1] == 0.0 and this.m_values[2] == 0.0
-        and this.m_values[3] == 1.0 and this.m_values[4] == 0.0 and this.m_values[5] == 0.0)
+    return (this.m_values[0] == 1.0 and this.m_values[1] == 0.0 and this.m_values[2] == 0.0 and this.m_values[3] == 1.0 and this.m_values[4] == 0.0 and this.m_values[5] == 0.0)
 
 ## Ported from Libraries/LibGfx/AffineTransform.h:34 Gfx::AffineTransform::is_identity_or_translation.
 pub func affine_transform_is_identity_or_translation(this: const AffineTransform*) -> bool:

@@ -77,15 +77,11 @@ pub func float_rect_intersects_horizontally(this: const FloatRect*, other: Float
 
 ## Ported from Libraries/LibGfx/Rect.h:395 Gfx::Rect::intersects for FloatRect.
 pub func float_rect_intersects_float_rect(this: const FloatRect*, other: FloatRect) -> bool:
-    return (float_rect_left(this) < float_rect_right(&other)
-        and float_rect_left(&other) < float_rect_right(this)
-        and float_rect_top(this) < float_rect_bottom(&other)
-        and float_rect_top(&other) < float_rect_bottom(this))
+    return (float_rect_left(this) < float_rect_right(&other) and float_rect_left(&other) < float_rect_right(this) and float_rect_top(this) < float_rect_bottom(&other) and float_rect_top(&other) < float_rect_bottom(this))
 
 ## Ported from Libraries/LibGfx/Rect.h:403 Gfx::Rect::edge_adjacent_intersects for FloatRect.
 pub func float_rect_edge_adjacent_intersects(this: const FloatRect*, other: FloatRect) -> bool:
-    return (ak.max_f32(float_rect_left(this), float_rect_left(&other)) <= ak.min_f32(float_rect_right(this), float_rect_right(&other))
-        and ak.max_f32(float_rect_top(this), float_rect_top(&other)) <= ak.min_f32(float_rect_bottom(this), float_rect_bottom(&other)))
+    return (ak.max_f32(float_rect_left(this), float_rect_left(&other)) <= ak.min_f32(float_rect_right(this), float_rect_right(&other)) and ak.max_f32(float_rect_top(this), float_rect_top(&other)) <= ak.min_f32(float_rect_bottom(this), float_rect_bottom(&other)))
 
 ## Ported from Libraries/LibGfx/Rect.h:410 Gfx::Rect::intersects<Container> for FloatRect.
 pub func float_rect_intersects_t_container(this: const FloatRect*, others: const FloatRect[]) -> bool:

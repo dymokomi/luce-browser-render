@@ -77,15 +77,11 @@ pub func device_pixel_rect_intersects_horizontally(this: const DevicePixelRect*,
 
 ## Ported from Libraries/LibGfx/Rect.h:395 Gfx::Rect::intersects for DevicePixelRect.
 pub func device_pixel_rect_intersects_device_pixel_rect(this: const DevicePixelRect*, other: DevicePixelRect) -> bool:
-    return (device_pixel_rect_left(this) < device_pixel_rect_right(&other)
-        and device_pixel_rect_left(&other) < device_pixel_rect_right(this)
-        and device_pixel_rect_top(this) < device_pixel_rect_bottom(&other)
-        and device_pixel_rect_top(&other) < device_pixel_rect_bottom(this))
+    return (device_pixel_rect_left(this) < device_pixel_rect_right(&other) and device_pixel_rect_left(&other) < device_pixel_rect_right(this) and device_pixel_rect_top(this) < device_pixel_rect_bottom(&other) and device_pixel_rect_top(&other) < device_pixel_rect_bottom(this))
 
 ## Ported from Libraries/LibGfx/Rect.h:403 Gfx::Rect::edge_adjacent_intersects for DevicePixelRect.
 pub func device_pixel_rect_edge_adjacent_intersects(this: const DevicePixelRect*, other: DevicePixelRect) -> bool:
-    return (ak.max[i32](device_pixel_rect_left(this), device_pixel_rect_left(&other)) <= ak.min[i32](device_pixel_rect_right(this), device_pixel_rect_right(&other))
-        and ak.max[i32](device_pixel_rect_top(this), device_pixel_rect_top(&other)) <= ak.min[i32](device_pixel_rect_bottom(this), device_pixel_rect_bottom(&other)))
+    return (ak.max[i32](device_pixel_rect_left(this), device_pixel_rect_left(&other)) <= ak.min[i32](device_pixel_rect_right(this), device_pixel_rect_right(&other)) and ak.max[i32](device_pixel_rect_top(this), device_pixel_rect_top(&other)) <= ak.min[i32](device_pixel_rect_bottom(this), device_pixel_rect_bottom(&other)))
 
 ## Ported from Libraries/LibGfx/Rect.h:410 Gfx::Rect::intersects<Container> for DevicePixelRect.
 pub func device_pixel_rect_intersects_t_container(this: const DevicePixelRect*, others: const DevicePixelRect[]) -> bool:

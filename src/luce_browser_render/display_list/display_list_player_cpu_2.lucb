@@ -103,8 +103,8 @@ func display_list_player_cpu_paint_text_shadow_impl(base: DisplayListPlayer*, co
     cpu_canvas_save_layer(canvas, CpuLayerEffects(blur_sigma = sigma))
     let text_location = int_point_to_float_point(command.text_rect.m_location)
     display_list_player_cpu_draw_glyph_run_impl(base, DrawGlyphRun(glyph_run = command.glyph_run, rect = command.text_rect,
-        translation = gfx.FloatPoint(m_x = command.draw_location.m_x + text_location.m_x, m_y = command.draw_location.m_y + text_location.m_y),
-        color = command.color, orientation = gfx.Orientation.horizontal))
+                                                                   translation = gfx.FloatPoint(m_x = command.draw_location.m_x + text_location.m_x, m_y = command.draw_location.m_y + text_location.m_y),
+                                                                   color = command.color, orientation = gfx.Orientation.horizontal))
     cpu_canvas_restore(canvas)
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:39 Web::Painting::DisplayListPlayerSkia::fill_rect_with_rounded_corners (override).
@@ -143,7 +143,7 @@ func cpu_shader_release(shader: CpuShader*):
 ## `to_skia_matrix`: a Gfx::AffineTransform (a, b, c, d, e, f) as a raster transform.
 func cpu_transform_of_affine(transform: const gfx.AffineTransform*) -> raster.Transform:
     return raster.Transform.from_row(gfx.affine_transform_a(transform), gfx.affine_transform_b(transform), gfx.affine_transform_c(transform),
-        gfx.affine_transform_d(transform), gfx.affine_transform_e(transform), gfx.affine_transform_f(transform))
+                                     gfx.affine_transform_d(transform), gfx.affine_transform_e(transform), gfx.affine_transform_f(transform))
 
 ## `to_skia_tile_mode`.
 func cpu_tile_mode(spread_method: SvgGradientPaintStyleSpreadMethod) -> CpuTileMode:
@@ -177,7 +177,7 @@ func cpu_gradient_paint_style_shader(paint_style: const SvgGradientPaintStyle*, 
     # Flags 0: interpolate unpremultiplied sRGB. A linearRGB gradient adds
     # SkColorFilters::LinearToSRGBGamma.
     return .gradient(value = CpuGradient(geometry = geometry, stops = stops, tile_mode = tile_mode, premul = false, local_matrix = matrix,
-        linear_to_srgb = svg_gradient_paint_style_color_space(paint_style) == gfx.InterpolationColorSpace.linear_rgb))
+                                         linear_to_srgb = svg_gradient_paint_style_color_space(paint_style) == gfx.InterpolationColorSpace.linear_rgb))
 
 ## The geometry of an SVG gradient: `SkGradientShader::MakeLinear` of a linear gradient's
 ## points, `MakeTwoPointConical` of a radial gradient's circles; none for any other.
@@ -296,7 +296,7 @@ func display_list_player_cpu_fill_path_impl(base: DisplayListPlayer*, command: F
 func cpu_stroke_of(command: const StrokePath*) -> raster.Stroke:
     let dash = raster.StrokeDash.new_(ak.vector_span_const(&command.dash_array), command.dash_offset)
     return raster.Stroke(width = command.thickness, miter_limit = command.miter_limit, line_cap = cpu_line_cap(command.cap_style),
-        line_join = cpu_line_join(command.join_style), dash = dash)
+                         line_join = cpu_line_join(command.join_style), dash = dash)
 
 ## Frees a stroke's dash.
 func cpu_stroke_release(stroke: raster.Stroke*):

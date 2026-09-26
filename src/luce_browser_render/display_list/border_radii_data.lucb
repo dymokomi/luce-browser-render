@@ -138,7 +138,7 @@ pub func border_radii_data_contains(this: const BorderRadiiData*, point: gfx.Css
         return true
 
     let corners = CornerRadii(top_left = border_radius_data_to_corner(&this.top_left), top_right = border_radius_data_to_corner(&this.top_right),
-        bottom_right = border_radius_data_to_corner(&this.bottom_right), bottom_left = border_radius_data_to_corner(&this.bottom_left))
+                              bottom_right = border_radius_data_to_corner(&this.bottom_right), bottom_left = border_radius_data_to_corner(&this.bottom_left))
     return corner_radii_contains(&corners, css_pixel_point_to_int_point(point), css_pixel_rect_to_int_rect(rect))
 
 ## Ported from Libraries/LibWeb/Painting/BorderRadiiData.h:135 Web::Painting::BorderRadiiData::shrink.

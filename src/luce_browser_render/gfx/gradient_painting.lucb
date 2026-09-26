@@ -71,7 +71,7 @@ pub func svg_gradient_paint_style_set_gradient_transform(this: SvgGradientPaintS
         let transform_scale = affine_transform_scale(&transform)
         let scale_x = float_point_x(&transform_scale)
         let scale_y = float_point_y(&transform_scale)
-        this.m_scale = scale_y if scale_x < scale_y else scale_x      # max(x, y)
+        this.m_scale = scale_y if scale_x < scale_y else scale_x  # max(x, y)
         var scale_adjusted: AffineTransform
         affine_transform_construct(&scale_adjusted)
         discard(affine_transform_multiply(affine_transform_scale_f32(&scale_adjusted, this.m_scale, this.m_scale), inverse))

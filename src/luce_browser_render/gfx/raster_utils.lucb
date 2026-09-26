@@ -161,7 +161,7 @@ pub func to_raster_join(join_style: PathJoinStyle) -> raster.LineJoin:
 ## BilinearMipmap samples bilinearly (FIXME: mipmaps for minification).
 pub func to_raster_filter_quality(scaling_mode: ScalingMode) -> raster.FilterQuality:
     match scaling_mode:
-        .none_: return raster.FilterQuality.nearest       # SkSamplingOptions(): nearest
+        .none_: return raster.FilterQuality.nearest  # SkSamplingOptions(): nearest
         .bilinear: return raster.FilterQuality.bilinear
         .bilinear_mipmap: return raster.FilterQuality.bilinear
         .nearest_neighbor: return raster.FilterQuality.nearest

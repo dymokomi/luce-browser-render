@@ -67,8 +67,7 @@ pub func float_quad_contains(this: const FloatQuad*, point: FloatPoint) -> bool:
             j += 1
             continue
 
-        let x_coord_of_intersection_with_edge = ((float_point_x(quad_points[j]) - float_point_x(quad_points[i])) * (float_point_y(&point) - float_point_y(quad_points[i]))
-            / (float_point_y(quad_points[j]) - float_point_y(quad_points[i])) + float_point_x(quad_points[i]))
+        let x_coord_of_intersection_with_edge = ((float_point_x(quad_points[j]) - float_point_x(quad_points[i])) * (float_point_y(&point) - float_point_y(quad_points[i])) / (float_point_y(quad_points[j]) - float_point_y(quad_points[i])) + float_point_x(quad_points[i]))
         if float_point_x(&point) < x_coord_of_intersection_with_edge:
             intersections_with_quad += 1
         i += 1

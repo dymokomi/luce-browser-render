@@ -244,7 +244,7 @@ func filter_saturation_matrix(sat: f32) -> f32[20]:
     m[10] = r
     m[11] = g
     m[12] = b + sat
-    m[18] = 1.0     # kA_Scale
+    m[18] = 1.0  # kA_Scale
     return m
 
 ## Ported from Libraries/LibGfx/Filter.cpp:249 Gfx::Filter::saturate.

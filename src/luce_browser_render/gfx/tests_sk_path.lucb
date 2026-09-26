@@ -52,10 +52,10 @@ func test_sk_vertical_line_to(this: TestSkGfxPath*, y: f32):
 
 # PathImplSkia::elliptical_arc_to (arc_to is the same with rx = ry = radius, rotation 0).
 func test_sk_elliptical_arc_to(this: TestSkGfxPath*, x: f32, y: f32, rx: f32, ry: f32, x_axis_rotation: f32,
-        large_arc: bool, sweep: bool):
+                               large_arc: bool, sweep: bool):
     let degrees = x_axis_rotation * (180.0 / sk_scalar_pi)
     sk_path_arc_to_rotated(&this.path, rx, ry, degrees, SkPathArcSize.large if large_arc else SkPathArcSize.small,
-        SkPathDirection.cw if sweep else SkPathDirection.ccw, x, y)
+                           SkPathDirection.cw if sweep else SkPathDirection.ccw, x, y)
 
 # PathImplSkia::copy_transformed with AffineTransform(a, b, c, d, e, f).
 func test_sk_transform(this: TestSkGfxPath*, a: f32, b: f32, c_: f32, d: f32, e: f32, f: f32):

@@ -127,7 +127,6 @@ func hb_decode_utf8(bytes: const u8[], index: usize) -> (u32, usize):
         return (((b0 & 0x07) << 18) | (((u32)bytes[index + 1] & 0x3F) << 12) | (((u32)bytes[index + 2] & 0x3F) << 6) | ((u32)bytes[index + 3] & 0x3F), 4)
     return (0xFFFD, 1)
 
-
 ## `text` (one or two scalar values) normalized to `form`, as scalar values.
 func hb_normalized(code_points: const u32[], form: web_unicode.NormalizationForm) -> ak.Vector[u32]:
     var utf8: u8[8]

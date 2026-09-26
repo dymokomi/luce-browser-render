@@ -59,14 +59,14 @@ pub struct SkMatrix:
 ## Ported from include/core/SkMatrix.h:54 SkMatrix::SkMatrix(): the identity.
 pub func sk_matrix_identity() -> SkMatrix:
     return SkMatrix(mat = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
-        type_mask = sk_matrix_identity_mask | sk_matrix_rect_stays_rect_mask)
+                    type_mask = sk_matrix_identity_mask | sk_matrix_rect_stays_rect_mask)
 
 ## Ported from include/core/SkMatrix.h:153 SkMatrix::MakeAll (setAll: the type mask is
 ## unknown).
 pub func sk_matrix_make_all(scale_x: f32, skew_x: f32, trans_x: f32, skew_y: f32, scale_y: f32,
-        trans_y: f32, persp0: f32, persp1: f32, persp2: f32) -> SkMatrix:
+                            trans_y: f32, persp0: f32, persp1: f32, persp2: f32) -> SkMatrix:
     return SkMatrix(mat = [scale_x, skew_x, trans_x, skew_y, scale_y, trans_y, persp0, persp1, persp2],
-        type_mask = sk_matrix_unknown_mask)
+                    type_mask = sk_matrix_unknown_mask)
 
 ## Ported from src/core/SkMatrix.cpp:86 SkMatrix::computePerspectiveTypeMask.
 func sk_matrix_compute_perspective_type_mask(this: const SkMatrix*) -> u8:
@@ -184,7 +184,7 @@ func sk_matrix_update_translate_mask(this: SkMatrix*):
 pub func sk_matrix_set_translate(this: SkMatrix*, dx: f32, dy: f32):
     let moved = dx != 0.0 or dy != 0.0
     *this = SkMatrix(mat = [1.0, 0.0, dx, 0.0, 1.0, dy, 0.0, 0.0, 1.0],
-        type_mask = (sk_matrix_translate_mask if moved else sk_matrix_identity_mask) | sk_matrix_rect_stays_rect_mask)
+                     type_mask = (sk_matrix_translate_mask if moved else sk_matrix_identity_mask) | sk_matrix_rect_stays_rect_mask)
 
 ## Ported from src/core/SkMatrix.cpp:285 SkMatrix::postTranslate.
 pub func sk_matrix_post_translate(this: SkMatrix*, dx: f32, dy: f32):
@@ -298,9 +298,9 @@ pub func sk_matrix_set_concat(this: SkMatrix*, a0: const SkMatrix*, b0: const Sk
         *this = a
     elif sk_matrix_only_scale_and_translate(a_type | b_type):
         *this = sk_matrix_scale_translate(a.mat[sk_m_scale_x] * b.mat[sk_m_scale_x],
-            a.mat[sk_m_scale_y] * b.mat[sk_m_scale_y],
-            a.mat[sk_m_scale_x] * b.mat[sk_m_trans_x] + a.mat[sk_m_trans_x],
-            a.mat[sk_m_scale_y] * b.mat[sk_m_trans_y] + a.mat[sk_m_trans_y])
+                                          a.mat[sk_m_scale_y] * b.mat[sk_m_scale_y],
+                                          a.mat[sk_m_scale_x] * b.mat[sk_m_trans_x] + a.mat[sk_m_trans_x],
+                                          a.mat[sk_m_scale_y] * b.mat[sk_m_trans_y] + a.mat[sk_m_trans_y])
     else:
         var tmp = sk_matrix_identity()
 
@@ -320,22 +320,22 @@ pub func sk_matrix_set_concat(this: SkMatrix*, a0: const SkMatrix*, b0: const Sk
             tmp.type_mask = sk_matrix_unknown_mask
         else:
             tmp.mat[sk_m_scale_x] = sk_matrix_muladdmul(a.mat[sk_m_scale_x], b.mat[sk_m_scale_x],
-                a.mat[sk_m_skew_x], b.mat[sk_m_skew_y])
+                                                        a.mat[sk_m_skew_x], b.mat[sk_m_skew_y])
 
             tmp.mat[sk_m_skew_x] = sk_matrix_muladdmul(a.mat[sk_m_scale_x], b.mat[sk_m_skew_x],
-                a.mat[sk_m_skew_x], b.mat[sk_m_scale_y])
+                                                       a.mat[sk_m_skew_x], b.mat[sk_m_scale_y])
 
             tmp.mat[sk_m_trans_x] = sk_matrix_muladdmul(a.mat[sk_m_scale_x], b.mat[sk_m_trans_x],
-                a.mat[sk_m_skew_x], b.mat[sk_m_trans_y]) + a.mat[sk_m_trans_x]
+                                                        a.mat[sk_m_skew_x], b.mat[sk_m_trans_y]) + a.mat[sk_m_trans_x]
 
             tmp.mat[sk_m_skew_y] = sk_matrix_muladdmul(a.mat[sk_m_skew_y], b.mat[sk_m_scale_x],
-                a.mat[sk_m_scale_y], b.mat[sk_m_skew_y])
+                                                       a.mat[sk_m_scale_y], b.mat[sk_m_skew_y])
 
             tmp.mat[sk_m_scale_y] = sk_matrix_muladdmul(a.mat[sk_m_skew_y], b.mat[sk_m_skew_x],
-                a.mat[sk_m_scale_y], b.mat[sk_m_scale_y])
+                                                        a.mat[sk_m_scale_y], b.mat[sk_m_scale_y])
 
             tmp.mat[sk_m_trans_y] = sk_matrix_muladdmul(a.mat[sk_m_skew_y], b.mat[sk_m_trans_x],
-                a.mat[sk_m_scale_y], b.mat[sk_m_trans_y]) + a.mat[sk_m_trans_y]
+                                                        a.mat[sk_m_scale_y], b.mat[sk_m_trans_y]) + a.mat[sk_m_trans_y]
 
             tmp.mat[sk_m_persp0] = 0.0
             tmp.mat[sk_m_persp1] = 0.0
@@ -436,4 +436,4 @@ pub func sk_matrix_map_point(this: SkMatrix*, p: SkPoint) -> SkPoint:
             z = 1.0 / z
         return SkPoint(x = x * z, y = y * z)
     return SkPoint(x = (p.x * this.mat[0] + p.y * this.mat[1]) + this.mat[2],
-        y = (p.x * this.mat[3] + p.y * this.mat[4]) + this.mat[5])
+                   y = (p.x * this.mat[3] + p.y * this.mat[4]) + this.mat[5])

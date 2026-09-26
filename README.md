@@ -26,7 +26,7 @@ of this repository.
 
 ## Testing
 
-`./test.sh` type-checks every module and runs the `display_list` and `raster` tests (the CPU
+`./test.sh` checks the formatting, type-checks every module with warnings as errors and runs the `display_list` and `raster` tests (the CPU
 display-list player is compared with Skia's pixels; the rasterizer with tiny-skia's reference
 images).
 
