@@ -1,5 +1,6 @@
 # C++ name	package	module	Luce name	file:line	kind
 (r09: FT_DivFix.)	luce-browser-render	web_fonts	ft_div_fix	-	addition
+(r09: FT_Get_Char_Index over FreeType's Unicode charmap, Skia's unicharToGlyph.)	luce-browser-render	web_fonts	sfnt_face_ft_glyph_for_code_point	-	addition
 (r09: FT_Load_Glyph with FT_LOAD_NO_HINTING: the unhinted outline of a glyph.)	luce-browser-render	web_fonts	sfnt_face_load_outline	-	addition
 (r09: FT_MulDiv.)	luce-browser-render	web_fonts	ft_mul_div	-	addition
 (r09: FT_MulFix.)	luce-browser-render	web_fonts	ft_mul_fix	-	addition
