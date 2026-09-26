@@ -1,0 +1,87 @@
+#==============================================================================================
+#
+#   cpu_filter - evaluating a gfx.Filter's image filter graph (Skia's SkImageFilters on the CPU)
+#
+#   DESCRIPTION:
+#       New code for DisplayListPlayerCpu (DESIGN.md §7.3). Region r10 builds a gfx.Filter as
+#       the graph of SkImageFilters the donor builds (gfx.ImageFilter nodes, the factory and its
+#       arguments); DisplayListPlayerSkia hands that graph to SkCanvas::saveLayer, whose restore
+#       (or, for a backdrop, whose save) runs SkImageFilter_Base::filterImage over the layer.
+#       This fragment is that evaluation, as Skia m144's raster backend does it (skif::
+#       FilterResult, SkBlurEngine, the image filters of src/effects/imagefilters).
+#
+#       Coordinates: "layer space" is the pixel space of the layer the filter reads and writes
+#       (skif's layer space); parameters (blur sigmas, offsets, radii, image rectangles) are in
+#       parameter space, the local coordinates of the saveLayer, and reach layer space through
+#       the layer matrix (skif::Mapping::layerMatrix()).
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+# mark: Types ==================================================================================
+
+## An integer rectangle [left, right) x [top, bottom) (SkIRect); empty when left >= right or
+## top >= bottom.
+struct CpuIRect:
+    var left: i32
+    var top: i32
+    var right: i32
+    var bottom: i32
+
+## What a filter graph lets the layer matrix be (skif::MatrixCapability).
+enum CpuFilterMatrixCapability as u8:
+    ## Only translation: the whole CTM is applied after filtering.
+    translate = 0
+    ## Scale and translation: skew and rotation are applied after filtering.
+    scale_translate = 1
+    ## Any matrix.
+    complex = 2
+
+## How a source image is sampled outside its pixels (the SkTileMode of its edges).
+enum CpuFilterSourceTile as u8:
+    ## Transparent black outside (SkTileMode::kDecal): a layer's own content.
+    decal = 0
+    ## The edge pixels repeat (SkTileMode::kClamp): a backdrop's prior device content.
+    clamp = 1
+
+## A filter's source or result image: premultiplied RGBA pixels whose pixel (0, 0) is at
+## (left, top) of layer space; transparent black everywhere else. `pixmap` none is a fully
+## transparent image. The pixmap lives in `memory.heap`; its owner releases it.
+struct CpuFilterImage:
+    var pixmap: raster.Pixmap?
+    var left: i32
+    var top: i32
+
+# mark: Evaluation =============================================================================
+
+## SkImageFilter_Base::getCTMCapability of the graph `filter` (none: the identity filter, which
+## is kComplex): the least capable node's.
+pub func cpu_filter_ctm_capability(filter: const gfx.ImageFilter*?) -> CpuFilterMatrixCapability:
+    discard(filter)
+    trap("unported: cpu_filter_ctm_capability")
+
+## SkImageFilter_Base::getInputBounds(mapping, desiredOutput, contentBounds = none): the part of
+## layer space the source image must cover so that `filter` can produce `desired_output`. Empty
+## when the graph does not read its source (a flood, an image, a turbulence).
+pub func cpu_filter_input_bounds(filter: const gfx.ImageFilter*?, layer_matrix: raster.Transform, desired_output: CpuIRect) -> CpuIRect:
+    discard(filter)
+    discard(layer_matrix)
+    discard(desired_output)
+    trap("unported: cpu_filter_input_bounds")
+
+## SkImageFilter_Base::filterImage over `source` (sampled outside its pixels as `source_tile`
+## says) for `desired_output`, followed by SkCanvas's apply_alpha_and_colorfilter for the
+## restore paint: SkColorFilters::Blend(alpha, kDstIn) when `alpha` < 1, then SkLumaColorFilter
+## when `luminance_to_alpha`. The result is resolved to pixels within `desired_output`; the
+## caller releases its pixmap. A `filter` of none is the identity.
+pub func cpu_filter_evaluate(filter: const gfx.ImageFilter*?, layer_matrix: raster.Transform, source: const CpuFilterImage*, source_tile: CpuFilterSourceTile, desired_output: CpuIRect, alpha: f32, luminance_to_alpha: bool) -> CpuFilterImage:
+    discard(filter)
+    discard(layer_matrix)
+    discard(source)
+    discard(source_tile)
+    discard(desired_output)
+    discard(alpha)
+    discard(luminance_to_alpha)
+    trap("unported: cpu_filter_evaluate")

@@ -28,6 +28,7 @@ cpu_blur.lucb
 cpu_color_space.lucb
 cpu_gradient.lucb
 cpu_shapes.lucb
+cpu_filter.lucb
 display_list_player_cpu.lucb
 display_list_player_cpu_2.lucb
 display_list_recorder.lucb
