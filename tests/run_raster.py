@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Build and run the rasterizer's integration tests (tiny-skia's suite, tests/raster).
+"""Build and run the rasterizer's integration tests (tiny-skia's suite and Skia scenes, tests/raster).
 
 Usage: tests/run_raster.py [--no-build] [--backend=c] [test_name ...]
 
 Builds tests/raster/run.lucb into build/run_raster and runs it from the repository root.
-Every test renders with the raster module and compares against tiny-skia's reference image
+Every test renders with the raster module and compares against its Skia m144 reference image
 pixel for pixel; a failure writes the actual image to build/raster-failures/. When the runner
 itself traps, each test is rerun on its own to name the ones that trap.
 """

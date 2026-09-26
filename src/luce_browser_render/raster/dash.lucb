@@ -17,7 +17,7 @@ pub struct StrokeDash:
     var array: Vec[f32]
     var offset: f32
     var interval_len: f32
-    var first_len: f32 # TODO: PositiveF32
+    var first_len: f32  # TODO: PositiveF32
     var first_index: usize
 
     ## Creates a new stroke dashing object (the dash array is copied).
@@ -167,7 +167,7 @@ struct ContourMeasureIter:
     static func new_(path: const Path*, res_scale: f32) -> ContourMeasureIter:
         # can't use tangents, since we need [0..1..................2] to be seen as definitely
         # not a line (it is when drawn, but not parametrically) so we compare midpoints
-        let cheap_dist_limit: f32 = 0.5 # just made this value up
+        let cheap_dist_limit: f32 = 0.5  # just made this value up
         return ContourMeasureIter(iter = path.segments(), tolerance = cheap_dist_limit * invert(res_scale))
 
     # If it encounters a zero-length contour, it is skipped.
@@ -200,7 +200,7 @@ struct ContourMeasureIter:
                     prev_p = p0
                 .quad_to(p0, p1):
                     let prev_d = distance
-                    distance = contour.compute_quad_segs(prev_p, p0, p1, distance, 0, max_t_value, point_index, self.tolerance)
+                    distance = contour.compute_quad_segs(prev_p, p0, p1, distance, 0, max_t_value, point_index, self.tolerance, 0)
 
                     if distance > prev_d:
                         contour.points.push(p0)
@@ -208,9 +208,24 @@ struct ContourMeasureIter:
                         point_index += 2
 
                     prev_p = p1
+                .conic_to(p0, p1, weight):
+                    let prev_d = distance
+                    let conic = Conic.new_(prev_p, p0, p1, weight)
+                    distance = contour.compute_conic_segs(&conic, distance, 0, prev_p, max_t_value, p1, point_index, self.tolerance, 0)
+
+                    if distance > prev_d:
+                        # we store the conic weight in our next point, followed by the last 2
+                        # pts thus to reconstitue a conic, you'd need to say
+                        # Conic(pts[0], pts[2], pts[3], weight = pts[1].x)
+                        contour.points.push(Point.from_xy(weight, 0.0))
+                        contour.points.push(p0)
+                        contour.points.push(p1)
+                        point_index += 3
+
+                    prev_p = p1
                 .cubic_to(p0, p1, p2):
                     let prev_d = distance
-                    distance = contour.compute_cubic_segs(prev_p, p0, p1, p2, distance, 0, max_t_value, point_index, self.tolerance)
+                    distance = contour.compute_cubic_segs(prev_p, p0, p1, p2, distance, 0, max_t_value, point_index, self.tolerance, 0)
 
                     if distance > prev_d:
                         contour.points.push(p0)
@@ -251,10 +266,11 @@ enum SegmentType as u8:
     line = 0
     quad = 1
     cubic = 2
+    conic = 3
 
 struct Segment:
-    var distance: f32      # total distance up to this point
-    var point_index: usize # index into the ContourMeasure::points array
+    var distance: f32  # total distance up to this point
+    var point_index: usize  # index into the ContourMeasure::points array
     var t_value: u32
     var kind: SegmentType
 
@@ -357,15 +373,15 @@ struct ContourMeasure:
 
         return distance
 
-    mutating func compute_quad_segs(p0: Point, p1: Point, p2: Point, distance0: f32, min_t: u32, max_t: u32, point_index: usize, tolerance: f32) -> f32:
+    mutating func compute_quad_segs(p0: Point, p1: Point, p2: Point, distance0: f32, min_t: u32, max_t: u32, point_index: usize, tolerance: f32, depth: i32) -> f32:
         var distance = distance0
-        if t_span_big_enough(max_t - min_t) != 0 and quad_too_curvy(p0, p1, p2, tolerance):
+        if depth < max_recursion_depth and t_span_big_enough(max_t - min_t) != 0 and quad_too_curvy(p0, p1, p2, tolerance):
             var tmp: Point[5] = [Point.zero(), Point.zero(), Point.zero(), Point.zero(), Point.zero()]
             let half_t = (min_t + max_t) >> 1
 
             chop_quad_at([p0, p1, p2], normalized_exclusive_half, tmp)
-            distance = self.compute_quad_segs(tmp[0], tmp[1], tmp[2], distance, min_t, half_t, point_index, tolerance)
-            distance = self.compute_quad_segs(tmp[2], tmp[3], tmp[4], distance, half_t, max_t, point_index, tolerance)
+            distance = self.compute_quad_segs(tmp[0], tmp[1], tmp[2], distance, min_t, half_t, point_index, tolerance, depth + 1)
+            distance = self.compute_quad_segs(tmp[2], tmp[3], tmp[4], distance, half_t, max_t, point_index, tolerance, depth + 1)
         else:
             let d = p0.distance(p2)
             let prev_d = distance
@@ -375,15 +391,34 @@ struct ContourMeasure:
 
         return distance
 
-    mutating func compute_cubic_segs(p0: Point, p1: Point, p2: Point, p3: Point, distance0: f32, min_t: u32, max_t: u32, point_index: usize, tolerance: f32) -> f32:
+    ## compute_conic_segs of SkContourMeasure.cpp: the conic split at t values until each
+    ## piece is flat enough.
+    mutating func compute_conic_segs(conic: const Conic*, distance0: f32, min_t: u32, min_pt: Point, max_t: u32, max_pt: Point, point_index: usize, tolerance: f32, depth: i32) -> f32:
         var distance = distance0
-        if t_span_big_enough(max_t - min_t) != 0 and cubic_too_curvy(p0, p1, p2, p3, tolerance):
+        let half_t = (min_t + max_t) >> 1
+        let half_pt = conic.eval_at((f32)half_t * (1.0 / (f32)max_t_value))
+        if not half_pt.is_finite():
+            return distance
+        if depth < max_recursion_depth and t_span_big_enough(max_t - min_t) != 0 and conic_too_curvy(min_pt, half_pt, max_pt, tolerance):
+            distance = self.compute_conic_segs(conic, distance, min_t, min_pt, half_t, half_pt, point_index, tolerance, depth + 1)
+            distance = self.compute_conic_segs(conic, distance, half_t, half_pt, max_t, max_pt, point_index, tolerance, depth + 1)
+        else:
+            let d = min_pt.distance(max_pt)
+            let prev_d = distance
+            distance += d
+            if distance > prev_d:
+                self.segments.push(Segment(distance = distance, point_index = point_index, t_value = max_t, kind = .conic))
+        return distance
+
+    mutating func compute_cubic_segs(p0: Point, p1: Point, p2: Point, p3: Point, distance0: f32, min_t: u32, max_t: u32, point_index: usize, tolerance: f32, depth: i32) -> f32:
+        var distance = distance0
+        if depth < max_recursion_depth and t_span_big_enough(max_t - min_t) != 0 and cubic_too_curvy(p0, p1, p2, p3, tolerance):
             var tmp: Point[7] = [Point.zero(), Point.zero(), Point.zero(), Point.zero(), Point.zero(), Point.zero(), Point.zero()]
             let half_t = (min_t + max_t) >> 1
 
             chop_cubic_at2([p0, p1, p2, p3], normalized_exclusive_half, tmp)
-            distance = self.compute_cubic_segs(tmp[0], tmp[1], tmp[2], tmp[3], distance, min_t, half_t, point_index, tolerance)
-            distance = self.compute_cubic_segs(tmp[3], tmp[4], tmp[5], tmp[6], distance, half_t, max_t, point_index, tolerance)
+            distance = self.compute_cubic_segs(tmp[0], tmp[1], tmp[2], tmp[3], distance, min_t, half_t, point_index, tolerance, depth + 1)
+            distance = self.compute_cubic_segs(tmp[3], tmp[4], tmp[5], tmp[6], distance, half_t, max_t, point_index, tolerance, depth + 1)
         else:
             let d = p0.distance(p3)
             let prev_d = distance
@@ -392,6 +427,10 @@ struct ContourMeasure:
                 self.segments.push(Segment(distance = distance, point_index = point_index, t_value = max_t, kind = .cubic))
 
         return distance
+
+## SkContourMeasure's kMaxRecursionDepth: puts a cap on the total size of our output, since
+## the client can pass in arbitrarily large values for res_scale.
+let max_recursion_depth: i32 = 8
 
 func find_segment(base: const Segment[], key: f32) -> i32:
     var lo: u32 = 0
@@ -426,6 +465,14 @@ func compute_pos_tan(points: const Point[], seg_kind: SegmentType, t: f32, pos: 
 
             if let tg = tangent:
                 *tg = eval_quad_tangent_at(points, t)
+                discard(tg.normalize())
+        .conic:
+            let conic = Conic.new_(points[0], points[2], points[3], points[1].x)
+            if let p = pos:
+                *p = conic.eval_at(t)
+
+            if let tg = tangent:
+                *tg = conic.eval_tangent_at(t)
                 discard(tg.normalize())
         .cubic:
             if let p = pos:
@@ -470,6 +517,20 @@ func segment_to(points: const Point[], seg_kind: SegmentType, start_t: f32, stop
                     let new_t = normalized_exclusive_new_bounded((stop_t - start_t) / (1.0 - start_t))
                     chop_quad_at(tmp0[2..], new_t, tmp1)
                     pb.quad_to_pt(tmp1[1], tmp1[2])
+        .conic:
+            let conic = Conic.new_(points[0], points[2], points[3], points[1].x)
+            if start_t == 0.0:
+                if stop_t == 1.0:
+                    pb.conic_to(conic.points[1].x, conic.points[1].y, conic.points[2].x, conic.points[2].y, conic.weight)
+                elif let pair = conic.chop_at(stop_t):
+                    pb.conic_to(pair.0.points[1].x, pair.0.points[1].y, pair.0.points[2].x, pair.0.points[2].y, pair.0.weight)
+            else:
+                if stop_t == 1.0:
+                    if let pair = conic.chop_at(start_t):
+                        pb.conic_to(pair.1.points[1].x, pair.1.points[1].y, pair.1.points[2].x, pair.1.points[2].y, pair.1.weight)
+                else:
+                    let part = conic.chop_between(start_t, stop_t)
+                    pb.conic_to(part.points[1].x, part.points[1].y, part.points[2].x, part.points[2].y, part.weight)
         .cubic:
             var tmp0: Point[7] = [Point.zero(), Point.zero(), Point.zero(), Point.zero(), Point.zero(), Point.zero(), Point.zero()]
             var tmp1: Point[7] = [Point.zero(), Point.zero(), Point.zero(), Point.zero(), Point.zero(), Point.zero(), Point.zero()]
@@ -502,6 +563,12 @@ func quad_too_curvy(p0: Point, p1: Point, p2: Point, tolerance: f32) -> bool:
     let dy = half(p1.y) - half(half(p0.y + p2.y))
 
     let dist = fmax(math32.abs(dx), math32.abs(dy))
+    return dist > tolerance
+
+func conic_too_curvy(first_pt: Point, mid_t_pt: Point, last_pt: Point, tolerance: f32) -> bool:
+    let mid_ends_x = (first_pt.x + last_pt.x) * 0.5
+    let mid_ends_y = (first_pt.y + last_pt.y) * 0.5
+    let dist = fmax(math32.abs(mid_t_pt.x - mid_ends_x), math32.abs(mid_t_pt.y - mid_ends_y))
     return dist > tolerance
 
 func cubic_too_curvy(p0: Point, p1: Point, p2: Point, p3: Point, tolerance: f32) -> bool:

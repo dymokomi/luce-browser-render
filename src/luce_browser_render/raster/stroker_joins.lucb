@@ -292,7 +292,7 @@ func quad_in_line(quad: const Point[]) -> bool:
                 pt_max = test_max
 
     let mid = outer1 ^ outer2 ^ 3
-    let curvature_slop: f32 = 0.000005 # this multiplier is pulled out of the air
+    let curvature_slop: f32 = 0.000005  # this multiplier is pulled out of the air
     let line_slop = pt_max * pt_max * curvature_slop
     return pt_to_line(quad[mid], quad[outer1], quad[outer2]) <= line_slop
 
@@ -308,6 +308,18 @@ func pt_to_line(pt: Point, line_start: Point, line_end: Point) -> f32:
         return hit.distance_to_sqd(pt)
     return pt.distance_to_sqd(line_start)
 
+# Returns the distance squared from the point to the line through `line_start` along
+# `tangent` (m144 pt_to_tangent_line).
+func pt_to_tangent_line(pt: Point, line_start: Point, tangent: Point) -> f32:
+    let ab0 = pt.sub(line_start)
+    let numer = tangent.dot(ab0)
+    let denom = tangent.dot(tangent)
+    let t = numer / denom
+    if t >= 0.0 and t <= 1.0:
+        let hit = Point.from_xy(line_start.x + tangent.x * t, line_start.y + tangent.y * t)
+        return hit.distance_to_sqd(pt)
+    return pt.distance_to_sqd(line_start)
+
 # Intersect the line with the quad and return the t values on the quad where the line
 # crosses.
 func intersect_quad_ray(line: const Point[], quad: const Point[], roots: f32[]) -> usize:
@@ -318,8 +330,8 @@ func intersect_quad_ray(line: const Point[], quad: const Point[], roots: f32[]) 
     var a = r[2]
     var b = r[1]
     let c = r[0]
-    a += c - 2.0 * b # A = a - 2*b + c
-    b -= c # B = -(b - c)
+    a += c - 2.0 * b  # A = a - 2*b + c
+    b -= c  # B = -(b - c)
 
     return find_unit_quad_roots(a, 2.0 * b, c, roots)
 
@@ -411,6 +423,6 @@ func cubic_in_line(cubic: const Point[]) -> bool:
                 pt_max = test_max
     let mid1: usize = ((usize)1 + ((usize)2 >> outer2)) >> outer1
     let mid2 = outer1 ^ outer2 ^ mid1
-    let line_slop = pt_max * pt_max * 0.00001 # this multiplier is pulled out of the air
+    let line_slop = pt_max * pt_max * 0.00001  # this multiplier is pulled out of the air
 
     return pt_to_line(cubic[mid1], cubic[outer1], cubic[outer2]) <= line_slop and pt_to_line(cubic[mid2], cubic[outer1], cubic[outer2]) <= line_slop

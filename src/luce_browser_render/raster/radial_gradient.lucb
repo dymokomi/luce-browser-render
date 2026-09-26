@@ -10,8 +10,8 @@
 #==============================================================================================
 
 struct FocalData:
-    var r1: f32      # r1 after mapping focal point to (0, 0)
-    var focal_x: f32 # f
+    var r1: f32  # r1 after mapping focal point to (0, 0)
+    var focal_x: f32  # f
     var is_swapped: bool
 
     mutating func set(r00: f32, r10: f32, matrix: Transform*) -> bool:
@@ -27,7 +27,7 @@ struct FocalData:
             r0 = r1
             r1 = t
 
-            self.focal_x = 0.0 # because r0 is now 0
+            self.focal_x = 0.0  # because r0 is now 0
             self.is_swapped = true
 
         # Map {focal point, (1, 0)} to {(0, 0), (1, 0)}
@@ -39,7 +39,7 @@ struct FocalData:
         let focal_matrix = ts_from_poly_to_poly(from0, from1, to0, to1) else return false
 
         *matrix = matrix.post_concat(focal_matrix)
-        self.r1 = r1 / math32.abs(1.0 - self.focal_x) # focalMatrix has a scale of 1/(1-f).
+        self.r1 = r1 / math32.abs(1.0 - self.focal_x)  # focalMatrix has a scale of 1/(1-f).
 
         # The following transformations are just to accelerate the shader computation by
         # saving some arithmetic operations.
@@ -48,7 +48,7 @@ struct FocalData:
         else:
             *matrix = matrix.post_scale(self.r1 / (self.r1 * self.r1 - 1.0), 1.0 / math32.sqrt(math32.abs(self.r1 * self.r1 - 1.0)))
 
-        *matrix = matrix.post_scale(math32.abs(1.0 - self.focal_x), math32.abs(1.0 - self.focal_x)) # scale |1 - f|
+        *matrix = matrix.post_scale(math32.abs(1.0 - self.focal_x), math32.abs(1.0 - self.focal_x))  # scale |1 - f|
 
         return true
 
@@ -71,6 +71,8 @@ enum GradientType:
 pub struct RadialGradient:
     var base: Gradient
     var gradient_type: GradientType
+    ## Skia's SkRadialGradient (one center, start radius 0) rather than SkConicalGradient.
+    var is_simple: bool
 
     ## Creates a new two-point conical gradient shader. Returns `Shader.solid_color` when
     ## `stops` has a single stop, and none when there are no stops, a radius is negative,
@@ -131,41 +133,42 @@ pub struct RadialGradient:
         let inv = invert(radius)
         let points_to_unit = Transform.from_translate(-center.x, -center.y).post_scale(inv, inv)
 
-        return .radial_gradient(g = RadialGradient(base = Gradient.new_(stops, mode, transform, points_to_unit), gradient_type = .radial(radius1 = 0.0, radius2 = radius)))
+        return .radial_gradient(g = RadialGradient(base = Gradient.new_(stops, mode, transform, points_to_unit), gradient_type = .radial(radius1 = 0.0, radius2 = radius), is_simple = true))
 
+    ## Whether this is Skia's SkRadialGradient (made by new_radial_unchecked: one center, a
+    ## start radius of 0) rather than an SkConicalGradient.
+    func is_simple_radial() -> bool:
+        return self.is_simple
+
+    ## SkRadialGradient's and SkConicalGradient's appendGradientStages around the shared
+    ## ones.
     func push_stages(cs: ColorSpace, p: RasterPipelineBuilder*) -> bool:
         var p0: f32 = 0.0
         var p1: f32 = 0.0
         match self.gradient_type:
-            .radial(radius1, radius2):
-                if radius1 == 0.0:
-                    p0 = 1.0
-                    p1 = 0.0
-                else:
-                    let d_radius = radius2 - radius1
-                    # For concentric gradients: t = t * scale + bias
-                    p0 = fmax(radius1, radius2) / d_radius
-                    p1 = -radius1 / d_radius
             .strip(scaled_r0):
                 p0 = scaled_r0 * scaled_r0
-                p1 = 0.0 # unused
             .focal(fd):
                 p0 = 1.0 / fd.r1
                 p1 = fd.focal_x
+            _:
+                p0 = 0.0
 
         p.ctx.two_point_conical_gradient = TwoPointConicalGradientCtx(mask = [u32[4](0), u32[4](0)], p0 = p0, p1 = p1)
 
         if not self.base.push_stages_pre(p):
             return false
 
-        # push_stages_pre
         match self.gradient_type:
-            .radial(_, _):
+            .radial(radius1, radius2):
                 p.push(.xy_to_radius)
-                # Apply scale/bias to map t from [0, 1] based on r_max to proper t where t=0
-                # at r0 and t=1 at r1
-                if p0 != 1.0 or p1 != 0.0:
-                    p.push(.apply_concentric_scale_bias)
+                if radius1 != 0.0:
+                    # Tiny twist: radial computes a t for [0, r2], but we want a t for
+                    # [r1, r2]: Translate(bias, 0) * Scale(scale, 1).
+                    let d_radius = radius2 - radius1
+                    let scale = fmax(radius1, radius2) / d_radius
+                    let bias = -radius1 / d_radius
+                    p.push_scale_translate_x(scale, bias)
             .strip(_):
                 p.push(.xy_to_2pt_conical_strip)
                 p.push(.mask_2pt_conical_nan)
@@ -193,7 +196,7 @@ pub struct RadialGradient:
 
         self.base.push_stages_body(p, cs)
 
-        # push_stages_post
+        # The post pipeline.
         match self.gradient_type:
             .strip(_):
                 p.push(.apply_vector_mask)
@@ -232,7 +235,7 @@ func create_radial(c0: Point, r0: f32, c1: Point, r1: f32, stops: const Gradient
                 return none
             gradient_type = .focal(fd = fd)
 
-    return .radial_gradient(g = RadialGradient(base = Gradient.new_(copy_stops(stops), mode, transform, gradient_matrix), gradient_type = gradient_type))
+    return .radial_gradient(g = RadialGradient(base = Gradient.new_(copy_stops(stops), mode, transform, gradient_matrix), gradient_type = gradient_type, is_simple = false))
 
 func map_to_unit_x(origin: Point, x_is_one: Point) -> Transform?:
     return ts_from_poly_to_poly(origin, x_is_one, Point.from_xy(0.0, 0.0), Point.from_xy(1.0, 0.0))

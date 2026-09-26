@@ -147,10 +147,11 @@ pub struct Color:
         let na = normalized_new(a) else return none
         return Color(r = nr, g = ng, b = nb, a = na)
 
-    ## Creates a new color from 4 components. u8 will be divided by 255 to get a float
-    ## component.
+    ## Creates a new color from 4 components: each u8 times 1/255 as an f32, as Skia's
+    ## SkColor4f::FromColor (SkColors reach Skia's pipeline this way).
     pub static func from_rgba8(r: u8, g: u8, b: u8, a: u8) -> Color:
-        return Color(r = (f32)r / 255.0, g = (f32)g / 255.0, b = (f32)b / 255.0, a = (f32)a / 255.0)
+        let scale = f32.bits(0x3B808081)  # 1.0f / 255: Skia's Sk4f_fromL32 multiplies by it
+        return Color(r = (f32)r * scale, g = (f32)g * scale, b = (f32)b * scale, a = (f32)a * scale)
 
     ## Returns color's red component. The value is guarantee to be in a 0..=1 range.
     pub func red() -> f32:
@@ -284,7 +285,6 @@ func colorspace_expand_color(cs: ColorSpace, color0: Color) -> Color:
     color.b = colorspace_expand_channel(cs, color.b)
     return color
 
-
 func colorspace_expand_stage(cs: ColorSpace) -> Stage?:
     match cs:
         .linear: return none
@@ -388,19 +388,19 @@ func blend_mode_should_pre_scale_coverage(mode: BlendMode) -> bool:
     #
     # This function is a finer-grained breakdown of SkBlendMode_SupportsCoverageAsAlpha().
     match mode:
-        .destination: return true      # d              --> no sa term, ok!
-        .destination_over: return true # d + s*inv(da)  --> no sa term, ok!
-        .plus: return true             # clamp(s+d)     --> no sa term, ok!
+        .destination: return true  # d              --> no sa term, ok!
+        .destination_over: return true  # d + s*inv(da)  --> no sa term, ok!
+        .plus: return true  # clamp(s+d)     --> no sa term, ok!
         .destination_out: return true  # d * inv(sa)
-        .source_atop: return true      # s*da + d*inv(sa)
-        .source_over: return true      # s + d*inv(sa)
-        .xor: return true              # s*inv(da) + d*inv(sa)
+        .source_atop: return true  # s*da + d*inv(sa)
+        .source_over: return true  # s + d*inv(sa)
+        .xor: return true  # s*inv(da) + d*inv(sa)
         _: return false
 
 func blend_mode_to_stage(mode: BlendMode) -> Stage?:
     match mode:
         .clear: return Stage.clear
-        .source: return none # This stage is a no-op.
+        .source: return none  # This stage is a no-op.
         .destination: return Stage.move_destination_to_source
         .source_over: return Stage.source_over
         .destination_over: return Stage.destination_over

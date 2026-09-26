@@ -1,0 +1,321 @@
+#==============================================================================================
+#
+#   scan_aaa_walk - the edge walks of the analytic anti-aliasing scan converter
+#
+#   DESCRIPTION:
+#       Port of aaa_walk_convex_edges and aaa_walk_edges of Skia m144
+#       src/core/SkScan_AAAPath.cpp. The convex walk keeps one left and one right edge and
+#       blits rectangles directly when both are vertical; the general walk advances over
+#       non-uniform scan lines (integer y, edge ends, intersections), computes the winding
+#       of every interval and blits each covered trapezoid row.
+#
+#       Copyright (c) 2016 The Android Open Source Project
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+# mark: aaa_walk_convex_edges =================================================================
+
+func aaa_walk_convex_edges(edges: AnalyticEdge[], prev_head: u32, blitter: AdditiveBlitter*, start_y: i32, stop_y: i32, left_bound: i32, rite_bound: i32, is_using_mask: bool):
+    var left_e = edges[prev_head].next
+    var rite_e = edges[left_e].next
+    var curr_e = edges[rite_e].next
+
+    var y = edges[left_e].upper_y if edges[left_e].upper_y > edges[rite_e].upper_y else edges[rite_e].upper_y
+
+    while true:
+        # We have to check lower_y first because some edges might be alone (e.g., there's
+        # only a left edge but no right edge in a given y scan line) due to precision limit.
+        while edges[left_e].lower_y <= y:  # Due to smooth jump, we may pass multiple short edges
+            if not edges[left_e].update(y):
+                if fixed_floor_to_int(edges[curr_e].upper_y) >= stop_y:
+                    return
+                left_e = curr_e
+                curr_e = edges[curr_e].next
+        while edges[rite_e].lower_y <= y:  # Due to smooth jump, we may pass multiple short edges
+            if not edges[rite_e].update(y):
+                if fixed_floor_to_int(edges[curr_e].upper_y) >= stop_y:
+                    return
+                rite_e = curr_e
+                curr_e = edges[curr_e].next
+
+        # check our bottom clip
+        if fixed_floor_to_int(y) >= stop_y:
+            break
+
+        edges[left_e].go_y(y)
+        edges[rite_e].go_y(y)
+
+        if edges[left_e].x > edges[rite_e].x or (edges[left_e].x == edges[rite_e].x and edges[left_e].dx > edges[rite_e].dx):
+            let t = left_e
+            left_e = rite_e
+            rite_e = t
+
+        var local_bot_fixed = edges[left_e].lower_y if edges[left_e].lower_y < edges[rite_e].lower_y else edges[rite_e].lower_y
+        if is_smooth_enough(edges, left_e, rite_e, curr_e, stop_y):
+            local_bot_fixed = fixed_ceil_to_fixed(local_bot_fixed)
+        if local_bot_fixed > int_to_fixed(stop_y):
+            local_bot_fixed = int_to_fixed(stop_y)
+
+        var left = left_bound if left_bound > edges[left_e].x else edges[left_e].x
+        let d_left = edges[left_e].dx
+        var rite = rite_bound if rite_bound < edges[rite_e].x else edges[rite_e].x
+        let d_rite = edges[rite_e].dx
+        if (d_left | d_rite) == 0:
+            let full_left = fixed_ceil_to_int(left)
+            let full_rite = fixed_floor_to_int(rite)
+            let partial_left = int_to_fixed(full_left) - left
+            let partial_rite = rite - int_to_fixed(full_rite)
+            let full_top = fixed_ceil_to_int(y)
+            let full_bot = fixed_floor_to_int(local_bot_fixed)
+            var partial_top = int_to_fixed(full_top) - y
+            var partial_bot = local_bot_fixed - int_to_fixed(full_bot)
+            if full_top > full_bot:  # The rectangle is within one pixel height...
+                partial_top -= (fixed_one - partial_bot)
+                partial_bot = 0
+
+            if full_rite >= full_left:
+                if partial_top > 0:  # blit first partial row
+                    if partial_left > 0:
+                        blitter.blit_anti_h1(full_left - 1, full_top - 1, fixed_to_alpha(fixed_mul(partial_top, partial_left)))
+                    blitter.blit_anti_hw(full_left, full_top - 1, full_rite - full_left, fixed_to_alpha(partial_top))
+                    if partial_rite > 0:
+                        blitter.blit_anti_h1(full_rite, full_top - 1, fixed_to_alpha(fixed_mul(partial_top, partial_rite)))
+                    blitter.flush_if_y_changed(y, y + partial_top)
+
+                # Blit all full-height rows from full_top to full_bot
+                if full_bot > full_top and (full_rite > full_left or fixed_to_alpha(partial_left) > 0 or fixed_to_alpha(partial_rite) > 0):
+                    # SkAAClip cannot handle the empty rect so check the non-emptiness here
+                    # (bug chromium:662800)
+                    blitter.real_blit_anti_rect(full_left - 1, full_top, full_rite - full_left, full_bot - full_top, fixed_to_alpha(partial_left), fixed_to_alpha(partial_rite))
+
+                if partial_bot > 0:  # blit last partial row
+                    if partial_left > 0:
+                        blitter.blit_anti_h1(full_left - 1, full_bot, fixed_to_alpha(fixed_mul(partial_bot, partial_left)))
+                    blitter.blit_anti_hw(full_left, full_bot, full_rite - full_left, fixed_to_alpha(partial_bot))
+                    if partial_rite > 0:
+                        blitter.blit_anti_h1(full_rite, full_bot, fixed_to_alpha(fixed_mul(partial_bot, partial_rite)))
+            else:
+                # Normal conditions, this means left and rite are within the same pixel, but
+                # if both left and rite were < leftBounds or > rightBounds, both edges are
+                # clipped and we should not do any blitting (particularly since the negative
+                # width saturates to full alpha).
+                let width = rite - left
+                if width > 0:
+                    if partial_top > 0:
+                        blitter.blit_anti_hw(full_left - 1, full_top - 1, 1, fixed_to_alpha(fixed_mul(partial_top, width)))
+                        blitter.flush_if_y_changed(y, y + partial_top)
+                    if full_bot > full_top:
+                        blitter.real_blit_v(full_left - 1, full_top, full_bot - full_top, fixed_to_alpha(width))
+                    if partial_bot > 0:
+                        blitter.blit_anti_hw(full_left - 1, full_bot, 1, fixed_to_alpha(fixed_mul(partial_bot, width)))
+
+            y = local_bot_fixed
+        else:
+            # The following constant are used to snap X. We snap X mainly for speedup (no
+            # tiny triangle) and avoiding edge cases caused by precision errors
+            let snap_digit = fixed_one >> 4
+            let snap_half = snap_digit >> 1
+            let snap_mask = -1 ^ (snap_digit - 1)
+            left += snap_half
+            rite += snap_half  # For fast rounding
+
+            # Number of blit_trapezoid_row calls we'll have
+            var count = fixed_ceil_to_int(local_bot_fixed) - fixed_floor_to_int(y)
+
+            # If we're using mask blitter, we advance the mask row in this function to save
+            # some "if" condition checks.
+            var mask_row: i32? = none
+            if is_using_mask:
+                mask_row = blitter.get_row(y >> 16)
+
+            # Instead of writing one loop that handles both partial-row blit_trapezoid_row
+            # and full-row trapezoid_row together, we use the following 3-stage flow to
+            # handle partial-row blit and full-row blit separately. It will save us much time
+            # on changing y, left, and rite.
+            if count > 1:
+                if (y & (i32)0xFFFF0000) != y:  # There's a partial-row on the top
+                    count -= 1
+                    let next_y = fixed_ceil_to_fixed(y + 1)
+                    let dy = next_y - y
+                    let next_left = left + fixed_mul(d_left, dy)
+                    let next_rite = rite + fixed_mul(d_rite, dy)
+                    blit_trapezoid_row(blitter, y >> 16, left & snap_mask, rite & snap_mask, next_left & snap_mask, next_rite & snap_mask, edges[left_e].dy, edges[rite_e].dy, get_partial_alpha(0xFF, dy), mask_row, false)
+                    blitter.flush_if_y_changed(y, next_y)
+                    left = next_left
+                    rite = next_rite
+                    y = next_y
+
+                while count > 1:  # Full rows in the middle
+                    count -= 1
+                    if is_using_mask:
+                        mask_row = blitter.get_row(y >> 16)
+                    let next_y = y + fixed_one
+                    let next_left = left + d_left
+                    let next_rite = rite + d_rite
+                    blit_trapezoid_row(blitter, y >> 16, left & snap_mask, rite & snap_mask, next_left & snap_mask, next_rite & snap_mask, edges[left_e].dy, edges[rite_e].dy, 0xFF, mask_row, false)
+                    blitter.flush_if_y_changed(y, next_y)
+                    left = next_left
+                    rite = next_rite
+                    y = next_y
+
+            if is_using_mask:
+                mask_row = blitter.get_row(y >> 16)
+
+            let dy = local_bot_fixed - y  # partial-row on the bottom
+            # Smooth jumping to integer y may make the last next_left/next_rite out of bound.
+            # Take them back into the bound here. Note that we substract snap_half later so we
+            # have to add them to left_bound/rite_bound
+            var next_left = left + fixed_mul(d_left, dy)
+            if next_left < left_bound + snap_half:
+                next_left = left_bound + snap_half
+            var next_rite = rite + fixed_mul(d_rite, dy)
+            if next_rite > rite_bound + snap_half:
+                next_rite = rite_bound + snap_half
+            blit_trapezoid_row(blitter, y >> 16, left & snap_mask, rite & snap_mask, next_left & snap_mask, next_rite & snap_mask, edges[left_e].dy, edges[rite_e].dy, get_partial_alpha(0xFF, dy), mask_row, false)
+            blitter.flush_if_y_changed(y, local_bot_fixed)
+            left = next_left
+            rite = next_rite
+            y = local_bot_fixed
+            left -= snap_half
+            rite -= snap_half
+
+        edges[left_e].x = left
+        edges[rite_e].x = rite
+        edges[left_e].y = y
+        edges[rite_e].y = y
+
+# mark: aaa_walk_edges ========================================================================
+
+func aaa_walk_edges(edges: AnalyticEdge[], prev_head: u32, next_tail: u32, fill_rule: FillRule, is_inverse: bool, blitter: AdditiveBlitter*, start_y0: i32, stop_y: i32, left_clip: i32, right_clip: i32, is_using_mask: bool, force_rle: bool, skip_intersect: bool):
+    var start_y = start_y0
+    edges[prev_head].x = left_clip
+    edges[prev_head].upper_x = left_clip
+    edges[next_tail].x = right_clip
+    edges[next_tail].upper_x = right_clip
+    let first_upper = edges[edges[prev_head].next].upper_y
+    var y = first_upper if first_upper > int_to_fixed(start_y) else int_to_fixed(start_y)
+    var next_next_y = fixed_max
+
+    var edge = edges[prev_head].next
+    while edges[edge].upper_y <= y:
+        edges[edge].go_y(y)
+        update_next_next_y(edges[edge].lower_y, y, &next_next_y)
+        edge = edges[edge].next
+    update_next_next_y(edges[edge].upper_y, y, &next_next_y)
+
+    let winding_mask: i32 = 1 if fill_rule == .even_odd else -1
+
+    if is_inverse and int_to_fixed(start_y) != y:
+        let width = fixed_floor_to_int(right_clip - left_clip)
+        if fixed_floor_to_int(y) != start_y:
+            blitter.real_blit_rect(fixed_floor_to_int(left_clip), start_y, width, fixed_floor_to_int(y) - start_y)
+            start_y = fixed_floor_to_int(y)
+        var mask_row: i32? = none
+        if is_using_mask:
+            mask_row = blitter.get_row(start_y)
+        blit_full_alpha(blitter, start_y, fixed_floor_to_int(left_clip), width, fixed_to_alpha(y - int_to_fixed(start_y)), mask_row, false)
+
+    while true:
+        var w: i32 = 0
+        var in_interval = is_inverse
+        var prev_x = edges[prev_head].x
+        let ceil_y = fixed_ceil_to_fixed(y + 1)
+        var next_y = next_next_y if next_next_y < ceil_y else ceil_y
+        var curr_e = edges[prev_head].next
+        var left_e = prev_head
+        var left = left_clip
+        var left_dy: i32 = 0
+        var prev_rite = fixed_floor_to_int(left_clip)
+
+        next_next_y = fixed_max
+
+        var y_shift: i32 = 0
+        if ((next_y - y) & (fixed_one >> 2)) != 0:
+            y_shift = 2
+            next_y = y + (fixed_one >> 2)
+        elif ((next_y - y) & (fixed_one >> 1)) != 0:
+            y_shift = 1
+
+        let full_alpha = fixed_to_alpha(next_y - y)
+
+        # If we're using mask blitter, we advance the mask row in this function to save
+        # some "if" condition checks.
+        var mask_row: i32? = none
+        if is_using_mask:
+            mask_row = blitter.get_row(fixed_floor_to_int(y))
+
+        # Even if next - y == SK_Fixed1, we can still break the left-to-right order
+        # requirement of the SKAAClip: |\| (two trapezoids with overlapping middle wedges)
+        let no_real_blitter = force_rle  # force_rle && (next_y - y != SK_Fixed1)
+
+        while edges[curr_e].upper_y <= y:
+            w += edges[curr_e].winding
+            let prev_in_interval = in_interval
+            in_interval = ((w & winding_mask) == 0) == is_inverse
+
+            let is_left = in_interval and not prev_in_interval
+            let is_rite = not in_interval and prev_in_interval
+
+            if is_rite:
+                var rite = edges[curr_e].x
+                edges[curr_e].go_y_shift(next_y, y_shift)
+                let next_left = left_clip if left_clip > edges[left_e].x else edges[left_e].x
+                rite = right_clip if right_clip < rite else rite
+                let next_rite = right_clip if right_clip < edges[curr_e].x else edges[curr_e].x
+                let too_close = full_alpha == 0xFF and (edges_too_close_rite(prev_rite, left, edges[left_e].x) or edges_too_close(edges, curr_e, edges[curr_e].next, next_y))
+                blit_trapezoid_row(blitter, y >> 16, left, rite, next_left, next_rite, left_dy, edges[curr_e].dy, full_alpha, mask_row, no_real_blitter or too_close)
+                let rmax = rite if rite > edges[curr_e].x else edges[curr_e].x
+                prev_rite = fixed_ceil_to_int(rmax)
+            else:
+                if is_left:
+                    left = edges[curr_e].x if edges[curr_e].x > left_clip else left_clip
+                    left_dy = edges[curr_e].dy
+                    left_e = curr_e
+                edges[curr_e].go_y_shift(next_y, y_shift)
+
+            let next = edges[curr_e].next
+
+            while edges[curr_e].lower_y <= next_y:
+                if edges[curr_e].curve_count < 0:
+                    edges[curr_e].keep_continuous_cubic()
+                    if not edges[curr_e].update_cubic():
+                        break
+                elif edges[curr_e].curve_count > 0:
+                    edges[curr_e].keep_continuous_quad()
+                    if not edges[curr_e].update_quadratic():
+                        break
+                else:
+                    break
+
+            if edges[curr_e].lower_y <= next_y:
+                aaa_remove_edge(edges, curr_e)
+            else:
+                update_next_next_y(edges[curr_e].lower_y, next_y, &next_next_y)
+                let new_x = edges[curr_e].x
+                if new_x < prev_x:
+                    # ripple curr_e backwards until it is x-sorted
+                    aaa_backward_insert_edge_based_on_x(edges, curr_e)
+                else:
+                    prev_x = new_x
+                if not skip_intersect:
+                    check_intersection(edges, curr_e, next_y, &next_next_y)
+
+            curr_e = next
+
+        # was our right-edge culled away?
+        if in_interval:
+            let next_left = left_clip if left_clip > edges[left_e].x else edges[left_e].x
+            let too_close = full_alpha == 0xFF and edges_too_close(edges, edges[left_e].prev, left_e, next_y)
+            blit_trapezoid_row(blitter, y >> 16, left, right_clip, next_left, right_clip, left_dy, 0, full_alpha, mask_row, no_real_blitter or too_close)
+
+        if force_rle:
+            blitter.flush_if_y_changed(y, next_y)
+
+        y = next_y
+        if y >= int_to_fixed(stop_y):
+            break
+
+        # now curr_e points to the first edge with a upper_y larger than the previous y
+        aaa_insert_new_edges(edges, curr_e, y, &next_next_y)

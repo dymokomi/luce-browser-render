@@ -1,12 +1,11 @@
 #==============================================================================================
 #
-#   alpha_runs - run-length coverage rows, and the Blitter interface
+#   alpha_runs - run-length coverage rows
 #
 #   DESCRIPTION:
 #       Port of tiny-skia alpha_runs.rs (AlphaRuns: the sparse run-length encoded alpha of
-#       one scanline, filled by the supersampling scan converter) and blitter.rs (the
-#       Blitter trait and its Mask). An `AlphaRun` is Rust's `Option<NonZeroU16>`: a u16
-#       where 0 is None.
+#       one scanline, filled by the scan converters). An `AlphaRun` is Rust's
+#       `Option<NonZeroU16>`: a u16 where 0 is None.
 #
 #==============================================================================================
 
@@ -105,7 +104,7 @@ struct AlphaRuns:
         if stop_alpha != 0:
             AlphaRuns.break_run(self.runs[runs_offset..], self.alpha[alpha_offset..], x, 1)
             alpha_offset += x
-            self.alpha[alpha_offset] += stop_alpha
+            self.alpha[alpha_offset] +%= stop_alpha
             last_alpha_offset = alpha_offset
 
         # new offset_x
@@ -169,51 +168,13 @@ struct AlphaRuns:
             let n_usize = (usize)n
             let n_i32 = (i32)n
             if x < n_i32:
+                # Skia's runs[0] and runs[x], relative to the current run (tiny-skia indexes
+                # from the start of the buffer here).
                 alpha[alpha_i + (usize)x] = alpha[alpha_i]
-                runs[0] = (u16)x
-                runs[(usize)x] = (u16)(n_i32 - x)
+                runs[run_i] = (u16)x
+                runs[run_i + (usize)x] = (u16)(n_i32 - x)
                 break
 
             run_i += n_usize
             alpha_i += n_usize
             x -= n_i32
-
-# mark: Blitter ===============================================================================
-
-## A two-pixel alpha mask handed to `Blitter.blit_mask` (tiny-skia's blitter::Mask).
-struct BlitMask:
-    var image: u8[2]
-    var bounds: ScreenIntRect
-    var row_bytes: u32
-
-## Blitter is responsible for actually writing pixels into memory. Besides efficiency, they
-## handle clipping and antialiasing. An object that implements Blitter contains all the
-## context needed to generate pixels for the destination and how src/generated pixels map to
-## the destination. The coordinates passed to the `blit_*` calls are in destination pixel
-## space. Every method of Rust's trait defaults to `unreachable!()`; implementations here
-## trap in the methods they do not support.
-interface Blitter:
-    ## Blits a horizontal run of one or more pixels (width > 0).
-    mutating func blit_h(x: u32, y: u32, width: u32)
-
-    ## Blits a horizontal run of antialiased pixels.
-    ##
-    ## runs[] is a *sparse* zero-terminated run-length encoding of spans of constant alpha
-    ## values. The runs[] and antialias[] work together to represent long runs of pixels
-    ## with the same alphas. The runs[] contains the number of pixels with the same alpha,
-    ## and antialias[] contain the coverage value for that number of pixels. The runs[] (and
-    ## antialias[]) are *sparse*: the runs[] may have entries of 0 between runs.
-    mutating func blit_anti_h(x: u32, y: u32, antialias: AlphaU8[], runs: AlphaRun[])
-
-    ## Blits a vertical run of pixels with a constant alpha value (height > 0).
-    mutating func blit_v(x: u32, y: u32, height: u32, alpha: AlphaU8)
-
-    mutating func blit_anti_h2(x: u32, y: u32, alpha0: AlphaU8, alpha1: AlphaU8)
-
-    mutating func blit_anti_v2(x: u32, y: u32, alpha0: AlphaU8, alpha1: AlphaU8)
-
-    ## Blits a solid rectangle one or more pixels wide.
-    mutating func blit_rect(rect: ScreenIntRect)
-
-    ## Blits a pattern of pixels defined by a rectangle-clipped mask.
-    mutating func blit_mask(mask: const BlitMask*, clip: ScreenIntRect)

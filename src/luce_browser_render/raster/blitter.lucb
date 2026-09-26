@@ -1,0 +1,343 @@
+#==============================================================================================
+#
+#   blitter - the Blitter interface, Skia's default blits and the rectangle clip blitter
+#
+#   DESCRIPTION:
+#       Port of Skia m144 src/core/SkBlitter.h/.cpp: the SkBlitter virtuals (the Blitter
+#       interface), the default implementations SkBlitter gives them (blitter_default_*,
+#       which implementations call where Skia's subclasses inherit the default),
+#       blitFatAntiRect, SkRectClipBlitter and SkNullBlitter. IRect is Skia's SkIRect
+#       (signed, possibly empty), used where Skia's scan converters work with one. BlitMask
+#       is SkMask in its kA8 format, the only one the rasterizer produces.
+#
+#       Copyright (c) 2006 The Android Open Source Project
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+# mark: IRect =================================================================================
+
+## Skia's SkIRect: an integer rectangle (left, top, right, bottom) that may be empty.
+struct IRect:
+    var left: i32
+    var top: i32
+    var right: i32
+    var bottom: i32
+
+    static func ltrb(left: i32, top: i32, right: i32, bottom: i32) -> IRect:
+        return IRect(left = left, top = top, right = right, bottom = bottom)
+
+    static func xywh(x: i32, y: i32, width: i32, height: i32) -> IRect:
+        return IRect(left = x, top = y, right = x + width, bottom = y + height)
+
+    static func from_screen(r: ScreenIntRect) -> IRect:
+        return IRect.ltrb((i32)r.left(), (i32)r.top(), (i32)r.right(), (i32)r.bottom())
+
+    func width() -> i32:
+        return self.right - self.left
+
+    func height() -> i32:
+        return self.bottom - self.top
+
+    ## SkIRect::isEmpty (with Skia's 64-bit width/height check).
+    func is_empty() -> bool:
+        let w = (i64)self.right - (i64)self.left
+        let h = (i64)self.bottom - (i64)self.top
+        if w <= 0 or h <= 0:
+            return true
+        return w > (i64)i32_max or h > (i64)i32_max
+
+    ## SkIRect::contains(SkIRect): `r` is inside (an empty `r` is never contained).
+    func contains(r: IRect) -> bool:
+        return not r.is_empty() and not self.is_empty() and self.left <= r.left and self.top <= r.top and self.right >= r.right and self.bottom >= r.bottom
+
+    ## SkIRect::intersect: the intersection, or none when it is empty.
+    func intersect(r: IRect) -> IRect?:
+        let l = self.left if self.left > r.left else r.left
+        let t = self.top if self.top > r.top else r.top
+        let rr = self.right if self.right < r.right else r.right
+        let b = self.bottom if self.bottom < r.bottom else r.bottom
+        let result = IRect.ltrb(l, t, rr, b)
+        if result.is_empty():
+            return none
+        return result
+
+    ## SkIRect::Intersects.
+    func intersects(r: IRect) -> bool:
+        return self.intersect(r) != none
+
+    ## The rectangle as a ScreenIntRect (it must be non-empty and non-negative).
+    func to_screen() -> ScreenIntRect:
+        return ScreenIntRect.from_xywh_safe((u32)self.left, (u32)self.top, (u32)self.width(), (u32)self.height())
+
+    ## SkRect::Make(SkIRect).
+    func to_rect() -> Rect:
+        return Rect.from_ltrb((f32)self.left, (f32)self.top, (f32)self.right, (f32)self.bottom) else trap("raster: invalid rect")
+
+## SkRect::roundOut: floor the left/top, ceil the right/bottom (saturating).
+func irect_round_out(r: Rect) -> IRect:
+    return IRect.ltrb(saturate_floor(r.left()), saturate_floor(r.top()), saturate_ceil(r.right()), saturate_ceil(r.bottom()))
+
+## SkRect::round: round every side (SkScalarRoundToInt: floor(x + 0.5), saturating).
+func irect_round(r: Rect) -> IRect:
+    return IRect.ltrb(scalar_round_to_int(r.left()), scalar_round_to_int(r.top()), scalar_round_to_int(r.right()), scalar_round_to_int(r.bottom()))
+
+## SkScalarRoundToInt.
+func scalar_round_to_int(x: f32) -> i32:
+    return saturate_from(math32.floor(x + 0.5))
+
+# mark: Blitter ===============================================================================
+
+## An 8-bit coverage mask handed to `Blitter.blit_mask`: Skia's SkMask in kA8 format. The
+## coverage of pixel (x, y) is `image[(y - bounds.top) * row_bytes + (x - bounds.left)]`;
+## a `row_bytes` of 0 repeats the first row.
+struct BlitMask:
+    var image: const u8[]
+    var bounds: IRect
+    var row_bytes: u32
+
+    ## The index of pixel (x, y) in `image`.
+    func index(x: i32, y: i32) -> usize:
+        return (usize)(y - self.bounds.top) * (usize)self.row_bytes + (usize)(x - self.bounds.left)
+
+## Blitter is responsible for actually writing pixels into memory. Besides efficiency, they
+## handle clipping and antialiasing. An object that implements Blitter contains all the
+## context needed to generate pixels for the destination and how src/generated pixels map to
+## the destination. The coordinates passed to the `blit_*` calls are in destination pixel
+## space; as in Skia they are signed (a clipping blitter may be handed pixels just outside
+## its clip). SkBlitter's methods with a default implementation are free functions here
+## (`blitter_default_*`) that an implementation calls where Skia's subclass inherits them.
+interface Blitter:
+    ## Blits a horizontal run of one or more pixels (width > 0).
+    mutating func blit_h(x: i32, y: i32, width: i32)
+
+    ## Blits a horizontal run of antialiased pixels.
+    ##
+    ## runs[] is a *sparse* zero-terminated run-length encoding of spans of constant alpha
+    ## values. The runs[] and antialias[] work together to represent long runs of pixels
+    ## with the same alphas. The runs[] contains the number of pixels with the same alpha,
+    ## and antialias[] contain the coverage value for that number of pixels. The runs[] (and
+    ## antialias[]) are *sparse*: the runs[] may have entries of 0 between runs. A clipping
+    ## blitter may modify both arrays.
+    mutating func blit_anti_h(x: i32, y: i32, antialias: AlphaU8[], runs: AlphaRun[])
+
+    ## Blits a vertical run of pixels with a constant alpha value (height > 0).
+    mutating func blit_v(x: i32, y: i32, height: i32, alpha: AlphaU8)
+
+    ## Blits a solid rectangle one or more pixels wide.
+    mutating func blit_rect(x: i32, y: i32, width: i32, height: i32)
+
+    ## Blits a rectangle with one alpha-blended column on the left (at `x`, which may be -1
+    ## when `left_alpha` is 0), `width` (zero or more) opaque pixels, and one alpha-blended
+    ## column on the right.
+    mutating func blit_anti_rect(x: i32, y: i32, width: i32, height: i32, left_alpha: AlphaU8, right_alpha: AlphaU8)
+
+    ## Blits a pattern of pixels defined by a rectangle-clipped mask.
+    mutating func blit_mask(mask: const BlitMask*, clip: IRect)
+
+    ## Blits (x, y) and (x + 1, y).
+    mutating func blit_anti_h2(x: i32, y: i32, alpha0: AlphaU8, alpha1: AlphaU8)
+
+    ## Blits (x, y) and (x, y + 1).
+    mutating func blit_anti_v2(x: i32, y: i32, alpha0: AlphaU8, alpha1: AlphaU8)
+
+# mark: SkBlitter's default implementations ===================================================
+
+## SkBlitter::blitAntiRect. Default implementation doesn't check for easy optimizations such
+## as alpha == 255; also uses blitV(), which some subclasses may not support.
+func blitter_default_blit_anti_rect(blitter: Blitter, x0: i32, y: i32, width: i32, height: i32, left_alpha: AlphaU8, right_alpha: AlphaU8):
+    var b = blitter
+    var x = x0
+    if left_alpha > 0:  # we may send in x = -1 with left_alpha = 0
+        b.blit_v(x, y, height, left_alpha)
+    x += 1
+    if width > 0:
+        b.blit_rect(x, y, width, height)
+        x += width
+    if right_alpha > 0:
+        b.blit_v(x, y, height, right_alpha)
+
+## SkBlitter::blitAntiH2.
+func blitter_default_blit_anti_h2(blitter: Blitter, x: i32, y: i32, alpha0: AlphaU8, alpha1: AlphaU8):
+    var b = blitter
+    var runs: AlphaRun[3] = [1, 1, 0]
+    var aa: u8[2] = [alpha0, alpha1]
+    b.blit_anti_h(x, y, aa, runs)
+
+## SkBlitter::blitAntiV2.
+func blitter_default_blit_anti_v2(blitter: Blitter, x: i32, y: i32, alpha0: AlphaU8, alpha1: AlphaU8):
+    var b = blitter
+    var runs: AlphaRun[2] = [1, 0]
+    var aa: u8[1] = [alpha0]
+    b.blit_anti_h(x, y, aa, runs)
+    # reset in case the clipping blitter modified runs
+    runs = [1, 0]
+    aa[0] = alpha1
+    b.blit_anti_h(x, y + 1, aa, runs)
+
+func scalar_to_alpha(a: f32) -> AlphaU8:
+    let alpha = (u8)(a * 255.0)
+    if alpha > 247:
+        return 0xFF
+    if alpha < 8:
+        return 0
+    return alpha
+
+## SkBlitter::blitFatAntiRect: blits a rect in AA with size at least 3 x 3.
+func blit_fat_anti_rect(blitter: Blitter, rect: Rect):
+    var b = blitter
+    let bounds = irect_round_out(rect)
+    # To ensure consistency of the threaded backend (a rect that's considered fat in the
+    # init-once phase must also be considered fat in the draw phase), we have to deal with
+    # rects with small heights because the horizontal tiling in the threaded backend may
+    # change the height.
+    if bounds.height() == 0:
+        return
+
+    let w = (usize)bounds.width()
+    let runs = (alloc AlphaRun[w + 1] in memory.heap) else trap("raster: out of memory")
+    defer free(runs) in memory.heap
+    let alphas = (alloc u8[w + 1] in memory.heap) else trap("raster: out of memory")
+    defer free(alphas) in memory.heap
+
+    let partial_l = (f32)(bounds.left + 1) - rect.left()
+    let partial_r = rect.right() - (f32)(bounds.right - 1)
+    var partial_t = (f32)(bounds.top + 1) - rect.top()
+    let partial_b = rect.bottom() - (f32)(bounds.bottom - 1)
+
+    if bounds.height() == 1:
+        partial_t = rect.bottom() - rect.top()
+
+    runs[0] = 1
+    runs[1] = (u16)(w - 2)
+    runs[w - 1] = 1
+    runs[w] = 0
+    alphas[0] = scalar_to_alpha(partial_l * partial_t)
+    alphas[1] = scalar_to_alpha(partial_t)
+    alphas[w - 1] = scalar_to_alpha(partial_r * partial_t)
+    b.blit_anti_h(bounds.left, bounds.top, alphas, runs)
+
+    if bounds.height() > 2:
+        b.blit_anti_rect(bounds.left, bounds.top + 1, (i32)w - 2, bounds.height() - 2, scalar_to_alpha(partial_l), scalar_to_alpha(partial_r))
+
+    if bounds.height() > 1:
+        runs[0] = 1
+        runs[1] = (u16)(w - 2)
+        runs[w - 1] = 1
+        runs[w] = 0
+        alphas[0] = scalar_to_alpha(partial_l * partial_b)
+        alphas[1] = scalar_to_alpha(partial_b)
+        alphas[w - 1] = scalar_to_alpha(partial_r * partial_b)
+        b.blit_anti_h(bounds.left, bounds.bottom - 1, alphas, runs)
+
+# mark: SkRectClipBlitter =====================================================================
+
+## Clips every blit to a rectangle before handing it to the wrapped blitter.
+struct RectClipBlitter: Blitter:
+    var blitter: Blitter
+    var clip: IRect
+
+    pub mutating func blit_h(left0: i32, y: i32, width0: i32):
+        if not y_in_rect(y, self.clip):
+            return
+        var left = left0
+        var right = left0 + width0
+        if left < self.clip.left:
+            left = self.clip.left
+        if right > self.clip.right:
+            right = self.clip.right
+        let width = right - left
+        if width > 0:
+            self.blitter.blit_h(left, y, width)
+
+    pub mutating func blit_anti_h(left: i32, y: i32, antialias0: AlphaU8[], runs0: AlphaRun[]):
+        var aa = antialias0
+        var runs = runs0
+
+        if not y_in_rect(y, self.clip) or left >= self.clip.right:
+            return
+
+        var x0 = left
+        var x1 = left + compute_anti_width(runs)
+
+        if x1 <= self.clip.left:
+            return
+
+        if x0 < self.clip.left:
+            let dx = self.clip.left - x0
+            AlphaRuns.break_at(aa, runs, dx)
+            aa = aa[(usize)dx..]
+            runs = runs[(usize)dx..]
+            x0 = self.clip.left
+
+        if x1 > self.clip.right:
+            x1 = self.clip.right
+            AlphaRuns.break_at(aa, runs, x1 - x0)
+            runs[(usize)(x1 - x0)] = 0
+
+        self.blitter.blit_anti_h(x0, y, aa, runs)
+
+    pub mutating func blit_v(x: i32, y: i32, height: i32, alpha: AlphaU8):
+        if not x_in_rect(x, self.clip):
+            return
+
+        var y0 = y
+        var y1 = y + height
+
+        if y0 < self.clip.top:
+            y0 = self.clip.top
+        if y1 > self.clip.bottom:
+            y1 = self.clip.bottom
+
+        if y0 < y1:
+            self.blitter.blit_v(x, y0, y1 - y0, alpha)
+
+    pub mutating func blit_rect(left: i32, y: i32, width: i32, height: i32):
+        let r = IRect.ltrb(left, y, left + width, y + height).intersect(self.clip) else return
+        self.blitter.blit_rect(r.left, r.top, r.width(), r.height())
+
+    pub mutating func blit_anti_rect(left: i32, y: i32, width: i32, height: i32, left_alpha0: AlphaU8, right_alpha0: AlphaU8):
+        # The *true* width of the rectangle blitted is width+2:
+        let r = IRect.ltrb(left, y, left + width + 2, y + height).intersect(self.clip) else return
+        var left_alpha = left_alpha0
+        var right_alpha = right_alpha0
+        if r.left != left:
+            left_alpha = 255
+        if r.right != left + width + 2:
+            right_alpha = 255
+        if left_alpha == 255 and right_alpha == 255:
+            self.blitter.blit_rect(r.left, r.top, r.width(), r.height())
+        elif r.width() == 1:
+            if r.left == left:
+                self.blitter.blit_v(r.left, r.top, r.height(), left_alpha)
+            else:
+                self.blitter.blit_v(r.left, r.top, r.height(), right_alpha)
+        else:
+            self.blitter.blit_anti_rect(r.left, r.top, r.width() - 2, r.height(), left_alpha, right_alpha)
+
+    pub mutating func blit_mask(mask: const BlitMask*, clip: IRect):
+        let r = clip.intersect(self.clip) else return
+        self.blitter.blit_mask(mask, r)
+
+    pub mutating func blit_anti_h2(x: i32, y: i32, alpha0: AlphaU8, alpha1: AlphaU8):
+        blitter_default_blit_anti_h2(&self, x, y, alpha0, alpha1)
+
+    pub mutating func blit_anti_v2(x: i32, y: i32, alpha0: AlphaU8, alpha1: AlphaU8):
+        blitter_default_blit_anti_v2(&self, x, y, alpha0, alpha1)
+
+func y_in_rect(y: i32, rect: IRect) -> bool:
+    return (u32)(y -% rect.top) < (u32)rect.height()
+
+func x_in_rect(x: i32, rect: IRect) -> bool:
+    return (u32)(x -% rect.left) < (u32)rect.width()
+
+func compute_anti_width(runs: const AlphaRun[]) -> i32:
+    var i: usize = 0
+    var width: i32 = 0
+    while runs[i] != 0:
+        let count = runs[i]
+        width += (i32)count
+        i += (usize)count
+
+    return width

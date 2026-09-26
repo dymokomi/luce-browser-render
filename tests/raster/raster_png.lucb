@@ -63,7 +63,7 @@ pub func decode_rgba8(data: const u8[]) -> DecodedPng?:
             bits = (u32)body[8]
             color = (u32)body[9]
             if body[12] != 0:
-                return none # interlaced
+                return none  # interlaced
         elif name[0] == 'P' and name[1] == 'L' and name[2] == 'T' and name[3] == 'E':
             palette = body
         elif name[0] == 't' and name[1] == 'R' and name[2] == 'N' and name[3] == 'S':

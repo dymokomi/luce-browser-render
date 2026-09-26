@@ -1,0 +1,294 @@
+#==============================================================================================
+#
+#   scan_aaa_blitters - the additive blitters of the analytic anti-aliasing scan converter
+#
+#   DESCRIPTION:
+#       Port of the first part of Skia m144 src/core/SkScan_AAAPath.cpp: AdditiveBlitter
+#       and its three implementations, MaskAdditiveBlitter (accumulates the coverage of a
+#       small path, at most 32 pixels wide and 1024 pixels in all, in a mask it blits at
+#       the end), RunBasedAdditiveBlitter (accumulates one row of runs, snapping alphas
+#       within 8 of 0 or 255, and blits it when the row changes) and SafeRLEAdditiveBlitter
+#       (the same, clamping the sums at 255 for concave paths). The three classes are one
+#       struct with a kind; the `real_*` methods are Skia's `getRealBlitter()->...` calls,
+#       which the mask blitter answers itself.
+#
+#       Copyright (c) 2016 The Android Open Source Project
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+func add_alpha(alpha: u8*, delta: AlphaU8):
+    *alpha = AlphaRuns.catch_overflow((u16)*alpha + (u16)delta)
+
+func safely_add_alpha(alpha: u8*, delta: AlphaU8):
+    let sum = (u32)*alpha + (u32)delta
+    *alpha = (u8)(sum if sum < 0xFF else 0xFF)
+
+## Which AdditiveBlitter.
+enum AdditiveKind as u8:
+    ## MaskAdditiveBlitter: significantly accelerates small path filling.
+    mask = 0
+    ## RunBasedAdditiveBlitter.
+    run_based = 1
+    ## SafeRLEAdditiveBlitter: for concave path filling, where we can easily accumulate
+    ## alpha greater than 0xFF.
+    safe_rle = 2
+
+## So we don't try to do very wide things, where the RLE blitter would be faster.
+let mask_max_width: i32 = 32
+let mask_max_storage: i32 = 1024
+
+## SkScan_AAAPath.cpp's AdditiveBlitter and its three implementations.
+struct AdditiveBlitter:
+    var kind: AdditiveKind
+    var real_blitter: Blitter
+
+    # MaskAdditiveBlitter: we add 2 because we can write 1 extra byte at either end due to
+    # precision error. The mask image starts at storage[1].
+    var storage: u8[1032]
+    var mask_bounds: IRect
+    var mask_row_bytes: i32
+    var clip_rect: IRect
+
+    # RunBasedAdditiveBlitter
+    ## Current y coordinate.
+    var curr_y: i32
+    ## Widest row of region to be blitted.
+    var width: i32
+    ## Leftmost x coordinate in any row.
+    var left: i32
+    ## Initial y coordinate (top of bounds).
+    var top: i32
+    var runs: AlphaRuns
+    var offset_x: i32
+
+    ## MaskAdditiveBlitter::CanHandleRect.
+    static func can_handle_rect(bounds: IRect) -> bool:
+        let width = bounds.width()
+        if width > mask_max_width:
+            return false
+        let rb = (i64)((width + 3) & ~3)
+        # use 64bits to detect overflow
+        let storage = rb * (i64)bounds.height()
+        return width <= mask_max_width and storage <= (i64)mask_max_storage
+
+    static func new_mask(real_blitter: Blitter, ir: IRect, clip_bounds: IRect) -> AdditiveBlitter:
+        var b: AdditiveBlitter = ---
+        b.kind = .mask
+        b.real_blitter = real_blitter
+        b.mask_bounds = ir
+        b.mask_row_bytes = ir.width()
+        b.clip_rect = ir.intersect(clip_bounds) else IRect.ltrb(0, 0, 0, 0)
+        for i in 0..<(usize)(ir.height() * ir.width() + 2):
+            b.storage[i] = 0
+        return b
+
+    static func new_rle(kind: AdditiveKind, real_blitter: Blitter, ir: IRect, clip_bounds: IRect, is_inverse: bool) -> AdditiveBlitter:
+        var sect_bounds = IRect.ltrb(0, 0, 0, 0)
+        if is_inverse:
+            # We use the clip bounds instead of the ir, since we may be asked to draw
+            # outside of the rect when we're a inverse filltype
+            sect_bounds = clip_bounds
+        elif let r = ir.intersect(clip_bounds):
+            sect_bounds = r
+        let width = sect_bounds.width()
+        var b: AdditiveBlitter = ---
+        b.kind = kind
+        b.real_blitter = real_blitter
+        b.left = sect_bounds.left
+        b.width = width
+        b.top = sect_bounds.top
+        b.curr_y = b.top - 1
+        b.runs = AlphaRuns.new_((u32)(width if width > 0 else 0))
+        b.offset_x = 0
+        return b
+
+    ## The destructor: the mask blitter blits its mask, the RLE blitters flush the last row.
+    mutating func finish():
+        match self.kind:
+            .mask:
+                if not self.clip_rect.is_empty():
+                    let mask = BlitMask(image = self.storage[1..], bounds = self.mask_bounds, row_bytes = (u32)self.mask_row_bytes)
+                    self.real_blitter.blit_mask(&mask, self.clip_rect)
+            _:
+                self.flush()
+                self.runs.release()
+
+    func get_width() -> i32:
+        if self.kind == .mask:
+            return self.clip_rect.width()
+        return self.width
+
+    # mark: MaskAdditiveBlitter ===================================================================
+
+    ## MaskAdditiveBlitter::getRow: the index in `storage` of (0, y), so that
+    ## `storage[row + x]` is the alpha of (x, y).
+    func get_row(y: i32) -> i32:
+        return 1 + (y - self.mask_bounds.top) * self.mask_row_bytes - self.mask_bounds.left
+
+    mutating func mask_at(row: i32, x: i32) -> u8*:
+        return &self.storage[(usize)(row + x)]
+
+    # mark: The additive blits ====================================================================
+
+    ## AdditiveBlitter::blitAntiH(x, y, antialias[], len).
+    mutating func blit_anti_h_row(x0: i32, y: i32, antialias0: const AlphaU8[], len0: i32):
+        if self.kind == .mask:
+            trap("raster: Don't use this; directly add alphas to the mask.")
+        self.check_y(y)
+        var x = x0 - self.left
+        var antialias = antialias0
+        var len = len0
+
+        if x < 0:
+            len += x
+            antialias = antialias[(usize)(-x)..]
+            x = 0
+        if len > self.width - x:
+            len = self.width - x
+
+        if x < self.offset_x:
+            self.offset_x = 0
+
+        if len > 0:
+            self.offset_x = (i32)self.runs.add((u32)x, 0, (usize)len, 0, 0, (usize)self.offset_x)  # Break the run
+        var i: i32 = 0
+        while i < len:
+            let n = (i32)self.runs.runs[(usize)(x + i)]
+            for j in 1..<n:
+                self.runs.runs[(usize)(x + i + j)] = 1
+                self.runs.alpha[(usize)(x + i + j)] = self.runs.alpha[(usize)(x + i)]
+            self.runs.runs[(usize)(x + i)] = 1
+            i += n
+        for k in 0..<len:
+            if self.kind == .safe_rle:
+                safely_add_alpha(&self.runs.alpha[(usize)(x + k)], antialias[(usize)k])
+            else:
+                add_alpha(&self.runs.alpha[(usize)(x + k)], antialias[(usize)k])
+
+    ## AdditiveBlitter::blitAntiH(x, y, alpha).
+    mutating func blit_anti_h1(x0: i32, y: i32, alpha: AlphaU8):
+        if self.kind == .mask:
+            add_alpha(self.mask_at(self.get_row(y), x0), alpha)
+            return
+        self.check_y(y)
+        let x = x0 - self.left
+
+        if x < self.offset_x:
+            self.offset_x = 0
+
+        if self.check(x, 1):
+            if self.kind == .safe_rle:
+                # Break the run
+                self.offset_x = (i32)self.runs.add((u32)x, 0, 1, 0, 0, (usize)self.offset_x)
+                safely_add_alpha(&self.runs.alpha[(usize)x], alpha)
+            else:
+                self.offset_x = (i32)self.runs.add((u32)x, 0, 1, 0, alpha, (usize)self.offset_x)
+
+    ## AdditiveBlitter::blitAntiH(x, y, width, alpha).
+    mutating func blit_anti_hw(x0: i32, y: i32, width: i32, alpha: AlphaU8):
+        if self.kind == .mask:
+            let row = self.get_row(y)
+            for i in 0..<width:
+                add_alpha(self.mask_at(row, x0 + i), alpha)
+            return
+        self.check_y(y)
+        let x = x0 - self.left
+
+        if x < self.offset_x:
+            self.offset_x = 0
+
+        if self.check(x, width):
+            if self.kind == .safe_rle:
+                # Break the run
+                self.offset_x = (i32)self.runs.add((u32)x, 0, (usize)width, 0, 0, (usize)self.offset_x)
+                var i = x
+                while i < x + width:
+                    safely_add_alpha(&self.runs.alpha[(usize)i], alpha)
+                    i += (i32)self.runs.runs[(usize)i]
+            else:
+                self.offset_x = (i32)self.runs.add((u32)x, 0, (usize)width, 0, alpha, (usize)self.offset_x)
+
+    ## Flush the additive alpha cache if floor(y) and floor(next_y) is different (i.e.,
+    ## we'll start working on a new pixel row). Only needed for the RLE blitters.
+    mutating func flush_if_y_changed(y: i32, next_y: i32):
+        if self.kind == .mask:
+            return
+        if fixed_floor_to_int(y) != fixed_floor_to_int(next_y):
+            self.flush()
+
+    func check(x: i32, width: i32) -> bool:
+        return x >= 0 and x + width <= self.width
+
+    ## Blitting 0xFF and 0 is much faster so we snap alphas close to them.
+    static func snap_alpha(alpha: AlphaU8) -> AlphaU8:
+        if alpha > 247:
+            return 0xFF
+        if alpha < 8:
+            return 0x00
+        return alpha
+
+    mutating func flush():
+        if self.curr_y >= self.top:
+            var x: usize = 0
+            while self.runs.runs[x] != 0:
+                # It seems that blitting 255 or 0 is much faster than blitting 254 or 1
+                self.runs.alpha[x] = AdditiveBlitter.snap_alpha(self.runs.alpha[x])
+                x += (usize)self.runs.runs[x]
+            if not self.runs.is_empty():
+                self.real_blitter.blit_anti_h(self.left, self.curr_y, self.runs.alpha, self.runs.runs)
+                self.runs.reset((u32)self.width)
+                self.offset_x = 0
+            self.curr_y = self.top - 1
+
+    mutating func check_y(y: i32):
+        if y != self.curr_y:
+            self.flush()
+            self.curr_y = y
+
+    # mark: getRealBlitter() ======================================================================
+    # The mask blitter is its own "real" blitter (it sets alphas directly rather than adding);
+    # the RLE blitters forward to the real one.
+
+    mutating func real_blit_v(x: i32, y: i32, height: i32, alpha: AlphaU8):
+        if self.kind != .mask:
+            self.real_blitter.blit_v(x, y, height, alpha)
+            return
+        if alpha == 0:
+            return
+        # This must be called as if this is a real blitter. So we directly set alpha rather
+        # than adding it.
+        var row = self.get_row(y)
+        for i in 0..<height:
+            *self.mask_at(row, x) = alpha
+            row += self.mask_row_bytes
+
+    mutating func real_blit_rect(x: i32, y: i32, width: i32, height: i32):
+        if self.kind != .mask:
+            self.real_blitter.blit_rect(x, y, width, height)
+            return
+        # This must be called as if this is a real blitter. So we directly set alpha rather
+        # than adding it.
+        var row = self.get_row(y)
+        for i in 0..<height:
+            for j in 0..<width:
+                *self.mask_at(row, x + j) = 0xFF
+            row += self.mask_row_bytes
+
+    mutating func real_blit_anti_rect(x: i32, y: i32, width: i32, height: i32, left_alpha: AlphaU8, right_alpha: AlphaU8):
+        if self.kind != .mask:
+            self.real_blitter.blit_anti_rect(x, y, width, height, left_alpha, right_alpha)
+            return
+        self.real_blit_v(x, y, height, left_alpha)
+        self.real_blit_v(x + 1 + width, y, height, right_alpha)
+        self.real_blit_rect(x + 1, y, width, height)
+
+    mutating func real_blit_h(x: i32, y: i32, width: i32):
+        self.real_blitter.blit_h(x, y, width)
+
+    mutating func real_blit_anti_h(x: i32, y: i32, antialias: AlphaU8[], runs: AlphaRun[]):
+        self.real_blitter.blit_anti_h(x, y, antialias, runs)
+
+    mutating func real_blit_anti_h2(x: i32, y: i32, a0: AlphaU8, a1: AlphaU8):
+        self.real_blitter.blit_anti_h2(x, y, a0, a1)

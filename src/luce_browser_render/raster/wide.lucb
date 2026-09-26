@@ -72,7 +72,7 @@ func i4_to_f4(a: I4) -> F4:
 
 ## The portable f32x4::round: round half to even below 2^23, keeping the sign.
 func f32_round(x0: f32) -> f32:
-    let to_int: f32 = 8388608.0 # 1.0 / f32::EPSILON
+    let to_int: f32 = 8388608.0  # 1.0 / f32::EPSILON
     let u = x0.bits()
     let e = (i32)((u >> 23) & 0xff)
     if e >= 0x7f + 23:
@@ -92,9 +92,6 @@ func f32_round(x0: f32) -> f32:
         y = y + x
     return -y if neg else y
 
-func f4_round(a: F4) -> F4:
-    return [f32_round(a[0]), f32_round(a[1]), f32_round(a[2]), f32_round(a[3])]
-
 func f4_round_int(a: F4) -> I4:
     return [(i32)f32_round(a[0]), (i32)f32_round(a[1]), (i32)f32_round(a[2]), (i32)f32_round(a[3])]
 
@@ -103,9 +100,6 @@ func f4_cmp_eq(a: F4, b: F4) -> U4:
 
 func f4_cmp_ne(a: F4, b: F4) -> U4:
     return [all_ones if a[0] != b[0] else 0, all_ones if a[1] != b[1] else 0, all_ones if a[2] != b[2] else 0, all_ones if a[3] != b[3] else 0]
-
-func f4_cmp_ge(a: F4, b: F4) -> U4:
-    return [all_ones if a[0] >= b[0] else 0, all_ones if a[1] >= b[1] else 0, all_ones if a[2] >= b[2] else 0, all_ones if a[3] >= b[3] else 0]
 
 func f4_cmp_gt(a: F4, b: F4) -> U4:
     return [all_ones if a[0] > b[0] else 0, all_ones if a[1] > b[1] else 0, all_ones if a[2] > b[2] else 0, all_ones if a[3] > b[3] else 0]
@@ -124,18 +118,6 @@ func f4_blend(m: U4, t: F4, f: F4) -> F4:
 func f4_floor(a: F4) -> F4:
     let roundtrip = i4_to_f4(f4_trunc_int(a))
     return roundtrip - f4_blend(f4_cmp_gt(roundtrip, a), f32[4](1.0), f32[4](0.0))
-
-## f32x8::fract.
-func f4_fract(a: F4) -> F4:
-    return a - f4_floor(a)
-
-## f32x8::normalize: clamp to [0, 1].
-func f4_normalize(a: F4) -> F4:
-    return f4_min(f4_max(a, f32[4](0.0)), f32[4](1.0))
-
-## f32x4::recip_fast (the portable one is exact).
-func f4_recip_fast(a: F4) -> F4:
-    return f32[4](1.0) / a
 
 ## f32x8::powf: Skia's approximation; x is assumed positive.
 func f4_powf(x: F4, exp: f32) -> F4:
@@ -191,38 +173,11 @@ func f8_div(a: F8, b: F8) -> F8:
 func f8_neg(a: F8) -> F8:
     return [-a[0], -a[1]]
 
-func f8_min(a: F8, b: F8) -> F8:
-    return [f4_min(a[0], b[0]), f4_min(a[1], b[1])]
-
-func f8_max(a: F8, b: F8) -> F8:
-    return [f4_max(a[0], b[0]), f4_max(a[1], b[1])]
-
 func f8_abs(a: F8) -> F8:
     return [f4_abs(a[0]), f4_abs(a[1])]
 
 func f8_sqrt(a: F8) -> F8:
     return [f4_sqrt(a[0]), f4_sqrt(a[1])]
-
-func f8_floor(a: F8) -> F8:
-    return [f4_floor(a[0]), f4_floor(a[1])]
-
-func f8_fract(a: F8) -> F8:
-    return [f4_fract(a[0]), f4_fract(a[1])]
-
-func f8_normalize(a: F8) -> F8:
-    return [f4_normalize(a[0]), f4_normalize(a[1])]
-
-func f8_round_int(a: F8) -> I8:
-    return [f4_round_int(a[0]), f4_round_int(a[1])]
-
-func f8_trunc_int(a: F8) -> I8:
-    return [f4_trunc_int(a[0]), f4_trunc_int(a[1])]
-
-func f8_recip_fast(a: F8) -> F8:
-    return [f4_recip_fast(a[0]), f4_recip_fast(a[1])]
-
-func i8_to_f8(a: I8) -> F8:
-    return [i4_to_f4(a[0]), i4_to_f4(a[1])]
 
 func f8_to_bits(a: F8) -> M8:
     return [f4_to_bits(a[0]), f4_to_bits(a[1])]
@@ -230,17 +185,11 @@ func f8_to_bits(a: F8) -> M8:
 func f8_from_bits(a: M8) -> F8:
     return [f4_from_bits(a[0]), f4_from_bits(a[1])]
 
-func f8_to_i8_bitcast(a: F8) -> I8:
-    return [f4_to_i4_bitcast(a[0]), f4_to_i4_bitcast(a[1])]
-
 func f8_cmp_eq(a: F8, b: F8) -> M8:
     return [f4_cmp_eq(a[0], b[0]), f4_cmp_eq(a[1], b[1])]
 
 func f8_cmp_ne(a: F8, b: F8) -> M8:
     return [f4_cmp_ne(a[0], b[0]), f4_cmp_ne(a[1], b[1])]
-
-func f8_cmp_ge(a: F8, b: F8) -> M8:
-    return [f4_cmp_ge(a[0], b[0]), f4_cmp_ge(a[1], b[1])]
 
 func f8_cmp_gt(a: F8, b: F8) -> M8:
     return [f4_cmp_gt(a[0], b[0]), f4_cmp_gt(a[1], b[1])]
@@ -264,39 +213,23 @@ func m8_and(a: M8, b: M8) -> M8:
 func f8_blend(m: M8, t: F8, f: F8) -> F8:
     return [f4_blend(m[0], t[0], f[0]), f4_blend(m[1], t[1], f[1])]
 
-func i8_mul(a: I8, b: I8) -> I8:
-    return [a[0] *% b[0], a[1] *% b[1]]
-
-func i8_add(a: I8, b: I8) -> I8:
-    return [a[0] +% b[0], a[1] +% b[1]]
-
 func f8_powf(x: F8, exp: f32) -> F8:
     return [f4_powf(x[0], exp), f4_powf(x[1], exp)]
 
 # mark: f32x16 ================================================================================
-
-## f32x16::floor (lowp) on a quarter of the lanes: Skia rounds, then steps down.
-func f16_floor_quarter(a: F4) -> F4:
-    # Yes, Skia does it in the same way.
-    let roundtrip = f4_round(a)
-    return roundtrip - f4_blend(f4_cmp_gt(roundtrip, a), f32[4](1.0), f32[4](0.0))
 
 # mark: u16x16 ================================================================================
 
 func u16_splat(x: u16) -> U16x16:
     return [u16[8](x), u16[8](x)]
 
+## min(a, b) per lane: a - max(a - b, 0), with saturating subtractions.
 func u16x8_min(a: U16x8, b: U16x8) -> U16x8:
-    var r: U16x8 = ---
-    for i: usize in 0..<8:
-        r[i] = a[i] if a[i] < b[i] else b[i]
-    return r
+    return a -| (a -| b)
 
+## max(a, b) per lane: a + max(b - a, 0).
 func u16x8_max(a: U16x8, b: U16x8) -> U16x8:
-    var r: U16x8 = ---
-    for i: usize in 0..<8:
-        r[i] = a[i] if a[i] > b[i] else b[i]
-    return r
+    return a +% (b -| a)
 
 func u16x8_cmp_le(a: U16x8, b: U16x8) -> U16x8:
     var r: U16x8 = ---
@@ -306,3 +239,131 @@ func u16x8_cmp_le(a: U16x8, b: U16x8) -> U16x8:
 
 func u16x8_blend(m: U16x8, t: U16x8, e: U16x8) -> U16x8:
     return (t & m) | (e & ~m)
+
+# mark: NEON arithmetic =======================================================================
+# What Skia m144's stages compute on arm64 (SKRP_CPU_NEON): highp's `mad`/`nmad` are fused
+# multiply-adds (vfmaq_f32 / vfmsq_f32), `min`/`max` are vminq_f32 / vmaxq_f32 (a NaN operand
+# gives NaN, -0 orders below +0), rounding is vcvtnq (half to even) and float to integer
+# conversions saturate, with NaN converting to zero.
+
+## vminq_f32 on one lane.
+func f32_vmin(a: f32, b: f32) -> f32:
+    if a != a or b != b:
+        return a + b
+    if a < b:
+        return a
+    if b < a:
+        return b
+    return f32.bits(a.bits() | b.bits())  # equal: -0 wins over +0
+
+## vmaxq_f32 on one lane.
+func f32_vmax(a: f32, b: f32) -> f32:
+    if a != a or b != b:
+        return a + b
+    if a > b:
+        return a
+    if b > a:
+        return b
+    return f32.bits(a.bits() & b.bits())  # equal: +0 wins over -0
+
+func f4_vmin(a: F4, b: F4) -> F4:
+    return [f32_vmin(a[0], b[0]), f32_vmin(a[1], b[1]), f32_vmin(a[2], b[2]), f32_vmin(a[3], b[3])]
+
+func f4_vmax(a: F4, b: F4) -> F4:
+    return [f32_vmax(a[0], b[0]), f32_vmax(a[1], b[1]), f32_vmax(a[2], b[2]), f32_vmax(a[3], b[3])]
+
+## mad(f, m, a) = f * m + a with one rounding (vfmaq_f32).
+func f4_fma(f: F4, m: F4, a: F4) -> F4:
+    return [math32.fma(f[0], m[0], a[0]), math32.fma(f[1], m[1], a[1]), math32.fma(f[2], m[2], a[2]), math32.fma(f[3], m[3], a[3])]
+
+## nmad(f, m, a) = a - f * m with one rounding (vfmsq_f32).
+func f4_fms(f: F4, m: F4, a: F4) -> F4:
+    return f4_fma(-f, m, a)
+
+## vcvtnq_s32_f32 / vcvtnq_u32_f32 of a value known to be in [0, 2^31): round half to even,
+## NaN to zero.
+func f32_round_nonneg(v: f32) -> u32:
+    if v != v:
+        return 0
+    return (u32)f32_round(v)
+
+## fcvtzs (truncation toward zero, saturating, NaN to zero): Luce's float to integer cast.
+func f32_trunc_i32(v: f32) -> i32:
+    return (i32)v
+
+func f8_fma(f: F8, m: F8, a: F8) -> F8:
+    return [f4_fma(f[0], m[0], a[0]), f4_fma(f[1], m[1], a[1])]
+
+func f8_fms(f: F8, m: F8, a: F8) -> F8:
+    return [f4_fms(f[0], m[0], a[0]), f4_fms(f[1], m[1], a[1])]
+
+func f8_vmin(a: F8, b: F8) -> F8:
+    return [f4_vmin(a[0], b[0]), f4_vmin(a[1], b[1])]
+
+func f8_vmax(a: F8, b: F8) -> F8:
+    return [f4_vmax(a[0], b[0]), f4_vmax(a[1], b[1])]
+
+## vrndmq_f32: floor.
+func f4_vfloor(a: F4) -> F4:
+    return [math32.floor(a[0]), math32.floor(a[1]), math32.floor(a[2]), math32.floor(a[3])]
+
+func f8_vfloor(a: F8) -> F8:
+    return [f4_vfloor(a[0]), f4_vfloor(a[1])]
+
+## clamp_01_ of the highp stages: min(max(0, v), 1).
+func f8_clamp_01(v: F8) -> F8:
+    return f8_vmin(f8_vmax(f8_splat(0.0), v), f8_splat(1.0))
+
+## RecipEstimate of the ARM architecture: the 9-bit estimate of 1/a for a in [256, 512).
+func recip_estimate(a0: u32) -> u32:
+    let a = a0 * 2 + 1  # Round to nearest
+    let b = (1 << 19) // a
+    return (b + 1) // 2  # Round to nearest
+
+## FRECPE (vrecpeq_f32) on one lane: an 8-bit reciprocal estimate.
+func f32_frecpe(x: f32) -> f32:
+    let bits = x.bits()
+    let sign = bits & 0x80000000
+    var exp = (i32)((bits >> 23) & 0xff)
+    var fraction = (u64)(bits & 0x7fffff) << 29  # as the 52-bit fraction of the pseudocode
+    if x != x:
+        return x
+    if exp == 0 and fraction == 0:
+        return f32.bits(sign | 0x7f800000)  # 1/0: infinity
+    if exp == 0xff:
+        return f32.bits(sign)  # 1/inf: zero
+    if math32.abs(x) < 2.938735877e-39:  # 2^-128: the estimate overflows
+        return f32.bits(sign | 0x7f800000)
+    if exp == 0:
+        if (fraction >> 51) & 1 == 0:
+            exp = -1
+            fraction = (fraction << 2) & 0xFFFFFFFFFFFFF
+        else:
+            fraction = (fraction << 1) & 0xFFFFFFFFFFFFF
+    let scaled = (u32)(0x100 | ((fraction >> 44) & 0xff))
+    var result_exp = 253 - exp
+    let estimate = recip_estimate(scaled)
+    var result_fraction = ((u64)estimate & 0xff) << 44
+    if result_exp == 0:
+        result_fraction = (1 << 51) | (result_fraction >> 1)
+    elif result_exp == -1:
+        result_fraction = (1 << 50) | (result_fraction >> 2)
+        result_exp = 0
+    return f32.bits(sign | ((u32)result_exp << 23) | (u32)(result_fraction >> 29))
+
+## FRECPS (vrecpsq_f32) on one lane: 2 - a * b, fused.
+func f32_frecps(a: f32, b: f32) -> f32:
+    if (math32.is_infinite(a) and b == 0.0) or (a == 0.0 and math32.is_infinite(b)):
+        return 2.0
+    return math32.fma(-a, b, 2.0)
+
+## rcp_fast of NEON (rcp_approx): the estimate refined by one Newton-Raphson step.
+func f4_rcp_fast(v: F4) -> F4:
+    var r: F4 = ---
+    for i: usize in 0..<4:
+        let e = f32_frecpe(v[i])
+        r[i] = f32_frecps(v[i], e) * e
+    return r
+
+func f8_rcp_fast(v: F8) -> F8:
+    return [f4_rcp_fast(v[0]), f4_rcp_fast(v[1])]

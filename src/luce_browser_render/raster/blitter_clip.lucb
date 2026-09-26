@@ -1,0 +1,367 @@
+#==============================================================================================
+#
+#   blitter_clip - clipping blitters over a Mask: Skia's region and anti-aliased clips
+#
+#   DESCRIPTION:
+#       A raster Mask plays the part of Skia's clip. When its pixels are all 0 or 255 it is
+#       an SkRegion (the pixels at 255), and drawing through it is SkRgnClipBlitter (port
+#       of src/core/SkBlitter.cpp); otherwise it is an SkAAClip, and drawing through it is
+#       SkAAClipBlitter (port of src/core/SkAAClip.cpp), which scales every coverage by the
+#       clip's alpha with SkMulDiv255Round. Skia walks its region's rectangles and its
+#       clip's run-length rows; these walk the mask's rows, which gives the same pixels.
+#       MaskClipInfo classifies a mask the way SkRasterClip ends up holding it.
+#
+#       Copyright (c) 2006 The Android Open Source Project
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+# mark: MaskClipInfo ==========================================================================
+
+## How a mask clips, as SkRasterClip would hold it.
+enum MaskClipKind as u8:
+    ## Nothing is visible.
+    empty = 0
+    ## A rectangle of 255s (SkRasterClip keeps a rectangular clip as a BW rect).
+    rect = 1
+    ## Only 0s and 255s, not a rectangle: an SkRegion.
+    region = 2
+    ## Partial alphas: an SkAAClip.
+    aa = 3
+
+## The classification of a mask and the bounds of its visible pixels.
+struct MaskClipInfo:
+    var kind: MaskClipKind
+    var bounds: IRect
+
+    static func of(mask: const Mask*) -> MaskClipInfo:
+        let w = (i32)mask.width()
+        let h = (i32)mask.height()
+        let data = mask.data()
+        var left = w
+        var top = h
+        var right: i32 = 0
+        var bottom: i32 = 0
+        var partial = false
+        var full_count: usize = 0
+        for y in 0..<h:
+            let row = data[(usize)(y * w)..<(usize)(y * w + w)]
+            for x in 0..<w:
+                let a = row[(usize)x]
+                if a == 0:
+                    continue
+                if a != 255:
+                    partial = true
+                else:
+                    full_count += 1
+                if x < left:
+                    left = x
+                if x + 1 > right:
+                    right = x + 1
+                if y < top:
+                    top = y
+                if y + 1 > bottom:
+                    bottom = y + 1
+        if right <= left:
+            return MaskClipInfo(kind = .empty, bounds = IRect.ltrb(0, 0, 0, 0))
+        let bounds = IRect.ltrb(left, top, right, bottom)
+        if partial:
+            return MaskClipInfo(kind = .aa, bounds = bounds)
+        if full_count == (usize)bounds.width() * (usize)bounds.height():
+            return MaskClipInfo(kind = .rect, bounds = bounds)
+        return MaskClipInfo(kind = .region, bounds = bounds)
+
+## The pixels of `mask`'s row `y`.
+func clip_mask_row(mask: const Mask*, y: i32) -> const u8[]:
+    let w = (usize)mask.width()
+    let start = (usize)y * w
+    return mask.data()[start..<start + w]
+
+## The end of the run of pixels starting at `x` whose "in region" state equals the one at
+## `x`, looking no further than `end`.
+func mask_region_run_end(row: const u8[], x: i32, end: i32) -> i32:
+    let inside = row[(usize)x] == 255
+    var e = x + 1
+    while e < end and (row[(usize)e] == 255) == inside:
+        e += 1
+    return e
+
+## The part of [x, x + width) inside the mask's columns, as (start, end).
+func mask_columns(mask: const Mask*, x: i32, width: i32) -> (i32, i32):
+    let start = x if x > 0 else 0
+    let w = (i32)mask.width()
+    let end = x + width if x + width < w else w
+    return (start, end)
+
+## Whether row y exists in the mask.
+func mask_has_row(mask: const Mask*, y: i32) -> bool:
+    return y >= 0 and y < (i32)mask.height()
+
+# mark: SkRgnClipBlitter ======================================================================
+
+## SkRgnClipBlitter over the region of a mask's 255 pixels.
+struct MaskRegionClipBlitter: Blitter:
+    var blitter: Blitter
+    var mask: const Mask*
+
+    pub mutating func blit_h(x: i32, y: i32, width: i32):
+        if not mask_has_row(self.mask, y):
+            return
+        let row = clip_mask_row(self.mask, y)
+        let (start, end) = mask_columns(self.mask, x, width)
+        var left = start
+        while left < end:
+            let right = mask_region_run_end(row, left, end)
+            if row[(usize)left] == 255:
+                self.blitter.blit_h(left, y, right - left)
+            left = right
+
+    pub mutating func blit_anti_h(x: i32, y: i32, aa: AlphaU8[], runs: AlphaRun[]):
+        if not mask_has_row(self.mask, y):
+            return
+        let width = compute_anti_width(runs)
+        let row = clip_mask_row(self.mask, y)
+        let (start, end) = mask_columns(self.mask, x, width)
+        var prev_rite = x
+        var left = start
+        while left < end:
+            let right = mask_region_run_end(row, left, end)
+            if row[(usize)left] == 255:
+                AlphaRuns.break_run(runs, aa, (usize)(left - x), (usize)(right - left))
+                # now zero before left
+                if left > prev_rite:
+                    let index = (usize)(prev_rite - x)
+                    aa[index] = 0  # skip runs after right
+                    runs[index] = (u16)(left - prev_rite)
+                prev_rite = right
+            left = right
+
+        if prev_rite > x:
+            runs[(usize)(prev_rite - x)] = 0
+            var xx = x
+            var aa2 = aa
+            var runs2 = runs
+            if xx < 0:
+                let skip = (i32)runs2[0]
+                aa2 = aa2[(usize)skip..]
+                runs2 = runs2[(usize)skip..]
+                xx += skip
+            self.blitter.blit_anti_h(xx, y, aa2, runs2)
+
+    pub mutating func blit_v(x: i32, y: i32, height: i32, alpha: AlphaU8):
+        if x < 0 or x >= (i32)self.mask.width():
+            return
+        let top0 = y if y > 0 else 0
+        let limit = y + height if y + height < (i32)self.mask.height() else (i32)self.mask.height()
+        var top = top0
+        while top < limit:
+            var bottom = top + 1
+            let inside = clip_mask_row(self.mask, top)[(usize)x] == 255
+            while bottom < limit and (clip_mask_row(self.mask, bottom)[(usize)x] == 255) == inside:
+                bottom += 1
+            if inside:
+                self.blitter.blit_v(x, top, bottom - top, alpha)
+            top = bottom
+
+    pub mutating func blit_rect(x: i32, y: i32, width: i32, height: i32):
+        for yy in y..<y + height:
+            self.blit_rect_row(x, yy, width)
+
+    mutating func blit_rect_row(x: i32, y: i32, width: i32):
+        if not mask_has_row(self.mask, y):
+            return
+        let row = clip_mask_row(self.mask, y)
+        let (start, end) = mask_columns(self.mask, x, width)
+        var left = start
+        while left < end:
+            let right = mask_region_run_end(row, left, end)
+            if row[(usize)left] == 255:
+                self.blitter.blit_rect(left, y, right - left, 1)
+            left = right
+
+    pub mutating func blit_anti_rect(x: i32, y: i32, width: i32, height: i32, left_alpha: AlphaU8, right_alpha: AlphaU8):
+        # The *true* width of the rectangle to blit is width + 2
+        let full_right = x + width + 2
+        for yy in y..<y + height:
+            if not mask_has_row(self.mask, yy):
+                continue
+            let row = clip_mask_row(self.mask, yy)
+            let (start, end) = mask_columns(self.mask, x, width + 2)
+            var left = start
+            while left < end:
+                let right = mask_region_run_end(row, left, end)
+                if row[(usize)left] == 255:
+                    let effective_left = left_alpha if left == x else 255
+                    let effective_right = right_alpha if right == full_right else 255
+                    if effective_left == 255 and effective_right == 255:
+                        self.blitter.blit_rect(left, yy, right - left, 1)
+                    elif right - left == 1:
+                        if left == x:
+                            self.blitter.blit_v(left, yy, 1, effective_left)
+                        else:
+                            self.blitter.blit_v(left, yy, 1, effective_right)
+                    else:
+                        self.blitter.blit_anti_rect(left, yy, right - left - 2, 1, effective_left, effective_right)
+                left = right
+
+    pub mutating func blit_mask(mask: const BlitMask*, clip: IRect):
+        for y in clip.top..<clip.bottom:
+            if not mask_has_row(self.mask, y):
+                continue
+            let row = clip_mask_row(self.mask, y)
+            let (start, end) = mask_columns(self.mask, clip.left, clip.width())
+            var left = start
+            while left < end:
+                let right = mask_region_run_end(row, left, end)
+                if row[(usize)left] == 255:
+                    self.blitter.blit_mask(mask, IRect.ltrb(left, y, right, y + 1))
+                left = right
+
+    pub mutating func blit_anti_h2(x: i32, y: i32, alpha0: AlphaU8, alpha1: AlphaU8):
+        blitter_default_blit_anti_h2(&self, x, y, alpha0, alpha1)
+
+    pub mutating func blit_anti_v2(x: i32, y: i32, alpha0: AlphaU8, alpha1: AlphaU8):
+        blitter_default_blit_anti_v2(&self, x, y, alpha0, alpha1)
+
+# mark: SkAAClipBlitter =======================================================================
+
+## SkAAClipBlitter over a mask with partial alphas. The blits it gets are inside the mask's
+## bounds (the scan converters clip to the clip's bounds first).
+struct MaskAAClipBlitter: Blitter:
+    var blitter: Blitter
+    var mask: const Mask*
+    ## Scratch runs and alphas, one row wide (plus the terminating run).
+    var runs: AlphaRun[]
+    var aa: AlphaU8[]
+
+    static func new_(blitter: Blitter, mask: const Mask*) -> MaskAAClipBlitter:
+        let count = (usize)mask.width() + 1
+        let runs = (alloc AlphaRun[count] in memory.heap) else trap("raster: out of memory")
+        let aa = (alloc AlphaU8[count] in memory.heap) else trap("raster: out of memory")
+        return MaskAAClipBlitter(blitter = blitter, mask = mask, runs = runs, aa = aa)
+
+    mutating func release():
+        free(self.runs) in memory.heap
+        free(self.aa) in memory.heap
+
+    ## SkAAClip::quickContains: every pixel of the rectangle is fully visible.
+    func quick_contains(x: i32, y: i32, width: i32, height: i32) -> bool:
+        for yy in y..<y + height:
+            let row = clip_mask_row(self.mask, yy)
+            for xx in x..<x + width:
+                if row[(usize)xx] != 255:
+                    return false
+        return true
+
+    ## expandToRuns: the clip's row from x as runs of equal alpha.
+    mutating func expand_to_runs(row: const u8[], x: i32, width: i32):
+        var i: i32 = 0
+        while i < width:
+            let n = mask_run_length(row, x + i, x + width)
+            self.runs[(usize)i] = (u16)n
+            self.aa[(usize)i] = row[(usize)(x + i)]
+            i += n
+        self.runs[(usize)width] = 0
+
+    pub mutating func blit_h(x: i32, y: i32, width: i32):
+        let row = clip_mask_row(self.mask, y)
+        let initial_count = mask_run_length(row, x, x + width)
+        if initial_count >= width:
+            let alpha = row[(usize)x]
+            if alpha == 0:
+                return
+            if alpha == 0xFF:
+                self.blitter.blit_h(x, y, width)
+                return
+        self.expand_to_runs(row, x, width)
+        self.blitter.blit_anti_h(x, y, self.aa, self.runs)
+
+    pub mutating func blit_anti_h(x: i32, y: i32, src_aa: AlphaU8[], src_runs: AlphaRun[]):
+        let row = clip_mask_row(self.mask, y)
+        # merge(): the runs split where either the source or the clip changes, each alpha
+        # scaled by the clip's.
+        var src_i: usize = 0
+        var src_n = (i32)src_runs[0]
+        if src_n == 0:
+            return
+        var dst_i: usize = 0
+        var px = x
+        while true:
+            let row_n = mask_run_length(row, px, px + src_n)
+            let new_alpha = mul_div255_round((u32)src_aa[src_i], (u32)row[(usize)px])
+            let min_n = src_n if src_n < row_n else row_n
+            self.runs[dst_i] = (u16)min_n
+            self.aa[dst_i] = (u8)new_alpha
+            dst_i += (usize)min_n
+            px += min_n
+            src_n -= min_n
+            if src_n == 0:
+                src_i += (usize)src_runs[src_i]
+                src_n = (i32)src_runs[src_i]
+                if src_n == 0:
+                    break
+        self.runs[dst_i] = 0
+        self.blitter.blit_anti_h(x, y, self.aa, self.runs)
+
+    pub mutating func blit_v(x: i32, y0: i32, height: i32, alpha: AlphaU8):
+        if self.quick_contains(x, y0, 1, height):
+            self.blitter.blit_v(x, y0, height, alpha)
+            return
+        var y = y0
+        let end = y0 + height
+        while y < end:
+            let clip_alpha = clip_mask_row(self.mask, y)[(usize)x]
+            var dy: i32 = 1
+            while y + dy < end and clip_mask_row(self.mask, y + dy)[(usize)x] == clip_alpha:
+                dy += 1
+            let new_alpha = (u8)mul_div255_round((u32)alpha, (u32)clip_alpha)
+            if new_alpha != 0:
+                self.blitter.blit_v(x, y, dy, new_alpha)
+            y += dy
+
+    pub mutating func blit_rect(x: i32, y: i32, width: i32, height: i32):
+        if self.quick_contains(x, y, width, height):
+            self.blitter.blit_rect(x, y, width, height)
+            return
+        for yy in y..<y + height:
+            self.blit_h(x, yy, width)
+
+    pub mutating func blit_anti_rect(x: i32, y: i32, width: i32, height: i32, left_alpha: AlphaU8, right_alpha: AlphaU8):
+        blitter_default_blit_anti_rect(&self, x, y, width, height, left_alpha, right_alpha)
+
+    pub mutating func blit_mask(mask: const BlitMask*, clip: IRect):
+        if self.quick_contains(clip.left, clip.top, clip.width(), clip.height()):
+            self.blitter.blit_mask(mask, clip)
+            return
+        # One row at a time: the mask's coverage merged with the clip's (mergeT).
+        let width = (usize)clip.width()
+        for y in clip.top..<clip.bottom:
+            let row = clip_mask_row(self.mask, y)
+            let start = mask.index(clip.left, y)
+            for i in 0..<width:
+                let clip_alpha = (u32)row[(usize)clip.left + i]
+                let value = (u32)mask.image[start + i]
+                if clip_alpha == 0xFF:
+                    self.aa[i] = (u8)value
+                elif clip_alpha == 0:
+                    self.aa[i] = 0
+                else:
+                    self.aa[i] = (u8)mul_div255_round(value, clip_alpha)
+            let row_rect = IRect.ltrb(clip.left, y, clip.right, y + 1)
+            let row_mask = BlitMask(image = self.aa, bounds = row_rect, row_bytes = (u32)width)
+            self.blitter.blit_mask(&row_mask, row_rect)
+
+    pub mutating func blit_anti_h2(x: i32, y: i32, alpha0: AlphaU8, alpha1: AlphaU8):
+        blitter_default_blit_anti_h2(&self, x, y, alpha0, alpha1)
+
+    pub mutating func blit_anti_v2(x: i32, y: i32, alpha0: AlphaU8, alpha1: AlphaU8):
+        blitter_default_blit_anti_v2(&self, x, y, alpha0, alpha1)
+
+## The length of the run of equal alphas starting at `x`, looking no further than `end`.
+func mask_run_length(row: const u8[], x: i32, end: i32) -> i32:
+    let a = row[(usize)x]
+    var e = x + 1
+    while e < end and row[(usize)e] == a:
+        e += 1
+    return e - x

@@ -1,0 +1,291 @@
+#==============================================================================================
+#
+#   scan_aaa_rows - the coverage of one trapezoid row of the analytic AA scan converter
+#
+#   DESCRIPTION:
+#       Port of the second part of Skia m144 src/core/SkScan_AAAPath.cpp: the alpha of
+#       trapezoids and triangles, compute_alpha_above_line/below_line, blit_single_alpha,
+#       blit_two_alphas, blit_full_alpha, blit_aaa_trapezoid_row and blit_trapezoid_row,
+#       which blit the coverage of the strip between two scan lines bounded by a left and a
+#       right edge.
+#
+#       Our algorithm is based on horizontal scan lines (y = c_i) as the previous
+#       sampling-based algorithm did, but it uses non-equal-spaced scan lines: c_i is an
+#       integer, the y value of a line segment endpoint, or the y value of an intersection
+#       of two line segments. For two consecutive scan lines we analytically compute the
+#       coverage of this horizontal strip of our path on each pixel, which is easy because
+#       the strip consists of trapezoids whose top and bottom edges are the scan lines. The
+#       coverage of a pixel is the area of the trapezoid minus the excluded areas, which
+#       are triangles (or their complements): it is ground-truth coverage, and there are
+#       far fewer scan lines than with 16x supersampling.
+#
+#       Copyright (c) 2016 The Android Open Source Project
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+# mark: Alphas ================================================================================
+
+## The alpha of a trapezoid whose height is 1.
+func trapezoid_to_alpha(l1: i32, l2: i32) -> AlphaU8:
+    let area = (l1 + l2) // 2
+    return (u8)(area >> 8)
+
+## The alpha of right-triangle (a, a*b).
+func partial_triangle_to_alpha(a: i32, b: i32) -> AlphaU8:
+    # Approximating...
+    # SkFixed area = SkFixedMul(a, SkFixedMul(a,b)) / 2;
+    let area = (a >> 11) *% (a >> 11) *% (b >> 11)
+    return (u8)((area >> 8) & 0xFF)
+
+func get_partial_alpha(alpha: AlphaU8, partial_height: i32) -> AlphaU8:
+    return (u8)fixed_round_to_int((i32)alpha * partial_height)
+
+func get_partial_alpha_a(alpha: AlphaU8, full_alpha: AlphaU8) -> AlphaU8:
+    return (u8)(((u32)alpha * (u32)full_alpha) >> 8)
+
+## For SkFixed that's close to SK_Fixed1, we can't convert it to alpha by just shifting right.
+## For example, when f = SK_Fixed1, right shifting 8 will get 256, but we need 255. This is
+## rarely the problem so we'll only use this for blitting rectangles.
+func fixed_to_alpha(f: i32) -> AlphaU8:
+    return get_partial_alpha(0xFF, f)
+
+## Suppose that line (l1, y)-(r1, y+1) intersects with (l2, y)-(r2, y+1), approximate (very
+## coarsely) the x coordinate of the intersection.
+func approximate_intersection(l10: i32, r10: i32, l20: i32, r20: i32) -> i32:
+    var l1 = l10
+    var r1 = r10
+    var l2 = l20
+    var r2 = r20
+    if l1 > r1:
+        let t = l1
+        l1 = r1
+        r1 = t
+    if l2 > r2:
+        let t = l2
+        l2 = r2
+        r2 = t
+    let a = l1 if l1 > l2 else l2
+    let b = r1 if r1 < r2 else r2
+    return (a + b) // 2
+
+## Here we always send in l < SK_Fixed1, and the first alpha we want to compute is alphas[0].
+func compute_alpha_above_line(alphas: AlphaU8[], l: i32, r: i32, dy: i32, full_alpha: AlphaU8):
+    let rr = fixed_ceil_to_int(r)
+    if rr == 0:
+        return
+    elif rr == 1:
+        alphas[0] = get_partial_alpha_a((u8)(((rr << 17) - l - r) >> 9), full_alpha)
+    else:
+        let first = fixed_one - l  # horizontal edge length of the left-most triangle
+        let last = r - ((rr - 1) << 16)  # horizontal edge length of the right-most triangle
+        let first_h = fixed_mul(first, dy)  # vertical edge of the left-most triangle
+        alphas[0] = (u8)(fixed_mul(first, first_h) >> 9)  # triangle alpha
+        var alpha16 = sat_add32(first_h, dy >> 1)  # rectangle plus triangle
+        for i in 1..<(usize)(rr - 1):
+            alphas[i] = (u8)(alpha16 >> 8)
+            alpha16 = sat_add32(alpha16, dy)
+        alphas[(usize)(rr - 1)] = full_alpha -% partial_triangle_to_alpha(last, dy)
+
+## Here we always send in l < SK_Fixed1, and the first alpha we want to compute is alphas[0].
+func compute_alpha_below_line(alphas: AlphaU8[], l: i32, r: i32, dy: i32, full_alpha: AlphaU8):
+    let rr = fixed_ceil_to_int(r)
+    if rr == 0:
+        return
+    elif rr == 1:
+        alphas[0] = get_partial_alpha_a(trapezoid_to_alpha(l, r), full_alpha)
+    else:
+        let first = fixed_one - l  # horizontal edge length of the left-most triangle
+        let last = r - ((rr - 1) << 16)  # horizontal edge length of the right-most triangle
+        let last_h = fixed_mul(last, dy)  # vertical edge of the right-most triangle
+        alphas[(usize)(rr - 1)] = (u8)(fixed_mul(last, last_h) >> 9)  # triangle alpha
+        var alpha16 = sat_add32(last_h, dy >> 1)  # rectangle plus triangle
+        var i = rr - 2
+        while i > 0:
+            alphas[(usize)i] = (u8)((alpha16 >> 8) & 0xFF)
+            alpha16 = sat_add32(alpha16, dy)
+            i -= 1
+        alphas[0] = full_alpha -% partial_triangle_to_alpha(first, dy)
+
+# mark: Blits =================================================================================
+
+## Note that if full_alpha != 0xFF, we'll multiply alpha by full_alpha.
+func blit_single_alpha(blitter: AdditiveBlitter*, y: i32, x: i32, alpha: AlphaU8, full_alpha: AlphaU8, mask_row: i32?, no_real_blitter: bool):
+    if let row = mask_row:
+        if full_alpha == 0xFF and not no_real_blitter:  # no_real_blitter is needed for concave paths
+            *blitter.mask_at(row, x) = alpha
+        else:
+            safely_add_alpha(blitter.mask_at(row, x), get_partial_alpha_a(alpha, full_alpha))
+    else:
+        if full_alpha == 0xFF and not no_real_blitter:
+            blitter.real_blit_v(x, y, 1, alpha)
+        else:
+            blitter.blit_anti_h1(x, y, get_partial_alpha_a(alpha, full_alpha))
+
+func blit_two_alphas(blitter: AdditiveBlitter*, y: i32, x: i32, a1: AlphaU8, a2: AlphaU8, full_alpha: AlphaU8, mask_row: i32?, no_real_blitter: bool):
+    if let row = mask_row:
+        safely_add_alpha(blitter.mask_at(row, x), a1)
+        safely_add_alpha(blitter.mask_at(row, x + 1), a2)
+    else:
+        if full_alpha == 0xFF and not no_real_blitter:
+            blitter.real_blit_anti_h2(x, y, a1, a2)
+        else:
+            blitter.blit_anti_h1(x, y, a1)
+            blitter.blit_anti_h1(x + 1, y, a2)
+
+func blit_full_alpha(blitter: AdditiveBlitter*, y: i32, x: i32, len: i32, full_alpha: AlphaU8, mask_row: i32?, no_real_blitter: bool):
+    if let row = mask_row:
+        for i in 0..<len:
+            safely_add_alpha(blitter.mask_at(row, x + i), full_alpha)
+    else:
+        if full_alpha == 0xFF and not no_real_blitter:
+            blitter.real_blit_h(x, y, len)
+        else:
+            blitter.blit_anti_hw(x, y, len, full_alpha)
+
+func blit_aaa_trapezoid_row(blitter: AdditiveBlitter*, y: i32, ul: i32, ur: i32, ll: i32, lr: i32, l_dy: i32, r_dy: i32, full_alpha: AlphaU8, mask_row: i32?, no_real_blitter: bool):
+    let ll_int = fixed_floor_to_int(ul)
+    let rr_int = fixed_ceil_to_int(lr)
+    let len = rr_int - ll_int
+
+    if len == 1:
+        let alpha = trapezoid_to_alpha(ur - ul, lr - ll)
+        blit_single_alpha(blitter, y, ll_int, alpha, full_alpha, mask_row, no_real_blitter)
+        return
+
+    let quick_len: i32 = 31
+    var quick_alphas: u8[64] = ---
+    var quick_temp: u8[64] = ---
+    var quick_runs: AlphaRun[64] = ---
+    var alphas: AlphaU8[] = quick_alphas
+    var temp_alphas: AlphaU8[] = quick_temp
+    var runs: AlphaRun[] = quick_runs
+    var heap = false
+    if len > quick_len:
+        alphas = (alloc AlphaU8[(usize)len + 1] in memory.heap) else trap("raster: out of memory")
+        temp_alphas = (alloc AlphaU8[(usize)len + 1] in memory.heap) else trap("raster: out of memory")
+        runs = (alloc AlphaRun[(usize)len + 1] in memory.heap) else trap("raster: out of memory")
+        heap = true
+
+    for i in 0..<(usize)len:
+        runs[i] = 1
+        alphas[i] = full_alpha
+    runs[(usize)len] = 0
+
+    let u_l = fixed_floor_to_int(ul)
+    let l_l = fixed_ceil_to_int(ll)
+    if u_l + 2 == l_l:  # We only need to compute two triangles, accelerate this special case
+        let first = int_to_fixed(u_l) + fixed_one - ul
+        let second = ll - ul - first
+        let a1 = full_alpha -% partial_triangle_to_alpha(first, l_dy)
+        let a2 = partial_triangle_to_alpha(second, l_dy)
+        alphas[0] = alphas[0] - a1 if alphas[0] > a1 else 0
+        alphas[1] = alphas[1] - a2 if alphas[1] > a2 else 0
+    else:
+        compute_alpha_below_line(temp_alphas[(usize)(u_l - ll_int)..], ul - int_to_fixed(u_l), ll - int_to_fixed(u_l), l_dy, full_alpha)
+        for i in u_l..<l_l:
+            let k = (usize)(i - ll_int)
+            if alphas[k] > temp_alphas[k]:
+                alphas[k] -= temp_alphas[k]
+            else:
+                alphas[k] = 0
+
+    let u_r = fixed_floor_to_int(ur)
+    let l_r = fixed_ceil_to_int(lr)
+    if u_r + 2 == l_r:  # We only need to compute two triangles, accelerate this special case
+        let first = int_to_fixed(u_r) + fixed_one - ur
+        let second = lr - ur - first
+        let a1 = partial_triangle_to_alpha(first, r_dy)
+        let a2 = full_alpha -% partial_triangle_to_alpha(second, r_dy)
+        let n = (usize)len
+        alphas[n - 2] = alphas[n - 2] - a1 if alphas[n - 2] > a1 else 0
+        alphas[n - 1] = alphas[n - 1] - a2 if alphas[n - 1] > a2 else 0
+    else:
+        compute_alpha_above_line(temp_alphas[(usize)(u_r - ll_int)..], ur - int_to_fixed(u_r), lr - int_to_fixed(u_r), r_dy, full_alpha)
+        for i in u_r..<l_r:
+            let k = (usize)(i - ll_int)
+            if alphas[k] > temp_alphas[k]:
+                alphas[k] -= temp_alphas[k]
+            else:
+                alphas[k] = 0
+
+    if let row = mask_row:
+        for i in 0..<len:
+            safely_add_alpha(blitter.mask_at(row, ll_int + i), alphas[(usize)i])
+    else:
+        if full_alpha == 0xFF and not no_real_blitter:
+            # Real blitter is faster than RunBasedAdditiveBlitter
+            blitter.real_blit_anti_h(ll_int, y, alphas, runs)
+        else:
+            blitter.blit_anti_h_row(ll_int, y, alphas, len)
+
+    if heap:
+        free(alphas) in memory.heap
+        free(temp_alphas) in memory.heap
+        free(runs) in memory.heap
+
+func blit_trapezoid_row(blitter: AdditiveBlitter*, y: i32, ul0: i32, ur0: i32, ll0: i32, lr0: i32, l_dy: i32, r_dy: i32, full_alpha: AlphaU8, mask_row: i32?, no_real_blitter: bool):
+    var ul = ul0
+    var ur = ur0
+    var ll = ll0
+    var lr = lr0
+    if ul > ur:
+        return
+
+    # Edge crosses. Approximate it. This should only happend due to precision limit, so the
+    # approximation could be very coarse.
+    if ll > lr:
+        ll = approximate_intersection(ul, ll, ur, lr)
+        lr = ll
+
+    if ul == ur and ll == lr:
+        return  # empty trapzoid
+
+    # We're going to use the left line ul-ll and the rite line ur-lr to exclude the area
+    # that's not covered by the path. Swapping (ul, ll) or (ur, lr) won't affect that
+    # exclusion so we'll do that for simplicity.
+    if ul > ll:
+        let t = ul
+        ul = ll
+        ll = t
+    if ur > lr:
+        let t = ur
+        ur = lr
+        lr = t
+
+    let join_left = fixed_ceil_to_fixed(ll)
+    let join_rite = fixed_floor_to_fixed(ur)
+    if join_left <= join_rite:  # There's a rect from join_left to join_rite that we can blit
+        if ul < join_left:
+            let len = fixed_ceil_to_int(join_left - ul)
+            if len == 1:
+                let alpha = trapezoid_to_alpha(join_left - ul, join_left - ll)
+                blit_single_alpha(blitter, y, ul >> 16, alpha, full_alpha, mask_row, no_real_blitter)
+            elif len == 2:
+                let first = join_left - fixed_one - ul
+                let second = ll - ul - first
+                let a1 = partial_triangle_to_alpha(first, l_dy)
+                let a2 = full_alpha -% partial_triangle_to_alpha(second, l_dy)
+                blit_two_alphas(blitter, y, ul >> 16, a1, a2, full_alpha, mask_row, no_real_blitter)
+            else:
+                blit_aaa_trapezoid_row(blitter, y, ul, join_left, ll, join_left, l_dy, fixed_max, full_alpha, mask_row, no_real_blitter)
+        # SkAAClip requires that we blit from left to right. Hence we must blit
+        # [ul, join_left] before blitting [join_left, join_rite]
+        if join_left < join_rite:
+            blit_full_alpha(blitter, y, fixed_floor_to_int(join_left), fixed_floor_to_int(join_rite - join_left), full_alpha, mask_row, no_real_blitter)
+        if lr > join_rite:
+            let len = fixed_ceil_to_int(lr - join_rite)
+            if len == 1:
+                let alpha = trapezoid_to_alpha(ur - join_rite, lr - join_rite)
+                blit_single_alpha(blitter, y, join_rite >> 16, alpha, full_alpha, mask_row, no_real_blitter)
+            elif len == 2:
+                let first = join_rite + fixed_one - ur
+                let second = lr - ur - first
+                let a1 = full_alpha -% partial_triangle_to_alpha(first, r_dy)
+                let a2 = partial_triangle_to_alpha(second, r_dy)
+                blit_two_alphas(blitter, y, join_rite >> 16, a1, a2, full_alpha, mask_row, no_real_blitter)
+            else:
+                blit_aaa_trapezoid_row(blitter, y, join_rite, ur, join_rite, lr, fixed_max, r_dy, full_alpha, mask_row, no_real_blitter)
+    else:
+        blit_aaa_trapezoid_row(blitter, y, ul, ur, ll, lr, l_dy, r_dy, full_alpha, mask_row, no_real_blitter)

@@ -1,0 +1,297 @@
+#==============================================================================================
+#
+#   draw - drawing rects, paths and strokes as Skia's SkDraw does
+#
+#   DESCRIPTION:
+#       Port of Skia m144 src/core/SkDraw.cpp (Draw::drawRect, drawPath, drawDevPath and
+#       modifyPaintForHairlines) and of SkBlitter::Choose (src/core/SkBlitter.cpp) with
+#       CheckFastPath (src/core/SkBlendMode.cpp): a draw picks the raster pipeline blitter
+#       (Ladybird's BGRA surfaces are not Skia's kN32, so its legacy blitters never draw
+#       them), then scan-converts through the clip (scan_raster_clip.lucb). These are the bodies of
+#       PixmapMut's fill_rect, fill_path and stroke_path. Pixmaps larger than 8191 pixels
+#       are drawn in tiles (DrawTiler), as Skia's SkDrawTiler does.
+#
+#       Copyright (c) 2006 The Android Open Source Project
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+# mark: SkBlitter::Choose =====================================================================
+
+enum DeviceBlitterKind as u8:
+    ## SkNullBlitter: nothing to draw.
+    null_ = 0
+    pipeline = 1
+
+## The blitter a draw writes the device with (SkBlitter::Choose's result).
+struct DeviceBlitter:
+    var kind: DeviceBlitterKind
+    var pipeline: RasterPipelineBlitter
+
+    static func null_blitter() -> DeviceBlitter:
+        var d: DeviceBlitter = ---
+        d.kind = .null_
+        return d
+
+    ## The blitter, none for SkNullBlitter.
+    mutating func view() -> Blitter?:
+        if self.kind == .pipeline:
+            return &self.pipeline
+        return none
+
+    mutating func release():
+        if self.kind == .pipeline:
+            self.pipeline.release()
+        self.kind = .null_
+
+## SkBlitter::Choose for a paint drawing into `pixmap`. Skia's legacy SkARGB32 blitters
+## draw only into kN32 devices, which is kRGBA_8888 on macOS and Linux; Ladybird paints into
+## kBGRA_8888 surfaces, so every draw goes through the raster pipeline
+## (SkBlitter::UseLegacyBlitter is false), whose blitter makes the rest of Choose's choices.
+func choose_blitter(paint: const Paint*, pixmap: SubPixmapMut*) -> DeviceBlitter:
+    var d = DeviceBlitter.null_blitter()
+    if let rp = RasterPipelineBlitter.new_(paint, pixmap):
+        d.kind = .pipeline
+        d.pipeline = rp
+    return d
+
+## SkPaint::nothingToDraw for our paints.
+func paint_nothing_to_draw(paint: const Paint*) -> bool:
+    match paint.blend_mode:
+        .source_over, .source_atop, .destination_out, .destination_over, .plus:
+            match paint.shader:
+                .solid_color(c): return c.alpha() == 0.0
+                _: return false
+        .destination:
+            return true
+        _:
+            return false
+
+# mark: drawRect ==============================================================================
+
+## Draw::drawRect for a fill.
+func draw_fill_rect(pixmap: PixmapMut*, rect: Rect, paint: const Paint*, transform: Transform, mask: const Mask*?):
+    if paint_nothing_to_draw(paint):
+        return
+    if transform.has_skew() or DrawTiler.required(pixmap.width(), pixmap.height()):
+        # Not rectStaysRect (or too big for one tile): draw as a path.
+        var path = PathBuilder.from_rect(rect)
+        defer path.release()
+        draw_fill_path(pixmap, &path, paint, .winding, transform, mask)
+        return
+
+    var corners: Point[2] = [Point.from_xy(rect.left(), rect.top()), Point.from_xy(rect.right(), rect.bottom())]
+    transform.map_points(corners)
+    let dev_rect = rect_sorted(corners[0], corners[1]) else return
+
+    # look for the quick exit, before we build a blitter
+    if rect_too_big_for_math(dev_rect):
+        return
+    if not rect_fits_in_fixed(dev_rect):
+        var path = PathBuilder.from_rect(rect)
+        defer path.release()
+        draw_fill_path(pixmap, &path, paint, .winding, transform, mask)
+        return
+
+    let clip = RasterClip.new_(pixmap.width(), pixmap.height(), mask)
+    if clip.quick_reject(irect_round_out(dev_rect)):
+        return
+
+    var shaded = *paint
+    shaded.shader.transform(transform)
+    var subpix = pixmap.as_subpixmap()
+    var device = choose_blitter(&shaded, &subpix)
+    defer device.release()
+    let blitter = device.view() else return
+
+    if paint.anti_alias:
+        raster_anti_fill_rect(dev_rect, &clip, blitter)
+    else:
+        raster_fill_rect(dev_rect, &clip, blitter)
+
+## SkPathPriv::TooBigForMath for a rect.
+func rect_too_big_for_math(r: Rect) -> bool:
+    # This value is just a guess. smaller is safer, but we don't want to reject largish
+    # paths that we don't have to.
+    let max = scalar_max * 0.25
+    # use ! expression so we return true if bounds contains NaN
+    return not (r.left() >= -max and r.top() >= -max and r.right() <= max and r.bottom() <= max)
+
+## SkRectPriv::FitsInFixed.
+func rect_fits_in_fixed(r: Rect) -> bool:
+    let limit: f32 = 32767.0
+    return math32.abs(r.left()) <= limit and math32.abs(r.top()) <= limit and math32.abs(r.right()) <= limit and math32.abs(r.bottom()) <= limit
+
+# mark: drawPath ==============================================================================
+
+## Draw::drawPath for a fill: the device path is filled through the clip.
+func draw_fill_path(pixmap: PixmapMut*, path: const Path*, paint: const Paint*, fill_rule: FillRule, transform: Transform, mask: const Mask*?):
+    if paint_nothing_to_draw(paint):
+        return
+    if transform.is_identity():
+        # SkCanvas rejects paths whose (device) bounds are empty.
+        let path_bounds = path.bounds()
+        if path_bounds.width() == 0.0 or path_bounds.height() == 0.0:
+            return
+        draw_dev_path(pixmap, path, paint, fill_rule, mask)
+        return
+
+    var transformed = path.clone()
+    defer transformed.release()
+    if not transformed.transform(transform):
+        # log::warn!("path transformation failed")
+        return
+
+    var transformed_paint = *paint
+    transformed_paint.shader.transform(transform)
+
+    draw_fill_path(pixmap, &transformed, &transformed_paint, fill_rule, Transform.identity(), mask)
+
+## Draw::drawDevPath for a fill (tiled when the pixmap is too big for one tile).
+func draw_dev_path(pixmap: PixmapMut*, path: const Path*, paint: const Paint*, fill_rule: FillRule, mask: const Mask*?):
+    if is_too_big_for_math(path):
+        # log::warn!("path coordinates are too big")
+        return
+
+    if not DrawTiler.required(pixmap.width(), pixmap.height()):
+        let clip = RasterClip.new_(pixmap.width(), pixmap.height(), mask)
+        var subpix = pixmap.as_subpixmap()
+        fill_dev_path(path, paint, fill_rule, &clip, &subpix)
+        return
+
+    var tiler = DrawTiler.new_(pixmap.width(), pixmap.height()) else trap("unreachable")
+    var tiled = path.clone()
+    defer tiled.release()
+    var tile_paint = *paint
+    while let tile = tiler.next():
+        let ts = Transform.from_translate(-(f32)tile.x(), -(f32)tile.y())
+        if not tiled.transform(ts):
+            # log::warn!("path transformation failed")
+            return
+        tile_paint.shader.transform(ts)
+
+        if let subpix0 = pixmap.subpixmap(tile.to_int_rect()):
+            var subpix = subpix0
+            var tile_clip = RasterClip(kind = .rect, bounds = IRect.ltrb(0, 0, (i32)tile.width(), (i32)tile.height()), mask = none)
+            if let m = mask:
+                # A tile of a mask: the mask's classification over the whole pixmap.
+                tile_clip = RasterClip.new_(m.width(), m.height(), m)
+                tile_clip.bounds = tile_clip.bounds.intersect(IRect.from_screen(tile)) else IRect.ltrb(0, 0, 0, 0)
+                if tile_clip.bounds.is_empty():
+                    tile_clip.kind = .empty
+                tile_clip.bounds = IRect.ltrb(tile_clip.bounds.left - (i32)tile.x(), tile_clip.bounds.top - (i32)tile.y(), tile_clip.bounds.right - (i32)tile.x(), tile_clip.bounds.bottom - (i32)tile.y())
+            fill_dev_path(&tiled, &tile_paint, fill_rule, &tile_clip, &subpix)
+
+        let ts2 = Transform.from_translate((f32)tile.x(), (f32)tile.y())
+        if not tiled.transform(ts2):
+            return  # technically unreachable
+        tile_paint.shader.transform(ts2)
+
+func fill_dev_path(path: const Path*, paint: const Paint*, fill_rule: FillRule, clip: const RasterClip*, pixmap: SubPixmapMut*):
+    var device = choose_blitter(paint, pixmap)
+    defer device.release()
+    let blitter = device.view() else return
+    if paint.anti_alias:
+        raster_anti_fill_path(path, fill_rule, clip, blitter)
+    else:
+        raster_fill_path(path, fill_rule, clip, blitter)
+
+# mark: Strokes ===============================================================================
+
+## Draw::drawPath for a stroke: thin strokes become (modulated) hairlines, the rest are
+## stroked into a path and filled.
+func draw_stroke_path(pixmap: PixmapMut*, path: const Path*, paint: const Paint*, stroke: const Stroke*, transform: Transform, mask: const Mask*?):
+    if stroke.width < 0.0:
+        # log::warn!("negative stroke width isn't allowed")
+        return
+    if paint_nothing_to_draw(paint):
+        return
+
+    let res_scale = PathStroker.compute_resolution_scale(transform)
+
+    if let dash = stroke.dash:
+        var dashed = path.dash(&dash, res_scale) else return  # path dashing failed
+        defer dashed.release()
+        draw_stroke_path_impl(pixmap, &dashed, paint, stroke, transform, mask, res_scale)
+    else:
+        draw_stroke_path_impl(pixmap, path, paint, stroke, transform, mask, res_scale)
+
+## The rest of Draw::drawPath for a stroke, with the dashed path when there is a dash.
+func draw_stroke_path_impl(pixmap: PixmapMut*, path: const Path*, paint: const Paint*, stroke: const Stroke*, transform: Transform, mask: const Mask*?, res_scale: f32):
+    # modifyPaintForHairlines
+    if let coverage = treat_as_hairline(paint, stroke, transform):
+        var hair_paint = shader_clone_paint(paint)
+        defer hair_paint.release()
+        var hairline = coverage == 1.0
+        if not hairline and blend_mode_supports_coverage_as_alpha(hair_paint.blend_mode):
+            # this is the old technique, which we preserve for now so we don't change
+            # previous results (testing) the new way seems fine, its just (a tiny bit)
+            # different
+            let scale = (i32)(coverage * 256.0)
+            match hair_paint.shader:
+                .solid_color(c):
+                    var color = c
+                    let alpha = (i32)color_to_u8_channel(color.alpha())
+                    let new_alpha = (alpha * scale) >> 8
+                    color.set_alpha((f32)new_alpha / 255.0)
+                    hair_paint.shader = .solid_color(color = color)
+                _:
+                    let new_alpha = (255 * scale) >> 8
+                    hair_paint.shader.apply_opacity((f32)new_alpha / 255.0)
+            hairline = true
+        if hairline:
+            draw_hairline(pixmap, path, &hair_paint, stroke.line_cap, transform, mask)
+            return
+
+    var stroked = path.stroke(stroke, res_scale) else return  # path stroking failed
+    defer stroked.release()
+    draw_fill_path(pixmap, &stroked, paint, .winding, transform, mask)
+
+## SkBlendMode_SupportsCoverageAsAlpha.
+func blend_mode_supports_coverage_as_alpha(mode: BlendMode) -> bool:
+    match mode:
+        .destination, .destination_over, .plus, .destination_out, .source_atop, .source_over, .xor:
+            return true
+        _:
+            return false
+
+## Draw::drawDevPath for a hairline (tiled when the pixmap is too big for one tile).
+func draw_hairline(pixmap: PixmapMut*, path0: const Path*, paint0: const Paint*, line_cap: LineCap, transform: Transform, mask: const Mask*?):
+    var path = path0.clone()
+    defer path.release()
+    var paint = *paint0
+    if not transform.is_identity():
+        paint.shader.transform(transform)
+        if not path.transform(transform):
+            # log::warn!("path transformation failed")
+            return
+    if is_too_big_for_math(&path):
+        return
+
+    if not DrawTiler.required(pixmap.width(), pixmap.height()):
+        let clip = RasterClip.new_(pixmap.width(), pixmap.height(), mask)
+        var subpix = pixmap.as_subpixmap()
+        hair_dev_path(&path, &paint, line_cap, &clip, &subpix)
+        return
+
+    var tiler = DrawTiler.new_(pixmap.width(), pixmap.height()) else trap("unreachable")
+    while let tile = tiler.next():
+        let ts = Transform.from_translate(-(f32)tile.x(), -(f32)tile.y())
+        if not path.transform(ts):
+            return
+        paint.shader.transform(ts)
+        if let subpix0 = pixmap.subpixmap(tile.to_int_rect()):
+            var subpix = subpix0
+            let clip = RasterClip(kind = .rect, bounds = IRect.ltrb(0, 0, (i32)tile.width(), (i32)tile.height()), mask = none)
+            hair_dev_path(&path, &paint, line_cap, &clip, &subpix)
+        let ts2 = Transform.from_translate((f32)tile.x(), (f32)tile.y())
+        if not path.transform(ts2):
+            return
+        paint.shader.transform(ts2)
+
+func hair_dev_path(path: const Path*, paint: const Paint*, line_cap: LineCap, clip: const RasterClip*, pixmap: SubPixmapMut*):
+    var device = choose_blitter(paint, pixmap)
+    defer device.release()
+    let blitter = device.view() else return
+    raster_hair_path(path, line_cap, paint.anti_alias, clip, blitter)

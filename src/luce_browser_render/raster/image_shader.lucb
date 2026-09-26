@@ -1,0 +1,106 @@
+#==============================================================================================
+#
+#   image_shader - the pipeline stages of a pattern (Skia's SkImageShader)
+#
+#   DESCRIPTION:
+#       Port of Skia m144's SkImageShader::appendStages (src/shaders/SkImageShader.cpp)
+#       for tiny-skia's Pattern: an 8888 premultiplied image without mipmaps, sampled
+#       nearest, bilinear or bicubic (FilterQuality::Bicubic is SkCubicResampler::Mitchell)
+#       with one tile mode on both axes. It picks Skia's stages: bilinear becomes nearest for
+#       an integer translate (tweak_sampling); clamped bilinear and bicubic use the fused
+#       bilerp_clamp_8888 / bicubic_clamp_8888; other bilinear and bicubic sampling runs the
+#       sampler; nearest tiles and gathers with integer coordinates snapping left/up;
+#       bicubic output is clamped to the premultiplied gamut. The pattern's opacity is the
+#       paint's alpha, applied after the shader by the blitter.
+#
+#       Copyright (c) 2015 Google Inc. All rights reserved.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+## SkImageShader::CubicResamplerMatrix(B, C), column-major (SkM44::getColMajor), computed in
+## f32 as Skia does.
+func cubic_resampler_matrix(b: f32, c: f32) -> f32[16]:
+    let one: f32 = 1.0
+    let two: f32 = 2.0
+    let three: f32 = 3.0
+    let six: f32 = 6.0
+    let sixth = one / six
+    let half_ = three / six
+    let third2 = two / six
+    let twelve6 = 12.0 / six
+    let nine6 = 9.0 / six
+    let fifteen6 = 15.0 / six
+    # The rows of the SkM44, whose columns the weights are.
+    let rows: f32[16] = [
+        sixth * b, -half_ * b - c, half_ * b + two * c, -sixth * b - c,
+        one - third2 * b, 0.0, -three + twelve6 * b + c, two - nine6 * b - c,
+        sixth * b, half_ * b + c, three - fifteen6 * b - two * c, -two + nine6 * b + c,
+        0.0, 0.0, -c, sixth * b + c,
+    ]
+    var cols: f32[16] = ---
+    for r: usize in 0..<4:
+        for k: usize in 0..<4:
+            cols[k * 4 + r] = rows[r * 4 + k]
+    return cols
+
+## The stages of a pattern: false when its transform cannot be inverted.
+func pattern_push_stages(patt: const Pattern*, cs: ColorSpace, p: RasterPipelineBuilder*) -> bool:
+    let inv = patt.transform.invert() else return false  # failed to invert a pattern transform. Nothing will be rendered
+
+    # tweak_sampling: when the matrix is just an integer translate, bilerp == nearest neighbor.
+    var quality = patt.quality
+    if quality == .bilinear and (inv.is_identity() or inv.is_translate()):
+        if inv.tx == (f32)(i32)inv.tx and inv.ty == (f32)(i32)inv.ty:
+            quality = .nearest
+
+    p.push(.seed_shader)
+    p.push_transform(inv)
+
+    let width = (f32)patt.pixmap.width()
+    let height = (f32)patt.pixmap.height()
+    # We would like an image that is mapped 1:1 with device pixels but at a half pixel
+    # offset to select every pixel from the src image once. Our rasterizer biases upward.
+    # That is a rect from 0.5...1.5 fills pixel 1 and not pixel 0. So we make exact integer
+    # pixel sample values select the pixel to the left/above the integer value. The
+    # implementation of mirror tiling modifies integer pixel snapping to create consistency
+    # when the sample coords are running backwards.
+    let snap: u32 = 1 if quality == .nearest else 0
+    p.ctx.gather = GatherCtx(width = width, height = height, round_down_at_integer = snap)
+    if quality == .bicubic:
+        let third: f32 = 1.0 / 3.0  # SkCubicResampler::Mitchell()
+        p.ctx.gather.weights = cubic_resampler_matrix(third, third)
+    # The mirror bias is 1 when integer coordinates snap left/up, -1 otherwise.
+    let bias: u32 = 1 if snap == 1 else 0xFFFFFFFF
+    p.ctx.limit_x = TileCtx(scale = width, inv_scale = 1.0 / width, mirror_bias_dir = bias)
+    p.ctx.limit_y = TileCtx(scale = height, inv_scale = 1.0 / height, mirror_bias_dir = bias)
+    p.ctx.sampler = SamplerCtx(spread_mode = patt.spread_mode)
+
+    if quality == .bilinear and patt.spread_mode == .pad_:
+        # Skia runs bilerp_clamp_8888_force_highp instead when the device bounds map outside
+        # of the i16 range in image space.
+        p.push(.bilerp_clamp_8888)
+    elif quality == .bicubic and patt.spread_mode == .pad_:
+        p.push(.bicubic_clamp_8888)
+    elif quality == .bicubic:
+        p.push(.bicubic)
+    elif quality == .bilinear:
+        p.push(.bilinear)
+    else:
+        # SpreadMode::Pad: The gather() stage will clamp for us.
+        if patt.spread_mode == .repeat:
+            p.push(.repeat)
+        elif patt.spread_mode == .reflect:
+            p.push(.mirror)
+        p.push(.gather)
+
+    # Bicubic filtering naturally produces out of range values on both sides of [0,1].
+    if quality == .bicubic:
+        p.push(.clamp_gamut)
+
+    if let stage = colorspace_expand_stage(cs):
+        # TODO: it would be better to gamma-expand prior to sampling, but there isn't
+        # currently an intermediate pipeline stage for that.
+        p.push(stage)
+
+    return true

@@ -9,7 +9,7 @@ porter follows is [DESIGN.md](../luce-browser-engine/docs/DESIGN.md).
 | --- | --- |
 | `gfx` | LibGfx geometry, color, paths; CSS pixels |
 | `web_fonts` | fonts and text layout |
-| `raster` | the CPU rasterizer |
+| `raster` | the CPU rasterizer: tiny-skia ported and changed to paint exactly as Skia m144 (see its module.lucb) |
 | `display_list` | the display list |
 
 Depends on: luce-std, luce-browser-foundation, luce-browser-css.

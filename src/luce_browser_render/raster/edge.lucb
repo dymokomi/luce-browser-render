@@ -54,7 +54,7 @@ struct LineEdge:
     var dx: FDot16
     var first_y: i32
     var last_y: i32
-    var winding: i8 # 1 or -1
+    var winding: i8  # 1 or -1
 
     static func new_(p0: Point, p1: Point, shift: i32) -> LineEdge?:
         let scale = (f32)(1 << (shift + 6))
@@ -116,7 +116,7 @@ struct LineEdge:
 struct QuadraticEdge:
     var line: LineEdge
     var curve_count: i8
-    var curve_shift: u8 # applied to all dx/ddx/dddx
+    var curve_shift: u8  # applied to all dx/ddx/dddx
     var qx: FDot16
     var qy: FDot16
     var qdx: FDot16
@@ -191,19 +191,19 @@ struct QuadraticEdge:
 
         let curve_shift = (u8)(shift - 1)
 
-        var a = fdot6_to_fixed_div2(x0 - x1 - x1 + x2) # 1/2 the real value
-        var b = fdot6_to_fdot16(x1 - x0) # 1/2 the real value
+        var a = fdot6_to_fixed_div2(x0 - x1 - x1 + x2)  # 1/2 the real value
+        var b = fdot6_to_fdot16(x1 - x0)  # 1/2 the real value
 
         let qx = fdot6_to_fdot16(x0)
-        let qdx = b + (a >> shift) # biased by shift
-        let qddx = a >> (shift - 1) # biased by shift
+        let qdx = b + (a >> shift)  # biased by shift
+        let qddx = a >> (shift - 1)  # biased by shift
 
-        a = fdot6_to_fixed_div2(y0 - y1 - y1 + y2) # 1/2 the real value
-        b = fdot6_to_fdot16(y1 - y0) # 1/2 the real value
+        a = fdot6_to_fixed_div2(y0 - y1 - y1 + y2)  # 1/2 the real value
+        b = fdot6_to_fdot16(y1 - y0)  # 1/2 the real value
 
         let qy = fdot6_to_fdot16(y0)
-        let qdy = b + (a >> shift) # biased by shift
-        let qddy = a >> (shift - 1) # biased by shift
+        let qdy = b + (a >> shift)  # biased by shift
+        let qddy = a >> (shift - 1)  # biased by shift
 
         let q_last_x = fdot6_to_fdot16(x2)
         let q_last_y = fdot6_to_fdot16(y2)
@@ -262,8 +262,8 @@ struct QuadraticEdge:
 struct CubicEdge:
     var line: LineEdge
     var curve_count: i8
-    var curve_shift: u8 # applied to all dx/ddx/dddx except for dshift exception
-    var dshift: u8      # applied to cdx and cdy
+    var curve_shift: u8  # applied to all dx/ddx/dddx except for dshift exception
+    var dshift: u8  # applied to cdx and cdy
     var cx: FDot16
     var cy: FDot16
     var cdx: FDot16
@@ -332,7 +332,7 @@ struct CubicEdge:
         # Since our in coming data is initially shifted down by 10 (or 8 in antialias). That
         # means the most we can shift up is 8. However, we compute coefficients with a 3*, so
         # the safest upshift is really 6
-        var up_shift: i32 = 6 # largest safe value
+        var up_shift: i32 = 6  # largest safe value
         var down_shift = shift + up_shift - 10
         if down_shift < 0:
             down_shift = 0
@@ -347,18 +347,18 @@ struct CubicEdge:
         var d = fdot6_up_shift(x3 + 3 * (x1 - x2) - x0, up_shift)
 
         let cx = fdot6_to_fdot16(x0)
-        let cdx = b + (c >> shift) + (d >> (2 * shift)) # biased by shift
-        let cddx = 2 * c + ((3 * d) >> (shift - 1)) # biased by 2*shift
-        let cdddx = (3 * d) >> (shift - 1) # biased by 2*shift
+        let cdx = b + (c >> shift) + (d >> (2 * shift))  # biased by shift
+        let cddx = 2 * c + ((3 * d) >> (shift - 1))  # biased by 2*shift
+        let cdddx = (3 * d) >> (shift - 1)  # biased by 2*shift
 
         b = fdot6_up_shift(3 * (y1 - y0), up_shift)
         c = fdot6_up_shift(3 * (y0 - y1 - y1 + y2), up_shift)
         d = fdot6_up_shift(y3 + 3 * (y1 - y2) - y0, up_shift)
 
         let cy = fdot6_to_fdot16(y0)
-        let cdy = b + (c >> shift) + (d >> (2 * shift)) # biased by shift
-        let cddy = 2 * c + ((3 * d) >> (shift - 1)) # biased by 2*shift
-        let cdddy = (3 * d) >> (shift - 1) # biased by 2*shift
+        let cdy = b + (c >> shift) + (d >> (2 * shift))  # biased by shift
+        let cddy = 2 * c + ((3 * d) >> (shift - 1))  # biased by 2*shift
+        let cdddy = (3 * d) >> (shift - 1)  # biased by 2*shift
 
         let c_last_x = fdot6_to_fdot16(x3)
         let c_last_y = fdot6_to_fdot16(y3)

@@ -1,0 +1,358 @@
+#==============================================================================================
+#
+#   cubics - chopping a monotonic cubic where it crosses a clip line
+#
+#   DESCRIPTION:
+#       Port of Skia m144's double-precision root finders and the code that uses them to chop
+#       a cubic exactly at a clip edge: src/base/SkFloatingPoint.cpp (sk_double_nearly_zero,
+#       sk_doubles_nearly_equal_ulps), src/base/SkQuads.cpp (Discriminant, Roots, RootsReal),
+#       src/base/SkCubics.cpp (RootsReal, RootsValidT, BinarySearchRootsValidT, EvalAt),
+#       src/base/SkBezierCurves.cpp (SkBezierCubic::ConvertToPolynomial, Subdivide) and
+#       src/core/SkGeometry.cpp (first_axis_intersection, SkChopMonoCubicAtX/Y). tiny-skia
+#       ports the older SkPathOps intersection instead, which picks slightly different t values.
+#
+#       Copyright (c) 2023 Google LLC
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+# mark: SkFloatingPoint ========================================================================
+
+## FLT_EPSILON as a double.
+let sk_flt_epsilon_f64: f64 = (f64)1.1920929e-7f32
+
+## The positive magnitude of a double: 2^e for a normal number, 0 for a subnormal one and
+## infinity for NaN or infinity.
+func double_magnitude(a: f64) -> f64:
+    return f64.bits(a.bits() & (u64)0x7FF0000000000000)
+
+## sk_double_nearly_zero.
+func sk_double_nearly_zero(a: f64) -> bool:
+    return a == 0.0 or math.abs(a) < sk_flt_epsilon_f64
+
+## sk_doubles_nearly_equal_ulps with the default of 16 ulps.
+func sk_doubles_nearly_equal_ulps(a: f64, b: f64) -> bool:
+    let min_magnitude: f64 = 2.2250738585072014e-308  # DBL_MIN
+    let max_magnitude = std_max64(std_max64(double_magnitude(a), min_magnitude), double_magnitude(b))
+    let ulp_factor: f64 = 2.220446049250313e-16  # DBL_EPSILON
+    let tolerance = max_magnitude * (ulp_factor * 17.0)
+    return a == b or math.abs(b - a) < tolerance
+
+## std::max for doubles (unlike fmax64, NaN is not ignored): `a` unless a < b.
+func std_max64(a: f64, b: f64) -> f64:
+    return b if a < b else a
+
+## std::min for doubles: `a` unless b < a.
+func std_min64(a: f64, b: f64) -> f64:
+    return b if b < a else a
+
+# mark: SkQuads ================================================================================
+
+func quads_solve_linear(m: f64, b: f64, solution: f64[]) -> usize:
+    if sk_double_nearly_zero(m):
+        solution[0] = 0.0
+        if sk_double_nearly_zero(b):
+            return 1
+        return 0
+    solution[0] = -b / m
+    if not math.is_finite(solution[0]):
+        return 0
+    return 1
+
+func quads_close_to_linear(a: f64, b: f64) -> bool:
+    if a != 0.0:
+        # Return if B is much bigger than A.
+        return math.abs(b / a) >= 1.0e+16
+    # Otherwise A is zero, and the quadratic is linear.
+    return true
+
+## SkQuads::Discriminant: b² - ac, with the rounding errors of both products added back in
+## when they cancel.
+func quads_discriminant(a: f64, b: f64, c: f64) -> f64:
+    let b2 = b * b
+    let ac = a * c
+    let rough_discriminant = b2 - ac
+    if 3.0 * math.abs(rough_discriminant) >= b2 + ac:
+        return rough_discriminant
+    let b2_rounding_error = math.fma(b, b, -b2)
+    let ac_rounding_error = math.fma(a, c, -ac)
+    return (b2 - ac) + (b2_rounding_error - ac_rounding_error)
+
+## SkQuads::Roots for Ax² - 2Bx + C: (discriminant, root0, root1).
+func quads_roots(a: f64, b: f64, c: f64) -> (f64, f64, f64):
+    let discriminant = quads_discriminant(a, b, c)
+    if a == 0.0:
+        var root: f64
+        if b == 0.0:
+            root = f64.bits((u64)0x7FF0000000000000) if c == 0.0 else f64.bits((u64)0x7FF8000000000000)
+        else:
+            root = c / (2.0 * b)
+        return (discriminant, root, root)
+    if discriminant == 0.0:
+        return (discriminant, b / a, b / a)
+    if discriminant > 0.0:
+        let d = math.sqrt(discriminant)
+        let r = b + d if b > 0.0 else b - d
+        return (discriminant, r / a, c / r)
+    return (discriminant, f64.bits((u64)0x7FF8000000000000), f64.bits((u64)0x7FF8000000000000))
+
+func zero_if_tiny(x: f64) -> f64:
+    return 0.0 if sk_double_nearly_zero(x) else x
+
+## SkQuads::RootsReal: the real roots of Ax² + Bx + C.
+func quads_roots_real(a: f64, b: f64, c: f64, solution: f64[]) -> usize:
+    if quads_close_to_linear(a, b):
+        return quads_solve_linear(b, c, solution)
+    let (discriminant, root0, root1) = quads_roots(a, -0.5 * b, c)
+    if not math.is_finite(discriminant) or discriminant < 0.0:
+        return 0
+    var roots: usize = 0
+    let r0 = zero_if_tiny(root0)
+    if math.is_finite(r0):
+        solution[roots] = r0
+        roots += 1
+    let r1 = zero_if_tiny(root1)
+    if math.is_finite(r1):
+        solution[roots] = r1
+        roots += 1
+    if roots == 2 and sk_doubles_nearly_equal_ulps(solution[0], solution[1]):
+        roots = 1
+    return roots
+
+# mark: SkCubics ===============================================================================
+
+## SkCubics::EvalAt: At³ + Bt² + Ct + D with fused multiply-adds.
+func cubics_eval_at(a: f64, b: f64, c: f64, d: f64, t: f64) -> f64:
+    return math.fma(t, math.fma(t, math.fma(t, a, b), c), d)
+
+func cubics_nearly_equal(x: f64, y: f64) -> bool:
+    if sk_double_nearly_zero(x):
+        return sk_double_nearly_zero(y)
+    return sk_doubles_nearly_equal_ulps(x, y)
+
+func close_to_a_quadratic(a: f64, b: f64) -> bool:
+    if sk_double_nearly_zero(b):
+        return sk_double_nearly_zero(a)
+    return math.abs(a / b) < 1.0e-7
+
+## SkTPin(x, lo, hi): std::max(lo, std::min(x, hi)).
+func pin64(x: f64, lo: f64, hi: f64) -> f64:
+    return std_max64(lo, std_min64(x, hi))
+
+## SkCubics::RootsReal: the real roots of At³ + Bt² + Ct + D.
+func cubics_roots_real(a0: f64, b0: f64, c0: f64, d0: f64, solution: f64[]) -> usize:
+    if close_to_a_quadratic(a0, b0):
+        return quads_roots_real(b0, c0, d0, solution)
+    if sk_double_nearly_zero(d0):  # 0 is one root
+        var num = quads_roots_real(a0, b0, c0, solution)
+        for i: usize in 0..<num:
+            if sk_double_nearly_zero(solution[i]):
+                return num
+        solution[num] = 0.0
+        num += 1
+        return num
+    if sk_double_nearly_zero(a0 + b0 + c0 + d0):  # 1 is one root
+        var num = quads_roots_real(a0, a0 + b0, -d0, solution)
+        for i: usize in 0..<num:
+            if sk_doubles_nearly_equal_ulps(solution[i], 1.0):
+                return num
+        solution[num] = 1.0
+        num += 1
+        return num
+    let inv_a = 1.0 / a0
+    let a = b0 * inv_a
+    let b = c0 * inv_a
+    let c = d0 * inv_a
+    let a2 = a * a
+    let q = (a2 - b * 3.0) / 9.0
+    let r = (2.0 * a2 * a - 9.0 * a * b + 27.0 * c) / 54.0
+    let r2 = r * r
+    let q3 = q * q * q
+    let r2_minus_q3 = r2 - q3
+    if not math.is_finite(r2_minus_q3):
+        return 0
+    let adiv3 = a / 3.0
+    let pi: f64 = 3.14159265358979323846264338327950288
+    var count: usize = 0
+    if r2_minus_q3 < 0.0:  # we have 3 real roots
+        let theta = math.acos(pin64(r / math.sqrt(q3), -1.0, 1.0))
+        let neg2_root_q = -2.0 * math.sqrt(q)
+        solution[0] = neg2_root_q * math.cos(theta / 3.0) - adiv3
+        count = 1
+        let root1 = neg2_root_q * math.cos((theta + 2.0 * pi) / 3.0) - adiv3
+        if not cubics_nearly_equal(solution[0], root1):
+            solution[count] = root1
+            count += 1
+        let root2 = neg2_root_q * math.cos((theta - 2.0 * pi) / 3.0) - adiv3
+        if not cubics_nearly_equal(solution[0], root2) and (count == 1 or not cubics_nearly_equal(solution[1], root2)):
+            solution[count] = root2
+            count += 1
+    # we have 1 real root
+    else:
+        let sqrt_r2_minus_q3 = math.sqrt(r2_minus_q3)
+        var big_a = math.cbrt(math.abs(r) + sqrt_r2_minus_q3)
+        if r > 0.0:
+            big_a = -big_a
+        if not sk_double_nearly_zero(big_a):
+            big_a += q / big_a
+        solution[0] = big_a - adiv3
+        count = 1
+        if not sk_double_nearly_zero(r2) and sk_doubles_nearly_equal_ulps(r2, q3):
+            let root1 = -big_a / 2.0 - adiv3
+            if not cubics_nearly_equal(solution[0], root1):
+                solution[count] = root1
+                count += 1
+    return count
+
+## SkCubics::RootsValidT: the roots in [0, 1], snapping those within 0.00005 of an end to it.
+func cubics_roots_valid_t(a: f64, b: f64, c: f64, d: f64, solution: f64[]) -> usize:
+    var all_roots: f64[3] = [0.0, 0.0, 0.0]
+    let real_roots = cubics_roots_real(a, b, c, d, all_roots)
+    var found: usize = 0
+    for index: usize in 0..<real_roots:
+        let t = all_roots[index]
+        if t <= 1.00005 and (t >= 1.0 or sk_doubles_nearly_equal_ulps(t, 1.0)):
+            if (found < 1 or not sk_doubles_nearly_equal_ulps(solution[0], 1.0)) and (found < 2 or not sk_doubles_nearly_equal_ulps(solution[1], 1.0)):
+                solution[found] = 1.0
+                found += 1
+        elif t >= -0.00005 and (t <= 0.0 or sk_double_nearly_zero(t)):
+            if (found < 1 or not sk_double_nearly_zero(solution[0])) and (found < 2 or not sk_double_nearly_zero(solution[1])):
+                solution[found] = 0.0
+                found += 1
+        elif t > 0.0 and t < 1.0:
+            solution[found] = t
+            found += 1
+    return found
+
+func cubics_approximately_zero(x: f64) -> bool:
+    return math.abs(x) < 0.00000001
+
+func find_extrema_valid_t(a: f64, b: f64, c: f64, t: f64[]) -> usize:
+    var roots: f64[2] = [0.0, 0.0]
+    let num_roots = quads_roots_real(3.0 * a, 2.0 * b, c, roots)
+    var valid: usize = 0
+    for i: usize in 0..<num_roots:
+        let t_value = roots[i]
+        if t_value >= 0.0 and t_value <= 1.0:
+            t[valid] = t_value
+            valid += 1
+    return valid
+
+## A root of the cubic in [start, stop] by bisection, or -1.
+func cubics_binary_search(a: f64, b: f64, c: f64, d: f64, start0: f64, stop0: f64) -> f64:
+    var start = start0
+    var stop = stop0
+    let left = cubics_eval_at(a, b, c, d, start)
+    if cubics_approximately_zero(left):
+        return start
+    let right = cubics_eval_at(a, b, c, d, stop)
+    if not math.is_finite(left) or not math.is_finite(right):
+        return -1.0
+    if (left > 0.0 and right > 0.0) or (left < 0.0 and right < 0.0):
+        return -1.0
+    for iteration: i32 in 0..<1000:  # prevent infinite loop
+        let step = (start + stop) / 2.0
+        let curr = cubics_eval_at(a, b, c, d, step)
+        if cubics_approximately_zero(curr):
+            return step
+        if (curr < 0.0 and left < 0.0) or (curr > 0.0 and left > 0.0):
+            start = step
+        else:
+            stop = step
+    return -1.0
+
+## SkCubics::BinarySearchRootsValidT: the roots in [0, 1] found by bisecting between extrema.
+func cubics_binary_search_roots_valid_t(a: f64, b: f64, c: f64, d: f64, solution: f64[]) -> usize:
+    if not math.is_finite(a) or not math.is_finite(b) or not math.is_finite(c) or not math.is_finite(d):
+        return 0
+    var regions: f64[4] = [0.0, 0.0, 0.0, 1.0]
+    var min_max: f64[2] = [0.0, 0.0]
+    let extrema_count = find_extrema_valid_t(a, b, c, min_max)
+    var start_index = 2 - extrema_count
+    if extrema_count == 1:
+        regions[start_index + 1] = min_max[0]
+    if extrema_count == 2:
+        regions[start_index + 1] = std_min64(min_max[0], min_max[1])
+        regions[start_index + 2] = std_max64(min_max[0], min_max[1])
+    var found: usize = 0
+    while start_index < 3:
+        let root = cubics_binary_search(a, b, c, d, regions[start_index], regions[start_index + 1])
+        if root >= 0.0:
+            if (found < 1 or not cubics_approximately_zero(solution[0] - root)) and (found < 2 or not cubics_approximately_zero(solution[1] - root)):
+                solution[found] = root
+                found += 1
+        start_index += 1
+    return found
+
+# mark: SkBezierCubic ==========================================================================
+
+## SkBezierCubic::ConvertToPolynomial for one axis of the control values `p`.
+func bezier_cubic_polynomial(p: const f64[]) -> (f64, f64, f64, f64):
+    let a = -p[0] + 3.0 * p[1] - 3.0 * p[2] + p[3]
+    let b = 3.0 * p[0] - 6.0 * p[1] + 3.0 * p[2]
+    let c = -3.0 * p[0] + 3.0 * p[1]
+    return (a, b, c, p[0])
+
+func interpolate64(a: f64, b: f64, t: f64) -> f64:
+    return a + (b - a) * t
+
+## SkBezierCubic::Subdivide for one axis: `v` holds the 4 control values, `out` receives 7.
+func bezier_cubic_subdivide(v: const f64[], t: f64, out: f64[]):
+    out[0] = v[0]
+    out[6] = v[3]
+    let v01 = interpolate64(v[0], v[1], t)
+    let v12 = interpolate64(v[1], v[2], t)
+    let v23 = interpolate64(v[2], v[3], t)
+    out[1] = v01
+    out[5] = v23
+    out[2] = interpolate64(v01, v12, t)
+    out[4] = interpolate64(v12, v23, t)
+    out[3] = interpolate64(out[2], out[4], t)
+
+# mark: SkChopMonoCubicAt ======================================================================
+
+func close_enough_to_zero(x: f64) -> bool:
+    return math.abs(x) < 0.00001
+
+## first_axis_intersection: the first accurate t where the axis values `p` reach `intercept`.
+func first_axis_intersection(p: const f64[], intercept: f64) -> f64?:
+    var (a, b, c, d) = bezier_cubic_polynomial(p)
+    d -= intercept
+    var roots: f64[3] = [0.0, 0.0, 0.0]
+    var count = cubics_roots_valid_t(a, b, c, d, roots)
+    if count == 0:
+        return none
+    # Verify that at least one of the roots is accurate.
+    for i: usize in 0..<count:
+        if close_enough_to_zero(cubics_eval_at(a, b, c, d, roots[i])):
+            return roots[i]
+    # None of the roots returned by our normal cubic solver were correct enough, so fall back
+    # to a more accurate solution.
+    count = cubics_binary_search_roots_valid_t(a, b, c, d, roots)
+    for i: usize in 0..<count:
+        if close_enough_to_zero(cubics_eval_at(a, b, c, d, roots[i])):
+            return roots[i]
+    return none
+
+## SkChopMonoCubicAtX/Y: chop `src` where its x (or y, when `y_axis`) equals `intercept`.
+func chop_mono_cubic_at_axis(src: const Point[], intercept: f32, y_axis: bool, dst: Point[]) -> bool:
+    var xs: f64[4] = [(f64)src[0].x, (f64)src[1].x, (f64)src[2].x, (f64)src[3].x]
+    var ys: f64[4] = [(f64)src[0].y, (f64)src[1].y, (f64)src[2].y, (f64)src[3].y]
+    if let t = first_axis_intersection(ys if y_axis else xs, (f64)intercept):
+        var out_x: f64[7] = ---
+        var out_y: f64[7] = ---
+        bezier_cubic_subdivide(xs, t, out_x)
+        bezier_cubic_subdivide(ys, t, out_y)
+        for i: usize in 0..<7:
+            dst[i] = Point.from_xy((f32)out_x[i], (f32)out_y[i])
+        return true
+    return false
+
+## SkChopMonoCubicAtX.
+func chop_mono_cubic_at_x(src: const Point[], x: f32, dst: Point[]) -> bool:
+    return chop_mono_cubic_at_axis(src, x, false, dst)
+
+## SkChopMonoCubicAtY.
+func chop_mono_cubic_at_y(src: const Point[], y: f32, dst: Point[]) -> bool:
+    return chop_mono_cubic_at_axis(src, y, true, dst)

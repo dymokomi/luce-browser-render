@@ -1,14 +1,15 @@
 #==============================================================================================
 #
-#   painter - Paint, and drawing rects, paths, strokes and pixmaps onto a pixmap
+#   painter - Paint, and drawing pixmaps onto a pixmap
 #
 #   DESCRIPTION:
-#       Port of tiny-skia painter.rs: FillRule, Paint, the bodies of PixmapMut's fill_rect,
-#       fill_path, stroke_path, draw_pixmap and apply_mask (declared in pixmap.lucb),
-#       stroke_hairline, treat_as_hairline, is_too_big_for_math and DrawTiler (drawing
-#       onto pixmaps larger than 8191 pixels in tiles). Where Rust clones a Paint to change
-#       its shader, the clone is a copy whose gradient stops are copied only when they are
-#       modified (apply_opacity), and released afterwards.
+#       Port of tiny-skia painter.rs: FillRule, Paint (with Skia's dither flag), the
+#       bodies of PixmapMut's draw_pixmap and apply_mask (declared in pixmap.lucb),
+#       treat_as_hairline (Skia's DrawTreatAsHairline), is_too_big_for_math and DrawTiler
+#       (drawing onto pixmaps larger than 8191 pixels in tiles). Filling and stroking follow
+#       Skia's SkDraw, in draw.lucb. Where Rust clones a Paint to change its shader, the
+#       clone is a copy whose gradient stops are copied only when they are modified
+#       (apply_opacity), and released afterwards.
 #
 #==============================================================================================
 
@@ -36,6 +37,10 @@ pub struct Paint:
     ## Forces a high quality/precision rendering pipeline. Default: false
     pub var force_hq_pipeline: bool = false
 
+    ## Dithers the colors of non-constant shaders (gradients, patterns), as Skia does with
+    ## SkPaint::setDither. Default: false
+    pub var dither: bool = false
+
     ## Sets a paint source to a solid color.
     pub mutating func set_color(color: Color):
         self.shader = .solid_color(color = color)
@@ -55,209 +60,11 @@ pub struct Paint:
     pub mutating func release():
         self.shader.release()
 
-# mark: fill_rect =============================================================================
-
-func painter_fill_rect(pixmap: PixmapMut*, rect: Rect, paint: const Paint*, transform: Transform, mask: const Mask*?):
-    # TODO: we probably can use tiler for rect too
-    if transform.is_identity() and not DrawTiler.required(pixmap.width(), pixmap.height()):
-        # TODO: ignore rects outside the pixmap
-
-        let clip = pixmap.size().to_screen_int_rect(0, 0)
-
-        var submask: SubMaskRef? = none
-        if let m = mask:
-            submask = m.as_submask()
-        var subpix = pixmap.as_subpixmap()
-        var blitter = RasterPipelineBlitter.new_(paint, submask, &subpix) else return # nothing to do, all good
-        defer blitter.release()
-
-        if paint.anti_alias:
-            scan_fill_rect_aa(rect, clip, &blitter)
-        else:
-            scan_fill_rect(rect, clip, &blitter)
-    else:
-        var path = PathBuilder.from_rect(rect)
-        defer path.release()
-        painter_fill_path(pixmap, &path, paint, .winding, transform, mask)
-
-# mark: fill_path =============================================================================
-
-func painter_fill_path(pixmap: PixmapMut*, path: const Path*, paint: const Paint*, fill_rule: FillRule, transform: Transform, mask: const Mask*?):
-    if transform.is_identity():
-        # This is sort of similar to SkDraw::drawPath
-
-        # Skip empty paths and horizontal/vertical lines.
-        let path_bounds = path.bounds()
-        if is_nearly_zero(path_bounds.width()) or is_nearly_zero(path_bounds.height()):
-            # log::warn!("empty paths and horizontal/vertical lines cannot be filled")
-            return
-
-        if is_too_big_for_math(path):
-            # log::warn!("path coordinates are too big")
-            return
-
-        # TODO: ignore paths outside the pixmap
-
-        if let tiler0 = DrawTiler.new_(pixmap.width(), pixmap.height()):
-            var tiler = tiler0
-            var tiled = path.clone() # TODO: avoid cloning
-            defer tiled.release()
-            var tile_paint = *paint
-
-            while let tile = tiler.next():
-                let ts = Transform.from_translate(-(f32)tile.x(), -(f32)tile.y())
-                if not tiled.transform(ts):
-                    # log::warn!("path transformation failed")
-                    return
-                tile_paint.shader.transform(ts)
-
-                let clip_rect = tile.size().to_screen_int_rect(0, 0)
-                if let subpix0 = pixmap.subpixmap(tile.to_int_rect()):
-                    var subpix = subpix0
-                    var submask: SubMaskRef? = none
-                    if let m = mask:
-                        submask = m.submask(tile.to_int_rect())
-                    if let blitter0 = RasterPipelineBlitter.new_(&tile_paint, submask, &subpix):
-                        var blitter = blitter0
-                        # We're ignoring "errors" here, because `fill_path` will return `None`
-                        # when rendering a tile that doesn't have a path on it. Which is not
-                        # an error in this case.
-                        if tile_paint.anti_alias:
-                            scan_aa_fill_path(&tiled, fill_rule, clip_rect, &blitter)
-                        else:
-                            scan_fill_path(&tiled, fill_rule, clip_rect, &blitter)
-                        blitter.release()
-
-                let ts2 = Transform.from_translate((f32)tile.x(), (f32)tile.y())
-                if not tiled.transform(ts2):
-                    return # technically unreachable
-                tile_paint.shader.transform(ts2)
-        else:
-            let clip_rect = pixmap.size().to_screen_int_rect(0, 0)
-            var submask: SubMaskRef? = none
-            if let m = mask:
-                submask = m.as_submask()
-            var subpix = pixmap.as_subpixmap()
-            var blitter = RasterPipelineBlitter.new_(paint, submask, &subpix) else return # nothing to do, all good
-            defer blitter.release()
-
-            if paint.anti_alias:
-                scan_aa_fill_path(path, fill_rule, clip_rect, &blitter)
-            else:
-                scan_fill_path(path, fill_rule, clip_rect, &blitter)
-    else:
-        var transformed = path.clone()
-        defer transformed.release()
-        if not transformed.transform(transform):
-            # log::warn!("path transformation failed")
-            return
-
-        var transformed_paint = *paint
-        transformed_paint.shader.transform(transform)
-
-        painter_fill_path(pixmap, &transformed, &transformed_paint, fill_rule, Transform.identity(), mask)
-
-# mark: stroke_path ===========================================================================
-
-func painter_stroke_path(pixmap: PixmapMut*, path: const Path*, paint: const Paint*, stroke: const Stroke*, transform: Transform, mask: const Mask*?):
-    if stroke.width < 0.0:
-        # log::warn!("negative stroke width isn't allowed")
-        return
-
-    let res_scale = PathStroker.compute_resolution_scale(transform)
-
-    if let dash = stroke.dash:
-        var dashed = path.dash(&dash, res_scale) else return # path dashing failed
-        defer dashed.release()
-        painter_stroke_path_impl(pixmap, &dashed, paint, stroke, transform, mask, res_scale)
-    else:
-        painter_stroke_path_impl(pixmap, path, paint, stroke, transform, mask, res_scale)
-
-# The rest of Rust's PixmapMut::stroke_path, with the dashed path when there is a dash.
-func painter_stroke_path_impl(pixmap: PixmapMut*, path: const Path*, paint: const Paint*, stroke: const Stroke*, transform: Transform, mask: const Mask*?, res_scale: f32):
-    if let coverage = treat_as_hairline(paint, stroke, transform):
-        var hair_paint = shader_clone_paint(paint)
-        defer hair_paint.release()
-        # When coverage == 1.0: no changes to the `paint`.
-        if coverage != 1.0 and blend_mode_should_pre_scale_coverage(hair_paint.blend_mode):
-            # This is the old technique, which we preserve for now so we don't change
-            # previous results (testing) the new way seems fine, its just (a tiny bit)
-            # different.
-            let scale = (i32)(coverage * 256.0)
-            let new_alpha = (255 * scale) >> 8
-            hair_paint.shader.apply_opacity((f32)new_alpha / 255.0)
-
-        if let tiler0 = DrawTiler.new_(pixmap.width(), pixmap.height()):
-            var tiler = tiler0
-            var tiled = path.clone() # TODO: avoid cloning
-            defer tiled.release()
-
-            if not transform.is_identity():
-                hair_paint.shader.transform(transform)
-                if not tiled.transform(transform):
-                    # log::warn!("path transformation failed")
-                    return
-
-            while let tile = tiler.next():
-                let ts = Transform.from_translate(-(f32)tile.x(), -(f32)tile.y())
-                if not tiled.transform(ts):
-                    # log::warn!("path transformation failed")
-                    return
-                hair_paint.shader.transform(ts)
-
-                if let subpix0 = pixmap.subpixmap(tile.to_int_rect()):
-                    var subpix = subpix0
-                    var submask: SubMaskRef? = none
-                    if let m = mask:
-                        submask = m.submask(tile.to_int_rect())
-
-                    # We're ignoring "errors" here, because `stroke_hairline` will return
-                    # `None` when rendering a tile that doesn't have a path on it. Which is
-                    # not an error in this case.
-                    stroke_hairline(&tiled, &hair_paint, stroke.line_cap, submask, &subpix)
-
-                let ts2 = Transform.from_translate((f32)tile.x(), (f32)tile.y())
-                if not tiled.transform(ts2):
-                    return
-                hair_paint.shader.transform(ts2)
-        else:
-            var subpix = pixmap.as_subpixmap()
-            var submask: SubMaskRef? = none
-            if let m = mask:
-                submask = m.as_submask()
-            if not transform.is_identity():
-                hair_paint.shader.transform(transform)
-
-                # TODO: avoid clone
-                var transformed = path.clone()
-                defer transformed.release()
-                if not transformed.transform(transform):
-                    # log::warn!("path transformation failed")
-                    return
-
-                stroke_hairline(&transformed, &hair_paint, stroke.line_cap, submask, &subpix)
-            else:
-                stroke_hairline(path, &hair_paint, stroke.line_cap, submask, &subpix)
-    else:
-        var stroked = path.stroke(stroke, res_scale) else return # path stroking failed
-        defer stroked.release()
-
-        painter_fill_path(pixmap, &stroked, paint, .winding, transform, mask)
-
 ## A copy of the paint whose gradient stops are its own (release it).
 func shader_clone_paint(paint: const Paint*) -> Paint:
     var copy = *paint
     copy.shader = paint.shader.clone()
     return copy
-
-func stroke_hairline(path: const Path*, paint: const Paint*, line_cap: LineCap, mask: SubMaskRef?, pixmap: SubPixmapMut*):
-    let clip = pixmap.size.to_screen_int_rect(0, 0)
-    var blitter = RasterPipelineBlitter.new_(paint, mask, pixmap) else return # nothing to do, all good
-    defer blitter.release()
-    if paint.anti_alias:
-        hairline_aa_stroke_path(path, line_cap, clip, &blitter)
-    else:
-        hairline_stroke_path(path, line_cap, clip, &blitter)
 
 # mark: draw_pixmap and apply_mask ============================================================
 
@@ -272,14 +79,14 @@ func painter_draw_pixmap(pixmap_dst: PixmapMut*, x: i32, y: i32, pixmap: PixmapR
     let patt_transform = Transform.from_translate((f32)x, (f32)y)
 
     let paint = Paint(
-        shader = Pattern.new_(pixmap, .pad_, pixmap_paint.quality, pixmap_paint.opacity, patt_transform), # Pad, otherwise we will get weird borders overlap.
-        blend_mode = pixmap_paint.blend_mode,
-        anti_alias = false, # Skia doesn't use it too.
-        force_hq_pipeline = false, # Pattern will use hq anyway.
-        colorspace = .linear,
+        shader = Pattern.new_(pixmap, .pad_, pixmap_paint.quality, pixmap_paint.opacity, patt_transform), blend_mode = pixmap_paint.blend_mode,
+        anti_alias = false, force_hq_pipeline = false, colorspace = .linear,
     )
+    # Pad, otherwise we will get weird borders overlap.
+    # Skia doesn't use it too.
+    # Pattern will use hq anyway.
 
-    painter_fill_rect(pixmap_dst, rect, &paint, transform, mask)
+    draw_fill_rect(pixmap_dst, rect, &paint, transform, mask)
 
 func painter_apply_mask(pixmap: PixmapMut*, mask: const Mask*):
     if pixmap.size().width() != mask.size().width() or pixmap.size().height() != mask.size().height():
@@ -332,7 +139,8 @@ func treat_as_hairline(paint: const Paint*, stroke: const Stroke*, ts0: Transfor
     let len1 = fast_len(points[1])
 
     if len0 <= 1.0 and len1 <= 1.0:
-        return ave(len0, len1)
+        # sk_float_midpoint: double math to avoid underflow and overflow.
+        return (f32)(0.5 * ((f64)len0 + (f64)len1))
 
     return none
 

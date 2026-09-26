@@ -4,7 +4,8 @@
 #
 #   DESCRIPTION:
 #       Port of tiny-skia-path path_builder.rs: PathDirection and PathBuilder (move_to,
-#       line_to, quad_to, conic_to via quads, cubic_to, close, rect/oval/circle, path
+#       line_to, quad_to, conic_to (kept as a conic, as SkPathBuilder does), cubic_to,
+#       close, rect/oval/circle made of conics as SkPath's, path
 #       concatenation and reversal, finish). NOTE (tiny-skia): this is not SkPathBuilder, but
 #       rather a reimplementation of SkPath. `finish()` hands the storage to the Path, as
 #       Rust's `finish(self)` consumes the builder; the builder is empty afterwards.
@@ -21,6 +22,8 @@ enum PathDirection as u8:
 pub struct PathBuilder:
     var verbs: Vec[PathVerb]
     var points: Vec[Point]
+    ## The weights of the conics, in order.
+    var weights: Vec[f32]
     var last_move_to_index: usize
     var move_to_required: bool = true
 
@@ -51,7 +54,7 @@ pub struct PathBuilder:
         points.push(Point.from_xy(rect.right(), rect.top()))
         points.push(Point.from_xy(rect.right(), rect.bottom()))
         points.push(Point.from_xy(rect.left(), rect.bottom()))
-        return Path(verbs = verbs, points = points, bounds_ = rect)
+        return Path(verbs = verbs, points = points, weights = Vec[f32](), bounds_ = rect)
 
     ## Creates a new `Path` from a circle. See `PathBuilder.push_circle` for details.
     pub static func from_circle(cx: f32, cy: f32, radius: f32) -> Path?:
@@ -116,9 +119,12 @@ pub struct PathBuilder:
     mutating func quad_to_pt(p1: Point, p: Point):
         self.quad_to(p1.x, p1.y, p.x, p.y)
 
-    # We do not support conic segments, but Skia still relies on them from time to time.
-    # This method will simply convert the input data into quad segments.
-    mutating func conic_to(x1: f32, y1: f32, x: f32, y: f32, weight: f32):
+    ## Adds a conic from the last point to `x`, `y` with control point `x1`, `y1` and
+    ## `weight` (SkPathBuilder::conicTo): a weight of 1 is a quad, a weight <= 0 or NaN a line
+    ## to the end point, an infinite one two lines through the control point. If `Path` is
+    ## empty - adds Move(0, 0) first. If `Path` ends with Close - adds Move(last_x, last_y)
+    ## first.
+    pub mutating func conic_to(x1: f32, y1: f32, x: f32, y: f32, weight: f32):
         # check for <= 0 or NaN with this test
         if not (weight > 0.0):
             self.line_to(x, y)
@@ -129,16 +135,10 @@ pub struct PathBuilder:
             self.quad_to(x1, y1, x, y)
         else:
             self.inject_move_to_if_needed()
-            let last = self.last_point() else trap("unreachable")
-            if let quadder = AutoConicToQuads.compute(last, Point.from_xy(x1, y1), Point.from_xy(x, y), weight):
-                # Points are ordered as: 0 - 1 2 - 3 4 - 5 6 - ..
-                # `count` is a number of pairs +1
-                var offset: usize = 1
-                for _i in 0..<(usize)quadder.len:
-                    let pt1 = quadder.points[offset + 0]
-                    let pt2 = quadder.points[offset + 1]
-                    self.quad_to(pt1.x, pt1.y, pt2.x, pt2.y)
-                    offset += 2
+            self.verbs.push(.conic)
+            self.points.push(Point.from_xy(x1, y1))
+            self.points.push(Point.from_xy(x, y))
+            self.weights.push(weight)
 
     mutating func conic_points_to(pt1: Point, pt2: Point, weight: f32):
         self.conic_to(pt1.x, pt1.y, pt2.x, pt2.y, weight)
@@ -233,6 +233,7 @@ pub struct PathBuilder:
         self.last_move_to_index = self.points.len
         self.verbs.extend(other.verbs.view())
         self.points.extend(other.points.view())
+        self.weights.extend(other.weights.view())
 
     mutating func push_path_builder(other: const PathBuilder*):
         if other.is_empty():
@@ -241,12 +242,14 @@ pub struct PathBuilder:
             self.last_move_to_index = self.points.len + other.last_move_to_index
         self.verbs.extend(other.verbs.view())
         self.points.extend(other.points.view())
+        self.weights.extend(other.weights.view())
 
     ## Appends, in a reverse order, the first contour of path separated by a MoveTo.
     mutating func reverse_path_to(other: const PathBuilder*):
         if other.is_empty():
             return
         var points_offset = other.points.len - 1
+        var weight_index = other.weights.len
         var index = other.verbs.len
         while index > 0:
             index -= 1
@@ -265,6 +268,12 @@ pub struct PathBuilder:
                     let pt2 = other.points.data[points_offset - 2]
                     points_offset -= 2
                     self.quad_to(pt1.x, pt1.y, pt2.x, pt2.y)
+                .conic:
+                    let pt1 = other.points.data[points_offset - 1]
+                    let pt2 = other.points.data[points_offset - 2]
+                    points_offset -= 2
+                    weight_index -= 1
+                    self.conic_to(pt1.x, pt1.y, pt2.x, pt2.y, other.weights.data[weight_index])
                 .cubic:
                     let pt1 = other.points.data[points_offset - 1]
                     let pt2 = other.points.data[points_offset - 2]
@@ -280,6 +289,7 @@ pub struct PathBuilder:
     pub mutating func clear():
         self.verbs.clear()
         self.points.clear()
+        self.weights.clear()
         self.last_move_to_index = 0
         self.move_to_required = true
 
@@ -292,9 +302,10 @@ pub struct PathBuilder:
             self.release()
             return none
         if let bounds = Rect.from_points(self.points.view()):
-            let path = Path(verbs = self.verbs, points = self.points, bounds_ = bounds)
+            let path = Path(verbs = self.verbs, points = self.points, weights = self.weights, bounds_ = bounds)
             self.verbs = Vec[PathVerb]()
             self.points = Vec[Point]()
+            self.weights = Vec[f32]()
             self.last_move_to_index = 0
             self.move_to_required = true
             return path
@@ -305,5 +316,6 @@ pub struct PathBuilder:
     pub mutating func release():
         self.verbs.release()
         self.points.release()
+        self.weights.release()
         self.last_move_to_index = 0
         self.move_to_required = true

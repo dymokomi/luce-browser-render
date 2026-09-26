@@ -3,207 +3,180 @@
 #   pipeline_blitter - the blitter that runs raster pipelines
 #
 #   DESCRIPTION:
-#       Port of tiny-skia pipeline/blitter.rs: RasterPipelineBlitter, which builds three
-#       pipelines from a paint (anti-aliased spans, rectangles, two-pixel masks), strength-
-#       reduces SourceOver/Clear to memsets where Skia does, and implements the Blitter
-#       interface for the scan converters. `new_mask` builds the variant that renders
-#       coverage into a Mask. It owns its compiled pipelines; `release()` frees them.
+#       Port of tiny-skia pipeline/blitter.rs, brought to Skia m144's
+#       SkRasterPipelineBlitter::Create (src/core/SkRasterPipelineBlitter.cpp) and the paint
+#       tweaks of SkBlitter::Choose, for Ladybird's destination (8888 premultiplied with a
+#       color space, so srcover_rgba_8888 is never used):
+#
+#       - Choose: a blend mode that acts like SourceOver becomes it (Source with an opaque
+#         solid color), Destination and DestinationIn with an opaque solid color draw
+#         nothing, Clear becomes Source with transparent black; dither only non-constant
+#         shaders.
+#       - The color pipeline: the shader's stages (a solid color is a uniform color, the
+#         constant pipeline Skia collapses back into one), the paint's alpha
+#         (scale_1_float) after a non-solid shader, then dither at 1/255.
+#       - SourceOver becomes Source when the color pipeline is opaque, and a constant color
+#         with Source fills rects with a memset.
+#       - The blit pipelines: color, clamp_01, then for rects load_dst + blend (unless
+#         Source); for anti-aliased runs and masks either the pre-scaled coverage
+#         (scale_1_float / scale_u8, for the modes SkBlendMode_ShouldPreScaleCoverage
+#         allows) then load_dst + blend, or load_dst + blend then lerp_1_float / lerp_u8;
+#         then store.
+#
+#       Clipping is done by the blitters that wrap this one (blitter.lucb,
+#       blitter_clip.lucb), as Skia's clip blitters wrap SkRasterPipelineBlitter. A blitter
+#       owns its compiled pipelines; `release()` frees them.
+#
+#       Copyright (c) 2016 Google Inc. All rights reserved.
+#       Copyright (c) 2020 Yevhenii Reizner All rights reserved.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia, LICENSE-tiny-skia)
 #
 #==============================================================================================
 
+## The dither rate of an 8888 destination.
+let dither_rate_8888: f32 = 1.0 / 255.0
+
+## What SkBlitter::Choose and create_pipeline_for_blitter decide about a paint.
+struct PipelineSource:
+    var shader: Shader
+    var blend_mode: BlendMode
+    var paint_alpha: f32  # the paint's alpha, applied after a non-solid shader
+    var is_opaque: bool
+    var is_constant: bool
+    var dither: bool
+    var colorspace: ColorSpace
+
+    ## The color pipeline into `p`: the shader, the paint's alpha, dither, and clamp_01
+    ## (appendClampIfNormalized; skipped where it is a no-op).
+    func push_color_stages(p: RasterPipelineBuilder*) -> bool:
+        if not self.shader.push_stages(self.colorspace, p):
+            return false
+        if not self.is_constant and self.paint_alpha != 1.0:
+            p.ctx.paint_alpha = self.paint_alpha
+            p.push(.scale_paint_alpha)
+        if self.dither:
+            p.ctx.dither_rate = dither_rate_8888
+            p.push(.dither)
+        # A constant color is in range already: its clamp changes nothing.
+        if not self.is_constant:
+            p.push(.clamp_01)
+        return true
+
+    ## load_dst and the blend mode's stages.
+    func push_load_and_blend(p: RasterPipelineBuilder*):
+        p.push(.load_destination)
+        if let stage = colorspace_expand_dest_stage(self.colorspace):
+            p.push(stage)
+        if let blend_stage = blend_mode_to_stage(self.blend_mode):
+            p.push(blend_stage)
+
+    ## A blit pipeline with coverage: `scale` pre-scales it, `lerp` lerps by it.
+    func build_coverage(scale: Stage, lerp: Stage) -> RasterPipeline?:
+        var b = RasterPipelineBuilder.new_()
+        if not self.push_color_stages(&b):
+            b.release()
+            return none
+        if blend_mode_should_pre_scale_coverage(self.blend_mode):
+            b.push(scale)
+            self.push_load_and_blend(&b)
+        else:
+            self.push_load_and_blend(&b)
+            b.push(lerp)
+        if let stage = colorspace_compress_stage(self.colorspace):
+            b.push(stage)
+        b.push(.store)
+        return b.compile()
+
+    ## The blitRect pipeline.
+    func build_rect() -> RasterPipeline?:
+        var b = RasterPipelineBuilder.new_()
+        if not self.push_color_stages(&b):
+            b.release()
+            return none
+        if self.blend_mode != .source:
+            self.push_load_and_blend(&b)
+        if let stage = colorspace_compress_stage(self.colorspace):
+            b.push(stage)
+        b.push(.store)
+        return b.compile()
+
+## CheckFastPath's "just a solid color": an opaque one.
+func just_solid_color(shader: Shader) -> bool:
+    match shader:
+        .solid_color(c): return c.is_opaque()
+        _: return false
+
+## SkRasterPipelineBlitter: blits a paint through the raster pipeline.
 struct RasterPipelineBlitter: Blitter:
-    var mask: SubMaskRef?
     var pixmap_src: PixmapRef
     var pixmap: SubPixmapMut*
     var memset2d_color: PremultipliedColorU8?
     var blit_anti_h_rp: RasterPipeline
     var blit_rect_rp: RasterPipeline
     var blit_mask_rp: RasterPipeline
-    var is_mask: bool
 
-    static func new_(paint: const Paint*, mask: SubMaskRef?, pixmap: SubPixmapMut*) -> RasterPipelineBlitter?:
-        # Make sure that `mask` has the same size as `pixmap`.
-        var has_mask = false
-        if let m = mask:
-            has_mask = true
-            if m.size.width() != pixmap.size.width() or m.size.height() != pixmap.size.height():
-                # log::warn!("Pixmap and Mask are expected to have the same size")
-                return none
+    ## SkBlitter::Choose and SkRasterPipelineBlitter::Create for `paint`; none when the paint
+    ## draws nothing (SkNullBlitter) or its shader cannot draw.
+    static func new_(paint: const Paint*, pixmap: SubPixmapMut*) -> RasterPipelineBlitter?:
+        var src = PipelineSource(shader = paint.shader, blend_mode = paint.blend_mode, paint_alpha = 1.0, is_opaque = false, is_constant = false, dither = false, colorspace = paint.colorspace)
 
-        # Fast-reject.
-        # This is basically SkInterpretXfermode().
-        if paint.blend_mode == .destination:
-            # `Destination` keep the pixmap unchanged. Nothing to do here.
+        # SkBlitter::Choose. We have the most fast-paths for SrcOver, so see if we can act
+        # like SrcOver (CheckFastPath; an 8888 destination is not always opaque).
+        if src.blend_mode == .source and just_solid_color(src.shader):
+            src.blend_mode = .source_over
+        elif src.blend_mode == .destination:
             return none
-        if paint.blend_mode == .destination_in and paint.shader.is_opaque() and paint.is_solid_color():
+        elif src.blend_mode == .destination_in and just_solid_color(src.shader):
             return none
+        # A Clear blend mode will ignore the entire color pipeline, as if Src mode with
+        # 0x00000000.
+        if src.blend_mode == .clear:
+            src.shader = .solid_color(color = Color.transparent())
+            src.blend_mode = .source
+        # Dither is only needed for non-constant shaders.
+        src.dither = paint.dither and not src.shader.is_constant()
 
-        # We can strength-reduce SourceOver into Source when opaque.
-        var blend_mode = paint.blend_mode
-        if paint.shader.is_opaque() and blend_mode == .source_over and not has_mask:
-            blend_mode = .source
-
-        # When we're drawing a constant color in Source mode, we can sometimes just memset.
+        # create_pipeline_for_blitter: the paint's alpha is a pattern's opacity.
         var memset2d_color: PremultipliedColorU8? = none
-        if paint.is_solid_color() and blend_mode == .source and not has_mask:
-            # Unlike Skia, our shader cannot be constant. Therefore there is no need to run a
-            # raster pipeline to get shader's color.
-            match paint.shader:
+        var pixmap_src = dummy_pixmap_ref()
+        match src.shader:
+            .solid_color(color):
+                src.is_constant = true
+                src.is_opaque = color.alpha() == 1.0
+            .pattern(patt):
+                src.paint_alpha = patt.opacity
+                src.is_opaque = src.shader.is_opaque() and patt.opacity == 1.0
+                pixmap_src = patt.pixmap
+            _:
+                src.is_opaque = src.shader.is_opaque()
+
+        # We can strength-reduce SrcOver into Src when opaque.
+        if src.is_opaque and src.blend_mode == .source_over:
+            src.blend_mode = .source
+
+        # When we're drawing a constant color in Src mode, we can sometimes just memset: the
+        # color pipeline's uniform color, stored.
+        if src.is_constant and src.blend_mode == .source:
+            match src.shader:
                 .solid_color(color):
-                    memset2d_color = color.premultiply().to_color_u8()
+                    let c = colorspace_expand_color(paint.colorspace, color).premultiply()
+                    memset2d_color = PremultipliedColorU8.from_rgba_unchecked((u8)(c.red() * 255.0 + 0.5), (u8)(c.green() * 255.0 + 0.5), (u8)(c.blue() * 255.0 + 0.5), (u8)(c.alpha() * 255.0 + 0.5))
                 _:
                     memset2d_color = none
 
-        # Clear is just a transparent color memset.
-        if blend_mode == .clear and not paint.anti_alias and not has_mask:
-            blend_mode = .source
-            memset2d_color = PremultipliedColorU8.transparent()
-
-        var anti_h = RasterPipelineBuilder.new_()
-        anti_h.set_force_hq_pipeline(paint.force_hq_pipeline)
-        if not paint.shader.push_stages(paint.colorspace, &anti_h):
-            anti_h.release()
-            return none
-
-        if has_mask:
-            anti_h.push(.mask_u8)
-
-        if blend_mode_should_pre_scale_coverage(blend_mode):
-            anti_h.push(.scale_1_float)
-            anti_h.push(.load_destination)
-            if let stage = colorspace_expand_dest_stage(paint.colorspace):
-                anti_h.push(stage)
-            if let blend_stage = blend_mode_to_stage(blend_mode):
-                anti_h.push(blend_stage)
-        else:
-            anti_h.push(.load_destination)
-            if let stage = colorspace_expand_dest_stage(paint.colorspace):
-                anti_h.push(stage)
-            if let blend_stage = blend_mode_to_stage(blend_mode):
-                anti_h.push(blend_stage)
-
-            anti_h.push(.lerp_1_float)
-
-        if let stage = colorspace_compress_stage(paint.colorspace):
-            anti_h.push(stage)
-        anti_h.push(.store)
-
-        var blit_anti_h_rp = anti_h.compile()
-
-        var rect_p = RasterPipelineBuilder.new_()
-        rect_p.set_force_hq_pipeline(paint.force_hq_pipeline)
-        if not paint.shader.push_stages(paint.colorspace, &rect_p):
-            rect_p.release()
-            blit_anti_h_rp.release()
-            return none
-
-        if has_mask:
-            rect_p.push(.mask_u8)
-
-        if blend_mode == .source_over and not has_mask:
-            if let stage = colorspace_compress_stage(paint.colorspace):
-                rect_p.push(stage)
-            # TODO: ignore when dither_rate is non-zero
-            rect_p.push(.source_over_rgba)
-        else:
-            if blend_mode != .source:
-                rect_p.push(.load_destination)
-                if let blend_stage = blend_mode_to_stage(blend_mode):
-                    if let stage = colorspace_expand_dest_stage(paint.colorspace):
-                        rect_p.push(stage)
-                    rect_p.push(blend_stage)
-
-            if let stage = colorspace_compress_stage(paint.colorspace):
-                rect_p.push(stage)
-            rect_p.push(.store)
-
-        var blit_rect_rp = rect_p.compile()
-
-        var mask_p = RasterPipelineBuilder.new_()
-        mask_p.set_force_hq_pipeline(paint.force_hq_pipeline)
-        if not paint.shader.push_stages(paint.colorspace, &mask_p):
-            mask_p.release()
-            blit_anti_h_rp.release()
-            blit_rect_rp.release()
-            return none
-
-        if has_mask:
-            mask_p.push(.mask_u8)
-
-        if blend_mode_should_pre_scale_coverage(blend_mode):
-            mask_p.push(.scale_u8)
-            mask_p.push(.load_destination)
-            if let stage = colorspace_expand_dest_stage(paint.colorspace):
-                mask_p.push(stage)
-            if let blend_stage = blend_mode_to_stage(blend_mode):
-                mask_p.push(blend_stage)
-        else:
-            mask_p.push(.load_destination)
-            if let stage = colorspace_expand_dest_stage(paint.colorspace):
-                mask_p.push(stage)
-            if let blend_stage = blend_mode_to_stage(blend_mode):
-                mask_p.push(blend_stage)
-
-            mask_p.push(.lerp_u8)
-
-        if let stage = colorspace_compress_stage(paint.colorspace):
-            mask_p.push(stage)
-        mask_p.push(.store)
-
-        let blit_mask_rp = mask_p.compile()
-
-        var pixmap_src = dummy_pixmap_ref()
-        match paint.shader:
-            .pattern(patt):
-                pixmap_src = patt.pixmap
-            _:
-                # Just a dummy one.
-                pixmap_src = dummy_pixmap_ref()
+        # Only the shader's stages can fail (a non-invertible matrix), so the first build
+        # decides for all three.
+        let blit_anti_h_rp = src.build_coverage(.scale_1_float, .lerp_1_float) else return none
+        let blit_rect_rp = src.build_rect() else trap("unreachable")
+        let blit_mask_rp = src.build_coverage(.scale_u8, .lerp_u8) else trap("unreachable")
 
         return RasterPipelineBlitter(
-            mask = mask,
             pixmap_src = pixmap_src,
             pixmap = pixmap,
             memset2d_color = memset2d_color,
             blit_anti_h_rp = blit_anti_h_rp,
             blit_rect_rp = blit_rect_rp,
             blit_mask_rp = blit_mask_rp,
-            is_mask = false,
-        )
-
-    static func new_mask(pixmap: SubPixmapMut*) -> RasterPipelineBlitter?:
-        let color = Color.white().premultiply()
-
-        let memset2d_color: PremultipliedColorU8? = color.to_color_u8()
-
-        var anti_h = RasterPipelineBuilder.new_()
-        anti_h.push_uniform_color(color)
-        anti_h.push(.load_destination_u8)
-        anti_h.push(.lerp_1_float)
-        anti_h.push(.store_u8)
-        let blit_anti_h_rp = anti_h.compile()
-
-        var rect_p = RasterPipelineBuilder.new_()
-        rect_p.push_uniform_color(color)
-        rect_p.push(.store_u8)
-        let blit_rect_rp = rect_p.compile()
-
-        var mask_p = RasterPipelineBuilder.new_()
-        mask_p.push_uniform_color(color)
-        mask_p.push(.load_destination_u8)
-        mask_p.push(.lerp_u8)
-        mask_p.push(.store_u8)
-        let blit_mask_rp = mask_p.compile()
-
-        return RasterPipelineBlitter(
-            mask = none,
-            pixmap_src = dummy_pixmap_ref(),
-            pixmap = pixmap,
-            memset2d_color = memset2d_color,
-            blit_anti_h_rp = blit_anti_h_rp,
-            blit_rect_rp = blit_rect_rp,
-            blit_mask_rp = blit_mask_rp,
-            is_mask = true,
         )
 
     ## Frees the compiled pipelines.
@@ -212,24 +185,16 @@ struct RasterPipelineBlitter: Blitter:
         self.blit_rect_rp.release()
         self.blit_mask_rp.release()
 
-    func mask_ctx() -> MaskCtx:
-        if let m = self.mask:
-            return m.mask_ctx()
-        return MaskCtx()
+    pub mutating func blit_h(x: i32, y: i32, width: i32):
+        self.blit_rect(x, y, width, 1)
 
-    pub mutating func blit_h(x: u32, y: u32, width: u32):
-        let r = ScreenIntRect.from_xywh_safe(x, y, width, 1)
-        self.blit_rect(r)
-
-    pub mutating func blit_anti_h(x0: u32, y: u32, aa: AlphaU8[], runs: AlphaRun[]):
-        let mask_ctx = self.mask_ctx()
-
+    pub mutating func blit_anti_h(x0: i32, y: i32, aa: AlphaU8[], runs: AlphaRun[]):
         var x = x0
         var aa_offset: usize = 0
         var run_offset: usize = 0
         var run = runs[0]
         while run != 0:
-            let width = (u32)run
+            let width = (i32)run
 
             let alpha = aa[aa_offset]
             if alpha == alpha_u8_opaque:
@@ -237,63 +202,57 @@ struct RasterPipelineBlitter: Blitter:
             elif alpha != alpha_u8_transparent:
                 self.blit_anti_h_rp.ctx.current_coverage = (f32)alpha * (1.0 / 255.0)
 
-                let rect = ScreenIntRect.from_xywh_safe(x, y, width, 1)
-                self.blit_anti_h_rp.run(rect, AAMaskCtx(), mask_ctx, self.pixmap_src, self.pixmap)
+                let rect = ScreenIntRect.from_xywh_safe((u32)x, (u32)y, (u32)width, 1)
+                self.blit_anti_h_rp.run(rect, AAMaskCtx(), MaskCtx(), self.pixmap_src, self.pixmap)
 
             x += width
             run_offset += (usize)run
             aa_offset += (usize)run
             run = runs[run_offset]
 
-    pub mutating func blit_v(x: u32, y: u32, height: u32, alpha: AlphaU8):
-        let bounds = ScreenIntRect.from_xywh_safe(x, y, 1, height)
-
-        let mask = BlitMask(image = [alpha, alpha], bounds = bounds, row_bytes = 0) # so we reuse the 1 "row" for all of height
-
-        self.blit_mask(&mask, bounds)
-
-    pub mutating func blit_anti_h2(x: u32, y: u32, alpha0: AlphaU8, alpha1: AlphaU8):
-        let bounds = ScreenIntRect.from_xywh(x, y, 2, 1) else trap("unreachable")
-
-        let mask = BlitMask(image = [alpha0, alpha1], bounds = bounds, row_bytes = 2)
+    pub mutating func blit_v(x: i32, y: i32, height: i32, alpha: AlphaU8):
+        let bounds = IRect.xywh(x, y, 1, height)
+        let image: u8[1] = [alpha]
+        let mask = BlitMask(image = image, bounds = bounds, row_bytes = 0)  # so we reuse the 1 "row" for all of height
 
         self.blit_mask(&mask, bounds)
 
-    pub mutating func blit_anti_v2(x: u32, y: u32, alpha0: AlphaU8, alpha1: AlphaU8):
-        let bounds = ScreenIntRect.from_xywh(x, y, 1, 2) else trap("unreachable")
-
-        let mask = BlitMask(image = [alpha0, alpha1], bounds = bounds, row_bytes = 1)
+    pub mutating func blit_anti_h2(x: i32, y: i32, alpha0: AlphaU8, alpha1: AlphaU8):
+        let bounds = IRect.xywh(x, y, 2, 1)
+        let image: u8[2] = [alpha0, alpha1]
+        let mask = BlitMask(image = image, bounds = bounds, row_bytes = 2)
 
         self.blit_mask(&mask, bounds)
 
-    pub mutating func blit_rect(rect: ScreenIntRect):
+    pub mutating func blit_anti_v2(x: i32, y: i32, alpha0: AlphaU8, alpha1: AlphaU8):
+        let bounds = IRect.xywh(x, y, 1, 2)
+        let image: u8[2] = [alpha0, alpha1]
+        let mask = BlitMask(image = image, bounds = bounds, row_bytes = 1)
+
+        self.blit_mask(&mask, bounds)
+
+    pub mutating func blit_rect(x: i32, y: i32, width: i32, height: i32):
+        let rect = ScreenIntRect.from_xywh_safe((u32)x, (u32)y, (u32)width, (u32)height)
         if let c = self.memset2d_color:
-            if self.is_mask:
-                for y in 0..<rect.height():
-                    let start = self.pixmap.offset((usize)rect.x(), (usize)(rect.y() + y))
-                    let end = start + (usize)rect.width()
-                    for p in &self.pixmap.data[start..<end]:
-                        *p = c.alpha()
-            else:
-                let pixels = self.pixmap.pixels_mut()
-                for y in 0..<rect.height():
-                    let start = self.pixmap.offset((usize)rect.x(), (usize)(rect.y() + y))
-                    let end = start + (usize)rect.width()
-                    for p in &pixels[start..<end]:
-                        *p = c
-
+            let pixels = self.pixmap.pixels_mut()
+            for yy in 0..<rect.height():
+                let start = self.pixmap.offset((usize)rect.x(), (usize)(rect.y() + yy))
+                let end = start + (usize)rect.width()
+                for p in &pixels[start..<end]:
+                    *p = c
             return
 
-        let mask_ctx = self.mask_ctx()
+        self.blit_rect_rp.run(rect, AAMaskCtx(), MaskCtx(), self.pixmap_src, self.pixmap)
 
-        self.blit_rect_rp.run(rect, AAMaskCtx(), mask_ctx, self.pixmap_src, self.pixmap)
+    pub mutating func blit_anti_rect(x: i32, y: i32, width: i32, height: i32, left_alpha: AlphaU8, right_alpha: AlphaU8):
+        blitter_default_blit_anti_rect(&self, x, y, width, height, left_alpha, right_alpha)
 
-    pub mutating func blit_mask(mask: const BlitMask*, clip: ScreenIntRect):
-        let aa_mask_ctx = AAMaskCtx(pixels = mask.image, stride = mask.row_bytes, shift = (usize)(mask.bounds.left() + mask.bounds.top() * mask.row_bytes))
+    pub mutating func blit_mask(mask: const BlitMask*, clip: IRect):
+        # The mask's pixels from the clip's top-left, lined up with the pixmap at (0, 0).
+        let start = mask.index(clip.left, clip.top)
+        let aa_mask_ctx = AAMaskCtx(pixels = mask.image[start..], stride = mask.row_bytes, shift = (usize)clip.left + (usize)clip.top * (usize)mask.row_bytes)
 
-        let mask_ctx = self.mask_ctx()
-
-        self.blit_mask_rp.run(clip, aa_mask_ctx, mask_ctx, self.pixmap_src, self.pixmap)
+        self.blit_mask_rp.run(clip.to_screen(), aa_mask_ctx, MaskCtx(), self.pixmap_src, self.pixmap)
 
 ## The 1x1 transparent pixmap the pipeline gets when there is no pattern.
 let dummy_pixel: u8[4] = [0, 0, 0, 0]

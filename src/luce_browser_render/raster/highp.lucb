@@ -3,11 +3,18 @@
 #   highp - the high precision (f32) raster pipeline: driver, stage table, memory stages
 #
 #   DESCRIPTION:
-#       Port of tiny-skia pipeline/highp.rs, part 1: the Pipeline state, the STAGES table,
-#       `start`, and the stages that move, load, store, gather, mask and scale colors, with
-#       load_8888/store_8888. Unlike lowp, this one implements all stages. Just like Skia,
-#       this pipeline is implemented using f32x8 (`F8`). The blend stages are in
-#       highp_blend.lucb, the shader stages in highp_shaders.lucb.
+#       Port of tiny-skia pipeline/highp.rs, part 1, brought to Skia m144's highp stages
+#       (src/opts/SkRasterPipeline_opts.h) as its NEON build computes them: `mad` fuses
+#       (vfmaq_f32), min/max are vminq/vmaxq, stores round half to even (vcvtnq). This part
+#       has the Pipeline state, the stage table, `start`, and the stages that move, clamp,
+#       load, store, scale, lerp and dither colors. The pipeline is f32x8 (`F8`); Skia's
+#       NEON highp is 4 lanes wide, which computes the same per-pixel values. The blend
+#       stages are in highp_blend.lucb, the shader stages in highp_shaders.lucb and
+#       highp_image.lucb.
+#
+#       Copyright (c) 2018 Google Inc. All rights reserved.
+#       Copyright (c) 2020 Yevhenii Reizner All rights reserved.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia, LICENSE-tiny-skia)
 #
 #==============================================================================================
 
@@ -20,7 +27,7 @@ struct HighpPipeline:
     var functions: const HighpStageFn[]
     var pixmap_src: PixmapRef
     var pixmap_dst: SubPixmapMut*
-    var ctx: Context* # TODO: remove mut
+    var ctx: Context*
     var mask_ctx: MaskCtx
     var aa_mask_ctx: AAMaskCtx
     var r: F8
@@ -41,11 +48,11 @@ func highp_next_stage(p: HighpPipeline*):
     next(p)
 
 # Must be in the same order as Stage
-let highp_stages: HighpStageFn[79] = [
+let highp_stages: HighpStageFn[83] = [
     highp_move_source_to_destination,
     highp_move_destination_to_source,
-    highp_clamp_0,
-    highp_clamp_a,
+    highp_clamp_01,
+    highp_clamp_gamut,
     highp_premultiply,
     highp_uniform_color,
     highp_seed_shader,
@@ -60,6 +67,8 @@ let highp_stages: HighpStageFn[79] = [
     highp_lerp_u8,
     highp_scale_1_float,
     highp_lerp_1_float,
+    highp_scale_paint_alpha,
+    highp_dither,
     highp_destination_atop,
     highp_destination_in,
     highp_destination_out,
@@ -87,16 +96,19 @@ let highp_stages: HighpStageFn[79] = [
     highp_saturation,
     highp_color,
     highp_luminosity,
-    highp_source_over_rgba,
     highp_transform,
-    highp_reflect,
+    highp_scale_translate_x,
     highp_repeat,
+    highp_mirror,
     highp_bilinear,
     highp_bicubic,
-    highp_pad_x1,
-    highp_reflect_x1,
-    highp_repeat_x1,
+    highp_bilerp_clamp_8888,
+    highp_bicubic_clamp_8888,
+    highp_clamp_x_1,
+    highp_mirror_x_1,
+    highp_repeat_x_1,
     highp_gradient,
+    highp_evenly_spaced_gradient,
     highp_evenly_spaced_2_stop_gradient,
     highp_xy_to_unit_angle,
     highp_xy_to_radius,
@@ -111,7 +123,6 @@ let highp_stages: HighpStageFn[79] = [
     highp_alter_2pt_conical_compensate_focal,
     highp_alter_2pt_conical_unswap,
     highp_negate_x,
-    highp_apply_concentric_scale_bias,
     highp_gamma_expand_2,
     highp_gamma_expand_dst_2,
     highp_gamma_compress_2,
@@ -158,19 +169,16 @@ func highp_start(functions: const HighpStageFn[], functions_tail: const HighpSta
             p.tail = end - x
             highp_next_stage(&p)
 
+func highp_just_return(_p: HighpPipeline*):
+    return  # Ends the loop.
+
+# mark: Basic stages ==========================================================================
+
 func highp_move_source_to_destination(p: HighpPipeline*):
     p.dr = p.r
     p.dg = p.g
     p.db = p.b
     p.da = p.a
-
-    highp_next_stage(p)
-
-func highp_premultiply(p: HighpPipeline*):
-    for h: usize in 0..<2:
-        p.r[h] = p.r[h] * p.a[h]
-        p.g[h] = p.g[h] * p.a[h]
-        p.b[h] = p.b[h] * p.a[h]
 
     highp_next_stage(p)
 
@@ -182,21 +190,28 @@ func highp_move_destination_to_source(p: HighpPipeline*):
 
     highp_next_stage(p)
 
-func highp_clamp_0(p: HighpPipeline*):
-    let zero = f8_splat(0.0)
-    p.r = f8_max(p.r, zero)
-    p.g = f8_max(p.g, zero)
-    p.b = f8_max(p.b, zero)
-    p.a = f8_max(p.a, zero)
+func highp_clamp_01(p: HighpPipeline*):
+    p.r = f8_clamp_01(p.r)
+    p.g = f8_clamp_01(p.g)
+    p.b = f8_clamp_01(p.b)
+    p.a = f8_clamp_01(p.a)
 
     highp_next_stage(p)
 
-func highp_clamp_a(p: HighpPipeline*):
-    let one = f8_splat(1.0)
-    p.r = f8_min(p.r, one)
-    p.g = f8_min(p.g, one)
-    p.b = f8_min(p.b, one)
-    p.a = f8_min(p.a, one)
+func highp_clamp_gamut(p: HighpPipeline*):
+    let zero = f8_splat(0.0)
+    p.a = f8_vmin(f8_vmax(p.a, zero), f8_splat(1.0))
+    p.r = f8_vmin(f8_vmax(p.r, zero), p.a)
+    p.g = f8_vmin(f8_vmax(p.g, zero), p.a)
+    p.b = f8_vmin(f8_vmax(p.b, zero), p.a)
+
+    highp_next_stage(p)
+
+func highp_premultiply(p: HighpPipeline*):
+    for h: usize in 0..<2:
+        p.r[h] = p.r[h] * p.a[h]
+        p.g[h] = p.g[h] * p.a[h]
+        p.b[h] = p.b[h] * p.a[h]
 
     highp_next_stage(p)
 
@@ -214,15 +229,41 @@ func highp_seed_shader(p: HighpPipeline*):
 
     p.r = f8_add(f8_splat((f32)p.dx), iota)
     p.g = f8_splat((f32)p.dy + 0.5)
-    p.b = f8_splat(1.0)
+    p.b = f8_splat(1.0)  # This is w=1 for matrix multiplies by the device coords.
     p.a = f8_splat(0.0)
 
-    p.dr = f8_splat(0.0)
-    p.dg = f8_splat(0.0)
-    p.db = f8_splat(0.0)
-    p.da = f8_splat(0.0)
+    highp_next_stage(p)
+
+## 8x8 ordered dithering (https://en.wikipedia.org/wiki/Ordered_dithering) with the matrix
+## 1/64 x [ 0 48 12 60 ... ], scaled by the context's rate and clamped to [0, a].
+func highp_dither(p: HighpPipeline*):
+    var d: F8 = ---
+    let y0 = (u32)p.dy
+    for i: usize in 0..<8:
+        let x = (u32)p.dx +% (u32)i
+        # We only need X and X^Y from here on, so it's easier to just think of that as "Y".
+        let y = y0 ^ x
+        # We'll mix the bottom 3 bits of each of X and Y to make 6 bits, for 2^6 == 64 ==
+        # 8x8 matrix values. If X=abc and Y=def, we make fcebda.
+        let m = (y & 1) << 5 | (x & 1) << 4 | (y & 2) << 2 | (x & 2) << 1 | (y & 4) >> 1 | (x & 4) >> 2
+        # Scale that dither to [0,1), then (-0.5,+0.5), here using 63/128 = 0.4921875 as
+        # 0.5-epsilon. We want to make sure our dither is less than 0.5 in either direction to
+        # keep exact values like 0 and 1 unchanged after rounding.
+        d[i >> 2][i & 3] = math32.fma((f32)m, 2.0 / 128.0, -63.0 / 128.0)
+
+    let rate = f8_splat(p.ctx.dither_rate)
+    p.r = f8_fma(d, rate, p.r)
+    p.g = f8_fma(d, rate, p.g)
+    p.b = f8_fma(d, rate, p.b)
+
+    let zero = f8_splat(0.0)
+    p.r = f8_vmax(zero, f8_vmin(p.r, p.a))
+    p.g = f8_vmax(zero, f8_vmin(p.g, p.a))
+    p.b = f8_vmax(zero, f8_vmin(p.b, p.a))
 
     highp_next_stage(p)
+
+# mark: Memory ================================================================================
 
 func highp_dst_pixels(p: HighpPipeline*) -> PremultipliedColorU8[]:
     let offset = p.pixmap_dst.offset(p.dx, p.dy)
@@ -246,54 +287,21 @@ func highp_store_tail(p: HighpPipeline*):
 
 # Currently, all mask/A8 pixmaps are handled by lowp.
 func highp_load_dst_u8(_p: HighpPipeline*):
-    return # unreachable
+    return  # unreachable
 
 func highp_load_dst_u8_tail(_p: HighpPipeline*):
-    return # unreachable
+    return  # unreachable
 
 func highp_store_u8(_p: HighpPipeline*):
-    return # unreachable
+    return  # unreachable
 
 func highp_store_u8_tail(_p: HighpPipeline*):
-    return # unreachable
-
-func highp_gather(p: HighpPipeline*):
-    let ix = gather_ix(p.pixmap_src, p.r, p.g)
-    let pixels = gather_pixels(p.pixmap_src, ix)
-    highp_load_8888(pixels, &p.r, &p.g, &p.b, &p.a)
-
-    highp_next_stage(p)
-
-## PixmapRef::gather: the 8 pixels at the indices.
-func gather_pixels(pixmap: PixmapRef, index: M8) -> PremultipliedColorU8[8]:
-    let pixels = pixmap.pixels()
-    var result: PremultipliedColorU8[8] = ---
-    for i: usize in 0..<8:
-        result[i] = pixels[(usize)index[i >> 2][i & 3]]
-    return result
-
-func gather_ix(pixmap: PixmapRef, x0: F8, y0: F8) -> M8:
-    # Exclusive -> inclusive.
-    let w = ulp_sub((f32)pixmap.width())
-    let h = ulp_sub((f32)pixmap.height())
-    let x = f8_min(f8_max(x0, f8_splat(0.0)), f8_splat(w))
-    let y = f8_min(f8_max(y0, f8_splat(0.0)), f8_splat(h))
-
-    let width = (i32)pixmap.width()
-    let ix = i8_add(i8_mul(f8_trunc_int(y), [i32[4](width), i32[4](width)]), f8_trunc_int(x))
-    var result: M8 = ---
-    for h2: usize in 0..<2:
-        for i: usize in 0..<4:
-            result[h2][i] = (u32)ix[h2][i]
-    return result
-
-func ulp_sub(v: f32) -> f32:
-    # Somewhat similar to v - f32::EPSILON
-    return f32.bits(v.bits() - 1)
+    return  # unreachable
 
 func highp_load_mask_u8(_p: HighpPipeline*):
-    return # unreachable
+    return  # unreachable
 
+# tiny-skia's clip mask stage (Skia clips with a clip blitter instead).
 func highp_mask_u8(p: HighpPipeline*):
     let offset = p.mask_ctx.offset(p.dx, p.dy)
     var c: f32[8] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
@@ -315,12 +323,20 @@ func highp_mask_u8(p: HighpPipeline*):
 
     highp_next_stage(p)
 
-func highp_scale_u8(p: HighpPipeline*):
-    # Load u8xTail and cast it to f32x8.
-    let data = p.aa_mask_ctx.copy_at_xy(p.dx, p.dy, p.tail)
-    let c0: F4 = [(f32)data[0], (f32)data[1], 0.0, 0.0]
-    let c: F8 = [c0 / f32[4](255.0), f32[4](0.0) / f32[4](255.0)]
+# mark: Coverage ==============================================================================
 
+## The blitted mask's coverage of the stage's lanes (from_byte: zero past `tail`).
+func highp_aa_coverage(p: HighpPipeline*) -> F8:
+    var bytes: u8[8]
+    p.aa_mask_ctx.load(p.dx, p.dy, p.tail, bytes)
+    let factor: f32 = 1.0 / 255.0
+    var c: F8 = ---
+    for i: usize in 0..<8:
+        c[i >> 2][i & 3] = (f32)bytes[i] * factor
+    return c
+
+func highp_scale_u8(p: HighpPipeline*):
+    let c = highp_aa_coverage(p)
     for h: usize in 0..<2:
         p.r[h] = p.r[h] * c[h]
         p.g[h] = p.g[h] * c[h]
@@ -330,11 +346,7 @@ func highp_scale_u8(p: HighpPipeline*):
     highp_next_stage(p)
 
 func highp_lerp_u8(p: HighpPipeline*):
-    # Load u8xTail and cast it to f32x8.
-    let data = p.aa_mask_ctx.copy_at_xy(p.dx, p.dy, p.tail)
-    let c0: F4 = [(f32)data[0], (f32)data[1], 0.0, 0.0]
-    let c: F8 = [c0 / f32[4](255.0), f32[4](0.0) / f32[4](255.0)]
-
+    let c = highp_aa_coverage(p)
     for h: usize in 0..<2:
         p.r[h] = highp_lerp4(p.dr[h], p.r[h], c[h])
         p.g[h] = highp_lerp4(p.dg[h], p.g[h], c[h])
@@ -343,8 +355,8 @@ func highp_lerp_u8(p: HighpPipeline*):
 
     highp_next_stage(p)
 
-func highp_scale_1_float(p: HighpPipeline*):
-    let c = f32[4](p.ctx.current_coverage)
+func highp_scale_by(p: HighpPipeline*, f: f32):
+    let c = f32[4](f)
     for h: usize in 0..<2:
         p.r[h] = p.r[h] * c
         p.g[h] = p.g[h] * c
@@ -352,6 +364,12 @@ func highp_scale_1_float(p: HighpPipeline*):
         p.a[h] = p.a[h] * c
 
     highp_next_stage(p)
+
+func highp_scale_1_float(p: HighpPipeline*):
+    highp_scale_by(p, p.ctx.current_coverage)
+
+func highp_scale_paint_alpha(p: HighpPipeline*):
+    highp_scale_by(p, p.ctx.paint_alpha)
 
 func highp_lerp_1_float(p: HighpPipeline*):
     let c = f32[4](p.ctx.current_coverage)
@@ -363,39 +381,10 @@ func highp_lerp_1_float(p: HighpPipeline*):
 
     highp_next_stage(p)
 
-func highp_source_over_rgba(p: HighpPipeline*):
-    let pixels = highp_dst_pixels(p)
-    highp_load_8888(pixels, &p.dr, &p.dg, &p.db, &p.da)
-    for h: usize in 0..<2:
-        let inv_a = f32[4](1.0) - p.a[h]
-        p.r[h] = p.dr[h] * inv_a + p.r[h]
-        p.g[h] = p.dg[h] * inv_a + p.g[h]
-        p.b[h] = p.db[h] * inv_a + p.b[h]
-        p.a[h] = p.da[h] * inv_a + p.a[h]
-    highp_store_8888(&p.r, &p.g, &p.b, &p.a, pixels)
-
-    highp_next_stage(p)
-
-func highp_source_over_rgba_tail(p: HighpPipeline*):
-    let pixels = highp_dst_pixels(p)
-    highp_load_8888_tail(p.tail, pixels, &p.dr, &p.dg, &p.db, &p.da)
-    for h: usize in 0..<2:
-        let inv_a = f32[4](1.0) - p.a[h]
-        p.r[h] = p.dr[h] * inv_a + p.r[h]
-        p.g[h] = p.dg[h] * inv_a + p.g[h]
-        p.b[h] = p.db[h] * inv_a + p.b[h]
-        p.a[h] = p.da[h] * inv_a + p.a[h]
-    highp_store_8888_tail(&p.r, &p.g, &p.b, &p.a, p.tail, pixels)
-
-    highp_next_stage(p)
-
-func highp_just_return(_p: HighpPipeline*):
-    return # Ends the loop.
-
 # mark: Load and store ========================================================================
 
+## from_8888: each byte times 1/255.
 func highp_load_8888(data: const PremultipliedColorU8[], r: F8*, g: F8*, b: F8*, a: F8*):
-    # Surprisingly, `f32 * FACTOR` is way faster than `f32x8 * f32x8::splat(FACTOR)`.
     let factor: f32 = 1.0 / 255.0
     if data.length < 8:
         trap("index out of bounds")
@@ -418,7 +407,6 @@ func highp_load_8888(data: const PremultipliedColorU8[], r: F8*, g: F8*, b: F8*,
 
 func highp_load_8888_tail(tail: usize, data: const PremultipliedColorU8[], r: F8*, g: F8*, b: F8*, a: F8*):
     # Fill a dummy array with `tail` values. `tail` is always in a 1..STAGE_WIDTH-1 range.
-    # This way we can reuse the `load_8888_` method and remove any branches.
     var tmp: PremultipliedColorU8[8]
     for i in 0..<tail:
         tmp[i] = data[i]
@@ -450,8 +438,12 @@ func highp_store_8888_tail(r: const F8*, g: const F8*, b: const F8*, a: const F8
         let aa = highp_unnorm4((*a)[h])
         data[i] = PremultipliedColorU8(rgba = [(u8)rr[l], (u8)gg[l], (u8)bb[l], (u8)aa[l]])
 
-func highp_unnorm4(v: F4) -> I4:
-    return f4_round_int(f4_normalize(v) * f32[4](255.0))
+## to_unorm(v, 255): round(min(max(0, v * 255), 255)), half to even, NaN to zero.
+func highp_unnorm4(v: F4) -> U4:
+    let c = f4_vmin(f4_vmax(f32[4](0.0), v * f32[4](255.0)), f32[4](255.0))
+    return [f32_round_nonneg(c[0]), f32_round_nonneg(c[1]), f32_round_nonneg(c[2]), f32_round_nonneg(c[3])]
+
+# mark: Helpers ===============================================================================
 
 func highp_inv(v: F8) -> F8:
     return f8_sub(f8_splat(1.0), v)
@@ -459,11 +451,10 @@ func highp_inv(v: F8) -> F8:
 func highp_two(v: F8) -> F8:
     return f8_add(v, v)
 
+## highp's mad: f * m + a, fused (vfmaq_f32).
 func highp_mad(f: F8, m: F8, a: F8) -> F8:
-    return [f[0] * m[0] + a[0], f[1] * m[1] + a[1]]
+    return f8_fma(f, m, a)
 
-func highp_lerp(from_: F8, to: F8, t: F8) -> F8:
-    return [highp_lerp4(from_[0], to[0], t[0]), highp_lerp4(from_[1], to[1], t[1])]
-
+## highp's lerp: mad(to - from, t, from).
 func highp_lerp4(from_: F4, to: F4, t: F4) -> F4:
-    return (to - from_) * t + from_
+    return f4_fma(to - from_, t, from_)

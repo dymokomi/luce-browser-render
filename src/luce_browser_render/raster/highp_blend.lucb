@@ -4,9 +4,15 @@
 #
 #   DESCRIPTION:
 #       Port of tiny-skia pipeline/highp.rs, part 2 (the blend_fn!, blend_fn2! and
-#       blend_fn3! stages): the Porter-Duff modes, the separable blend modes and the
-#       non-separable ones (hue, saturation, color, luminosity). Each Rust closure is a
-#       kernel function; `highp_blend_fn` / `highp_blend_fn2` apply it as the macros do.
+#       blend_fn3! stages), as Skia m144's BLEND_MODE stages compute them on NEON: the
+#       Porter-Duff modes, the separable blend modes and the non-separable ones (hue,
+#       saturation, color, luminosity), with fused mads, vminq/vmaxq and the reciprocal
+#       estimate (rcp_fast). Each kernel is a function; `highp_blend_fn` /
+#       `highp_blend_fn2` apply it as the macros do.
+#
+#       Copyright (c) 2018 Google Inc. All rights reserved.
+#       Copyright (c) 2020 Yevhenii Reizner All rights reserved.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia, LICENSE-tiny-skia)
 #
 #==============================================================================================
 
@@ -35,10 +41,10 @@ func highp_clear_k(_s: F8, _d: F8, _sa: F8, _da: F8) -> F8:
     return f8_splat(0.0)
 
 func highp_source_atop_k(s: F8, d: F8, sa: F8, da: F8) -> F8:
-    return f8_add(f8_mul(s, da), f8_mul(d, highp_inv(sa)))
+    return highp_mad(s, da, f8_mul(d, highp_inv(sa)))
 
 func highp_destination_atop_k(s: F8, d: F8, sa: F8, da: F8) -> F8:
-    return f8_add(f8_mul(d, sa), f8_mul(s, highp_inv(da)))
+    return highp_mad(d, sa, f8_mul(s, highp_inv(da)))
 
 func highp_source_in_k(s: F8, _d: F8, _sa: F8, da: F8) -> F8:
     return f8_mul(s, da)
@@ -62,16 +68,16 @@ func highp_modulate_k(s: F8, d: F8, _sa: F8, _da: F8) -> F8:
     return f8_mul(s, d)
 
 func highp_multiply_k(s: F8, d: F8, sa: F8, da: F8) -> F8:
-    return f8_add(f8_add(f8_mul(s, highp_inv(da)), f8_mul(d, highp_inv(sa))), f8_mul(s, d))
+    return highp_mad(s, d, highp_mad(s, highp_inv(da), f8_mul(d, highp_inv(sa))))
 
 func highp_screen_k(s: F8, d: F8, _sa: F8, _da: F8) -> F8:
-    return f8_sub(f8_add(s, d), f8_mul(s, d))
+    return f8_fms(s, d, f8_add(s, d))
 
 func highp_xor_k(s: F8, d: F8, sa: F8, da: F8) -> F8:
-    return f8_add(f8_mul(s, highp_inv(da)), f8_mul(d, highp_inv(sa)))
+    return highp_mad(s, highp_inv(da), f8_mul(d, highp_inv(sa)))
 
 func highp_plus_k(s: F8, d: F8, _sa: F8, _da: F8) -> F8:
-    return f8_min(f8_add(s, d), f8_splat(1.0))
+    return f8_vmin(f8_add(s, d), f8_splat(1.0))
 
 func highp_clear(p: HighpPipeline*):
     highp_blend_fn(p, highp_clear_k)
@@ -118,13 +124,13 @@ func highp_plus(p: HighpPipeline*):
 # mark: blend_fn2! ============================================================================
 
 func highp_darken_k(s: F8, d: F8, sa: F8, da: F8) -> F8:
-    return f8_sub(f8_add(s, d), f8_max(f8_mul(s, da), f8_mul(d, sa)))
+    return f8_sub(f8_add(s, d), f8_vmax(f8_mul(s, da), f8_mul(d, sa)))
 
 func highp_lighten_k(s: F8, d: F8, sa: F8, da: F8) -> F8:
-    return f8_sub(f8_add(s, d), f8_min(f8_mul(s, da), f8_mul(d, sa)))
+    return f8_sub(f8_add(s, d), f8_vmin(f8_mul(s, da), f8_mul(d, sa)))
 
 func highp_difference_k(s: F8, d: F8, sa: F8, da: F8) -> F8:
-    return f8_sub(f8_add(s, d), highp_two(f8_min(f8_mul(s, da), f8_mul(d, sa))))
+    return f8_sub(f8_add(s, d), highp_two(f8_vmin(f8_mul(s, da), f8_mul(d, sa))))
 
 func highp_exclusion_k(s: F8, d: F8, _sa: F8, _da: F8) -> F8:
     return f8_sub(f8_add(s, d), highp_two(f8_mul(s, d)))
@@ -136,7 +142,7 @@ func highp_color_burn_k(s: F8, d: F8, sa: F8, da: F8) -> F8:
         f8_blend(
             f8_cmp_eq(s, f8_splat(0.0)),
             f8_mul(d, highp_inv(sa)),
-            f8_add(f8_add(f8_mul(sa, f8_sub(da, f8_min(da, f8_mul(f8_mul(f8_sub(da, d), sa), f8_recip_fast(s))))), f8_mul(s, highp_inv(da))), f8_mul(d, highp_inv(sa))),
+            f8_add(f8_add(f8_mul(sa, f8_sub(da, f8_vmin(da, f8_mul(f8_mul(f8_sub(da, d), sa), f8_rcp_fast(s))))), f8_mul(s, highp_inv(da))), f8_mul(d, highp_inv(sa))),
         ),
     )
 
@@ -147,7 +153,7 @@ func highp_color_dodge_k(s: F8, d: F8, sa: F8, da: F8) -> F8:
         f8_blend(
             f8_cmp_eq(s, sa),
             f8_add(s, f8_mul(d, highp_inv(sa))),
-            f8_add(f8_add(f8_mul(sa, f8_min(da, f8_mul(f8_mul(d, sa), f8_recip_fast(f8_sub(sa, s))))), f8_mul(s, highp_inv(da))), f8_mul(d, highp_inv(sa))),
+            f8_add(f8_add(f8_mul(sa, f8_vmin(da, f8_mul(f8_mul(d, sa), f8_rcp_fast(f8_sub(sa, s))))), f8_mul(s, highp_inv(da))), f8_mul(d, highp_inv(sa))),
         ),
     )
 
@@ -176,9 +182,9 @@ func highp_soft_light_k(s: F8, d: F8, sa: F8, da: F8) -> F8:
     let dark_src = f8_mul(d, f8_add(sa, f8_mul(f8_sub(s2, sa), f8_sub(one, m))))
     let dark_dst = f8_add(f8_mul(f8_add(f8_mul(m4, m4), m4), f8_sub(m, one)), f8_mul(f8_splat(7.0), m))
     let lite_dst = f8_sub(f8_sqrt(m), m)
-    let lite_src = f8_add(f8_mul(d, sa), f8_mul(f8_mul(da, f8_sub(s2, sa)), f8_blend(f8_cmp_le(highp_two(highp_two(d)), da), dark_dst, lite_dst))) # 2 or 3?
+    let lite_src = f8_add(f8_mul(d, sa), f8_mul(f8_mul(da, f8_sub(s2, sa)), f8_blend(f8_cmp_le(highp_two(highp_two(d)), da), dark_dst, lite_dst)))  # 2 or 3?
 
-    return f8_add(f8_add(f8_mul(s, highp_inv(da)), f8_mul(d, highp_inv(sa))), f8_blend(f8_cmp_le(s2, sa), dark_src, lite_src)) # 1 or (2 or 3)?
+    return f8_add(f8_add(f8_mul(s, highp_inv(da)), f8_mul(d, highp_inv(sa))), f8_blend(f8_cmp_le(s2, sa), dark_src, lite_src))  # 1 or (2 or 3)?
 
 func highp_darken(p: HighpPipeline*):
     highp_blend_fn2(p, highp_darken_k)
@@ -217,120 +223,77 @@ func highp_soft_light(p: HighpPipeline*):
 # Anything extra we add beyond that is to make the math work with premul inputs.
 
 func highp_hue(p: HighpPipeline*):
-    let r = p.r
-    let g = p.g
-    let b = p.b
     let a = p.a
-    let dr = p.dr
-    let dg = p.dg
-    let db = p.db
-    let da = p.da
+    var c = Rgb8(r = f8_mul(p.r, a), g = f8_mul(p.g, a), b = f8_mul(p.b, a))
 
-    var c = Rgb8(r = f8_mul(r, a), g = f8_mul(g, a), b = f8_mul(b, a))
-
-    set_sat(&c, f8_mul(sat(dr, dg, db), a))
-    set_lum(&c, f8_mul(lum(dr, dg, db), a))
-    clip_color(&c, f8_mul(a, da))
+    set_sat(&c, f8_mul(sat(p.dr, p.dg, p.db), a))
+    set_lum(&c, f8_mul(lum(p.dr, p.dg, p.db), a))
+    clip_color(&c, f8_mul(a, p.da))
 
     highp_blend_fn3_finish(p, c)
 
 func highp_saturation(p: HighpPipeline*):
-    let r = p.r
-    let g = p.g
-    let b = p.b
     let a = p.a
-    let dr = p.dr
-    let dg = p.dg
-    let db = p.db
-    let da = p.da
+    var c = Rgb8(r = f8_mul(p.dr, a), g = f8_mul(p.dg, a), b = f8_mul(p.db, a))
 
-    var c = Rgb8(r = f8_mul(dr, a), g = f8_mul(dg, a), b = f8_mul(db, a))
-
-    set_sat(&c, f8_mul(sat(r, g, b), da))
-    set_lum(&c, f8_mul(lum(dr, dg, db), a)) # (This is not redundant.)
-    clip_color(&c, f8_mul(a, da))
+    set_sat(&c, f8_mul(sat(p.r, p.g, p.b), p.da))
+    set_lum(&c, f8_mul(lum(p.dr, p.dg, p.db), a))  # (This is not redundant.)
+    clip_color(&c, f8_mul(a, p.da))
 
     highp_blend_fn3_finish(p, c)
 
 func highp_color(p: HighpPipeline*):
-    let r = p.r
-    let g = p.g
-    let b = p.b
-    let a = p.a
-    let dr = p.dr
-    let dg = p.dg
-    let db = p.db
     let da = p.da
+    var c = Rgb8(r = f8_mul(p.r, da), g = f8_mul(p.g, da), b = f8_mul(p.b, da))
 
-    var c = Rgb8(r = f8_mul(r, da), g = f8_mul(g, da), b = f8_mul(b, da))
-
-    set_lum(&c, f8_mul(lum(dr, dg, db), a))
-    clip_color(&c, f8_mul(a, da))
+    set_lum(&c, f8_mul(lum(p.dr, p.dg, p.db), p.a))
+    clip_color(&c, f8_mul(p.a, da))
 
     highp_blend_fn3_finish(p, c)
 
 func highp_luminosity(p: HighpPipeline*):
-    let r = p.r
-    let g = p.g
-    let b = p.b
     let a = p.a
-    let dr = p.dr
-    let dg = p.dg
-    let db = p.db
-    let da = p.da
+    var c = Rgb8(r = f8_mul(p.dr, a), g = f8_mul(p.dg, a), b = f8_mul(p.db, a))
 
-    var c = Rgb8(r = f8_mul(dr, a), g = f8_mul(dg, a), b = f8_mul(db, a))
-
-    set_lum(&c, f8_mul(lum(r, g, b), da))
-    clip_color(&c, f8_mul(a, da))
+    set_lum(&c, f8_mul(lum(p.r, p.g, p.b), p.da))
+    clip_color(&c, f8_mul(a, p.da))
 
     highp_blend_fn3_finish(p, c)
 
-# The rr, gg, bb of the non-separable kernels (Rust passes three `&mut f32x8`; the struct is a
-# workaround: compiler-issues/c_backend_address_of_local_array).
+# The R, G, B of the non-separable stages (a struct is a workaround:
+# compiler-issues/c_backend_address_of_local_array).
 struct Rgb8:
     var r: F8
     var g: F8
     var b: F8
 
-# The shared tail of the four non-separable kernels.
+# The shared tail of the four non-separable stages.
 func highp_blend_fn3_finish(p: HighpPipeline*, c: Rgb8):
-    let rr = c.r
-    let gg = c.g
-    let bb = c.b
-    let r = p.r
-    let g = p.g
-    let b = p.b
     let a = p.a
-    let dr = p.dr
-    let dg = p.dg
-    let db = p.db
     let da = p.da
-
-    p.r = f8_add(f8_add(f8_mul(r, highp_inv(da)), f8_mul(dr, highp_inv(a))), rr)
-    p.g = f8_add(f8_add(f8_mul(g, highp_inv(da)), f8_mul(dg, highp_inv(a))), gg)
-    p.b = f8_add(f8_add(f8_mul(b, highp_inv(da)), f8_mul(db, highp_inv(a))), bb)
-    p.a = f8_sub(f8_add(a, da), f8_mul(a, da))
+    p.r = highp_mad(p.r, highp_inv(da), highp_mad(p.dr, highp_inv(a), c.r))
+    p.g = highp_mad(p.g, highp_inv(da), highp_mad(p.dg, highp_inv(a), c.g))
+    p.b = highp_mad(p.b, highp_inv(da), highp_mad(p.db, highp_inv(a), c.b))
+    p.a = f8_add(a, f8_fms(a, da, da))
 
     highp_next_stage(p)
 
 func sat(r: F8, g: F8, b: F8) -> F8:
-    return f8_sub(f8_max(r, f8_max(g, b)), f8_min(r, f8_min(g, b)))
+    return f8_sub(f8_vmax(r, f8_vmax(g, b)), f8_vmin(r, f8_vmin(g, b)))
 
 func lum(r: F8, g: F8, b: F8) -> F8:
-    return f8_add(f8_add(f8_mul(r, f8_splat(0.30)), f8_mul(g, f8_splat(0.59))), f8_mul(b, f8_splat(0.11)))
+    return highp_mad(r, f8_splat(0.30), highp_mad(g, f8_splat(0.59), f8_mul(b, f8_splat(0.11))))
 
-func set_sat(c: Rgb8*, s: F8):
-    let mn = f8_min(c.r, f8_min(c.g, c.b))
-    let mx = f8_max(c.r, f8_max(c.g, c.b))
+func set_sat(c: Rgb8*, s0: F8):
+    let mn = f8_vmin(c.r, f8_vmin(c.g, c.b))
+    let mx = f8_vmax(c.r, f8_vmax(c.g, c.b))
     let sat_ = f8_sub(mx, mn)
 
     # Map min channel to 0, max channel to s, and scale the middle proportionally.
-    let zero = f8_splat(0.0)
-    let is_zero = f8_cmp_eq(sat_, zero)
-    c.r = f8_blend(is_zero, zero, f8_div(f8_mul(f8_sub(c.r, mn), s), sat_))
-    c.g = f8_blend(is_zero, zero, f8_div(f8_mul(f8_sub(c.g, mn), s), sat_))
-    c.b = f8_blend(is_zero, zero, f8_div(f8_mul(f8_sub(c.b, mn), s), sat_))
+    let s = f8_blend(f8_cmp_eq(sat_, f8_splat(0.0)), f8_splat(0.0), f8_mul(s0, f8_rcp_fast(sat_)))
+    c.r = f8_mul(f8_sub(c.r, mn), s)
+    c.g = f8_mul(f8_sub(c.g, mn), s)
+    c.b = f8_mul(f8_sub(c.b, mn), s)
 
 func set_lum(c: Rgb8*, l: F8):
     let diff = f8_sub(l, lum(c.r, c.g, c.b))
@@ -339,18 +302,21 @@ func set_lum(c: Rgb8*, l: F8):
     c.b = f8_add(c.b, diff)
 
 func clip_color(c: Rgb8*, a: F8):
-    let mn = f8_min(c.r, f8_min(c.g, c.b))
-    let mx = f8_max(c.r, f8_max(c.g, c.b))
+    let mn = f8_vmin(c.r, f8_vmin(c.g, c.b))
+    let mx = f8_vmax(c.r, f8_vmax(c.g, c.b))
     let l = lum(c.r, c.g, c.b)
+    let mn_scale = f8_mul(l, f8_rcp_fast(f8_sub(l, mn)))
+    let mx_scale = f8_mul(f8_sub(a, l), f8_rcp_fast(f8_sub(mx, l)))
+    let clip_low = m8_and(f8_cmp_lt(mn, f8_splat(0.0)), f8_cmp_ne(l, mn))
+    let clip_high = m8_and(f8_cmp_gt(mx, a), f8_cmp_ne(l, mx))
 
-    c.r = clip_channel(c.r, mn, mx, l, a)
-    c.g = clip_channel(c.g, mn, mx, l, a)
-    c.b = clip_channel(c.b, mn, mx, l, a)
+    c.r = clip_channel(c.r, l, clip_low, clip_high, mn_scale, mx_scale)
+    c.g = clip_channel(c.g, l, clip_low, clip_high, mn_scale, mx_scale)
+    c.b = clip_channel(c.b, l, clip_low, clip_high, mn_scale, mx_scale)
 
-func clip_channel(c0: F8, mn: F8, mx: F8, l: F8, a: F8) -> F8:
-    let zero = f8_splat(0.0)
+func clip_channel(c0: F8, l: F8, clip_low: M8, clip_high: M8, mn_scale: F8, mx_scale: F8) -> F8:
     var c = c0
-    c = f8_blend(f8_cmp_ge(mx, zero), c, f8_add(l, f8_div(f8_mul(f8_sub(c, l), l), f8_sub(l, mn))))
-    c = f8_blend(f8_cmp_gt(mx, a), f8_add(l, f8_div(f8_mul(f8_sub(c, l), f8_sub(a, l)), f8_sub(mx, l))), c)
-    c = f8_max(c, zero) # Sometimes without this we may dip just a little negative.
+    c = f8_blend(clip_low, highp_mad(mn_scale, f8_sub(c, l), l), c)
+    c = f8_blend(clip_high, highp_mad(mx_scale, f8_sub(c, l), l), c)
+    c = f8_vmax(c, f8_splat(0.0))  # Sometimes without this we may dip just a little negative.
     return c

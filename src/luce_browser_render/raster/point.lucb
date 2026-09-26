@@ -172,8 +172,8 @@ func set_point_length(pt: Point*, x0: f32, y0: f32, length: f32) -> bool:
     let yy = (f64)y0
     let dmag = math.sqrt(xx * xx + yy * yy)
     let dscale = (f64)length / dmag
-    let x = x0 * (f32)dscale
-    let y = y0 * (f32)dscale
+    let x = (f32)((f64)x0 * dscale)  # C++ `x *= dscale` multiplies in double
+    let y = (f32)((f64)y0 * dscale)
 
     # check if we're not finite, or we're zero-length
     if not math32.is_finite(x) or not math32.is_finite(y) or (x == 0.0 and y == 0.0):

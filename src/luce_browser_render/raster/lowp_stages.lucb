@@ -3,9 +3,14 @@
 #   lowp_stages - the blend and shader stages of the low precision pipeline
 #
 #   DESCRIPTION:
-#       Port of tiny-skia pipeline/lowp.rs, part 2: the blend_fn! / blend_fn2! stages in
-#       u16 math (div255), transform, the x1 tiling stages, the gradient stages
-#       (gradient lookup, evenly spaced two-stop gradient, radius) and round_f32_to_u16.
+#       Port of tiny-skia pipeline/lowp.rs, part 2, as Skia m144's lowp stages compute
+#       them on NEON: the blend modes in u16 math (div255), the matrix stages, the x1
+#       tiling stages and the gradient stages (gradient lookup, evenly spaced gradients,
+#       sweep angle, radius) with round_F_to_U16.
+#
+#       Copyright (c) 2018 Google Inc. All rights reserved.
+#       Copyright (c) 2020 Yevhenii Reizner All rights reserved.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia, LICENSE-tiny-skia)
 #
 #==============================================================================================
 
@@ -59,9 +64,6 @@ func lowp_source_out_k(s: U16x8, _d: U16x8, _sa: U16x8, da: U16x8) -> U16x8:
 func lowp_destination_out_k(_s: U16x8, d: U16x8, sa: U16x8, _da: U16x8) -> U16x8:
     return div255(d *% lowp_inv(sa))
 
-func lowp_source_over_k(s: U16x8, d: U16x8, sa: U16x8, _da: U16x8) -> U16x8:
-    return s +% div255(d *% lowp_inv(sa))
-
 func lowp_destination_over_k(s: U16x8, d: U16x8, _sa: U16x8, da: U16x8) -> U16x8:
     return d +% div255(s *% lowp_inv(da))
 
@@ -102,14 +104,16 @@ func lowp_destination_out(p: LowpPipeline*):
     lowp_blend_fn(p, lowp_destination_out_k)
 
 func lowp_source_over(p: LowpPipeline*):
+    lowp_source_over_math(p)
+    lowp_next_stage(p)
+
+func lowp_source_over_math(p: LowpPipeline*):
     for h: usize in 0..<2:
         let inv_a = lowp_inv(p.a[h])
         p.r[h] = p.r[h] +% div255(p.dr[h] *% inv_a)
         p.g[h] = p.g[h] +% div255(p.dg[h] *% inv_a)
         p.b[h] = p.b[h] +% div255(p.db[h] *% inv_a)
         p.a[h] = p.a[h] +% div255(p.da[h] *% inv_a)
-
-    lowp_next_stage(p)
 
 func lowp_destination_over(p: LowpPipeline*):
     lowp_blend_fn(p, lowp_destination_over_k)
@@ -169,9 +173,11 @@ func lowp_hard_light(p: LowpPipeline*):
 func lowp_overlay(p: LowpPipeline*):
     lowp_blend_fn2(p, lowp_overlay_k)
 
-# mark: Shaders ===============================================================================
-# Coordinates are f32x16 (`F16`, four F4 quarters) carried in the u16 registers.
+# mark: Matrices ==============================================================================
+# Coordinates are f32x16 (`F16`, four F4 quarters) carried in the u16 registers. lowp's mad
+# rounds twice.
 
+# matrix_2x3 (matrix_translate and matrix_scale_translate compute the same values).
 func lowp_transform(p: LowpPipeline*):
     let ts = p.ctx.transform
 
@@ -189,42 +195,70 @@ func lowp_transform(p: LowpPipeline*):
 
     lowp_next_stage(p)
 
-func lowp_pad_x1(p: LowpPipeline*):
+# matrix_scale_translate with a unit y scale (y = y * 1 + 0 is y).
+func lowp_scale_translate_x(p: LowpPipeline*):
+    let m = p.ctx.scale_translate_x
     var x = lowp_join(p.r, p.g)
     for q: usize in 0..<4:
-        x[q] = f4_normalize(x[q])
+        x[q] = lowp_mad(x[q], f32[4](m.sx), f32[4](m.tx))
     lowp_split(x, &p.r, &p.g)
 
     lowp_next_stage(p)
 
-func lowp_reflect_x1(p: LowpPipeline*):
+# mark: Tiling ================================================================================
+# Clamp x to [0,1], both sides inclusive (think, gradients). Even repeat and mirror funnel
+# through a clamp to handle bad inputs like +Inf, NaN.
+
+func lowp_clamp_x_1(p: LowpPipeline*):
+    var x = lowp_join(p.r, p.g)
+    for q: usize in 0..<4:
+        x[q] = lowp_clamp_01_(x[q])
+    lowp_split(x, &p.r, &p.g)
+
+    lowp_next_stage(p)
+
+func lowp_repeat_x_1(p: LowpPipeline*):
+    var x = lowp_join(p.r, p.g)
+    for q: usize in 0..<4:
+        x[q] = lowp_clamp_01_(x[q] - f4_vfloor(x[q]))
+    lowp_split(x, &p.r, &p.g)
+
+    lowp_next_stage(p)
+
+func lowp_mirror_x_1(p: LowpPipeline*):
     var x = lowp_join(p.r, p.g)
     let one = f32[4](1.0)
     for q: usize in 0..<4:
-        let fl = f16_floor_quarter((x[q] - one) * f32[4](0.5))
-        x[q] = f4_normalize(f4_abs(x[q] - one - (fl + fl) - one))
+        let fl = f4_vfloor((x[q] - one) * f32[4](0.5))
+        x[q] = lowp_clamp_01_(f4_abs((x[q] - one) - (fl + fl) - one))
     lowp_split(x, &p.r, &p.g)
 
     lowp_next_stage(p)
 
-func lowp_repeat_x1(p: LowpPipeline*):
-    var x = lowp_join(p.r, p.g)
-    for q: usize in 0..<4:
-        x[q] = f4_normalize(x[q] - f16_floor_quarter(x[q]))
-    lowp_split(x, &p.r, &p.g)
-
-    lowp_next_stage(p)
+# mark: Gradients =============================================================================
 
 func lowp_gradient(p: LowpPipeline*):
     let ctx = &p.ctx.gradient
 
     # N.B. The loop starts at 1 because idx 0 is the color to use before the first stop.
     let t = lowp_join(p.r, p.g)
-    var idx = u16_splat(0)
+    var idx: u32[16]
     for i in 1..<ctx.len:
         let tt = ctx.t_values.data[i]
         for l: usize in 0..<16:
-            idx[l >> 3][l & 7] +%= (u16)(t[l >> 2][l & 3] >= tt)
+            idx[l] +%= (u32)(t[l >> 2][l & 3] >= tt)
+    lowp_gradient_lookup(ctx, idx, t, &p.r, &p.g, &p.b, &p.a)
+
+    lowp_next_stage(p)
+
+func lowp_evenly_spaced_gradient(p: LowpPipeline*):
+    let ctx = &p.ctx.gradient
+
+    let t = lowp_join(p.r, p.g)
+    let scale = (f32)(ctx.len - 1)
+    var idx: u32[16]
+    for l: usize in 0..<16:
+        idx[l] = (u32)(i32)(t[l >> 2][l & 3] * scale)  # fcvtzs: saturating, NaN to 0
     lowp_gradient_lookup(ctx, idx, t, &p.r, &p.g, &p.b, &p.a)
 
     lowp_next_stage(p)
@@ -246,23 +280,44 @@ func lowp_evenly_spaced_2_stop_gradient(p: LowpPipeline*):
 
     lowp_next_stage(p)
 
+func lowp_xy_to_unit_angle(p: LowpPipeline*):
+    var x = lowp_join(p.r, p.g)
+    let y = lowp_join(p.b, p.a)
+    let zero = f32[4](0.0)
+    for q: usize in 0..<4:
+        let xabs = f4_abs(x[q])
+        let yabs = f4_abs(y[q])
+        let slope = lowp_fmin(xabs, yabs) / lowp_fmax(xabs, yabs)
+        let s = slope * slope
+        # Use a 7th degree polynomial to approximate atan. This was generated using
+        # sollya.gforge.inria.fr. A float optimized polynomial was generated using the
+        # following command.
+        # P1 = fpminimax((1/(2*Pi))*atan(x),[|1,3,5,7|],[|24...|],[2^(-40),1],relative);
+        var phi = slope * (f32[4](0.15912117063999176025390625) + s * (f32[4](-5.185396969318389892578125e-2) + s * (f32[4](2.476101927459239959716796875e-2) + s * f32[4](-7.0547382347285747528076171875e-3))))
+        phi = f4_blend(f4_cmp_lt(xabs, yabs), f32[4](0.25) - phi, phi)
+        phi = f4_blend(f4_cmp_lt(x[q], zero), f32[4](0.5) - phi, phi)
+        phi = f4_blend(f4_cmp_lt(y[q], zero), f32[4](1.0) - phi, phi)
+        phi = f4_blend(f4_cmp_ne(phi, phi), zero, phi)  # Check for NaN.
+        x[q] = phi
+    lowp_split(x, &p.r, &p.g)
+
+    lowp_next_stage(p)
+
 func lowp_xy_to_radius(p: LowpPipeline*):
     var x = lowp_join(p.r, p.g)
     let y = lowp_join(p.b, p.a)
     for q: usize in 0..<4:
         x[q] = f4_sqrt(x[q] * x[q] + y[q] * y[q])
     lowp_split(x, &p.r, &p.g)
-    lowp_split(y, &p.b, &p.a)
 
     lowp_next_stage(p)
 
-# We are using u16 for index, not u32 as Skia, to simplify the code a bit. The gradient
-# creation code will not allow that many stops anyway.
-func lowp_gradient_lookup(ctx: const GradientCtx*, idx: U16x16, t: F16, r: U16x16*, g: U16x16*, b: U16x16*, a: U16x16*):
-    # Surprisingly, but bound checking doesn't affect the performance. And since `idx` can
-    # contain any number, we should leave it in place.
+## Skia's gather of the stops' factors and biases at `idx`, then t * factor + bias rounded to
+## u16. An index past the context (Skia reads beyond its arrays then) is clamped.
+func lowp_gradient_lookup(ctx: const GradientCtx*, idx: const u32[16], t: F16, r: U16x16*, g: U16x16*, b: U16x16*, a: U16x16*):
     let factors = ctx.factors.view()
     let biases = ctx.biases.view()
+    let last = (u32)factors.length - 1
     var fr: F16 = ---
     var fg: F16 = ---
     var fb: F16 = ---
@@ -272,7 +327,7 @@ func lowp_gradient_lookup(ctx: const GradientCtx*, idx: U16x16, t: F16, r: U16x1
     var bb: F16 = ---
     var ba: F16 = ---
     for l: usize in 0..<16:
-        let i = (usize)idx[l >> 3][l & 7]
+        let i = (usize)(idx[l] if idx[l] < last else last)
         let f = factors[i]
         let bias = biases[i]
         let h = l >> 2
@@ -293,22 +348,21 @@ func lowp_gradient_lookup(ctx: const GradientCtx*, idx: U16x16, t: F16, r: U16x1
         fa[q] = lowp_mad(t[q], fa[q], ba[q])
     round_f32_to_u16(&fr, &fg, &fb, &fa, r, g, b, a)
 
+## round_F_to_U16: color channels clamped to [0,1] (lowp's min/max), then x * 255 + 0.5
+## converted to u16; alpha is assumed to be in [0,1] already.
 func round_f32_to_u16(rf: const F16*, gf: const F16*, bf: const F16*, af: const F16*, r: U16x16*, g: U16x16*, b: U16x16*, a: U16x16*):
-    # TODO: may produce a slightly different result to Skia
-    #       affects the two_stops_linear_mirror test
-
     let scale = f32[4](255.0)
     let half_ = f32[4](0.5)
     for q: usize in 0..<4:
-        let rq = f4_normalize((*rf)[q]) * scale + half_
-        let gq = f4_normalize((*gf)[q]) * scale + half_
-        let bq = f4_normalize((*bf)[q]) * scale + half_
+        let rq = lowp_clamp_01_((*rf)[q]) * scale + half_
+        let gq = lowp_clamp_01_((*gf)[q]) * scale + half_
+        let bq = lowp_clamp_01_((*bf)[q]) * scale + half_
         let aq = (*af)[q] * scale + half_
 
-        # Do not use to_i32x8, because it involves rounding, and Skia cast's without it.
         let h = q >> 1
         let o = (q & 1) * 4
         for k: usize in 0..<4:
+            # The colors are in [0.5, 255.5]; alpha's conversion saturates like fcvtzu.
             (*r)[h][o + k] = (u16)rq[k]
             (*g)[h][o + k] = (u16)gq[k]
             (*b)[h][o + k] = (u16)bq[k]
