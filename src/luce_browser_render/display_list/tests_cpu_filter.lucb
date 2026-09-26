@@ -1,0 +1,191 @@
+#==============================================================================================
+#
+#   tests_cpu_filter - the image filter evaluation against Skia's pixels
+#
+#   DESCRIPTION:
+#       Every gfx.Filter node kind, evaluated by cpu_filter_evaluate and compared with the pixels
+#       Skia m144 renders for the same Gfx::Filter graph (tests_cpu_filter_data_*.lucb; see
+#       tests_cpu_filter_support). Every scene matches exactly (the port follows the raster
+#       pipeline's float and lowp stages step for step); the one exception, a scaled bilinear
+#       image, says why at its scene.
+#
+#==============================================================================================
+
+# mark: Blur ===================================================================================
+
+test "cpu filter: no filter":
+    test_cpu_filter_identity()
+
+noinline func test_cpu_filter_identity():
+    test_filter_expect("identity", TestFilterScene(), none, filter_skia_identity, 0, 0)
+    test_filter_expect("identity_scale", TestFilterScene(scaled = true), none, filter_skia_identity_scale, 0, 0)
+
+test "cpu filter: blur, Gaussian pass":
+    test_cpu_filter_blur_gaussian()
+
+noinline func test_cpu_filter_blur_gaussian():
+    let f = gfx.filter_blur(1.5, 1.5)
+    test_filter_expect("blur_1_5", TestFilterScene(), test_filter_graph(&f), filter_skia_blur_1_5, 0, 0)
+    let g = gfx.filter_blur(0.0, 3.0)
+    test_filter_expect("blur_0_3", TestFilterScene(), test_filter_graph(&g), filter_skia_blur_0_3, 0, 0)
+
+test "cpu filter: blur, three-box pass":
+    test_cpu_filter_blur_box()
+
+noinline func test_cpu_filter_blur_box():
+    let odd = gfx.filter_blur(2.5, 2.5)
+    test_filter_expect("blur_2_5", TestFilterScene(), test_filter_graph(&odd), filter_skia_blur_2_5, 0, 0)
+    let even = gfx.filter_blur(4.0, 4.0)
+    test_filter_expect("blur_4", TestFilterScene(), test_filter_graph(&even), filter_skia_blur_4, 0, 0)
+
+test "cpu filter: blur through a clip, a scale and an alpha":
+    test_cpu_filter_blur_context()
+
+noinline func test_cpu_filter_blur_context():
+    let clip = gfx.filter_blur(3.0, 2.0)
+    test_filter_expect("blur_clip", TestFilterScene(clip = cpu_irect(5, 6, 18, 20)), test_filter_graph(&clip), filter_skia_blur_clip, 0, 0)
+    let scaled = gfx.filter_blur(1.0, 2.0)
+    test_filter_expect("blur_scale", TestFilterScene(scaled = true, clip = cpu_irect(2, 2, 22, 22)), test_filter_graph(&scaled), filter_skia_blur_scale, 0, 0)
+    let alpha = gfx.filter_blur(2.0, 2.0)
+    test_filter_expect("blur_alpha", TestFilterScene(alpha = 0.6), test_filter_graph(&alpha), filter_skia_blur_alpha, 0, 0)
+
+test "cpu filter: blur, large sigmas":
+    test_cpu_filter_blur_large()
+
+noinline func test_cpu_filter_blur_large():
+    let medium = gfx.filter_blur(12.0, 12.0)
+    test_filter_expect("blur_12", TestFilterScene(width = 32, height = 32), test_filter_graph(&medium), filter_skia_blur_12, 0, 0)
+    let large = gfx.filter_blur(40.0, 30.0)
+    test_filter_expect("blur_40", TestFilterScene(width = 32, height = 32), test_filter_graph(&large), filter_skia_blur_40, 0, 0)
+    # Above the engine's 135, Skia blurs a downscaled image (FilterResult::rescale), which the
+    # port does not do (it blurs at full resolution with a tent pass); over this content both
+    # round to transparent.
+    let huge = gfx.filter_blur(300.0, 300.0)
+    test_filter_expect("blur_300", TestFilterScene(), test_filter_graph(&huge), filter_skia_blur_300, 0, 0)
+
+test "cpu filter: a rotated layer matrix":
+    test_cpu_filter_rotated()
+
+noinline func test_cpu_filter_rotated():
+    # Offset and color filters take any layer matrix (kComplex): the rotation is layer space.
+    let offset = gfx.filter_offset(2.0, 1.0)
+    test_filter_expect("offset_rotate", TestFilterScene(rotated = true, clip = cpu_irect(2, 3, 21, 22)), test_filter_graph(&offset), filter_skia_offset_rotate, 0, 0)
+    let sepia = gfx.filter_color(gfx.ColorFilterType.sepia, 0.8)
+    test_filter_expect("sepia_rotate", TestFilterScene(rotated = true), test_filter_graph(&sepia), filter_skia_sepia_rotate, 0, 0)
+
+# mark: Color filters ==========================================================================
+
+test "cpu filter: color matrices":
+    test_cpu_filter_color_matrices()
+
+noinline func test_cpu_filter_color_matrices():
+    let grayscale = gfx.filter_color(gfx.ColorFilterType.grayscale, 0.7)
+    test_filter_expect("grayscale", TestFilterScene(), test_filter_graph(&grayscale), filter_skia_grayscale, 0, 0)
+    let sepia = gfx.filter_color(gfx.ColorFilterType.sepia, 0.5)
+    let chain = gfx.filter_color(gfx.ColorFilterType.brightness, 1.3, &sepia)
+    test_filter_expect("chain", TestFilterScene(), test_filter_graph(&chain), filter_skia_chain, 0, 0)
+    let saturate = gfx.filter_saturate(1.7)
+    let hue = gfx.filter_hue_rotate(40.0, &saturate)
+    test_filter_expect("chain_alpha_luma", TestFilterScene(alpha = 0.5, luma = true), test_filter_graph(&hue), filter_skia_chain_alpha_luma, 0, 0)
+    let invert = gfx.filter_color(gfx.ColorFilterType.invert, 0.8)
+    let opacity = gfx.filter_color(gfx.ColorFilterType.opacity, 0.5, &invert)
+    test_filter_expect("invert_opacity", TestFilterScene(), test_filter_graph(&opacity), filter_skia_invert_opacity, 0, 0)
+    let contrast = gfx.filter_color(gfx.ColorFilterType.contrast, 1.6)
+    let blurred = gfx.filter_blur(1.5, 1.5, &contrast)
+    test_filter_expect("contrast_blur", TestFilterScene(), test_filter_graph(&blurred), filter_skia_contrast_blur, 0, 0)
+
+test "cpu filter: color table and a matrix that fills the clip":
+    test_cpu_filter_table_and_fill()
+
+noinline func test_cpu_filter_table_and_fill():
+    var table: u8[256]
+    for i in 0..<256:
+        table[(usize)i] = (u8)(255 - (i * i) // 255)
+    let tables = gfx.filter_color_table(none, table, none, table)
+    test_filter_expect("color_table", TestFilterScene(), test_filter_graph(&tables), filter_skia_color_table, 0, 0)
+    let m: f32[20] = [0.5, 0.0, 0.0, 0.0, 0.1, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.25]
+    let fills = gfx.filter_color_matrix(m)
+    test_filter_expect("matrix_fills", TestFilterScene(clip = cpu_irect(2, 1, 20, 22)), test_filter_graph(&fills), filter_skia_matrix_fills, 0, 0)
+
+# mark: Shadows, offsets, merges, morphology ===================================================
+
+test "cpu filter: drop shadows":
+    test_cpu_filter_drop_shadows()
+
+noinline func test_cpu_filter_drop_shadows():
+    let shadow = gfx.filter_drop_shadow(3.5, 2.0, 2.0, test_filter_color(10, 20, 200, 180))
+    test_filter_expect("drop_shadow", TestFilterScene(), test_filter_graph(&shadow), filter_skia_drop_shadow, 0, 0)
+    let scaled = gfx.filter_drop_shadow(-1.0, 1.5, 1.0, test_filter_color(0, 0, 0, 255))
+    test_filter_expect("drop_shadow_scale", TestFilterScene(scaled = true), test_filter_graph(&scaled), filter_skia_drop_shadow_scale, 0, 0)
+
+test "cpu filter: offsets and merge":
+    test_cpu_filter_offsets_and_merge()
+
+noinline func test_cpu_filter_offsets_and_merge():
+    let whole = gfx.filter_offset(3.0, -2.0)
+    test_filter_expect("offset_int", TestFilterScene(), test_filter_graph(&whole), filter_skia_offset_int, 0, 0)
+    let fractional = gfx.filter_offset(2.5, 1.25)
+    test_filter_expect("offset_frac", TestFilterScene(), test_filter_graph(&fractional), filter_skia_offset_frac, 0, 0)
+    var inputs: ak.Vector[gfx.Filter?]
+    ak.vector_append_t(&inputs, gfx.filter_offset(4.0, 1.0))
+    ak.vector_append_t(&inputs, none)
+    ak.vector_append_t(&inputs, gfx.filter_flood(test_filter_color(255, 0, 0, 255), 0.25))
+    let merged = gfx.filter_merge(&inputs)
+    test_filter_expect("merge", TestFilterScene(clip = cpu_irect(1, 2, 23, 21)), test_filter_graph(&merged), filter_skia_merge, 0, 0)
+
+test "cpu filter: erode and dilate":
+    test_cpu_filter_morphology()
+
+noinline func test_cpu_filter_morphology():
+    let erode = gfx.filter_erode(1.0, 1.0)
+    test_filter_expect("erode", TestFilterScene(), test_filter_graph(&erode), filter_skia_erode, 0, 0)
+    let dilate = gfx.filter_dilate(2.0, 1.0)
+    test_filter_expect("dilate", TestFilterScene(), test_filter_graph(&dilate), filter_skia_dilate, 0, 0)
+
+test "cpu filter: compose":
+    test_cpu_filter_compose()
+
+noinline func test_cpu_filter_compose():
+    let outer = gfx.filter_blur(1.0, 1.0)
+    let inner = gfx.filter_color(gfx.ColorFilterType.grayscale, 1.0)
+    let composed = gfx.filter_compose(outer, inner)
+    test_filter_expect("compose", TestFilterScene(), test_filter_graph(&composed), filter_skia_compose, 0, 0)
+
+# mark: Floods, noise, displacement ============================================================
+
+test "cpu filter: flood":
+    test_cpu_filter_flood()
+
+noinline func test_cpu_filter_flood():
+    let flood = gfx.filter_flood(test_filter_color(30, 60, 90, 255), 0.7)
+    test_filter_expect("flood", TestFilterScene(clip = cpu_irect(3, 4, 12, 9)), test_filter_graph(&flood), filter_skia_flood, 0, 0)
+
+test "cpu filter: fractal noise and turbulence":
+    test_cpu_filter_noise()
+
+noinline func test_cpu_filter_noise():
+    let fractal = gfx.filter_turbulence(gfx.TurbulenceType.fractal_noise, 0.15, 0.2, 2, 3.0, gfx.IntSize(m_width = 0, m_height = 0))
+    test_filter_expect("fractal_noise", TestFilterScene(), test_filter_graph(&fractal), filter_skia_fractal_noise, 0, 0)
+    let stitched = gfx.filter_turbulence(gfx.TurbulenceType.turbulence, 0.12, 0.09, 3, 7.5, gfx.IntSize(m_width = 13, m_height = 11))
+    test_filter_expect("turbulence_stitch", TestFilterScene(), test_filter_graph(&stitched), filter_skia_turbulence_stitch, 0, 0)
+    let scaled = gfx.filter_turbulence(gfx.TurbulenceType.turbulence, 0.2, 0.3, 1, 0.0, gfx.IntSize(m_width = 0, m_height = 0))
+    test_filter_expect("turbulence_scale", TestFilterScene(scaled = true), test_filter_graph(&scaled), filter_skia_turbulence_scale, 0, 0)
+
+test "cpu filter: displacement map":
+    test_cpu_filter_displacement()
+
+noinline func test_cpu_filter_displacement():
+    let noise = gfx.filter_turbulence(gfx.TurbulenceType.fractal_noise, 0.2, 0.2, 1, 2.0, gfx.IntSize(m_width = 0, m_height = 0))
+    let displaced = gfx.filter_displacement_map(none, &noise, 6.0, gfx.ChannelSelector.red, gfx.ChannelSelector.alpha)
+    test_filter_expect("displacement", TestFilterScene(), test_filter_graph(&displaced), filter_skia_displacement, 0, 0)
+
+# mark: Backdrops ==============================================================================
+
+test "cpu filter: backdrops":
+    test_cpu_filter_backdrops()
+
+noinline func test_cpu_filter_backdrops():
+    let blur = gfx.filter_blur(2.0, 2.0)
+    test_filter_expect("backdrop_blur", TestFilterScene(clip = cpu_irect(0, 4, 16, 18), backdrop = true), test_filter_graph(&blur), filter_skia_backdrop_blur, 0, 0)
+    let invert = gfx.filter_color(gfx.ColorFilterType.invert, 1.0)
+    test_filter_expect("backdrop_invert", TestFilterScene(clip = cpu_irect(6, 6, 20, 20), backdrop = true), test_filter_graph(&invert), filter_skia_backdrop_invert, 0, 0)

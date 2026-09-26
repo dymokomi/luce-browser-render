@@ -1,0 +1,233 @@
+#==============================================================================================
+#
+#   cpu_filter_nodes - each image filter's onFilterImage
+#
+#   DESCRIPTION:
+#       Port of the onFilterImage members of Skia m144's image filters (src/effects/
+#       imagefilters), for the nodes region r10's gfx.Filter factories build:
+#       SkComposeImageFilter, SkColorFilterImageFilter, SkShaderImageFilter (a color flood or
+#       SkPerlinNoiseShader), SkImageImageFilter (FilterResult::MakeFromImage), SkMergeImageFilter,
+#       SkMatrixTransformImageFilter (SkImageFilters::Offset: nearest-neighbor), the graph
+#       SkImageFilters::DropShadow builds (Merge(MatrixTransform(kLinear, ColorFilter(kSrcIn,
+#       Blur(input))), input)) and SkMorphologyImageFilter (the linear and sparse morphology
+#       shaders reduce to a per-channel minimum or maximum over the window). The blur is in
+#       cpu_filter_blur; blends, arithmetic and the displacement map in cpu_filter_blend.
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+# mark: Dispatch ===============================================================================
+
+## SkImageFilter_Base::filterImage (getChildOutput for a child): `filter` over the context's
+## source; none is the source itself.
+func cpu_filter_node_evaluate(filter: const gfx.ImageFilter*?, ctx: const CpuFilterContext*) -> CpuFr:
+    let node = filter else return ctx.source
+    if cpu_irect_is_empty(ctx.desired):
+        return cpu_fr_empty()
+    match node.node:
+        .arithmetic(k1, k2, k3, k4, _, background, foreground):
+            match cpu_arithmetic_mode(k1, k2, k3, k4):
+                .source: return cpu_filter_node_evaluate(foreground, ctx)
+                .destination: return cpu_filter_node_evaluate(background, ctx)
+                .clear: return cpu_fr_empty()
+                _: return cpu_filter_blend_node(ctx, filter, background, foreground)
+        .blend(mode, background, foreground):
+            if mode == gfx.CompositingAndBlendingOperator.copy:
+                return cpu_filter_node_evaluate(foreground, ctx)
+            if mode == gfx.CompositingAndBlendingOperator.clear:
+                return cpu_fr_empty()
+            return cpu_filter_blend_node(ctx, filter, background, foreground)
+        .compose(outer, inner):
+            return cpu_filter_compose(ctx, outer, inner)
+        .blur(sigma_x, sigma_y, input):
+            return cpu_filter_blur(ctx, sigma_x, sigma_y, input)
+        .shader(shader):
+            return cpu_filter_shader(ctx, &shader)
+        .displacement_map(x_channel, y_channel, scale, displacement, color):
+            return cpu_filter_displacement(ctx, x_channel, y_channel, scale, displacement, color)
+        .drop_shadow(dx, dy, sigma_x, sigma_y, color, input):
+            return cpu_filter_drop_shadow(ctx, dx, dy, sigma_x, sigma_y, color, input)
+        .color_filter(color_filter, input):
+            let child = cpu_filter_node_evaluate(input, ctx)
+            return cpu_fr_apply_color_op(ctx, &child, cpu_color_op_node(color_filter))
+        .image(bitmap, src_rect, dest_rect, scaling_mode):
+            return cpu_filter_image(ctx, bitmap, src_rect, dest_rect, scaling_mode)
+        .merge(inputs):
+            var results: ak.Vector[CpuFr]
+            for input in ak.vector_span_const(&inputs):
+                ak.vector_append_t(&results, cpu_filter_node_evaluate(input, ctx))
+            return cpu_fr_merge(ctx, ak.vector_span_const(&results))
+        .offset(dx, dy, input):
+            return cpu_filter_translate(ctx, dx, dy, false, input)
+        .erode(radius_x, radius_y, input):
+            return cpu_filter_morphology(ctx, false, radius_x, radius_y, input)
+        .dilate(radius_x, radius_y, input):
+            return cpu_filter_morphology(ctx, true, radius_x, radius_y, input)
+        _: trap("VERIFY_NOT_REACHED")
+
+## What SkBlenders::Arithmetic makes of (k1, k2, k3, k4).
+enum CpuArithmeticMode as u8:
+    ## (0, 1, 0, 0): SkBlendMode::kSrc, the foreground.
+    source = 0
+    ## (0, 0, 1, 0): SkBlendMode::kDst, the background.
+    destination = 1
+    ## (0, 0, 0, 0): SkBlendMode::kClear, nothing.
+    clear = 2
+    ## Anything else: the arithmetic runtime blender.
+    blender = 3
+
+## SkBlenders::Arithmetic's "nearly a blend mode" table (SkScalarNearlyEqual).
+func cpu_arithmetic_mode(k1: f32, k2: f32, k3: f32, k4: f32) -> CpuArithmeticMode:
+    let e: f32 = 1.0 / 4096.0
+    if math32.abs(k1) <= e and math32.abs(k3) <= e and math32.abs(k4) <= e:
+        if math32.abs(k2 - 1.0) <= e:
+            return CpuArithmeticMode.source
+        if math32.abs(k2) <= e:
+            return CpuArithmeticMode.clear
+    if math32.abs(k1) <= e and math32.abs(k2) <= e and math32.abs(k3 - 1.0) <= e and math32.abs(k4) <= e:
+        return CpuArithmeticMode.destination
+    return CpuArithmeticMode.blender
+
+# mark: Compose ================================================================================
+
+## SkComposeImageFilter::onFilterImage: the inner result is the outer filter's source.
+func cpu_filter_compose(ctx: const CpuFilterContext*, outer: const gfx.ImageFilter*?, inner: const gfx.ImageFilter*?) -> CpuFr:
+    var source_bounds: CpuIRect? = none
+    if cpu_fr_has_image(&ctx.source):
+        source_bounds = ctx.source.bounds
+    else:
+        source_bounds = cpu_irect_empty()
+    let inner_output = cpu_filter_node_output_bounds(inner, ctx.layer, source_bounds)
+    let outer_required = cpu_filter_node_input_bounds(outer, ctx.layer, ctx.desired, inner_output)
+    let inner_ctx = cpu_ctx_with_desired(ctx, outer_required)
+    let inner_result = cpu_filter_node_evaluate(inner, &inner_ctx)
+    let outer_ctx = cpu_ctx_with_source(ctx, inner_result)
+    return cpu_filter_node_evaluate(outer, &outer_ctx)
+
+# mark: Transforms =============================================================================
+
+## SkMatrixTransformImageFilter::onFilterImage for SkMatrix::Translate(dx, dy) over `input`:
+## Offset samples nearest-neighbor, the drop shadow's offset kLinear.
+func cpu_filter_translate(ctx: const CpuFilterContext*, dx: f32, dy: f32, linear: bool, input: const gfx.ImageFilter*?) -> CpuFr:
+    let required = cpu_translate_required_input(ctx.layer, dx, dy, linear, ctx.desired)
+    let child_ctx = cpu_ctx_with_desired(ctx, required)
+    let child = cpu_filter_node_evaluate(input, &child_ctx)
+    let transform = cpu_fm_param_to_layer_matrix(ctx.layer, cpu_fm_translate(dx, dy))
+    return cpu_fr_apply_transform(ctx, &child, transform, linear)
+
+## The graph of SkImageFilters::DropShadow(dx, dy, sigma, sigma, color, input):
+## Merge(MatrixTransform(Translate(dx, dy), kLinear, ColorFilter(Blend(color, kSrcIn),
+## Blur(sigma, input))), input).
+func cpu_filter_drop_shadow(ctx: const CpuFilterContext*, dx: f32, dy: f32, sigma_x: f32, sigma_y: f32, color: gfx.Color, input: const gfx.ImageFilter*?) -> CpuFr:
+    let required = cpu_translate_required_input(ctx.layer, dx, dy, true, ctx.desired)
+    let shadow_ctx = cpu_ctx_with_desired(ctx, required)
+    let blurred = cpu_filter_blur(&shadow_ctx, sigma_x, sigma_y, input)
+    let colored = cpu_fr_apply_color_op(&shadow_ctx, &blurred, cpu_color_op_src_in(color))
+    let transform = cpu_fm_param_to_layer_matrix(ctx.layer, cpu_fm_translate(dx, dy))
+    let shadow = cpu_fr_apply_transform(ctx, &colored, transform, true)
+    let original = cpu_filter_node_evaluate(input, ctx)
+    let inputs: CpuFr[2] = [shadow, original]
+    return cpu_fr_merge(ctx, inputs)
+
+# mark: Leaves =================================================================================
+
+## SkShaderImageFilter::onFilterImage (FilterResult::MakeFromShader): the shader drawn over the
+## desired output with kSrc, evaluated in parameter space.
+func cpu_filter_shader(ctx: const CpuFilterContext*, shader: const gfx.ImageFilterShader*) -> CpuFr:
+    let out = ctx.desired
+    let width = cpu_irect_width(out)
+    let height = cpu_irect_height(out)
+    match *shader:
+        .color(color):
+            # SkShaders::Color(SkColor): the unpremultiplied color, premultiplied by the pipeline.
+            let data = cpu_filter_arena_pixmap(ctx.arena, width, height)
+            let value = color.m_value
+            let k: f32 = 1.0 / 255.0
+            let a = (f32)((value >> 24) & 0xff) * k
+            let premul = CpuRgba(r = (f32)((value >> 16) & 0xff) * k * a, g = (f32)((value >> 8) & 0xff) * k * a, b = (f32)(value & 0xff) * k * a, a = a)
+            for i in 0..<(usize)width * (usize)height:
+                cpu_store_rgba(data, i * 4, cpu_rgba_clamp01(premul))
+            return cpu_fr_of_pixels(data, width, height, out.left, out.top)
+        .turbulence(turbulence_type, base_frequency_x, base_frequency_y, num_octaves, seed, tile_stitch_size):
+            return cpu_filter_turbulence(ctx, turbulence_type, base_frequency_x, base_frequency_y, num_octaves, seed, tile_stitch_size)
+        _: trap("VERIFY_NOT_REACHED")
+
+## SkImageImageFilter::onFilterImage: FilterResult::MakeFromImage for the integer rectangles
+## LibWeb passes (the image subset, transformed by the layer matrix times RectToRect(src, dst)).
+func cpu_filter_image(ctx: const CpuFilterContext*, bitmap: const gfx.ImmutableBitmap*, src_rect: gfx.DevicePixelRect, dest_rect: gfx.DevicePixelRect, scaling_mode: gfx.ScalingMode) -> CpuFr:
+    let rects = cpu_image_rects(bitmap, src_rect, dest_rect) else return cpu_fr_empty()
+    let src = rects.0
+    let dst = rects.1
+    let subset = cpu_irect_round_out(src.0, src.1, src.2, src.3)
+    if (f32)subset.left != src.0 or (f32)subset.top != src.1 or (f32)subset.right != src.2 or (f32)subset.bottom != src.3:
+        # FIXME: fractional source rectangles (drawn with drawImageRect) cannot come from LibWeb.
+        trap("unported: SkImageFilters::Image with a fractional source rectangle")
+    var pixmap = cpu_pixmap_of_immutable_bitmap(bitmap) else return cpu_fr_empty()
+    let pixels = pixmap.data()
+    let stride = (i32)pixmap.width()
+    ak.vector_append_t(&ctx.arena.pixmaps, pixmap)
+    let width = cpu_irect_width(subset)
+    let height = cpu_irect_height(subset)
+    let view = cpu_blur_view(ctx.arena, pixels, stride, subset.left, subset.top, width, height)
+    var image = cpu_fr_of_pixels(view, width, height, subset.left, subset.top)
+    # An SkImage's special image has no known transparent boundary.
+    image.padded = false
+    let transform = cpu_fm_concat(ctx.layer, cpu_fm_rect_to_rect(src.0, src.1, src.2, src.3, dst.0, dst.1, dst.2, dst.3))
+    # to_skia_sampling_options: None and NearestNeighbor sample nearest, the others linear.
+    let linear = scaling_mode == gfx.ScalingMode.bilinear or scaling_mode == gfx.ScalingMode.bilinear_mipmap
+    return cpu_fr_apply_transform(ctx, &image, transform, linear)
+
+# mark: Morphology =============================================================================
+
+## SkMorphologyImageFilter::onFilterImage: an X pass then a Y pass, each the per-channel maximum
+## (dilate) or minimum (erode) over [-radius, radius], transparent outside the input.
+func cpu_filter_morphology(ctx: const CpuFilterContext*, dilate: bool, radius_x: f32, radius_y: f32, input: const gfx.ImageFilter*?) -> CpuFr:
+    if radius_x < 0.0 or radius_y < 0.0:
+        return cpu_filter_node_evaluate(input, ctx)
+    if radius_x == 0.0 and radius_y == 0.0:
+        # make_morphology: the identity kernel is no filter.
+        return cpu_filter_node_evaluate(input, ctx)
+    let radii = cpu_morphology_radii(ctx.layer, radius_x, radius_y)
+    let child_ctx = cpu_ctx_with_desired(ctx, cpu_irect_outset(ctx.desired, radii.0, radii.1))
+    var child = cpu_filter_node_evaluate(input, &child_ctx)
+    let sign: i32 = 1 if dilate else -1
+    let reach = cpu_irect_outset(child.bounds, sign * radii.0, sign * radii.1)
+    let max_output = cpu_irect_intersect(reach, ctx.desired) else return cpu_fr_empty()
+    let x_ctx = cpu_ctx_with_desired(ctx, cpu_irect_outset(max_output, 0, radii.1))
+    child = cpu_morphology_pass(&x_ctx, &child, dilate, radii.0, 0)
+    let y_ctx = cpu_ctx_with_desired(ctx, max_output)
+    return cpu_morphology_pass(&y_ctx, &child, dilate, 0, radii.1)
+
+## morphology_pass along x (radius_x) or y (radius_y), producing the desired output.
+func cpu_morphology_pass(ctx: const CpuFilterContext*, input: const CpuFr*, dilate: bool, radius_x: i32, radius_y: i32) -> CpuFr:
+    if radius_x == 0 and radius_y == 0:
+        return *input
+    if not cpu_fr_has_image(input):
+        return cpu_fr_empty()
+    let out = ctx.desired
+    let width = cpu_irect_width(out)
+    let height = cpu_irect_height(out)
+    let data = cpu_filter_arena_pixmap(ctx.arena, width, height)
+    let sampler = cpu_fr_sampler(input)
+    let radius = radius_x + radius_y
+    for y in 0..<height:
+        for x in 0..<width:
+            let px = out.left + x
+            let py = out.top + y
+            var agg = cpu_fr_shader_sample(input, &sampler, (f32)px + 0.5, (f32)py + 0.5, false)
+            for i in 1..<radius + 1:
+                let dx = i if radius_x > 0 else 0
+                let dy = i if radius_y > 0 else 0
+                let ahead = cpu_fr_shader_sample(input, &sampler, (f32)(px + dx) + 0.5, (f32)(py + dy) + 0.5, false)
+                let behind = cpu_fr_shader_sample(input, &sampler, (f32)(px - dx) + 0.5, (f32)(py - dy) + 0.5, false)
+                agg = cpu_morph_pick(dilate, agg, cpu_morph_pick(dilate, ahead, behind))
+            cpu_store_rgba(data, ((usize)y * (usize)width + (usize)x) * 4, cpu_rgba_clamp01(agg))
+    return cpu_fr_of_pixels(data, width, height, out.left, out.top)
+
+## The per-channel maximum (dilate) or minimum (erode).
+func cpu_morph_pick(dilate: bool, a: CpuRgba, b: CpuRgba) -> CpuRgba:
+    if dilate:
+        return CpuRgba(r = cpu_max_f32(a.r, b.r), g = cpu_max_f32(a.g, b.g), b = cpu_max_f32(a.b, b.b), a = cpu_max_f32(a.a, b.a))
+    return CpuRgba(r = cpu_min_f32(a.r, b.r), g = cpu_min_f32(a.g, b.g), b = cpu_min_f32(a.b, b.b), a = cpu_min_f32(a.a, b.a))

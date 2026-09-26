@@ -1,0 +1,83 @@
+#==============================================================================================
+#
+#   tests_cpu_filter_blend - blends, arithmetic and images against Skia's pixels
+#
+#   DESCRIPTION:
+#       The blend filter with every CompositingAndBlendingOperator (the layer content as the
+#       background, an image filter of the oracle's pattern as the foreground), the arithmetic
+#       filter and the image filter's sampling, compared with Skia m144's pixels
+#       (tests_cpu_filter_data_*.lucb; see tests_cpu_filter_support).
+#
+#==============================================================================================
+
+test "cpu filter: images":
+    test_cpu_filter_images()
+
+noinline func test_cpu_filter_images():
+    let image = test_filter_pattern_bitmap(10, 8)
+    let nearest = gfx.filter_image(image, test_filter_rect(1, 1, 6, 5), test_filter_rect(3, 2, 12, 10), gfx.ScalingMode.nearest_neighbor)
+    test_filter_expect("image_nearest", TestFilterScene(), test_filter_graph(&nearest), filter_skia_image_nearest, 0, 0)
+    let bilinear = gfx.filter_image(image, test_filter_rect(0, 0, 10, 8), test_filter_rect(2, 3, 15, 13), gfx.ScalingMode.bilinear)
+    # Scaled with linear sampling, an SkImage goes through the strict, shader-tiled image shader
+    # (float stages); two pixels come out one level apart, rounding in its matrix and sampling
+    # stages that the port does not reproduce step for step.
+    test_filter_expect("image_bilinear", TestFilterScene(), test_filter_graph(&bilinear), filter_skia_image_bilinear, 1, 2)
+    let offset = gfx.filter_image(image, test_filter_rect(0, 0, 10, 8), test_filter_rect(5, 4, 10, 8), gfx.ScalingMode.bilinear)
+    test_filter_expect("image_offset", TestFilterScene(), test_filter_graph(&offset), filter_skia_image_offset, 0, 0)
+
+test "cpu filter: arithmetic":
+    test_cpu_filter_arithmetic()
+
+noinline func test_cpu_filter_arithmetic():
+    let flood = gfx.filter_flood(test_filter_color(200, 100, 50, 255), 0.8)
+    let arithmetic = gfx.filter_arithmetic(none, &flood, 0.5, 0.3, 0.6, 0.0)
+    test_filter_expect("arithmetic", TestFilterScene(), test_filter_graph(&arithmetic), filter_skia_arithmetic, 0, 0)
+    let offset = gfx.filter_offset(2.0, 2.0)
+    let fills = gfx.filter_arithmetic(none, &offset, 0.2, 0.4, 0.5, 0.1)
+    test_filter_expect("arithmetic_k4", TestFilterScene(clip = cpu_irect(0, 0, 20, 20)), test_filter_graph(&fills), filter_skia_arithmetic_k4, 0, 0)
+
+## Blends the layer content (background) with the pattern at (10, 11) (foreground) by `mode`.
+func test_cpu_filter_blend_mode(name: str, mode: gfx.CompositingAndBlendingOperator, expected: str, max_difference: u32, max_pixels: usize):
+    let image = test_filter_pattern_bitmap(10, 8)
+    let foreground = gfx.filter_image(image, test_filter_rect(0, 0, 10, 8), test_filter_rect(10, 11, 10, 8), gfx.ScalingMode.nearest_neighbor)
+    let blend = gfx.filter_blend(none, &foreground, mode)
+    test_filter_expect(name, TestFilterScene(), test_filter_graph(&blend), expected, max_difference, max_pixels)
+
+test "cpu filter: Porter-Duff blends":
+    test_cpu_filter_blend_porter_duff()
+
+noinline func test_cpu_filter_blend_porter_duff():
+    test_cpu_filter_blend_mode("blend_normal", gfx.CompositingAndBlendingOperator.normal, filter_skia_blend_normal, 0, 0)
+    test_cpu_filter_blend_mode("blend_source_in", gfx.CompositingAndBlendingOperator.source_in, filter_skia_blend_source_in, 0, 0)
+    test_cpu_filter_blend_mode("blend_destination_out", gfx.CompositingAndBlendingOperator.destination_out, filter_skia_blend_destination_out, 0, 0)
+    test_cpu_filter_blend_mode("blend_xor", gfx.CompositingAndBlendingOperator.xor, filter_skia_blend_xor, 0, 0)
+    test_cpu_filter_blend_mode("blend_lighter", gfx.CompositingAndBlendingOperator.lighter, filter_skia_blend_lighter, 0, 0)
+    test_cpu_filter_blend_mode("blend_copy", gfx.CompositingAndBlendingOperator.copy, filter_skia_blend_copy, 0, 0)
+    test_cpu_filter_blend_mode("blend_clear", gfx.CompositingAndBlendingOperator.clear, filter_skia_blend_clear, 0, 0)
+    test_cpu_filter_blend_mode("blend_plus_darker", gfx.CompositingAndBlendingOperator.plus_darker, filter_skia_blend_plus_darker, 0, 0)
+    test_cpu_filter_blend_mode("blend_plus_lighter", gfx.CompositingAndBlendingOperator.plus_lighter, filter_skia_blend_plus_lighter, 0, 0)
+
+test "cpu filter: separable blends":
+    test_cpu_filter_blend_separable()
+
+noinline func test_cpu_filter_blend_separable():
+    test_cpu_filter_blend_mode("blend_multiply", gfx.CompositingAndBlendingOperator.multiply, filter_skia_blend_multiply, 0, 0)
+    test_cpu_filter_blend_mode("blend_screen", gfx.CompositingAndBlendingOperator.screen, filter_skia_blend_screen, 0, 0)
+    test_cpu_filter_blend_mode("blend_overlay", gfx.CompositingAndBlendingOperator.overlay, filter_skia_blend_overlay, 0, 0)
+    test_cpu_filter_blend_mode("blend_darken", gfx.CompositingAndBlendingOperator.darken, filter_skia_blend_darken, 0, 0)
+    test_cpu_filter_blend_mode("blend_lighten", gfx.CompositingAndBlendingOperator.lighten, filter_skia_blend_lighten, 0, 0)
+    test_cpu_filter_blend_mode("blend_color_dodge", gfx.CompositingAndBlendingOperator.color_dodge, filter_skia_blend_color_dodge, 0, 0)
+    test_cpu_filter_blend_mode("blend_color_burn", gfx.CompositingAndBlendingOperator.color_burn, filter_skia_blend_color_burn, 0, 0)
+    test_cpu_filter_blend_mode("blend_hard_light", gfx.CompositingAndBlendingOperator.hard_light, filter_skia_blend_hard_light, 0, 0)
+    test_cpu_filter_blend_mode("blend_soft_light", gfx.CompositingAndBlendingOperator.soft_light, filter_skia_blend_soft_light, 0, 0)
+    test_cpu_filter_blend_mode("blend_difference", gfx.CompositingAndBlendingOperator.difference, filter_skia_blend_difference, 0, 0)
+    test_cpu_filter_blend_mode("blend_exclusion", gfx.CompositingAndBlendingOperator.exclusion, filter_skia_blend_exclusion, 0, 0)
+
+test "cpu filter: non-separable blends":
+    test_cpu_filter_blend_non_separable()
+
+noinline func test_cpu_filter_blend_non_separable():
+    test_cpu_filter_blend_mode("blend_hue", gfx.CompositingAndBlendingOperator.hue, filter_skia_blend_hue, 0, 0)
+    test_cpu_filter_blend_mode("blend_saturation", gfx.CompositingAndBlendingOperator.saturation, filter_skia_blend_saturation, 0, 0)
+    test_cpu_filter_blend_mode("blend_color", gfx.CompositingAndBlendingOperator.color, filter_skia_blend_color, 0, 0)
+    test_cpu_filter_blend_mode("blend_luminosity", gfx.CompositingAndBlendingOperator.luminosity, filter_skia_blend_luminosity, 0, 0)

@@ -7,8 +7,19 @@
 #       the graph of SkImageFilters the donor builds (gfx.ImageFilter nodes, the factory and its
 #       arguments); DisplayListPlayerSkia hands that graph to SkCanvas::saveLayer, whose restore
 #       (or, for a backdrop, whose save) runs SkImageFilter_Base::filterImage over the layer.
-#       This fragment is that evaluation, as Skia m144's raster backend does it (skif::
-#       FilterResult, SkBlurEngine, the image filters of src/effects/imagefilters).
+#       This fragment and the cpu_filter_* fragments after it are that evaluation, as Skia m144's
+#       raster backend does it (skif::FilterResult, SkBlurEngine, the image filters of
+#       src/effects/imagefilters):
+#
+#       - this fragment: the types, integer rectangles, the parameter-to-layer mapping
+#         (src/core/SkImageFilterTypes.cpp lines 45-527: Mapping::map, LayerSpace), the matrix
+#         capability, the input and output bounds of every node (onGetInputLayerBounds,
+#         onGetOutputLayerBounds) and the public entry points;
+#       - cpu_filter_result: skif::FilterResult (lazy transform, color filters, crop, tiling);
+#       - cpu_filter_color: the color filters, in the raster pipeline's float stages;
+#       - cpu_filter_blur: SkBlurImageFilter, FilterResult::Builder::blur and SkBlurEngine;
+#       - cpu_filter_nodes, cpu_filter_blend: each node's onFilterImage;
+#       - cpu_filter_noise: SkPerlinNoiseShader.
 #
 #       Coordinates: "layer space" is the pixel space of the layer the filter reads and writes
 #       (skif's layer space); parameters (blur sigmas, offsets, radii, image rectangles) are in
@@ -54,22 +65,301 @@ struct CpuFilterImage:
     var left: i32
     var top: i32
 
-# mark: Evaluation =============================================================================
+## An affine SkMatrix: x' = sx * x + kx * y + tx, y' = ky * x + sy * y + ty.
+struct CpuFMatrix:
+    var sx: f32 = 1.0
+    var kx: f32 = 0.0
+    var tx: f32 = 0.0
+    var ky: f32 = 0.0
+    var sy: f32 = 1.0
+    var ty: f32 = 0.0
+
+## skif's kRoundEpsilon: the tolerance for near-integer bounds and translations.
+let cpu_filter_round_epsilon: f32 = 0.001
+
+# mark: Integer rectangles =====================================================================
+
+func cpu_irect(left: i32, top: i32, right: i32, bottom: i32) -> CpuIRect:
+    return CpuIRect(left = left, top = top, right = right, bottom = bottom)
+
+## SkIRect::MakeEmpty().
+func cpu_irect_empty() -> CpuIRect:
+    return CpuIRect(left = 0, top = 0, right = 0, bottom = 0)
+
+## SkIRect::isEmpty.
+func cpu_irect_is_empty(r: CpuIRect) -> bool:
+    return r.left >= r.right or r.top >= r.bottom
+
+func cpu_irect_width(r: CpuIRect) -> i32:
+    return r.right - r.left
+
+func cpu_irect_height(r: CpuIRect) -> i32:
+    return r.bottom - r.top
+
+## SkIRect::intersect: the overlap of `a` and `b`, or none when it is empty.
+func cpu_irect_intersect(a: CpuIRect, b: CpuIRect) -> CpuIRect?:
+    let result = CpuIRect(left = cpu_max_i32(a.left, b.left), top = cpu_max_i32(a.top, b.top),
+                          right = cpu_min_i32(a.right, b.right), bottom = cpu_min_i32(a.bottom, b.bottom))
+    if cpu_irect_is_empty(result):
+        return none
+    return result
+
+## SkIRect::Intersects.
+func cpu_irect_intersects(a: CpuIRect, b: CpuIRect) -> bool:
+    if cpu_irect_intersect(a, b) != none:
+        return true
+    return false
+
+## SkIRect::join: the bounds of both; an empty rectangle adds nothing.
+func cpu_irect_join(a: CpuIRect, b: CpuIRect) -> CpuIRect:
+    if cpu_irect_is_empty(b):
+        return a
+    if cpu_irect_is_empty(a):
+        return b
+    return CpuIRect(left = cpu_min_i32(a.left, b.left), top = cpu_min_i32(a.top, b.top),
+                    right = cpu_max_i32(a.right, b.right), bottom = cpu_max_i32(a.bottom, b.bottom))
+
+## SkIRect::outset (negative deltas inset).
+func cpu_irect_outset(r: CpuIRect, dx: i32, dy: i32) -> CpuIRect:
+    return CpuIRect(left = r.left - dx, top = r.top - dy, right = r.right + dx, bottom = r.bottom + dy)
+
+## SkIRect::contains(SkIRect): `b` is not empty and lies within `a`.
+func cpu_irect_contains(a: CpuIRect, b: CpuIRect) -> bool:
+    return not cpu_irect_is_empty(a) and not cpu_irect_is_empty(b) and a.left <= b.left and a.top <= b.top and a.right >= b.right and a.bottom >= b.bottom
+
+## skif RoundOut: the smallest integer rectangle holding `(l, t, r, b)` inset by kRoundEpsilon.
+func cpu_irect_round_out(l: f32, t: f32, r: f32, b: f32) -> CpuIRect:
+    let e = cpu_filter_round_epsilon
+    return CpuIRect(left = cpu_f32_to_i32(math32.floor(l + e)), top = cpu_f32_to_i32(math32.floor(t + e)),
+                    right = cpu_f32_to_i32(math32.ceil(r - e)), bottom = cpu_f32_to_i32(math32.ceil(b - e)))
+
+# mark: Matrices ===============================================================================
+
+func cpu_fm_identity() -> CpuFMatrix:
+    return CpuFMatrix()
+
+func cpu_fm_translate(tx: f32, ty: f32) -> CpuFMatrix:
+    return CpuFMatrix(tx = tx, ty = ty)
+
+## The layer matrix passed to the public entry points as an SkMatrix.
+func cpu_fm_of_transform(t: raster.Transform) -> CpuFMatrix:
+    return CpuFMatrix(sx = t.sx, kx = t.kx, tx = t.tx, ky = t.ky, sy = t.sy, ty = t.ty)
+
+## SkMatrix::isScaleTranslate.
+func cpu_fm_is_scale_translate(m: CpuFMatrix) -> bool:
+    return m.kx == 0.0 and m.ky == 0.0
+
+## SkMatrix::mapPoint.
+func cpu_fm_map_x(m: CpuFMatrix, x: f32, y: f32) -> f32:
+    if cpu_fm_is_scale_translate(m):
+        return x * m.sx + m.tx
+    return x * m.sx + y * m.kx + m.tx
+
+func cpu_fm_map_y(m: CpuFMatrix, x: f32, y: f32) -> f32:
+    if cpu_fm_is_scale_translate(m):
+        return y * m.sy + m.ty
+    return x * m.ky + y * m.sy + m.ty
+
+## The raster pipeline's matrix stages (matrix_translate, matrix_scale_translate, matrix_2x3)
+## mapping a sample point, with NEON's fused multiply-adds.
+func cpu_fm_pipeline_x(m: CpuFMatrix, x: f32, y: f32) -> f32:
+    if cpu_fm_is_scale_translate(m):
+        if m.sx == 1.0:
+            return x + m.tx
+        return math32.fma(x, m.sx, m.tx)
+    return math32.fma(x, m.sx, math32.fma(y, m.kx, m.tx))
+
+func cpu_fm_pipeline_y(m: CpuFMatrix, x: f32, y: f32) -> f32:
+    if cpu_fm_is_scale_translate(m):
+        if m.sy == 1.0:
+            return y + m.ty
+        return math32.fma(y, m.sy, m.ty)
+    return math32.fma(x, m.ky, math32.fma(y, m.sy, m.ty))
+
+## SkMatrix::setConcat(a, b): the matrix applying `b`, then `a`.
+func cpu_fm_concat(a: CpuFMatrix, b: CpuFMatrix) -> CpuFMatrix:
+    if cpu_fm_is_scale_translate(a) and cpu_fm_is_scale_translate(b):
+        return CpuFMatrix(sx = a.sx * b.sx, tx = a.sx * b.tx + a.tx, sy = a.sy * b.sy, ty = a.sy * b.ty + a.ty)
+    # SkMatrix's muladdmul: (a * b + c * d) in double.
+    return CpuFMatrix(sx = cpu_muladdmul(a.sx, b.sx, a.kx, b.ky), kx = cpu_muladdmul(a.sx, b.kx, a.kx, b.sy),
+                      tx = cpu_muladdmul(a.sx, b.tx, a.kx, b.ty) + a.tx, ky = cpu_muladdmul(a.ky, b.sx, a.sy, b.ky),
+                      sy = cpu_muladdmul(a.ky, b.kx, a.sy, b.sy), ty = cpu_muladdmul(a.ky, b.tx, a.sy, b.ty) + a.ty)
+
+func cpu_muladdmul(a: f32, b: f32, c: f32, d: f32) -> f32:
+    return (f32)((f64)a * (f64)b + (f64)c * (f64)d)
+
+## SkMatrix::invert, or none when `m` is singular.
+func cpu_fm_invert(m: CpuFMatrix) -> CpuFMatrix?:
+    if cpu_fm_is_scale_translate(m):
+        if m.sx == 0.0 or m.sy == 0.0:
+            return none
+        let inv_x = 1.0 / m.sx
+        let inv_y = 1.0 / m.sy
+        return CpuFMatrix(sx = inv_x, tx = -m.tx * inv_x, sy = inv_y, ty = -m.ty * inv_y)
+    let det = (f64)m.sx * (f64)m.sy - (f64)m.kx * (f64)m.ky
+    if det == 0.0:
+        return none
+    let inv = 1.0 / det
+    let sx = (f64)m.sy * inv
+    let kx = -(f64)m.kx * inv
+    let ky = -(f64)m.ky * inv
+    let sy = (f64)m.sx * inv
+    let tx = ((f64)m.kx * (f64)m.ty - (f64)m.sy * (f64)m.tx) * inv
+    let ty = ((f64)m.ky * (f64)m.tx - (f64)m.sx * (f64)m.ty) * inv
+    return CpuFMatrix(sx = (f32)sx, kx = (f32)kx, tx = (f32)tx, ky = (f32)ky, sy = (f32)sy, ty = (f32)ty)
+
+## SkMatrix::mapRect of (l, t, r, b), as (l, t, r, b).
+func cpu_fm_map_rect(m: CpuFMatrix, l: f32, t: f32, r: f32, b: f32) -> (f32, f32, f32, f32):
+    let x0 = cpu_fm_map_x(m, l, t)
+    let y0 = cpu_fm_map_y(m, l, t)
+    let x1 = cpu_fm_map_x(m, r, t)
+    let y1 = cpu_fm_map_y(m, r, t)
+    let x2 = cpu_fm_map_x(m, r, b)
+    let y2 = cpu_fm_map_y(m, r, b)
+    let x3 = cpu_fm_map_x(m, l, b)
+    let y3 = cpu_fm_map_y(m, l, b)
+    return (cpu_min_f32(cpu_min_f32(x0, x1), cpu_min_f32(x2, x3)), cpu_min_f32(cpu_min_f32(y0, y1), cpu_min_f32(y2, y3)),
+            cpu_max_f32(cpu_max_f32(x0, x1), cpu_max_f32(x2, x3)), cpu_max_f32(cpu_max_f32(y0, y1), cpu_max_f32(y2, y3)))
+
+## Mapping::map<SkIRect>: an integer rectangle through `m`, keeping 1px precision for
+## scale-translate matrices.
+func cpu_fm_map_irect(m: CpuFMatrix, r: CpuIRect) -> CpuIRect:
+    if cpu_irect_is_empty(r):
+        return cpu_irect_empty()
+    if cpu_fm_is_scale_translate(m):
+        let l = (f64)m.sx * (f64)r.left + (f64)m.tx
+        let rr = (f64)m.sx * (f64)r.right + (f64)m.tx
+        let t = (f64)m.sy * (f64)r.top + (f64)m.ty
+        let b = (f64)m.sy * (f64)r.bottom + (f64)m.ty
+        return cpu_irect_of_f64(math.min(l, rr), math.min(t, b), math.max(l, rr), math.max(t, b))
+    let mapped = cpu_fm_map_rect(m, (f32)r.left, (f32)r.top, (f32)r.right, (f32)r.bottom)
+    return cpu_irect_round_out(mapped.0, mapped.1, mapped.2, mapped.3)
+
+## floor(l + eps), floor(t + eps), ceil(r - eps), ceil(b - eps) in double, saturated.
+func cpu_irect_of_f64(l: f64, t: f64, r: f64, b: f64) -> CpuIRect:
+    let e = (f64)cpu_filter_round_epsilon
+    return CpuIRect(left = cpu_f64_to_i32(math.floor(l + e)), top = cpu_f64_to_i32(math.floor(t + e)),
+                    right = cpu_f64_to_i32(math.ceil(r - e)), bottom = cpu_f64_to_i32(math.ceil(b - e)))
+
+func cpu_f64_to_i32(value: f64) -> i32:
+    if value < -2147483648.0:
+        return -2147483647 - 1
+    if value > 2147483647.0:
+        return 2147483647
+    return (i32)value
+
+## LayerSpace<SkMatrix>::inverseMapRect(SkIRect): the smallest rectangle `m` maps over `r`, or
+## none when `m` is singular.
+func cpu_fm_inverse_map_irect(m: CpuFMatrix, r: CpuIRect) -> CpuIRect?:
+    if cpu_irect_is_empty(r):
+        return cpu_irect_empty()
+    if cpu_fm_is_scale_translate(m):
+        if m.sx == 0.0 or m.sy == 0.0:
+            return none
+        let l = ((f64)r.left - (f64)m.tx) / (f64)m.sx
+        let rr = ((f64)r.right - (f64)m.tx) / (f64)m.sx
+        let t = ((f64)r.top - (f64)m.ty) / (f64)m.sy
+        let b = ((f64)r.bottom - (f64)m.ty) / (f64)m.sy
+        return cpu_irect_of_f64(math.min(l, rr), math.min(t, b), math.max(l, rr), math.max(t, b))
+    let inverse = cpu_fm_invert(m) else return none
+    let mapped = cpu_fm_map_rect(inverse, (f32)r.left, (f32)r.top, (f32)r.right, (f32)r.bottom)
+    return cpu_irect_round_out(mapped.0, mapped.1, mapped.2, mapped.3)
+
+## is_nearly_integer_translation: whether `m` is within kRoundEpsilon of a translation by
+## whole pixels, and that translation.
+func cpu_fm_integer_translation(m: CpuFMatrix) -> (i32, i32)?:
+    let tx = math32.floor(m.tx + 0.5)
+    let ty = math32.floor(m.ty + 0.5)
+    let e = cpu_filter_round_epsilon
+    if math32.abs(1.0 - m.sx) <= e and math32.abs(m.kx) <= e and math32.abs(tx - m.tx) <= e and math32.abs(m.ky) <= e and math32.abs(1.0 - m.sy) <= e and math32.abs(ty - m.ty) <= e:
+        return ((i32)tx, (i32)ty)
+    return none
+
+## Mapping::map<SkSize>: the lengths of the mapped x and y axes of a (width, height) size.
+func cpu_fm_map_size(m: CpuFMatrix, width: f32, height: f32) -> (f32, f32):
+    if cpu_fm_is_scale_translate(m):
+        return (math32.abs(m.sx * width), math32.abs(m.sy * height))
+    let xx = m.sx * width
+    let xy = m.ky * width
+    let yx = m.kx * height
+    let yy = m.sy * height
+    return (math32.sqrt(xx * xx + xy * xy), math32.sqrt(yx * yx + yy * yy))
+
+## Mapping::map<Vector>: SkMatrix::mapVector.
+func cpu_fm_map_vector(m: CpuFMatrix, x: f32, y: f32) -> (f32, f32):
+    if cpu_fm_is_scale_translate(m):
+        return (x * m.sx, y * m.sy)
+    return (x * m.sx + y * m.kx, x * m.ky + y * m.sy)
+
+## Mapping::map<SkMatrix>(transform, layer): `transform` (a parameter-space matrix) as the
+## layer-space matrix layer * transform * layer^-1.
+func cpu_fm_param_to_layer_matrix(layer: CpuFMatrix, transform: CpuFMatrix) -> CpuFMatrix:
+    var inverse = cpu_fm_invert(layer) else cpu_fm_identity()
+    inverse = cpu_fm_concat(transform, inverse)
+    return cpu_fm_concat(layer, inverse)
+
+## LayerSpace<SkSize>::ceil: SkScalarCeilToInt(size - kRoundEpsilon).
+func cpu_size_ceil(v: f32) -> i32:
+    return cpu_f32_to_i32(math32.ceil(v - cpu_filter_round_epsilon))
+
+## SkScalarRoundToInt.
+func cpu_round_to_int(v: f32) -> i32:
+    return cpu_f32_to_i32(math32.floor(v + 0.5))
+
+# mark: Matrix capability ======================================================================
+
+## SkImageFilter_Base::getCTMCapability of one node, then its inputs'.
+func cpu_filter_node_capability(filter: const gfx.ImageFilter*?) -> CpuFilterMatrixCapability:
+    let node = filter else return CpuFilterMatrixCapability.complex
+    match node.node:
+        .arithmetic(_, _, _, _, _, background, foreground):
+            return cpu_filter_min_capability(cpu_filter_node_capability(background), cpu_filter_node_capability(foreground))
+        .compose(outer, inner):
+            return cpu_filter_min_capability(cpu_filter_node_capability(outer), cpu_filter_node_capability(inner))
+        .blend(_, background, foreground):
+            return cpu_filter_min_capability(cpu_filter_node_capability(background), cpu_filter_node_capability(foreground))
+        .blur(_, _, input):
+            return cpu_filter_min_capability(CpuFilterMatrixCapability.scale_translate, cpu_filter_node_capability(input))
+        .shader(_):
+            return CpuFilterMatrixCapability.complex
+        .displacement_map(_, _, _, displacement, color):
+            let inputs = cpu_filter_min_capability(cpu_filter_node_capability(displacement), cpu_filter_node_capability(color))
+            return cpu_filter_min_capability(CpuFilterMatrixCapability.scale_translate, inputs)
+        .drop_shadow(_, _, _, _, _, input):
+            # Blur (scale-translate), color filter, matrix transform, merge (complex).
+            return cpu_filter_min_capability(CpuFilterMatrixCapability.scale_translate, cpu_filter_node_capability(input))
+        .color_filter(_, input):
+            return cpu_filter_node_capability(input)
+        .image(_, _, _, _):
+            return CpuFilterMatrixCapability.complex
+        .merge(inputs):
+            var result = CpuFilterMatrixCapability.complex
+            for input in ak.vector_span_const(&inputs):
+                result = cpu_filter_min_capability(result, cpu_filter_node_capability(input))
+            return result
+        .offset(_, _, input):
+            return cpu_filter_node_capability(input)
+        .erode(_, _, input):
+            return cpu_filter_min_capability(CpuFilterMatrixCapability.scale_translate, cpu_filter_node_capability(input))
+        .dilate(_, _, input):
+            return cpu_filter_min_capability(CpuFilterMatrixCapability.scale_translate, cpu_filter_node_capability(input))
+        _: trap("VERIFY_NOT_REACHED")
+
+func cpu_filter_min_capability(a: CpuFilterMatrixCapability, b: CpuFilterMatrixCapability) -> CpuFilterMatrixCapability:
+    return a if (u8)a < (u8)b else b
+
+# mark: Public entry points ====================================================================
 
 ## SkImageFilter_Base::getCTMCapability of the graph `filter` (none: the identity filter, which
 ## is kComplex): the least capable node's.
 pub func cpu_filter_ctm_capability(filter: const gfx.ImageFilter*?) -> CpuFilterMatrixCapability:
-    discard(filter)
-    trap("unported: cpu_filter_ctm_capability")
+    return cpu_filter_node_capability(filter)
 
 ## SkImageFilter_Base::getInputBounds(mapping, desiredOutput, contentBounds = none): the part of
 ## layer space the source image must cover so that `filter` can produce `desired_output`. Empty
 ## when the graph does not read its source (a flood, an image, a turbulence).
 pub func cpu_filter_input_bounds(filter: const gfx.ImageFilter*?, layer_matrix: raster.Transform, desired_output: CpuIRect) -> CpuIRect:
-    discard(filter)
-    discard(layer_matrix)
-    discard(desired_output)
-    trap("unported: cpu_filter_input_bounds")
+    return cpu_filter_node_input_bounds(filter, cpu_fm_of_transform(layer_matrix), desired_output, none)
 
 ## SkImageFilter_Base::filterImage over `source` (sampled outside its pixels as `source_tile`
 ## says) for `desired_output`, followed by SkCanvas's apply_alpha_and_colorfilter for the
@@ -77,11 +367,15 @@ pub func cpu_filter_input_bounds(filter: const gfx.ImageFilter*?, layer_matrix: 
 ## when `luminance_to_alpha`. The result is resolved to pixels within `desired_output`; the
 ## caller releases its pixmap. A `filter` of none is the identity.
 pub func cpu_filter_evaluate(filter: const gfx.ImageFilter*?, layer_matrix: raster.Transform, source: const CpuFilterImage*, source_tile: CpuFilterSourceTile, desired_output: CpuIRect, alpha: f32, luminance_to_alpha: bool) -> CpuFilterImage:
-    discard(filter)
-    discard(layer_matrix)
-    discard(source)
-    discard(source_tile)
-    discard(desired_output)
-    discard(alpha)
-    discard(luminance_to_alpha)
-    trap("unported: cpu_filter_evaluate")
+    var arena = CpuFilterArena()
+    defer cpu_filter_arena_release(&arena)
+    let layer = cpu_fm_of_transform(layer_matrix)
+    let required = cpu_filter_node_input_bounds(filter, layer, desired_output, none)
+    let ctx = CpuFilterContext(layer = layer, desired = desired_output, source = cpu_fr_of_source(&arena, source, source_tile, required), arena = &arena)
+    var result = cpu_filter_node_evaluate(filter, &ctx)
+    # apply_alpha_and_colorfilter
+    if alpha < 1.0:
+        result = cpu_fr_apply_color_op(&ctx, &result, cpu_color_op_dst_in(alpha))
+    if luminance_to_alpha:
+        result = cpu_fr_apply_color_op(&ctx, &result, cpu_color_op_luma())
+    return cpu_fr_to_image(&ctx, &result, desired_output)

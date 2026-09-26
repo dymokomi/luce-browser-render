@@ -1,0 +1,450 @@
+#==============================================================================================
+#
+#   cpu_filter_result - skif::FilterResult: an image, its deferred transform, color filters and
+#                       tiling, and its layer bounds
+#
+#   DESCRIPTION:
+#       Port of the parts of Skia m144's src/core/SkImageFilterTypes.cpp (lines 528-1330,
+#       1899-2106) that the image filters of cpu_filter_nodes use: FilterResult's
+#       applyColorFilter, applyTransform, applyCrop (for a clamped backdrop source), resolve,
+#       draw and Builder::merge, and skif::Context. A FilterResult keeps an image (pixels, or
+#       none for transparent black), the transform from its pixels to layer space, the sampling
+#       that transform uses, a tile mode, the layer bounds that crop it and a chain of color
+#       filters not yet applied. Pixels are only produced when a filter needs them (resolve),
+#       so consecutive color filters, and a color filter after a transform, are evaluated in
+#       one pass of float math as Skia's raster pipeline evaluates them (cpu_filter_color).
+#
+#       Every image made during an evaluation lives in the evaluation's arena (memory.heap) and
+#       is released when it ends; the source image belongs to the caller.
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+# mark: Types ==================================================================================
+
+## The images one evaluation allocates (released together at its end).
+struct CpuFilterArena:
+    var pixmaps: ak.Vector[raster.Pixmap]
+
+## skif::Context: the layer matrix, the desired output in layer space, the source image and the
+## arena.
+struct CpuFilterContext:
+    var layer: CpuFMatrix
+    var desired: CpuIRect
+    var source: CpuFr
+    var arena: CpuFilterArena*
+
+## The most color filters a FilterResult defers; one more resolves the image first.
+let cpu_fr_max_color_ops: u32 = 12
+
+## skif::FilterResult.
+struct CpuFr:
+    ## The image's premultiplied RGBA pixels (none: transparent black), `width` x `height`.
+    var pixels: (const u8[])?
+    var width: i32
+    var height: i32
+    ## fTransform: image pixel space to layer space.
+    var transform: CpuFMatrix
+    ## fSamplingOptions: linear (kDefaultSampling) or nearest-neighbor.
+    var linear: bool = true
+    ## fLayerBounds: nothing outside is visible.
+    var bounds: CpuIRect
+    ## fTileMode: clamp (true) or decal (false).
+    var clamp: bool
+    ## fBoundary is kTransparent: the image is known to have transparent pixels around it (a
+    ## padded layer, a surface the evaluation drew), so bilinear filtering may read past its
+    ## edges. Otherwise (an SkImage) it is drawn as its transformed rectangle, sampled clamped.
+    var padded: bool = true
+    ## fColorFilter: `ops[0]` is applied first.
+    var ops: CpuColorOp[12] = [CpuColorOp(), CpuColorOp(), CpuColorOp(), CpuColorOp(), CpuColorOp(), CpuColorOp(), CpuColorOp(), CpuColorOp(), CpuColorOp(), CpuColorOp(), CpuColorOp(), CpuColorOp()]
+    var op_count: u32
+
+# mark: Arena and contexts =====================================================================
+
+## Releases every image of the arena.
+func cpu_filter_arena_release(arena: CpuFilterArena*):
+    for i in 0..<ak.vector_size(&arena.pixmaps):
+        ak.vector_at(&arena.pixmaps, i).release()
+    ak.vector_clear(&arena.pixmaps)
+
+## A new transparent image of `width` x `height` in the arena, and its pixels.
+func cpu_filter_arena_pixmap(arena: CpuFilterArena*, width: i32, height: i32) -> u8[]:
+    var pixmap = raster.Pixmap.new_((u32)width, (u32)height) else trap("cpu_filter: empty image")
+    let data = pixmap.data_mut()
+    ak.vector_append_t(&arena.pixmaps, pixmap)
+    return data
+
+## Context::withNewDesiredOutput.
+func cpu_ctx_with_desired(ctx: const CpuFilterContext*, desired: CpuIRect) -> CpuFilterContext:
+    var result = *ctx
+    result.desired = desired
+    return result
+
+## Context::withNewSource.
+func cpu_ctx_with_source(ctx: const CpuFilterContext*, source: CpuFr) -> CpuFilterContext:
+    var result = *ctx
+    result.source = source
+    return result
+
+# mark: Construction ===========================================================================
+
+## The empty FilterResult (transparent black).
+func cpu_fr_empty() -> CpuFr:
+    return CpuFr(pixels = none, width = 0, height = 0, transform = cpu_fm_identity(), bounds = cpu_irect_empty(), clamp = false, op_count = 0)
+
+## Whether `fr` has an image (FilterResult's operator bool).
+func cpu_fr_has_image(fr: const CpuFr*) -> bool:
+    if fr.pixels != none:
+        return true
+    return false
+
+## A FilterResult of `width` x `height` pixels whose pixel (0, 0) is at (left, top).
+func cpu_fr_of_pixels(pixels: const u8[], width: i32, height: i32, left: i32, top: i32) -> CpuFr:
+    return CpuFr(pixels = pixels, width = width, height = height, transform = cpu_fm_translate((f32)left, (f32)top),
+                 bounds = cpu_irect(left, top, left + width, top + height), clamp = false, op_count = 0)
+
+## The caller's source image as the context's source FilterResult. A clamped source is
+## internalDrawDeviceWithFilter's applyCrop(ctx, source bounds, kClamp) for the filter's
+## required input `required`: the part of the image within it, clamped at that part's edges,
+## filling `required` (or the plain image when it covers `required`).
+func cpu_fr_of_source(arena: CpuFilterArena*, source: const CpuFilterImage*, tile: CpuFilterSourceTile, required: CpuIRect) -> CpuFr:
+    let pixmap = source.pixmap else return cpu_fr_empty()
+    let width = (i32)pixmap.width()
+    let height = (i32)pixmap.height()
+    let fr = cpu_fr_of_pixels(pixmap.data(), width, height, source.left, source.top)
+    if tile == CpuFilterSourceTile.decal:
+        return fr
+    let fitted = cpu_irect_intersect(fr.bounds, required) else return cpu_fr_empty()
+    if cpu_irect_contains(fitted, required):
+        var covered = fr
+        covered.bounds = required
+        return covered
+    let view = cpu_blur_view(arena, pixmap.data(), width, fitted.left - source.left, fitted.top - source.top, cpu_irect_width(fitted), cpu_irect_height(fitted))
+    var clamped = cpu_fr_of_pixels(view, cpu_irect_width(fitted), cpu_irect_height(fitted), fitted.left, fitted.top)
+    clamped.clamp = true
+    clamped.bounds = required
+    return clamped
+
+## FilterResult::updateTileMode: a clamped image fills the desired output.
+func cpu_fr_set_clamp(ctx: const CpuFilterContext*, fr: CpuFr*):
+    if cpu_fr_has_image(fr):
+        fr.clamp = true
+        fr.bounds = ctx.desired
+
+# mark: Sampling ===============================================================================
+
+## The premultiplied pixel (x, y) of `fr`'s image as floats (from_8888: v * (1 / 255)).
+func cpu_fr_texel(fr: const CpuFr*, x: i32, y: i32) -> CpuRgba:
+    let pixels = fr.pixels else return cpu_rgba_zero()
+    let i = ((usize)y * (usize)fr.width + (usize)x) * 4
+    let k: f32 = 1.0 / 255.0
+    return CpuRgba(r = (f32)pixels[i] * k, g = (f32)pixels[i + 1] * k, b = (f32)pixels[i + 2] * k, a = (f32)pixels[i + 3] * k)
+
+## The texel at integer image coordinates under the tile mode: clamped, or transparent outside.
+func cpu_fr_tiled_texel(fr: const CpuFr*, x: i32, y: i32) -> CpuRgba:
+    if fr.clamp:
+        return cpu_fr_texel(fr, cpu_clamp_i32(x, 0, fr.width - 1), cpu_clamp_i32(y, 0, fr.height - 1))
+    if x < 0 or y < 0 or x >= fr.width or y >= fr.height:
+        return cpu_rgba_zero()
+    return cpu_fr_texel(fr, x, y)
+
+## The image sampled at layer-space pixel (x, y) (its center), before the color filters.
+func cpu_fr_sample_image(fr: const CpuFr*, inverse: const CpuFMatrix*, integer: (i32, i32)?, x: i32, y: i32) -> CpuRgba:
+    if let origin = integer:
+        return cpu_fr_tiled_texel(fr, x - origin.0, y - origin.1)
+    return cpu_fr_sample_point(fr, inverse, (f32)x + 0.5, (f32)y + 0.5, not fr.linear)
+
+## The image sampled at the layer-space point (cx, cy): nearest-neighbor, or the raster
+## pipeline's bilinear sampler (four taps at +/- 1/2 weighted by (1 - f) and f, accumulated
+## with fused multiply-adds).
+func cpu_fr_sample_point(fr: const CpuFr*, inverse: const CpuFMatrix*, cx: f32, cy: f32, nearest: bool) -> CpuRgba:
+    let u = cpu_fm_pipeline_x(*inverse, cx, cy)
+    let v = cpu_fm_pipeline_y(*inverse, cx, cy)
+    if nearest:
+        return cpu_fr_nearest_texel(fr, u, v)
+    var coverage: f32 = 1.0
+    var clamp = fr.clamp
+    if not fr.padded and not fr.clamp:
+        # FilterResult::draw's drawSpecial: the image's rectangle, anti-aliased, sampled with
+        # clamping inside it.
+        coverage = cpu_fr_rect_coverage(fr, cx, cy)
+        if coverage == 0.0:
+            return cpu_rgba_zero()
+        clamp = true
+    let fx = cpu_fract(u + 0.5)
+    let fy = cpu_fract(v + 0.5)
+    var sum = cpu_rgba_zero()
+    for tap in 0..<4:
+        let dy: f32 = -0.5 if tap < 2 else 0.5
+        let dx: f32 = -0.5 if tap % 2 == 0 else 0.5
+        let scale_x = 1.0 - fx if dx < 0.0 else fx
+        let scale_y = 1.0 - fy if dy < 0.0 else fy
+        let scale = scale_x * scale_y
+        let x = cpu_f32_to_i32(math32.floor(u + dx))
+        let y = cpu_f32_to_i32(math32.floor(v + dy))
+        var texel = cpu_rgba_zero()
+        if clamp:
+            texel = cpu_fr_texel(fr, cpu_clamp_i32(x, 0, fr.width - 1), cpu_clamp_i32(y, 0, fr.height - 1))
+        elif x >= 0 and y >= 0 and x < fr.width and y < fr.height:
+            texel = cpu_fr_texel(fr, x, y)
+        sum = CpuRgba(r = math32.fma(scale, texel.r, sum.r), g = math32.fma(scale, texel.g, sum.g),
+                      b = math32.fma(scale, texel.b, sum.b), a = math32.fma(scale, texel.a, sum.a))
+    if coverage < 1.0:
+        return CpuRgba(r = sum.r * coverage, g = sum.g * coverage, b = sum.b * coverage, a = sum.a * coverage)
+    return sum
+
+## The part of the pixel centered at (cx, cy) that the image's transformed rectangle covers
+## (for a scale-and-translate transform; others count the pixel center only).
+func cpu_fr_rect_coverage(fr: const CpuFr*, cx: f32, cy: f32) -> f32:
+    let rect = cpu_fm_map_rect(fr.transform, 0.0, 0.0, (f32)fr.width, (f32)fr.height)
+    if not cpu_fm_is_scale_translate(fr.transform):
+        if cx >= rect.0 and cx < rect.2 and cy >= rect.1 and cy < rect.3:
+            return 1.0
+        return 0.0
+    let overlap_x = cpu_clamp_unit(cpu_min_f32(cx + 0.5, rect.2) - cpu_max_f32(cx - 0.5, rect.0))
+    let overlap_y = cpu_clamp_unit(cpu_min_f32(cy + 0.5, rect.3) - cpu_max_f32(cy - 0.5, rect.1))
+    return overlap_x * overlap_y
+
+## The raster pipeline's nearest-neighbor gather (ix_and_ptr with roundDownAtInteger, which
+## SkImageShader sets for nearest sampling): the coordinate clamped inside (0, limit), moved
+## down one ULP so that an exact integer picks the pixel before it, truncated; a decal image is
+## transparent unless 0 < u < width or u == width.
+func cpu_fr_nearest_texel(fr: const CpuFr*, u: f32, v: f32) -> CpuRgba:
+    let w = (f32)fr.width
+    let h = (f32)fr.height
+    if not fr.clamp:
+        let inside_x = (0.0 < u and u < w) or u == w
+        let inside_y = (0.0 < v and v < h) or v == h
+        if not (inside_x and inside_y):
+            return cpu_rgba_zero()
+    return cpu_fr_texel(fr, cpu_round_down_index(u, w), cpu_round_down_index(v, h))
+
+## trunc(prev_float(clamp_ex(v, limit))).
+func cpu_round_down_index(v: f32, limit: f32) -> i32:
+    let low = f32.bits(0x00800000)
+    let high = f32.bits(limit.bits() - 1)
+    var c = v
+    if not (low < c):
+        c = low
+    if high < c:
+        c = high
+    return (i32)f32.bits(c.bits() - 1)
+
+## `fr` as a shader (FilterResult::asShader) evaluated at the layer-space point (cx, cy), with
+## its color filters, transparent outside its layer bounds; `nearest` forces nearest-neighbor
+## sampling.
+func cpu_fr_shader_sample(fr: const CpuFr*, sampler: const (CpuFMatrix, (i32, i32)?)*, cx: f32, cy: f32, nearest: bool) -> CpuRgba:
+    let x = cpu_f32_to_i32(math32.floor(cx))
+    let y = cpu_f32_to_i32(math32.floor(cy))
+    if not cpu_fr_has_image(fr) or not cpu_fr_in_bounds(fr, x, y):
+        return cpu_rgba_zero()
+    var color = cpu_rgba_zero()
+    if let origin = (*sampler).1:
+        color = cpu_fr_tiled_texel(fr, x - origin.0, y - origin.1)
+    else:
+        color = cpu_fr_sample_point(fr, &(*sampler).0, cx, cy, nearest or not fr.linear)
+    for i in 0..<fr.op_count:
+        color = cpu_color_op_apply(&fr.ops[i], color)
+    return color
+
+## fract: v - floor(v).
+func cpu_fract(v: f32) -> f32:
+    return v - math32.floor(v)
+
+## The inverse of `fr`'s transform (for sampling) and its integer translation, if it is one.
+func cpu_fr_sampler(fr: const CpuFr*) -> (CpuFMatrix, (i32, i32)?):
+    let integer = cpu_fm_integer_translation(fr.transform)
+    let inverse = cpu_fm_invert(fr.transform) else cpu_fm_identity()
+    return (inverse, integer)
+
+## Whether a pixel of layer space is inside `fr`'s layer bounds.
+func cpu_fr_in_bounds(fr: const CpuFr*, x: i32, y: i32) -> bool:
+    return x >= fr.bounds.left and x < fr.bounds.right and y >= fr.bounds.top and y < fr.bounds.bottom
+
+# mark: Color filters ==========================================================================
+
+## Whether `fr`'s pending color filters turn transparent black into a color.
+func cpu_fr_ops_affect_transparent(fr: const CpuFr*) -> bool:
+    if fr.op_count == 0:
+        return false
+    var color = cpu_rgba_zero()
+    for i in 0..<fr.op_count:
+        color = cpu_color_op_apply(&fr.ops[i], color)
+    return color.r != 0.0 or color.g != 0.0 or color.b != 0.0 or color.a != 0.0
+
+## FilterResult::applyColorFilter.
+func cpu_fr_apply_color_op(ctx: const CpuFilterContext*, fr: const CpuFr*, op: CpuColorOp) -> CpuFr:
+    if cpu_irect_is_empty(ctx.desired):
+        return cpu_fr_empty()
+    var new_bounds = fr.bounds
+    if cpu_color_op_affects_transparent(&op):
+        let visible = cpu_irect_intersect(new_bounds, ctx.desired)
+        if not cpu_fr_has_image(fr) or visible == none:
+            # The desired output is filled with the filtered transparent black: one clamped pixel.
+            let data = cpu_filter_arena_pixmap(ctx.arena, 1, 1)
+            cpu_store_rgba(data, 0, cpu_color_op_apply(&op, cpu_rgba_zero()))
+            var solid = cpu_fr_of_pixels(data, 1, 1, ctx.desired.left, ctx.desired.top)
+            cpu_fr_set_clamp(ctx, &solid)
+            return solid
+        if cpu_fr_requires_layer_crop(fr, ctx.desired):
+            # Resolve to keep the current layer bounds' crop; then fill out the desired output.
+            let outset = cpu_irect_outset(new_bounds, 1, 1)
+            let resolve_bounds = cpu_irect_intersect(outset, ctx.desired) else trap("VERIFY")
+            var filtered = cpu_fr_resolve(ctx, fr, resolve_bounds, true)
+            filtered.ops[0] = op
+            filtered.op_count = 1
+            cpu_fr_set_clamp(ctx, &filtered)
+            return filtered
+        new_bounds = ctx.desired
+    else:
+        if not cpu_fr_has_image(fr) or not cpu_irect_intersects(new_bounds, ctx.desired):
+            return cpu_fr_empty()
+    var filtered = *fr
+    if filtered.op_count == cpu_fr_max_color_ops:
+        # FIXME: Skia composes any number of color filters; past this many the port resolves.
+        filtered = cpu_fr_resolve(ctx, fr, fr.bounds, true)
+    filtered.bounds = new_bounds
+    filtered.ops[filtered.op_count] = op
+    filtered.op_count += 1
+    return filtered
+
+## analyzeBounds' kRequiresLayerCrop for `dst`: the layer bounds show inside `dst` and crop the
+## image, or crop an effect that fills them (a clamped image, a transparent-affecting filter).
+func cpu_fr_requires_layer_crop(fr: const CpuFr*, dst: CpuIRect) -> bool:
+    if cpu_irect_contains(fr.bounds, dst):
+        return false
+    if fr.clamp or cpu_fr_ops_affect_transparent(fr):
+        return true
+    let image_bounds = cpu_fm_map_irect(fr.transform, cpu_irect(0, 0, fr.width, fr.height))
+    return not cpu_irect_contains(fr.bounds, image_bounds)
+
+# mark: Resolving ==============================================================================
+
+## The pixel of `fr` at layer pixel (x, y) with its color filters applied, as the raster
+## pipeline has it before the store (clamped to [0, 1] for the 8-bit destination).
+func cpu_fr_pixel(fr: const CpuFr*, sampler: const (CpuFMatrix, (i32, i32)?)*, x: i32, y: i32) -> CpuRgba:
+    if not cpu_fr_in_bounds(fr, x, y):
+        return cpu_rgba_zero()
+    var color = cpu_fr_sample_image(fr, &(*sampler).0, (*sampler).1, x, y)
+    for i in 0..<fr.op_count:
+        color = cpu_color_op_apply(&fr.ops[i], color)
+    return cpu_rgba_clamp01(color)
+
+## FilterResult::resolve: `fr` drawn (transform, tiling, color filters, layer-bounds crop) into
+## a new image covering `dst` (or `dst` within the layer bounds unless `preserve_dst`).
+func cpu_fr_resolve(ctx: const CpuFilterContext*, fr: const CpuFr*, dst: CpuIRect, preserve_dst: bool) -> CpuFr:
+    if not cpu_fr_has_image(fr):
+        return cpu_fr_empty()
+    var bounds = dst
+    if not preserve_dst:
+        bounds = cpu_irect_intersect(dst, fr.bounds) else return cpu_fr_empty()
+    if cpu_irect_is_empty(bounds):
+        return cpu_fr_empty()
+    if fr.op_count == 0 and not fr.clamp and not preserve_dst:
+        if cpu_fm_integer_translation(fr.transform) != none:
+            # subset(): the same pixels, restricted.
+            var subset = *fr
+            subset.bounds = bounds
+            return subset
+    let width = cpu_irect_width(bounds)
+    let height = cpu_irect_height(bounds)
+    let data = cpu_filter_arena_pixmap(ctx.arena, width, height)
+    cpu_fr_draw_src(fr, data, bounds)
+    return cpu_fr_of_pixels(data, width, height, bounds.left, bounds.top)
+
+## Draws `fr` with kSrc into the image `target` covering `bounds` (lowp when it can run so).
+func cpu_fr_draw_src(fr: const CpuFr*, target: u8[], bounds: CpuIRect):
+    let width = cpu_irect_width(bounds)
+    let sampler = cpu_fr_sampler(fr)
+    let lowp = cpu_fr_is_lowp(fr)
+    for y in 0..<cpu_irect_height(bounds):
+        for x in 0..<width:
+            let offset = ((usize)y * (usize)width + (usize)x) * 4
+            if lowp:
+                cpu_store_lowp(target, offset, cpu_fr_pixel_lowp(fr, &sampler, bounds.left + x, bounds.top + y))
+            else:
+                cpu_store_rgba(target, offset, cpu_fr_pixel(fr, &sampler, bounds.left + x, bounds.top + y))
+
+## Draws `fr` over the image `target` (whose pixel (0, 0) is at (left, top)) with source-over,
+## as FilterResult::draw into a Builder surface does.
+func cpu_fr_draw_src_over(fr: const CpuFr*, target: u8[], left: i32, top: i32, width: i32, height: i32):
+    if not cpu_fr_has_image(fr):
+        return
+    let area = cpu_irect_intersect(fr.bounds, cpu_irect(left, top, left + width, top + height)) else return
+    let sampler = cpu_fr_sampler(fr)
+    let lowp = cpu_fr_is_lowp(fr)
+    for y in area.top..<area.bottom:
+        for x in area.left..<area.right:
+            let offset = ((usize)(y - top) * (usize)width + (usize)(x - left)) * 4
+            if lowp:
+                cpu_store_lowp(target, offset, cpu_lowp_src_over(cpu_fr_pixel_lowp(fr, &sampler, x, y), cpu_load_lowp(target, offset)))
+            else:
+                let source = cpu_fr_pixel(fr, &sampler, x, y)
+                cpu_store_rgba(target, offset, cpu_blend_src_over(source, cpu_load_rgba(target, offset)))
+
+## The result as the caller's image: resolved within `desired` (a copy when it is a view of
+## pixels the arena or the caller owns).
+func cpu_fr_to_image(ctx: const CpuFilterContext*, fr: const CpuFr*, desired: CpuIRect) -> CpuFilterImage:
+    let visible = cpu_irect_intersect(fr.bounds, desired) else return CpuFilterImage(pixmap = none, left = 0, top = 0)
+    if not cpu_fr_has_image(fr):
+        return CpuFilterImage(pixmap = none, left = 0, top = 0)
+    let width = cpu_irect_width(visible)
+    let height = cpu_irect_height(visible)
+    var pixmap = raster.Pixmap.new_((u32)width, (u32)height) else trap("cpu_filter: empty image")
+    cpu_fr_draw_src(fr, pixmap.data_mut(), visible)
+    discard(ctx)
+    return CpuFilterImage(pixmap = pixmap, left = visible.left, top = visible.top)
+
+# mark: Transforms =============================================================================
+
+## FilterResult::applyTransform with `linear` (kLinear) or nearest-neighbor sampling.
+func cpu_fr_apply_transform(ctx: const CpuFilterContext*, fr: const CpuFr*, transform: CpuFMatrix, linear: bool) -> CpuFr:
+    if not cpu_fr_has_image(fr) or cpu_irect_is_empty(ctx.desired):
+        return cpu_fr_empty()
+    if cpu_fm_invert(transform) == none:
+        return cpu_fr_empty()
+    let next_integer = cpu_fm_integer_translation(transform) != none
+    let current_integer = cpu_fm_integer_translation(fr.transform) != none
+    # An integer translation samples as the default (linear, downgraded to nearest).
+    let next_linear = true if next_integer else linear
+    var transformed = *fr
+    var compatible = next_integer or current_integer
+    if not next_integer and cpu_fr_requires_layer_crop(fr, cpu_fm_inverse_map_irect(transform, ctx.desired) else ctx.desired):
+        compatible = false
+    if not compatible:
+        # Resolve first; the new transform then samples the resolved pixels.
+        let tight = cpu_fm_inverse_map_irect(transform, ctx.desired) else return cpu_fr_empty()
+        transformed = cpu_fr_resolve(ctx, fr, tight, false)
+        if not cpu_fr_has_image(&transformed):
+            return cpu_fr_empty()
+    if current_integer or not compatible:
+        transformed.linear = next_linear
+    elif not next_integer:
+        # compatible_sampling: nearest-neighbor is kept when either side asks for it.
+        transformed.linear = transformed.linear and next_linear
+    transformed.transform = cpu_fm_concat(transform, transformed.transform)
+    transformed.bounds = cpu_fm_map_irect(transform, transformed.bounds)
+    if not cpu_irect_intersects(transformed.bounds, ctx.desired):
+        return cpu_fr_empty()
+    return transformed
+
+# mark: Builder ================================================================================
+
+## FilterResult::Builder::merge: the inputs drawn source-over, in order, into an image covering
+## the union of their layer bounds within the desired output.
+func cpu_fr_merge(ctx: const CpuFilterContext*, inputs: const CpuFr[]) -> CpuFr:
+    if inputs.length == 1:
+        return inputs[0]
+    var merged = cpu_irect_empty()
+    for input in inputs:
+        if cpu_fr_has_image(&input):
+            merged = cpu_irect_join(merged, input.bounds)
+    let output = cpu_irect_intersect(merged, ctx.desired) else return cpu_fr_empty()
+    let width = cpu_irect_width(output)
+    let height = cpu_irect_height(output)
+    let data = cpu_filter_arena_pixmap(ctx.arena, width, height)
+    for input in inputs:
+        cpu_fr_draw_src_over(&input, data, output.left, output.top, width, height)
+    return cpu_fr_of_pixels(data, width, height, output.left, output.top)
