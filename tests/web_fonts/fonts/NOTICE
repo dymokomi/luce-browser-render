@@ -1,0 +1,19 @@
+Fonts used by the web_fonts module's tests (src/luce_browser_render/web_fonts/tests_*.lucb),
+copied from Ladybird at 47c82b38d0 (see PIN at the repository root):
+
+SerenitySans-Regular.ttf  Base/res/fonts/SerenitySans-Regular.ttf; part of Ladybird, under the
+                          BSD 2-Clause License in LICENSE at the repository root.
+NotoEmoji.ttf             Base/res/fonts/NotoEmoji.ttf (also Tests/LibWeb/Assets/NotoEmoji.ttf);
+                          SIL Open Font License 1.1, OFL-1.1.txt in this directory.
+Lato-Bold.ttf             Tests/LibWeb/Assets/Lato-Bold.ttf; SIL Open Font License 1.1,
+                          OFL-1.1.txt in this directory.
+HashSans.woff             Tests/LibWeb/Assets/HashSans.woff; a Ladybird test asset, under the
+                          BSD 2-Clause License in LICENSE at the repository root.
+NotoSansTifinagh-Regular.otf  A CFF (OpenType) font of the Noto project
+                          (https://github.com/notofonts/tifinagh, "Copyright 2022 The Noto
+                          Project Authors"); SIL Open Font License 1.1, OFL-1.1.txt in this
+                          directory. Not from Ladybird: it tests the CFF outline reader.
+OFL-1.1.txt               Tests/LibWeb/Assets/OFL-1.1.txt.
+
+../woff/                  Tests/LibGfx/test-inputs/woff and woff2: Ladybird's WOFF and WOFF2
+                          loader test inputs, under the BSD 2-Clause License.

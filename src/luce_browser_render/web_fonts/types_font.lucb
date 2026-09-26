@@ -10,17 +10,34 @@
 #
 #==============================================================================================
 
-## SkFont (Libraries/LibGfx/Font/Font.h:20): opaque in this phase (not in the phase-1 closure).
+## SkFont (Libraries/LibGfx/Font/Font.h:20): filled by region r09 with what the port's
+## replacement of Skia's font needs (sk_font.lucb): the typeface, the size in pixels and
+## whether glyphs are positioned at subpixel offsets.
 pub struct SkFont:
-    pub var opaque_: u8
+    pub var typeface: const SkTypeface*?
+    pub var size: f32
+    pub var subpixel: bool
 
-## hb_font_t (Libraries/LibGfx/Font/Font.h:21): opaque in this phase (not in the phase-1 closure).
+## hb_font_t (Libraries/LibGfx/Font/Font.h:21): filled by region r09 with what the port's
+## replacement of HarfBuzz needs (hb_buffer.lucb): the face, the scale and hb_font_t's
+## em multipliers, the point size and the variation coordinates.
 pub struct HbFontT:
-    pub var opaque_: u8
+    pub var face: HbFaceT*
+    pub var x_scale: i32
+    pub var y_scale: i32
+    pub var x_mult: i64
+    pub var y_mult: i64
+    pub var ptem: f32
+    pub var variations: ak.Vector[HbVariation]
 
-## hb_buffer_t (Libraries/LibGfx/Font/Font.h:22): opaque in this phase (not in the phase-1 closure).
+## hb_buffer_t (Libraries/LibGfx/Font/Font.h:22): filled by region r09 (hb_buffer.lucb): the
+## glyph infos and positions, the direction and the script of the text (its ISO 15924 code
+## as a tag, 'Latn'; 0 while unset).
 pub struct HbBufferT:
-    pub var opaque_: u8
+    pub var infos: ak.Vector[HbGlyphInfo]
+    pub var positions: ak.Vector[HbGlyphPosition]
+    pub var direction: HbDirection
+    pub var script: u32
 
 # mark: FontPixelMetrics ========================================================================
 
@@ -46,8 +63,7 @@ pub enum FontWidth as u32:
     ultra_expanded = 9
 
 ## Gfx::text_shaping_resolution (Libraries/LibGfx/Font/Font.h:56).
-# C++ initializer: 64
-pub var text_shaping_resolution: f32
+pub let text_shaping_resolution: f32 = 64.0
 
 # mark: Font ====================================================================================
 

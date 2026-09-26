@@ -1,0 +1,456 @@
+#==============================================================================================
+#
+#   sfnt_reader - the OpenType/TrueType face: table directory, head, maxp, hhea, OS/2, post,
+#                 name and the metrics FreeType derives from them
+#
+#   DESCRIPTION:
+#       New code of the luce-browser port (DESIGN.md §7.1): Ladybird reads fonts through Skia
+#       (SkTypeface over FreeType, the "FontConfig" font manager its test mode forces) and
+#       HarfBuzz (hb_face_t). This fragment is the pure-Luce reader both are replaced by. An
+#       SfntFace is what `TypefaceSkia::Impl` holds; it answers what SkTypeface answered
+#       (glyph count, units per em, family name, style) with FreeType's rules, which are cited
+#       where they matter (freetype 2.13.3 src/sfnt/sfobjs.c, Skia's SkFontHost_FreeType.cpp).
+#
+#       Reads are bounds-checked and answer 0 outside the data, the way HarfBuzz's sanitized
+#       tables answer its Null object: a malformed font yields odd metrics, never a trap.
+#
+#==============================================================================================
+
+# mark: Reading big-endian data ================================================================
+
+## A byte of `data`, or 0 outside it.
+pub func sfnt_u8(data: const u8[], offset: usize) -> u8:
+    if offset >= data.length:
+        return 0
+    return data[offset]
+
+## A big-endian u16 of `data`, or 0 when it does not fit.
+pub func sfnt_u16(data: const u8[], offset: usize) -> u16:
+    if offset >= data.length or data.length - offset < 2:
+        return 0
+    return ((u16)data[offset] << 8) | (u16)data[offset + 1]
+
+## A big-endian i16 of `data`, or 0 when it does not fit.
+pub func sfnt_i16(data: const u8[], offset: usize) -> i16:
+    return (i16)sfnt_u16(data, offset)
+
+## A big-endian u24 of `data`, or 0 when it does not fit.
+pub func sfnt_u24(data: const u8[], offset: usize) -> u32:
+    if offset >= data.length or data.length - offset < 3:
+        return 0
+    return ((u32)data[offset] << 16) | ((u32)data[offset + 1] << 8) | (u32)data[offset + 2]
+
+## A big-endian u32 of `data`, or 0 when it does not fit.
+pub func sfnt_u32(data: const u8[], offset: usize) -> u32:
+    if offset >= data.length or data.length - offset < 4:
+        return 0
+    return ((u32)data[offset] << 24) | ((u32)data[offset + 1] << 16) | ((u32)data[offset + 2] << 8) | (u32)data[offset + 3]
+
+## A big-endian i32 of `data`, or 0 when it does not fit.
+pub func sfnt_i32(data: const u8[], offset: usize) -> i32:
+    return (i32)sfnt_u32(data, offset)
+
+## The four characters of an OpenType tag as the u32 HB_TAG and FT_MAKE_TAG build.
+pub func sfnt_tag(b0: u8, b1: u8, b2: u8, b3: u8) -> u32:
+    return ((u32)b0 << 24) | ((u32)b1 << 16) | ((u32)b2 << 8) | (u32)b3
+
+## The part of `data` from `offset` of at most `length` bytes (clamped to the data).
+pub func sfnt_slice(data: const u8[], offset: usize, length: usize) -> const u8[]:
+    if offset >= data.length:
+        return data[data.length..]
+    let available = data.length - offset
+    let size = length if length < available else available
+    return data[offset..<offset + size]
+
+# mark: The face ================================================================================
+
+## One table record of the table directory.
+pub struct SfntTable:
+    pub var tag: u32
+    pub var offset: usize
+    pub var length: usize
+
+## The fields of the OS/2 table that FreeType and Skia read (FreeType's TT_OS2). A face without
+## a usable OS/2 table has none (FreeType's `version == 0xFFFF`).
+pub struct SfntOs2:
+    pub var version: u16
+    pub var x_avg_char_width: i16
+    pub var us_weight_class: u16
+    pub var us_width_class: u16
+    pub var fs_type: u16
+    pub var y_strikeout_size: i16
+    pub var y_strikeout_position: i16
+    pub var fs_selection: u16
+    pub var s_typo_ascender: i16
+    pub var s_typo_descender: i16
+    pub var s_typo_line_gap: i16
+    pub var us_win_ascent: u16
+    pub var us_win_descent: u16
+    pub var sx_height: i16
+    pub var s_cap_height: i16
+
+## Which glyph outlines the face has.
+pub enum SfntOutlineFormat as u8:
+    none_ = 0
+    true_type = 1
+    cff = 2
+
+## A parsed OpenType face: what SkTypeface_FreeType and hb_face_t knew about one font of a
+## font file or collection. The bytes are borrowed; the typeface that owns the face keeps
+## them alive (TypefaceSkia::m_buffer, FontData).
+pub struct SfntFace:
+    pub var data: const u8[]
+    pub var ttc_index: u32
+    pub var tables: ak.Vector[SfntTable]
+    pub var outline_format: SfntOutlineFormat
+    # head
+    pub var units_per_em: u16
+    pub var head_flags: u16
+    pub var x_min: i16
+    pub var y_min: i16
+    pub var x_max: i16
+    pub var y_max: i16
+    pub var mac_style: u16
+    pub var index_to_loc_format: i16
+    # maxp
+    pub var num_glyphs: u16
+    # hhea
+    pub var hhea_ascender: i16
+    pub var hhea_descender: i16
+    pub var hhea_line_gap: i16
+    pub var number_of_h_metrics: u16
+    # OS/2 and post
+    pub var os2: SfntOs2?
+    pub var underline_position: i16
+    pub var underline_thickness: i16
+    # FreeType's FT_Face fields derived from the tables (sfobjs.c sfnt_load_face)
+    pub var ascender: i16
+    pub var descender: i16
+    pub var height: i16
+    pub var style_flags_bold: bool
+    pub var style_flags_italic: bool
+    pub var family_name: ak.FlyString
+    # cmap: the absolute offset of the chosen subtable and whether it is a symbol cmap
+    pub var cmap_subtable: usize?
+    pub var cmap_is_symbol: bool
+    # tables the rest of the module reads, as slices of `data` (empty when absent)
+    pub var hmtx: const u8[]
+    pub var loca: const u8[]
+    pub var glyf: const u8[]
+    pub var cff: const u8[]
+    pub var gsub: const u8[]
+    pub var gpos: const u8[]
+    pub var gdef: const u8[]
+    pub var kern: const u8[]
+    # the CFF outlines' parsed INDEX offsets (sfnt_cff.lucb), filled on first use
+    pub var cff_font: SfntCffFont*?
+
+## The TTC tag, 'ttcf'.
+let sfnt_ttcf_tag: u32 = 0x74746366
+
+## Parses the font `ttc_index` of `data`: what `SkFontMgr::makeFromStream` does through FreeType's
+## FT_Open_Face. Fails where FreeType fails to open the face.
+pub func sfnt_face_create(data: const u8[], ttc_index: u32) -> SfntFace*!:
+    if data.length < 12:
+        error(ak.ak_error, "Font data is too short")
+
+    # A collection names the offset of each font's table directory.
+    var directory_offset: usize = 0
+    if sfnt_u32(data, 0) == sfnt_ttcf_tag:
+        let number_of_fonts = sfnt_u32(data, 8)
+        if ttc_index >= number_of_fonts or (usize)number_of_fonts > (data.length - 12) // 4:
+            error(ak.ak_error, "Invalid font collection index")
+        directory_offset = (usize)sfnt_u32(data, 12 + 4 * (usize)ttc_index)
+    elif ttc_index != 0:
+        error(ak.ak_error, "Invalid font collection index")
+
+    let sfnt_version = sfnt_u32(data, directory_offset)
+    if sfnt_version != 0x00010000 and sfnt_version != sfnt_tag('O', 'T', 'T', 'O') and sfnt_version != sfnt_tag('t', 'r', 'u', 'e'):
+        error(ak.ak_error, "Unknown sfnt version")
+    let num_tables = (usize)sfnt_u16(data, directory_offset + 4)
+    if num_tables == 0 or directory_offset + 12 + num_tables * 16 > data.length:
+        error(ak.ak_error, "Truncated table directory")
+
+    let face = new SfntFace(data = data, ttc_index = ttc_index) else trap("out of memory")
+    for index in 0..<num_tables:
+        let record = directory_offset + 12 + index * 16
+        let offset = (usize)sfnt_u32(data, record + 8)
+        var length = (usize)sfnt_u32(data, record + 12)
+        # FreeType ignores tables that start past the end and truncates ones that run over it.
+        if offset >= data.length:
+            continue
+        if length > data.length - offset:
+            length = data.length - offset
+        ak.vector_append_t(&face.tables, SfntTable(tag = sfnt_u32(data, record), offset = offset, length = length))
+
+    let head = sfnt_face_table(face, sfnt_tag('h', 'e', 'a', 'd')) else error(ak.ak_error, "The font has no head table")
+    if head.length < 54:
+        error(ak.ak_error, "Truncated head table")
+    face.head_flags = sfnt_u16(head, 16)
+    face.units_per_em = sfnt_u16(head, 18)
+    face.x_min = sfnt_i16(head, 36)
+    face.y_min = sfnt_i16(head, 38)
+    face.x_max = sfnt_i16(head, 40)
+    face.y_max = sfnt_i16(head, 42)
+    face.mac_style = sfnt_u16(head, 44)
+    face.index_to_loc_format = sfnt_i16(head, 50)
+    # FreeType (ttload.c tt_face_load_head) rejects these em sizes.
+    if face.units_per_em < 16 or face.units_per_em > 16384:
+        error(ak.ak_error, "Invalid units per em")
+
+    let maxp = sfnt_face_table(face, sfnt_tag('m', 'a', 'x', 'p')) else error(ak.ak_error, "The font has no maxp table")
+    face.num_glyphs = sfnt_u16(maxp, 4)
+
+    face.glyf = sfnt_face_table(face, sfnt_tag('g', 'l', 'y', 'f')) else face.glyf
+    face.loca = sfnt_face_table(face, sfnt_tag('l', 'o', 'c', 'a')) else face.loca
+    face.cff = sfnt_face_table(face, sfnt_tag('C', 'F', 'F', ' ')) else face.cff
+    if face.glyf.length > 0 and face.loca.length > 0:
+        face.outline_format = SfntOutlineFormat.true_type
+    elif face.cff.length > 0:
+        face.outline_format = SfntOutlineFormat.cff
+
+    # A scalable face needs horizontal metrics (sfobjs.c: `Horiz_Header_Missing`).
+    if let hhea = sfnt_face_table(face, sfnt_tag('h', 'h', 'e', 'a')):
+        face.hhea_ascender = sfnt_i16(hhea, 4)
+        face.hhea_descender = sfnt_i16(hhea, 6)
+        face.hhea_line_gap = sfnt_i16(hhea, 8)
+        face.number_of_h_metrics = sfnt_u16(hhea, 34)
+    elif face.outline_format != SfntOutlineFormat.none_:
+        error(ak.ak_error, "The font has no hhea table")
+    face.hmtx = sfnt_face_table(face, sfnt_tag('h', 'm', 't', 'x')) else face.hmtx
+
+    sfnt_face_load_os2(face)
+    if let post = sfnt_face_table(face, sfnt_tag('p', 'o', 's', 't')):
+        face.underline_position = sfnt_i16(post, 8)
+        face.underline_thickness = sfnt_i16(post, 10)
+
+    face.gsub = sfnt_face_table(face, sfnt_tag('G', 'S', 'U', 'B')) else face.gsub
+    face.gpos = sfnt_face_table(face, sfnt_tag('G', 'P', 'O', 'S')) else face.gpos
+    face.gdef = sfnt_face_table(face, sfnt_tag('G', 'D', 'E', 'F')) else face.gdef
+    face.kern = sfnt_face_table(face, sfnt_tag('k', 'e', 'r', 'n')) else face.kern
+
+    sfnt_face_compute_metrics(face)
+    sfnt_face_compute_style_flags(face)
+    face.family_name = sfnt_face_family_name(face)
+    sfnt_face_select_cmap(face)
+    return face
+
+## The table `tag` of the face, or none when it has no such table.
+pub func sfnt_face_table(face: const SfntFace*, tag: u32) -> const u8[]?:
+    for table in ak.vector_span_const(&face.tables):
+        if table.tag == tag:
+            return face.data[table.offset..<table.offset + table.length]
+    return none
+
+## Whether the face has a non-empty table `tag` (hb_face_reference_table's length > 0).
+pub func sfnt_face_has_table(face: const SfntFace*, tag: u32) -> bool:
+    if let table = sfnt_face_table(face, tag):
+        return table.length > 0
+    return false
+
+# mark: OS/2 and FreeType's derived metrics ====================================================
+
+## Reads the OS/2 fields as FreeType's tt_face_load_os2 does: the version 0 fields must all be
+## present (78 bytes), sxHeight and sCapHeight only exist from version 2 on.
+func sfnt_face_load_os2(face: SfntFace*):
+    let table = sfnt_face_table(face, sfnt_tag('O', 'S', '/', '2')) else return
+    if table.length < 78:
+        return
+    var os2 = SfntOs2(
+        version = sfnt_u16(table, 0),
+        x_avg_char_width = sfnt_i16(table, 2),
+        us_weight_class = sfnt_u16(table, 4),
+        us_width_class = sfnt_u16(table, 6),
+        fs_type = sfnt_u16(table, 8),
+        y_strikeout_size = sfnt_i16(table, 26),
+        y_strikeout_position = sfnt_i16(table, 28),
+        fs_selection = sfnt_u16(table, 62),
+        s_typo_ascender = sfnt_i16(table, 68),
+        s_typo_descender = sfnt_i16(table, 70),
+        s_typo_line_gap = sfnt_i16(table, 72),
+        us_win_ascent = sfnt_u16(table, 74),
+        us_win_descent = sfnt_u16(table, 76))
+    if os2.version >= 2 and table.length >= 90:
+        os2.sx_height = sfnt_i16(table, 86)
+        os2.s_cap_height = sfnt_i16(table, 88)
+    face.os2 = os2
+
+## FT_Face's ascender, descender and height (sfobjs.c sfnt_load_face, "Computing the
+## ascender/descender/height is tricky").
+func sfnt_face_compute_metrics(face: SfntFace*):
+    if let os2 = face.os2:
+        if (os2.fs_selection & 128) != 0:
+            face.ascender = os2.s_typo_ascender
+            face.descender = os2.s_typo_descender
+            face.height = (i16)((i32)face.ascender - (i32)face.descender + (i32)os2.s_typo_line_gap)
+            return
+    face.ascender = face.hhea_ascender
+    face.descender = face.hhea_descender
+    face.height = (i16)((i32)face.ascender - (i32)face.descender + (i32)face.hhea_line_gap)
+    if face.ascender == 0 and face.descender == 0:
+        if let os2 = face.os2:
+            if os2.s_typo_ascender != 0 or os2.s_typo_descender != 0:
+                face.ascender = os2.s_typo_ascender
+                face.descender = os2.s_typo_descender
+                face.height = (i16)((i32)face.ascender - (i32)face.descender + (i32)os2.s_typo_line_gap)
+            else:
+                face.ascender = (i16)os2.us_win_ascent
+                face.descender = -(i16)os2.us_win_descent
+                face.height = (i16)((i32)face.ascender - (i32)face.descender)
+
+## FT_Face's style flags (sfobjs.c "Compute style flags").
+func sfnt_face_compute_style_flags(face: SfntFace*):
+    if face.outline_format != SfntOutlineFormat.none_:
+        if let os2 = face.os2:
+            # Bit 9 of fsSelection indicates an oblique face, bit 0 an italic one.
+            if (os2.fs_selection & 512) != 0 or (os2.fs_selection & 1) != 0:
+                face.style_flags_italic = true
+            if (os2.fs_selection & 32) != 0:
+                face.style_flags_bold = true
+            return
+    # An old Mac font: the head table's macStyle.
+    if (face.mac_style & 1) != 0:
+        face.style_flags_bold = true
+    if (face.mac_style & 2) != 0:
+        face.style_flags_italic = true
+
+## The weight SkFontScanner_FreeType::scanInstance gives the face: OS/2's usWeightClass, else
+## 700 for a bold face and 400 otherwise, pinned to 0..1000 as SkFontStyle does.
+## FIXME: Variable fonts' 'wght' axis and Type 1 PS font info are not read.
+pub func sfnt_face_weight(face: const SfntFace*) -> u16:
+    var weight: i32 = 700 if face.style_flags_bold else 400
+    if let os2 = face.os2:
+        weight = (i32)os2.us_weight_class
+    if weight > 1000:
+        weight = 1000
+    return (u16)weight
+
+## The width scanInstance gives the face: OS/2's usWidthClass, else 5 (normal), pinned to 1..9.
+pub func sfnt_face_width(face: const SfntFace*) -> u16:
+    var width: i32 = 5
+    if let os2 = face.os2:
+        width = (i32)os2.us_width_class
+    if width < 1:
+        width = 1
+    if width > 9:
+        width = 9
+    return (u16)width
+
+## The slant scanInstance gives the face, as TypefaceSkia::slope numbers it: 0 upright,
+## 1 italic, 2 oblique (OS/2 fsSelection bit 9).
+pub func sfnt_face_slope(face: const SfntFace*) -> u8:
+    var slope: u8 = 1 if face.style_flags_italic else 0
+    if let os2 = face.os2:
+        if (os2.fs_selection & 512) != 0:
+            slope = 2
+    return slope
+
+# mark: The name table =========================================================================
+
+## FreeType's family name (sfobjs.c): WWS family, typographic family, then family, or, for a
+## WWS-only face (OS/2 fsSelection bit 8), typographic family then family.
+func sfnt_face_family_name(face: const SfntFace*) -> ak.FlyString:
+    var wws_only = false
+    if let os2 = face.os2:
+        wws_only = (os2.fs_selection & 256) != 0
+    if not wws_only:
+        if let name = sfnt_face_get_name(face, 21):
+            return name
+    if let name = sfnt_face_get_name(face, 16):
+        return name
+    if let name = sfnt_face_get_name(face, 1):
+        return name
+    return ak.fly_string_from_str("")
+
+## FreeType's tt_face_get_name: the English Windows name if there is one (unless an Apple name
+## exists and the Windows one is not English), else the Apple name, else a Unicode-platform
+## name; converted to ASCII with '?' for anything outside 32..127.
+func sfnt_face_get_name(face: const SfntFace*, name_id: u16) -> ak.FlyString?:
+    let table = sfnt_face_table(face, sfnt_tag('n', 'a', 'm', 'e')) else return none
+    let count = (usize)sfnt_u16(table, 2)
+    let storage = (usize)sfnt_u16(table, 4)
+    var found_apple_roman: isize = -1
+    var found_apple_english: isize = -1
+    var found_win: isize = -1
+    var found_unicode: isize = -1
+    var is_english = false
+    for n in 0..<count:
+        let record = 6 + n * 12
+        if record + 12 > table.length:
+            break
+        let platform_id = sfnt_u16(table, record)
+        let encoding_id = sfnt_u16(table, record + 2)
+        let language_id = sfnt_u16(table, record + 4)
+        if sfnt_u16(table, record + 6) != name_id or sfnt_u16(table, record + 8) == 0:
+            continue
+        match platform_id:
+            0, 2:
+                found_unicode = (isize)n
+            1:
+                if language_id == 0:
+                    found_apple_english = (isize)n
+                elif encoding_id == 0:
+                    found_apple_roman = (isize)n
+            3:
+                if found_win == -1 or (language_id & 0x3FF) == 0x009:
+                    if encoding_id == 0 or encoding_id == 1 or encoding_id == 10:
+                        is_english = (language_id & 0x3FF) == 0x009
+                        found_win = (isize)n
+            _:
+                continue
+    var found_apple = found_apple_roman
+    if found_apple_english >= 0:
+        found_apple = found_apple_english
+
+    var chosen: isize = -1
+    var utf16 = false
+    if found_win >= 0 and not (found_apple >= 0 and not is_english):
+        chosen = found_win
+        utf16 = true
+    elif found_apple >= 0:
+        chosen = found_apple
+    elif found_unicode >= 0:
+        chosen = found_unicode
+        utf16 = true
+    if chosen < 0:
+        return none
+
+    let record = 6 + (usize)chosen * 12
+    let length = (usize)sfnt_u16(table, record + 8)
+    let bytes = sfnt_slice(table, storage + (usize)sfnt_u16(table, record + 10), length)
+    var ascii: ak.Vector[u8] = ak.vector_create_atomic[u8]()
+    var index: usize = 0
+    while index < bytes.length:
+        var code: u32
+        if utf16:
+            if index + 1 >= bytes.length:
+                break
+            code = ((u32)bytes[index] << 8) | (u32)bytes[index + 1]
+            index += 2
+        else:
+            code = (u32)bytes[index]
+            index += 1
+        if code == 0:
+            break
+        if code < 32 or code > 127:
+            code = (u32)'?'
+        ak.vector_append_t(&ascii, (u8)code)
+    return ak.fly_string_from_utf8_without_validation(ak.vector_span_const(&ascii))
+
+# mark: Horizontal metrics =====================================================================
+
+## The advance width of `glyph` in font units (hmtx; glyphs past numberOfHMetrics repeat the
+## last advance).
+pub func sfnt_face_advance(face: const SfntFace*, glyph: u32) -> u16:
+    let count = (u32)face.number_of_h_metrics
+    if count == 0:
+        return 0
+    let index = glyph if glyph < count else count - 1
+    return sfnt_u16(face.hmtx, (usize)index * 4)
+
+## The left side bearing of `glyph` in font units (hmtx).
+pub func sfnt_face_left_side_bearing(face: const SfntFace*, glyph: u32) -> i16:
+    let count = (u32)face.number_of_h_metrics
+    if glyph < count:
+        return sfnt_i16(face.hmtx, (usize)glyph * 4 + 2)
+    return sfnt_i16(face.hmtx, (usize)count * 4 + (usize)(glyph - count) * 2)

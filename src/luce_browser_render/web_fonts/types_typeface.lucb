@@ -10,17 +10,19 @@
 #
 #==============================================================================================
 
-## SkTypeface (Libraries/LibGfx/Font/Typeface.h:21): opaque in this phase (not in the phase-1 closure).
+## SkTypeface (Libraries/LibGfx/Font/Typeface.h:21): filled by region r09: Skia's typeface is
+## replaced by the port's OpenType reader (sfnt_reader.lucb).
 pub struct SkTypeface:
-    pub var opaque_: u8
+    pub var face: SfntFace*
 
-## hb_blob_t (Libraries/LibGfx/Font/Typeface.h:22): opaque in this phase (not in the phase-1 closure).
+## hb_blob_t (Libraries/LibGfx/Font/Typeface.h:22): filled by region r09: borrowed font bytes.
 pub struct HbBlobT:
-    pub var opaque_: u8
+    pub var data: const u8[]
 
-## hb_face_t (Libraries/LibGfx/Font/Typeface.h:23): opaque in this phase (not in the phase-1 closure).
+## hb_face_t (Libraries/LibGfx/Font/Typeface.h:23): filled by region r09: the parsed face, none
+## when the bytes are not a font (HarfBuzz's empty face).
 pub struct HbFaceT:
-    pub var opaque_: u8
+    pub var face: SfntFace*?
 
 # mark: ScaledFontMetrics =======================================================================
 

@@ -1,0 +1,143 @@
+#==============================================================================================
+#
+#   sfnt_cmap - character to glyph mapping: choosing a cmap subtable and looking code points up
+#
+#   DESCRIPTION:
+#       New code of the luce-browser port (DESIGN.md §7.1), replacing SkTypeface::unicharToGlyph
+#       (FreeType's FT_Get_Char_Index over the Unicode charmap) and hb_font_get_nominal_glyph.
+#       The subtable is chosen as HarfBuzz's OT::cmap::find_best_subtable chooses it (a symbol
+#       subtable first, then the full-repertoire Unicode subtables, then the BMP ones; the Mac
+#       subtables HarfBuzz falls back to last are not read);
+#       formats 0, 4, 6, 10, 12 and 13 are read. A glyph id at or past the face's glyph count
+#       answers 0, as both libraries do.
+#
+#==============================================================================================
+
+## Chooses the Unicode subtable of the face's cmap (hb-ot-cmap-table.hh find_best_subtable).
+func sfnt_face_select_cmap(face: SfntFace*):
+    let cmap = sfnt_face_table(face, sfnt_tag('c', 'm', 'a', 'p')) else return
+    let base = (usize)(cmap.data - face.data.data)
+    # The symbol subtable first (HarfBuzz issue 1918), then the full Unicode repertoire, then
+    # the BMP.
+    let preferences: u32[9] = [0x00030000, 0x0003000A, 0x00000006, 0x00000004, 0x00030001, 0x00000003, 0x00000002, 0x00000001, 0x00000000]
+    for preference in preferences:
+        let platform_id = (u16)(preference >> 16)
+        let encoding_id = (u16)(preference & 0xFFFF)
+        if let offset = sfnt_cmap_find_subtable(cmap, platform_id, encoding_id):
+            face.cmap_subtable = base + offset
+            face.cmap_is_symbol = platform_id == 3 and encoding_id == 0
+            return
+
+## The offset in `cmap` of the subtable for (platform, encoding), or none.
+func sfnt_cmap_find_subtable(cmap: const u8[], platform_id: u16, encoding_id: u16) -> usize?:
+    let count = (usize)sfnt_u16(cmap, 2)
+    for index in 0..<count:
+        let record = 4 + index * 8
+        if record + 8 > cmap.length:
+            return none
+        if sfnt_u16(cmap, record) == platform_id and sfnt_u16(cmap, record + 2) == encoding_id:
+            let offset = (usize)sfnt_u32(cmap, record + 4)
+            if offset >= cmap.length:
+                return none
+            # A subtable of an unknown format is skipped, as HarfBuzz's sanitizer drops it.
+            let table_format = sfnt_u16(cmap, offset)
+            if table_format == 0 or table_format == 4 or table_format == 6 or table_format == 10 or table_format == 12 or table_format == 13:
+                return offset
+            return none
+    return none
+
+## The glyph of `code_point` in the face's chosen cmap subtable, 0 when there is none.
+pub func sfnt_face_glyph_for_code_point(face: const SfntFace*, code_point: u32) -> u32:
+    let offset = face.cmap_subtable else return 0
+    var glyph = sfnt_cmap_lookup(face.data, offset, code_point)
+    # A symbol font maps its characters into the private use area U+F000..U+F0FF
+    # (hb-ot-cmap-table.hh get_glyph_from_symbol).
+    if glyph == 0 and face.cmap_is_symbol and code_point <= 0x00FF:
+        glyph = sfnt_cmap_lookup(face.data, offset, 0xF000 + code_point)
+    if glyph >= (u32)face.num_glyphs:
+        return 0
+    return glyph
+
+## Looks `code_point` up in the subtable at `offset` of `data`.
+func sfnt_cmap_lookup(data: const u8[], offset: usize, code_point: u32) -> u32:
+    let table_format = sfnt_u16(data, offset)
+    match table_format:
+        0:
+            if code_point > 255:
+                return 0
+            return (u32)sfnt_u8(data, offset + 6 + (usize)code_point)
+        4:
+            return sfnt_cmap_lookup_format_4(data, offset, code_point)
+        6:
+            let first_code = (u32)sfnt_u16(data, offset + 6)
+            let entry_count = (u32)sfnt_u16(data, offset + 8)
+            if code_point < first_code or code_point - first_code >= entry_count:
+                return 0
+            return (u32)sfnt_u16(data, offset + 10 + (usize)(code_point - first_code) * 2)
+        10:
+            let start_char = sfnt_u32(data, offset + 12)
+            let num_chars = sfnt_u32(data, offset + 16)
+            if code_point < start_char or code_point - start_char >= num_chars:
+                return 0
+            return (u32)sfnt_u16(data, offset + 20 + (usize)(code_point - start_char) * 2)
+        12, 13:
+            return sfnt_cmap_lookup_format_12_13(data, offset, code_point, table_format == 13)
+        _:
+            return 0
+
+## Format 4: segment mapping to delta values, searched by binary search over the end codes.
+func sfnt_cmap_lookup_format_4(data: const u8[], offset: usize, code_point: u32) -> u32:
+    if code_point > 0xFFFF:
+        return 0
+    let segment_count = (usize)sfnt_u16(data, offset + 6) // 2
+    let end_codes = offset + 14
+    let start_codes = end_codes + segment_count * 2 + 2
+    let id_deltas = start_codes + segment_count * 2
+    let id_range_offsets = id_deltas + segment_count * 2
+    var low: usize = 0
+    var high = segment_count
+    while low < high:
+        let middle = low + (high - low) // 2
+        let end_code = (u32)sfnt_u16(data, end_codes + middle * 2)
+        if code_point > end_code:
+            low = middle + 1
+            continue
+        let start_code = (u32)sfnt_u16(data, start_codes + middle * 2)
+        if code_point < start_code:
+            high = middle
+            continue
+        let id_delta = (u32)sfnt_u16(data, id_deltas + middle * 2)
+        let range_offset_position = id_range_offsets + middle * 2
+        let id_range_offset = (usize)sfnt_u16(data, range_offset_position)
+        if id_range_offset == 0:
+            return (code_point +% id_delta) & 0xFFFF
+        let glyph_position = range_offset_position + id_range_offset + (usize)(code_point - start_code) * 2
+        let glyph = (u32)sfnt_u16(data, glyph_position)
+        if glyph == 0:
+            return 0
+        return (glyph +% id_delta) & 0xFFFF
+    return 0
+
+## Formats 12 and 13: sequential or many-to-one groups, searched by binary search.
+func sfnt_cmap_lookup_format_12_13(data: const u8[], offset: usize, code_point: u32, many_to_one: bool) -> u32:
+    let group_count = (usize)sfnt_u32(data, offset + 12)
+    let groups = offset + 16
+    if groups > data.length or group_count > (data.length - groups) // 12:
+        return 0
+    var low: usize = 0
+    var high = group_count
+    while low < high:
+        let middle = low + (high - low) // 2
+        let group = groups + middle * 12
+        let start_code = sfnt_u32(data, group)
+        let end_code = sfnt_u32(data, group + 4)
+        if code_point < start_code:
+            high = middle
+        elif code_point > end_code:
+            low = middle + 1
+        else:
+            let start_glyph = sfnt_u32(data, group + 8)
+            if many_to_one:
+                return start_glyph
+            return start_glyph +% (code_point - start_code)
+    return 0

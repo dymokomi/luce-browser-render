@@ -1,0 +1,62 @@
+#==============================================================================================
+#
+#   woff2_loader - WOFF 2.0: converting a WOFF2 file into an sfnt font
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Font/WOFF2/Loader.cpp (lines 1-76). The donor hands the
+#       bytes to Google's woff2 library (woff2::ConvertWOFF2ToTTF), which needs a Brotli
+#       decoder; the Luce ecosystem has none yet (DESIGN.md §7.1: "Brotli: missing"), so
+#       convert_to_ttf fails and WOFF2 fonts do not load. WOFF2ByteBufferOut, the output
+#       sink the library writes through, is ported for when a decoder exists.
+#
+#==============================================================================================
+
+## A WOFF2ByteBufferOut over `buffer`, with its vtable.
+func woff2_byte_buffer_out_create(buffer: ak.ByteBuffer*) -> Woff2ByteBufferOut:
+    var output = Woff2ByteBufferOut(vtable = &woff2_byte_buffer_out_vtable, class_id = woff2_byte_buffer_out_class.first_id, m_buffer = buffer)
+    woff2_byte_buffer_out_construct(&output, buffer)
+    return output
+
+## Ported from Libraries/LibGfx/Font/WOFF2/Loader.cpp:15 WOFF2::WOFF2ByteBufferOut::WOFF2ByteBufferOut.
+pub func woff2_byte_buffer_out_construct(this: Woff2ByteBufferOut*, buffer: ak.ByteBuffer*):
+    this.m_buffer = buffer
+
+## Ported from Libraries/LibGfx/Font/WOFF2/Loader.cpp:22 WOFF2::WOFF2ByteBufferOut::Write (virtual).
+# Append n bytes of data from buf.
+# Return true if all written, false otherwise.
+pub func woff2_byte_buffer_out_write_impl(this: Woff2ByteBufferOut*, data: const void*?, size: usize) -> bool:
+    ak.byte_buffer_try_append_void(this.m_buffer, data, size) else trap("VERIFY_NOT_REACHED")
+    return true
+
+## Ported from Libraries/LibGfx/Font/WOFF2/Loader.cpp:33 WOFF2::WOFF2ByteBufferOut::Write (virtual).
+# Write n bytes of data from buf at offset.
+# Return true if all written, false otherwise.
+pub func woff2_byte_buffer_out_write_usize_impl(this: Woff2ByteBufferOut*, data: const void*?, offset: usize, n: usize) -> bool:
+    let end = offset +? n else return false
+    if end > ak.byte_buffer_size(this.m_buffer):
+        ak.byte_buffer_try_resize(this.m_buffer, end) else return false
+    if n > 0:
+        let source = data else return false
+        let destination = ak.byte_buffer_offset_pointer(this.m_buffer, offset) else return false
+        memory.copy(u8[](destination, n), u8[]((u8*)source, n), n)
+    return true
+
+## Ported from Libraries/LibGfx/Font/WOFF2/Loader.cpp:47 WOFF2::WOFF2ByteBufferOut::Size (virtual).
+pub func woff2_byte_buffer_out_size_impl(this: Woff2ByteBufferOut*) -> usize:
+    return ak.byte_buffer_size(this.m_buffer)
+
+## Ported from Libraries/LibGfx/Font/WOFF2/Loader.cpp:56 WOFF2::convert_to_ttf.
+pub func woff2_convert_to_ttf(bytes: const u8[]) -> ak.ByteBuffer!:
+    var ttf_buffer = try ak.byte_buffer_create_uninitialized(0)
+    var output = woff2_byte_buffer_out_create(&ttf_buffer)
+    # woff2::ConvertWOFF2ToTTF(bytes.data(), bytes.size(), &output): FIXME: there is no Luce
+    # port of the woff2 library and its Brotli decoder, so the conversion fails.
+    discard(woff2_byte_buffer_out_size(&output))
+    error(ak.ak_error, "Failed to convert the WOFF2 font to TTF")
+
+## Ported from Libraries/LibGfx/Font/WOFF2/Loader.cpp:68 WOFF2::try_load_from_bytes.
+pub func woff2_try_load_from_bytes(bytes: const u8[]) -> Typeface*!:
+    let ttf_buffer = try woff2_convert_to_ttf(bytes)
+    let font_data = font_data_create_from_byte_buffer(ttf_buffer)
+    let input_font = try typeface_try_load_from_font_data(font_data)
+    return input_font

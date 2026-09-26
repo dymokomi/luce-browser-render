@@ -12,14 +12,14 @@
 pub struct CodePointFallbackKeyTraits: ak.Traits[CodePointFallbackKey]:
     var empty_: u8
 
-    func hash_of(key: const CodePointFallbackKey*) -> u32: trap("unported: AK::Traits<CodePointFallbackKey>::hash")
+    func hash_of(key: const CodePointFallbackKey*) -> u32: return code_point_fallback_key_hash(key)
 
-    func equals(a: const CodePointFallbackKey*, b: const CodePointFallbackKey*) -> bool: trap("unported: AK::Traits<CodePointFallbackKey>::equals")
+    func equals(a: const CodePointFallbackKey*, b: const CodePointFallbackKey*) -> bool: return *a == *b
 
 ## AK::Traits<FontCacheKey>: AK's hash and equality for the key type.
 pub struct FontCacheKeyTraits: ak.Traits[FontCacheKey]:
     var empty_: u8
 
-    func hash_of(key: const FontCacheKey*) -> u32: trap("unported: AK::Traits<FontCacheKey>::hash")
+    func hash_of(key: const FontCacheKey*) -> u32: return font_cache_key_hash(key)
 
-    func equals(a: const FontCacheKey*, b: const FontCacheKey*) -> bool: trap("unported: AK::Traits<FontCacheKey>::equals")
+    func equals(a: const FontCacheKey*, b: const FontCacheKey*) -> bool: return font_cache_key_eq(a, *b)

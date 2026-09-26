@@ -1,0 +1,236 @@
+#==============================================================================================
+#
+#   path_font_provider - PathFontProvider: a system font provider over the font files found
+#                        under a directory
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Font/PathFontProvider.cpp (lines 1-154) with the inline
+#       functions of Libraries/LibGfx/Font/PathFontProvider.h (lines 1-38).
+#       Core::Resource::load_from_uri and for_each_descendant_file (LibCore, not ported) are
+#       a walk of the directory a `file://` URI names (POSIX nftw, or the Windows C runtime's
+#       _findfirst64), and each font file is read with stdio into a ByteBuffer that the
+#       typefaces made from it share. (luce-std's files module would do, but checking it
+#       with Luce 0.8.12 prints warnings of its own.) `resource://` URIs (Ladybird's
+#       resource root) are not supported: the embedder passes file URIs.
+#
+#==============================================================================================
+
+## make<Gfx::PathFontProvider>(): a provider with its vtable, constructed. (r09 addition:
+## the skeleton has no creation helper for non-cell classes.)
+pub func path_font_provider_create() -> PathFontProvider*:
+    let this = new PathFontProvider(system_font_provider_base = SystemFontProvider(vtable = &path_font_provider_vtable.system_font_provider_vtable, class_id = path_font_provider_class.first_id)) else trap("out of memory")
+    path_font_provider_construct(this)
+    return this
+
+## Ported from Libraries/LibGfx/Font/PathFontProvider.cpp:18 Gfx::PathFontProvider::PathFontProvider.
+pub func path_font_provider_construct(this: PathFontProvider*):
+    path_font_provider_init_fields(this)
+    this.m_name = ak.string_from_str("Path")
+
+## Ported from Libraries/LibGfx/Font/PathFontProvider.h:25 Gfx::PathFontProvider::set_name_but_fixme_should_create_custom_system_font_provider.
+pub func path_font_provider_set_name_but_fixme_should_create_custom_system_font_provider(this: PathFontProvider*, name: ak.String):
+    this.m_name = name
+
+## Ported from Libraries/LibGfx/Font/PathFontProvider.cpp:22 Gfx::number_of_fonts_in_ttc.
+# https://learn.microsoft.com/en-us/typography/opentype/spec/otff#ttc-header
+func number_of_fonts_in_ttc(bytes: const u8[]) -> u32:
+    # TTC Header:
+    #   0-3: ttcTag ('ttcf')
+    #   4-7: majorVersion, minorVersion
+    #   8-11: numFonts (big-endian u32)
+    if bytes.length < 12:
+        return 1
+    if bytes[0] != 't' or bytes[1] != 't' or bytes[2] != 'c' or bytes[3] != 'f':
+        return 1
+    let num_fonts = sfnt_u32(bytes, 8)
+
+    # The TTC header is followed by an array of 4-byte offsets, one per font. Reject counts that exceed what the file
+    # could physically contain.
+    if (usize)num_fonts > (bytes.length - 12) // 4:
+        return 1
+
+    return num_fonts
+
+# mark: Loading fonts ============================================================================
+
+# The C library calls the walk and the reads use (stdio, and the directory walkers of POSIX and
+# of the Windows C runtime; only the target's walker is linked).
+extern func web_fonts_fopen as "fopen"(path: c.str, mode: c.str) -> void*?
+extern func web_fonts_fclose as "fclose"(stream: void*) -> i32
+extern func web_fonts_fread as "fread"(buffer: void*, size: usize, count: usize, stream: void*) -> usize
+extern func web_fonts_nftw as "nftw"(path: c.str, callback: func(c.str, const void*, i32, void*) -> i32, depth: i32, flags: i32) -> i32
+extern func web_fonts_findfirst64 as "_findfirst64"(spec: c.str, data: void*) -> isize
+extern func web_fonts_findnext64 as "_findnext64"(handle: isize, data: void*) -> i32
+extern func web_fonts_findclose as "_findclose"(handle: isize) -> i32
+
+## Reads the whole file at `path` (Core::Resource::data of a file resource), or none.
+func path_font_provider_read_file(path: c.str) -> ak.ByteBuffer?:
+    let stream = web_fonts_fopen(path, "rb") else return none
+    defer discard(web_fonts_fclose(stream))
+    var buffer: ak.ByteBuffer
+    var chunk: u8[16384]
+    while true:
+        let count = web_fonts_fread(&chunk[0], 1, chunk.length, stream)
+        if count == 0:
+            break
+        ak.byte_buffer_try_append_span_u8(&buffer, chunk[0..<count]) else return none
+    return buffer
+
+## The provider the current walk loads into (nftw's callback has no context).
+local var path_font_provider_walk_target: PathFontProvider*?
+
+## nftw's callback: every regular file (FTW_F) of the tree.
+func path_font_provider_visit(path: c.str, info: const void*, type_flag: i32, ftw: void*) -> i32:
+    let this = path_font_provider_walk_target else return 0
+    if type_flag == 0:
+        let text = str(path) else return 0
+        path_font_provider_load_font_file(this, text)
+    return 0
+
+## `left` followed by `right`, in managed memory.
+func path_font_provider_joined(left: str, right: str) -> str:
+    let bytes = new u8[left.length + right.length] else trap("out of memory")
+    memory.copy(bytes, left.bytes, left.length)
+    memory.copy(bytes[left.length..], right.bytes, right.length)
+    return (str)bytes
+
+## Adds `typeface` to its family (m_typeface_by_family.ensure(family, ...).append(font)).
+func path_font_provider_add_typeface(this: PathFontProvider*, font: Typeface*):
+    let family_name = typeface_family(font)
+    if ak.hash_map_get_k(&this.m_typeface_by_family, family_name) == none:
+        discard(ak.hash_map_set(&this.m_typeface_by_family, family_name, ak.Vector[Typeface*]()))
+    let family = ak.hash_map_get_k(&this.m_typeface_by_family, family_name) else trap("VERIFY_NOT_REACHED")
+    ak.vector_append_t(family, font)
+
+## The body of load_all_fonts_from_uri's for_each_descendant_file callback for one file.
+func path_font_provider_load_font_file(this: PathFontProvider*, uri: str):
+    var path: ak.LexicalPath = ---
+    ak.lexical_path_construct(&path, ak.byte_string_from_str(uri))
+    let is_open_type = ak.lexical_path_has_extension(&path, ak.sv(".ttf")) or ak.lexical_path_has_extension(&path, ak.sv(".ttc")) or ak.lexical_path_has_extension(&path, ak.sv(".otf"))
+    let is_woff = ak.lexical_path_has_extension(&path, ak.sv(".woff"))
+    if not is_open_type and not is_woff:
+        return
+    # resource.data(): the port reads the file into a ByteBuffer the typefaces share.
+    let buffer = path_font_provider_read_file(path_font_provider_c_string(uri)) else return
+    if is_open_type:
+        let font_count = number_of_fonts_in_ttc(ak.byte_buffer_bytes_const(&buffer))
+        for ttc_index in 0..<font_count:
+            let font_data = font_data_create_from_byte_buffer(buffer)
+            let font_or_error: Typeface*? = typeface_try_load_from_font_data(font_data, ttc_index) catch:
+                recover none
+            if let font = font_or_error:
+                path_font_provider_add_typeface(this, font)
+    else:
+        let font_or_error: Typeface*? = woff_try_load_from_bytes(ak.byte_buffer_bytes_const(&buffer)) catch:
+            recover none
+        if let font = font_or_error:
+            path_font_provider_add_typeface(this, font)
+
+## A NUL-terminated copy of `text` for the C boundary.
+func path_font_provider_c_string(text: str) -> c.str:
+    let bytes = new u8[text.length + 1] else trap("out of memory")
+    memory.copy(bytes, text.bytes, text.length)
+    bytes[text.length] = 0
+    return (c.str)(str)bytes[0..<text.length]
+
+## Ported from Libraries/LibGfx/Font/PathFontProvider.cpp:42 Gfx::PathFontProvider::load_all_fonts_from_uri.
+pub func path_font_provider_load_all_fonts_from_uri(this: PathFontProvider*, uri: ak.StringView):
+    # Core::Resource::load_from_uri: the port reads file:// URIs.
+    let file_scheme = ak.sv("file://")
+    if not ak.string_view_starts_with_string_view(&uri, file_scheme):
+        ak.dbgln(f"PathFontProvider::load_all_fonts_from_uri('{ak.string_view_text(uri)}'): only file:// URIs are supported")
+        return
+    let root = ak.string_view_text(ak.string_view_substring_view(&uri, ak.string_view_length(&file_scheme)))
+
+    # root->for_each_descendant_file(...): a missing root (ENOENT) loads nothing.
+    if os.windows:
+        # _findfirst64 over `directory\\*`, depth first. The walk is written inline because
+        # an unreferenced function would still link its Windows-only symbols in test builds.
+        # FIXME: untested; the owner's Windows session should run the font tests.
+        var pending: ak.Vector[str]
+        ak.vector_append_t(&pending, root)
+        while not ak.vector_is_empty(&pending):
+            let directory = ak.vector_take_last(&pending)
+            # struct _finddata64_t: attrib at 0, the three times and the size, name[260] at 40.
+            var data: u8[304]
+            let pattern = path_font_provider_joined(directory, "\\*")
+            let handle = web_fonts_findfirst64(path_font_provider_c_string(pattern), &data[0])
+            if handle == -1:
+                continue
+            while true:
+                let attributes = (u32)data[0] | ((u32)data[1] << 8) | ((u32)data[2] << 16) | ((u32)data[3] << 24)
+                var length: usize = 0
+                while length < 260 and data[40 + length] != 0:
+                    length += 1
+                let name = (str)data[40..<40 + length]
+                if name != "." and name != "..":
+                    let full = path_font_provider_joined(path_font_provider_joined(directory, "\\"), name)
+                    if (attributes & 0x10) != 0:
+                        ak.vector_append_t(&pending, full)
+                    else:
+                        path_font_provider_load_font_file(this, full)
+                if web_fonts_findnext64(handle, &data[0]) != 0:
+                    break
+            discard(web_fonts_findclose(handle))
+    else:
+        let saved = path_font_provider_walk_target
+        path_font_provider_walk_target = this
+        # FTW_PHYS: symbolic links are not followed.
+        discard(web_fonts_nftw(path_font_provider_c_string(root), path_font_provider_visit, 16, 1))
+        path_font_provider_walk_target = saved
+
+# mark: SystemFontProvider ======================================================================
+
+## The shape features get_font applies by default.
+func path_font_provider_compute_default_shape_features() -> ak.Vector[ShapeFeature]:
+    # NB: These shape features match those applied when all CSS properties are initial values
+    var shape_features: ak.Vector[ShapeFeature]
+    ak.vector_append_t(&shape_features, ShapeFeature(tag = ['c', 'l', 'i', 'g'], value = 1))
+    ak.vector_append_t(&shape_features, ShapeFeature(tag = ['k', 'e', 'r', 'n'], value = 1))
+    ak.vector_append_t(&shape_features, ShapeFeature(tag = ['l', 'i', 'g', 'a'], value = 1))
+    return shape_features
+
+## The variation settings get_font applies by default.
+func path_font_provider_compute_default_font_variation_settings(point_size: f32, weight: u32, width: u32) -> FontVariationSettings:
+    var default_font_variation_settings: FontVariationSettings
+    font_variation_settings_set_weight(&default_font_variation_settings, (f32)weight)
+    # NB: We use the pixel size for 'opsz'
+    font_variation_settings_set_optical_sizing(&default_font_variation_settings, point_size / 0.75)
+
+    match width:
+        1: font_variation_settings_set_width(&default_font_variation_settings, 50.0)
+        2: font_variation_settings_set_width(&default_font_variation_settings, 62.5)
+        3: font_variation_settings_set_width(&default_font_variation_settings, 75.0)
+        4: font_variation_settings_set_width(&default_font_variation_settings, 87.5)
+        5: font_variation_settings_set_width(&default_font_variation_settings, 100.0)
+        6: font_variation_settings_set_width(&default_font_variation_settings, 112.5)
+        7: font_variation_settings_set_width(&default_font_variation_settings, 125.0)
+        8: font_variation_settings_set_width(&default_font_variation_settings, 150.0)
+        9: font_variation_settings_set_width(&default_font_variation_settings, 200.0)
+        _: trap("VERIFY_NOT_REACHED")
+
+    return default_font_variation_settings
+
+## Ported from Libraries/LibGfx/Font/PathFontProvider.cpp:81 Gfx::PathFontProvider::get_font (override).
+pub func path_font_provider_get_font_impl(base: SystemFontProvider*, family: ak.FlyString, point_size: f32, weight: u32, width: u32, slope: u32, font_variation_settings: FontVariationSettings?, shape_features: ak.Vector[ShapeFeature]?) -> Font*?:
+    let this = (PathFontProvider*)base
+    let typefaces = ak.hash_map_get_k(&this.m_typeface_by_family, family) else return none
+    for typeface in ak.vector_span_const(typefaces):
+        if (u32)typeface_weight(typeface) == weight and (u32)typeface_width(typeface) == width and (u32)typeface_slope(typeface) == slope:
+            let variations = font_variation_settings else path_font_provider_compute_default_font_variation_settings(point_size, weight, width)
+            let features = shape_features else path_font_provider_compute_default_shape_features()
+            return typeface_font(typeface, point_size, variations, features)
+
+    return none
+
+## Ported from Libraries/LibGfx/Font/PathFontProvider.cpp:144 Gfx::PathFontProvider::for_each_typeface_with_family_name (override).
+pub func path_font_provider_for_each_typeface_with_family_name_impl(base: SystemFontProvider*, family_name: ak.FlyString, callback: ak.Function1[Typeface*, unit]):
+    let this = (PathFontProvider*)base
+    let typefaces = ak.hash_map_get_k(&this.m_typeface_by_family, family_name) else return
+    for typeface in ak.vector_span_const(typefaces):
+        ak.function1_call(&callback, typeface)
+
+## Ported from Libraries/LibGfx/Font/PathFontProvider.h:31 Gfx::PathFontProvider::name (override).
+pub func path_font_provider_name_impl(base: SystemFontProvider*) -> ak.StringView:
+    let this = (PathFontProvider*)base
+    return ak.string_bytes_as_string_view(&this.m_name)

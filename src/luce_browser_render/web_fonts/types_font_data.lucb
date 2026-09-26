@@ -12,6 +12,10 @@
 
 # mark: FontData ================================================================================
 
-## Gfx::FontData (Libraries/LibGfx/Font/FontData.h:14).
+## Gfx::FontData (Libraries/LibGfx/Font/FontData.h:14). Edited by region r09: the C++
+## `Variant<ByteBuffer, NonnullRefPtr<Core::Resource const>> m_data` is two fields, because
+## bytes() answers a span into the ByteBuffer held here, which a payload enum cannot give (its
+## payload is only reachable as a copy, and a small ByteBuffer keeps its bytes inline).
 pub struct FontData:
-    pub var m_data: ak.ByteBufferOrCoreResource
+    pub var m_byte_buffer: ak.ByteBuffer
+    pub var m_resource: const ak.CoreResource*?

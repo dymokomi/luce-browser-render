@@ -1,0 +1,505 @@
+#==============================================================================================
+#
+#   hb_layout - OpenType layout for the shaper: GDEF classes, the feature plan and GSUB
+#
+#   DESCRIPTION:
+#       New code of the luce-browser port (DESIGN.md §7.1), the part of HarfBuzz's
+#       hb-ot-layout and hb-ot-map a default (Latin-style) shaping plan uses:
+#
+#       - the plan: the script's default language system (the text's script, else DFLT, dflt,
+#         latn), the features HarfBuzz enables by default (rvrn in a stage of its own, then
+#         ltra/ltrm or rtla/rtlm, abvm, blwm, ccmp, locl, mark, mkmk, rlig, calt, clig, curs,
+#         dist, kern, liga, rclt) overridden by the font's features, and the lookups of the
+#         chosen features applied in lookup-list order;
+#       - GSUB lookups 1 (single), 2 (multiple), 3 (alternate), 4 (ligature) and 7
+#         (extension);
+#       - lookup flags (ignore base/ligature/mark, mark attachment type, mark filtering sets).
+#
+#       GPOS and the kern table are in hb_position.lucb.
+#
+#       FIXME: contextual and chaining substitutions (GSUB 5, 6, 8) and FeatureVariations are
+#       not applied.
+#
+#==============================================================================================
+
+# mark: Coverage and class definitions ===============================================================
+
+## The coverage index of `glyph` in the Coverage table at `offset` of `table`, or none.
+func ot_coverage_index(table: const u8[], offset: usize, glyph: u32) -> usize?:
+    let coverage_format = sfnt_u16(table, offset)
+    if coverage_format == 1:
+        let count = (usize)sfnt_u16(table, offset + 2)
+        var low: usize = 0
+        var high = count
+        while low < high:
+            let middle = low + (high - low) // 2
+            let candidate = (u32)sfnt_u16(table, offset + 4 + middle * 2)
+            if glyph < candidate:
+                high = middle
+            elif glyph > candidate:
+                low = middle + 1
+            else:
+                return middle
+        return none
+    if coverage_format == 2:
+        let count = (usize)sfnt_u16(table, offset + 2)
+        var low: usize = 0
+        var high = count
+        while low < high:
+            let middle = low + (high - low) // 2
+            let record = offset + 4 + middle * 6
+            let start = (u32)sfnt_u16(table, record)
+            let end = (u32)sfnt_u16(table, record + 2)
+            if glyph < start:
+                high = middle
+            elif glyph > end:
+                low = middle + 1
+            else:
+                return (usize)sfnt_u16(table, record + 4) + (usize)(glyph - start)
+        return none
+    return none
+
+## The class of `glyph` in the ClassDef table at `offset` of `table` (0 when unlisted).
+func ot_class_of(table: const u8[], offset: usize, glyph: u32) -> u16:
+    let class_format = sfnt_u16(table, offset)
+    if class_format == 1:
+        let start = (u32)sfnt_u16(table, offset + 2)
+        let count = (u32)sfnt_u16(table, offset + 4)
+        if glyph < start or glyph - start >= count:
+            return 0
+        return sfnt_u16(table, offset + 6 + (usize)(glyph - start) * 2)
+    if class_format == 2:
+        let count = (usize)sfnt_u16(table, offset + 2)
+        var low: usize = 0
+        var high = count
+        while low < high:
+            let middle = low + (high - low) // 2
+            let record = offset + 4 + middle * 6
+            let start = (u32)sfnt_u16(table, record)
+            let end = (u32)sfnt_u16(table, record + 2)
+            if glyph < start:
+                high = middle
+            elif glyph > end:
+                low = middle + 1
+            else:
+                return sfnt_u16(table, record + 4)
+        return 0
+    return 0
+
+# mark: GDEF ====================================================================================
+
+## Whether GDEF has a glyph class definition (hb_ot_layout_has_glyph_classes).
+func gdef_has_glyph_classes(face: const SfntFace*) -> bool:
+    return face.gdef.length > 0 and sfnt_u16(face.gdef, 4) != 0
+
+## The GDEF glyph class of `glyph`.
+func gdef_glyph_class(face: const SfntFace*, glyph: u32) -> u8:
+    let offset = (usize)sfnt_u16(face.gdef, 4)
+    if offset == 0:
+        return 0
+    return (u8)ot_class_of(face.gdef, offset, glyph)
+
+## The GDEF mark attachment class of `glyph`.
+func gdef_mark_attachment_class(face: const SfntFace*, glyph: u32) -> u16:
+    let offset = (usize)sfnt_u16(face.gdef, 10)
+    if offset == 0:
+        return 0
+    return ot_class_of(face.gdef, offset, glyph)
+
+## Whether `glyph` is in GDEF mark glyph set `set` (GDEF 1.2).
+func gdef_mark_set_covers(face: const SfntFace*, set: u16, glyph: u32) -> bool:
+    if sfnt_u16(face.gdef, 2) < 2:
+        return false
+    let sets = (usize)sfnt_u16(face.gdef, 12)
+    if sets == 0 or set >= sfnt_u16(face.gdef, sets + 2):
+        return false
+    let coverage = sets + (usize)sfnt_u32(face.gdef, sets + 4 + (usize)set * 4)
+    return ot_coverage_index(face.gdef, coverage, glyph) != none
+
+## The general category Mn, resolved once.
+var hb_nonspacing_mark_category: u32?
+
+## hb_ot_layout_substitute_start's glyph properties: GDEF's classes, or, without them,
+## hb_synthesize_glyph_classes (a non-spacing mark that is not default ignorable is a mark).
+func hb_set_glyph_classes(face: const SfntFace*, buffer: HbBufferT*):
+    let infos = ak.vector_span(&buffer.infos)
+    if gdef_has_glyph_classes(face):
+        for index in 0..<infos.length:
+            infos[index].glyph_class = gdef_glyph_class(face, infos[index].codepoint)
+        return
+    if hb_nonspacing_mark_category == none:
+        hb_nonspacing_mark_category = web_unicode.general_category_from_string(ak.sv("Mn"))
+    for index in 0..<infos.length:
+        var is_mark = false
+        if let mn = hb_nonspacing_mark_category:
+            is_mark = web_unicode.code_point_has_general_category(infos[index].character, mn) and not infos[index].is_default_ignorable
+        infos[index].glyph_class = 3 if is_mark else 1
+
+## The class a substituted glyph takes: GDEF's, else `fallback`.
+func hb_class_for_substitute(face: const SfntFace*, glyph: u32, fallback: u8) -> u8:
+    if gdef_has_glyph_classes(face):
+        return gdef_glyph_class(face, glyph)
+    return fallback
+
+# mark: The plan ================================================================================
+
+## A lookup to apply, with the value of the feature that enabled it.
+struct HbPlanLookup:
+    var index: u16
+    var feature_value: u32
+
+## The shaping plan: GSUB's two stages and GPOS's lookups, in lookup-list order.
+pub struct HbLayoutPlan:
+    var gsub_stage_rvrn: ak.Vector[HbPlanLookup]
+    var gsub_stage_main: ak.Vector[HbPlanLookup]
+    var gpos_lookups: ak.Vector[HbPlanLookup]
+    var apply_kern_table: bool
+
+## A feature the plan asks for.
+struct HbWantedFeature:
+    var tag: u32
+    var value: u32
+
+## The features HarfBuzz enables for a horizontal run of the default shaper (hb-ot-shape.cc
+## hb_ot_shape_collect_features), then the font's features, which override them.
+func hb_wanted_features(direction: HbDirection, features: const HbFeature[]) -> ak.Vector[HbWantedFeature]:
+    var wanted: ak.Vector[HbWantedFeature]
+    let defaults: str[16] = ["ltra", "ltrm", "abvm", "blwm", "ccmp", "locl", "mark", "mkmk", "rlig", "calt", "clig", "curs", "dist", "kern", "liga", "rclt"]
+    for name in defaults:
+        let bytes = name.bytes
+        var tag = sfnt_tag(bytes[0], bytes[1], bytes[2], bytes[3])
+        if direction == HbDirection.rtl:
+            if tag == sfnt_tag('l', 't', 'r', 'a'):
+                tag = sfnt_tag('r', 't', 'l', 'a')
+            elif tag == sfnt_tag('l', 't', 'r', 'm'):
+                tag = sfnt_tag('r', 't', 'l', 'm')
+        ak.vector_append_t(&wanted, HbWantedFeature(tag = tag, value = 1))
+    for feature in features:
+        var found = false
+        for index in 0..<ak.vector_size(&wanted):
+            let entry = ak.vector_at(&wanted, index)
+            if entry.tag == feature.tag:
+                entry.value = feature.value
+                found = true
+        if not found:
+            ak.vector_append_t(&wanted, HbWantedFeature(tag = feature.tag, value = feature.value))
+    return wanted
+
+## The OpenType script tags of a script, in HarfBuzz's order of preference
+## (hb_ot_all_tags_from_script: the new Indic tags first, then the old tag), followed by the
+## fallbacks of hb_ot_layout_table_select_script (DFLT, dflt, latn).
+func ot_script_tags(script: u32) -> ak.Vector[u32]:
+    var tags: ak.Vector[u32]
+    let indic: str[10] = ["Bengbng3bng2", "Devadev3dev2", "Gujrgjr3gjr2", "Gurugur3gur2", "Kndaknd3knd2", "Mlymmlm3mlm2", "Oryaory3ory2", "Tamltml3tml2", "Telutel3tel2", "Mymrmym2mym2"]
+    for entry in indic:
+        let bytes = entry.bytes
+        if script == sfnt_tag(bytes[0], bytes[1], bytes[2], bytes[3]):
+            ak.vector_append_t(&tags, sfnt_tag(bytes[4], bytes[5], bytes[6], bytes[7]))
+            let second = sfnt_tag(bytes[8], bytes[9], bytes[10], bytes[11])
+            if second != *ak.vector_at(&tags, 0):
+                ak.vector_append_t(&tags, second)
+    if script != 0:
+        # hb_ot_old_tag_from_script
+        if script == sfnt_tag('H', 'i', 'r', 'a'):
+            ak.vector_append_t(&tags, sfnt_tag('k', 'a', 'n', 'a'))
+        elif script == sfnt_tag('L', 'a', 'o', 'o'):
+            ak.vector_append_t(&tags, sfnt_tag('l', 'a', 'o', ' '))
+        elif script == sfnt_tag('Y', 'i', 'i', 'i'):
+            ak.vector_append_t(&tags, sfnt_tag('y', 'i', ' ', ' '))
+        elif script == sfnt_tag('N', 'k', 'o', 'o'):
+            ak.vector_append_t(&tags, sfnt_tag('n', 'k', 'o', ' '))
+        elif script == sfnt_tag('V', 'a', 'i', 'i'):
+            ak.vector_append_t(&tags, sfnt_tag('v', 'a', 'i', ' '))
+        else:
+            # The script tag with its first letter lowercased.
+            ak.vector_append_t(&tags, script | 0x20000000)
+    ak.vector_append_t(&tags, sfnt_tag('D', 'F', 'L', 'T'))
+    ak.vector_append_t(&tags, sfnt_tag('d', 'f', 'l', 't'))
+    ak.vector_append_t(&tags, sfnt_tag('l', 'a', 't', 'n'))
+    return tags
+
+## The offset in `table` (GSUB or GPOS) of the default language system of the script.
+func ot_find_lang_sys(table: const u8[], script: u32) -> usize?:
+    let script_list = (usize)sfnt_u16(table, 4)
+    if script_list == 0:
+        return none
+    let count = (usize)sfnt_u16(table, script_list)
+    let candidates = ot_script_tags(script)
+    for candidate in ak.vector_span_const(&candidates):
+        if candidate == 0:
+            continue
+        for index in 0..<count:
+            let record = script_list + 2 + index * 6
+            if sfnt_u32(table, record) != candidate:
+                continue
+            let script_table = script_list + (usize)sfnt_u16(table, record + 4)
+            let default_lang_sys = (usize)sfnt_u16(table, script_table)
+            if default_lang_sys == 0:
+                return none
+            return script_table + default_lang_sys
+    return none
+
+## The lookups of the wanted features in the language system, sorted by lookup index.
+func ot_collect_lookups(table: const u8[], lang_sys: usize?, wanted: const HbWantedFeature[]) -> ak.Vector[HbPlanLookup]:
+    var lookups: ak.Vector[HbPlanLookup]
+    let lang = lang_sys else return lookups
+    let feature_list = (usize)sfnt_u16(table, 6)
+    let required = sfnt_u16(table, lang + 2)
+    let feature_count = (usize)sfnt_u16(table, lang + 4)
+    for position in 0..<feature_count + 1:
+        var feature_index: u16
+        var value: u32 = 1
+        if position == feature_count:
+            # The required feature is always applied.
+            if required == 0xFFFF:
+                break
+            feature_index = required
+        else:
+            feature_index = sfnt_u16(table, lang + 6 + position * 2)
+            let tag = sfnt_u32(table, feature_list + 2 + (usize)feature_index * 6)
+            var enabled = false
+            for entry in wanted:
+                if entry.tag == tag:
+                    enabled = entry.value != 0
+                    value = entry.value
+            if not enabled:
+                continue
+        let feature = feature_list + (usize)sfnt_u16(table, feature_list + 2 + (usize)feature_index * 6 + 4)
+        let lookup_count = (usize)sfnt_u16(table, feature + 2)
+        for lookup_position in 0..<lookup_count:
+            let lookup_index = sfnt_u16(table, feature + 4 + lookup_position * 2)
+            hb_plan_add_lookup(&lookups, lookup_index, value)
+    return lookups
+
+## Adds a lookup keeping the list sorted and without duplicates (hb_ot_map_t merges the
+## lookups of a stage by index).
+func hb_plan_add_lookup(lookups: ak.Vector[HbPlanLookup]*, index: u16, value: u32):
+    var position: usize = 0
+    while position < ak.vector_size(lookups):
+        let existing = ak.vector_at(lookups, position)
+        if existing.index == index:
+            return
+        if existing.index > index:
+            break
+        position += 1
+    ak.vector_insert(lookups, position, HbPlanLookup(index = index, feature_value = value))
+
+## Plans the layout of `buffer` with the font's `features`.
+func hb_layout_plan(face: const SfntFace*, buffer: const HbBufferT*, features: const HbFeature[]) -> HbLayoutPlan:
+    var plan: HbLayoutPlan
+    let wanted = hb_wanted_features(buffer.direction, features)
+    let wanted_span = ak.vector_span_const(&wanted)
+    if face.gsub.length > 0:
+        let lang_sys = ot_find_lang_sys(face.gsub, buffer.script)
+        let rvrn: HbWantedFeature[1] = [HbWantedFeature(tag = sfnt_tag('r', 'v', 'r', 'n'), value = 1)]
+        plan.gsub_stage_rvrn = ot_collect_lookups(face.gsub, lang_sys, rvrn)
+        plan.gsub_stage_main = ot_collect_lookups(face.gsub, lang_sys, wanted_span)
+    var kern_enabled = false
+    for entry in wanted_span:
+        if entry.tag == sfnt_tag('k', 'e', 'r', 'n'):
+            kern_enabled = entry.value != 0
+    var gpos_has_kern = false
+    if face.gpos.length > 0:
+        let lang_sys = ot_find_lang_sys(face.gpos, buffer.script)
+        plan.gpos_lookups = ot_collect_lookups(face.gpos, lang_sys, wanted_span)
+        let kern_only: HbWantedFeature[1] = [HbWantedFeature(tag = sfnt_tag('k', 'e', 'r', 'n'), value = 1)]
+        let kern_lookups = ot_collect_lookups(face.gpos, lang_sys, kern_only)
+        gpos_has_kern = ak.vector_size(&kern_lookups) > 0
+    plan.apply_kern_table = kern_enabled and not gpos_has_kern and face.kern.length > 0
+    return plan
+
+# mark: Lookups ==================================================================================
+
+## A lookup of a GSUB or GPOS table: its type (extensions resolved per subtable), flags and
+## subtables.
+struct OtLookup:
+    var table: const u8[]
+    var offset: usize
+    var lookup_type: u16
+    var flags: u16
+    var mark_filtering_set: u16
+
+func ot_lookup(table: const u8[], index: u16) -> OtLookup?:
+    let lookup_list = (usize)sfnt_u16(table, 8)
+    if lookup_list == 0 or index >= sfnt_u16(table, lookup_list):
+        return none
+    let offset = lookup_list + (usize)sfnt_u16(table, lookup_list + 2 + (usize)index * 2)
+    let flags = sfnt_u16(table, offset + 2)
+    let subtable_count = (usize)sfnt_u16(table, offset + 4)
+    var mark_filtering_set: u16 = 0
+    if (flags & 0x10) != 0:
+        mark_filtering_set = sfnt_u16(table, offset + 6 + subtable_count * 2)
+    return OtLookup(table = table, offset = offset, lookup_type = sfnt_u16(table, offset), flags = flags, mark_filtering_set = mark_filtering_set)
+
+## The subtable `index` of a lookup, with its type after resolving an extension subtable
+## (`extension_type`: 7 in GSUB, 9 in GPOS).
+func ot_lookup_subtable(lookup: const OtLookup*, index: usize, extension_type: u16) -> (u16, usize):
+    let subtable = lookup.offset + (usize)sfnt_u16(lookup.table, lookup.offset + 6 + index * 2)
+    if lookup.lookup_type == extension_type:
+        return (sfnt_u16(lookup.table, subtable + 2), subtable + (usize)sfnt_u32(lookup.table, subtable + 4))
+    return (lookup.lookup_type, subtable)
+
+## Whether the lookup's flags skip `info` (hb_ot_layout_match_properties).
+func ot_lookup_skips(face: const SfntFace*, lookup: const OtLookup*, info: const HbGlyphInfo*) -> bool:
+    let glyph_class = info.glyph_class
+    if glyph_class == 1 and (lookup.flags & 0x02) != 0:
+        return true
+    if glyph_class == 2 and (lookup.flags & 0x04) != 0:
+        return true
+    if glyph_class == 3:
+        if (lookup.flags & 0x08) != 0:
+            return true
+        if (lookup.flags & 0x10) != 0:
+            return not gdef_mark_set_covers(face, lookup.mark_filtering_set, info.codepoint)
+        let attachment_type = lookup.flags >> 8
+        if attachment_type != 0:
+            return gdef_mark_attachment_class(face, info.codepoint) != attachment_type
+    return false
+
+## The next glyph after `index` a lookup would consider, skipping what its flags skip.
+func ot_next_glyph(face: const SfntFace*, lookup: const OtLookup*, infos: const HbGlyphInfo[], index: usize) -> usize?:
+    var candidate = index + 1
+    while candidate < infos.length:
+        if not ot_lookup_skips(face, lookup, &infos[candidate]):
+            return candidate
+        candidate += 1
+    return none
+
+# mark: GSUB ====================================================================================
+
+## Applies the plan's GSUB lookups, stage by stage.
+func hb_layout_substitute(face: const SfntFace*, plan: const HbLayoutPlan*, buffer: HbBufferT*):
+    for planned in ak.vector_span_const(&plan.gsub_stage_rvrn):
+        gsub_apply_lookup(face, planned, buffer)
+    for planned in ak.vector_span_const(&plan.gsub_stage_main):
+        gsub_apply_lookup(face, planned, buffer)
+
+func gsub_apply_lookup(face: const SfntFace*, planned: HbPlanLookup, buffer: HbBufferT*):
+    let lookup = ot_lookup(face.gsub, planned.index) else return
+    let subtable_count = (usize)sfnt_u16(face.gsub, lookup.offset + 4)
+    var index: usize = 0
+    while index < ak.vector_size(&buffer.infos):
+        let info = *ak.vector_at(&buffer.infos, index)
+        if ot_lookup_skips(face, &lookup, &info):
+            index += 1
+            continue
+        var next = index + 1
+        for subtable_index in 0..<subtable_count:
+            let (lookup_type, subtable) = ot_lookup_subtable(&lookup, subtable_index, 7)
+            if let applied = gsub_apply_subtable(face, &lookup, lookup_type, subtable, planned.feature_value, buffer, index):
+                next = applied
+                break
+        index = next
+
+## Applies one subtable at `index`; answers the index to continue at when it applied.
+func gsub_apply_subtable(face: const SfntFace*, lookup: const OtLookup*, lookup_type: u16, subtable: usize, feature_value: u32, buffer: HbBufferT*, index: usize) -> usize?:
+    let gsub = face.gsub
+    let glyph = ak.vector_at(&buffer.infos, index).codepoint
+    let coverage = ot_coverage_index(gsub, subtable + (usize)sfnt_u16(gsub, subtable + 2), glyph) else return none
+    match lookup_type:
+        1:
+            var substitute: u32
+            if sfnt_u16(gsub, subtable) == 1:
+                substitute = (glyph +% (u32)sfnt_u16(gsub, subtable + 4)) & 0xFFFF
+            else:
+                if coverage >= (usize)sfnt_u16(gsub, subtable + 4):
+                    return none
+                substitute = (u32)sfnt_u16(gsub, subtable + 6 + coverage * 2)
+            gsub_replace_glyph(face, buffer, index, substitute)
+            return index + 1
+        2:
+            if coverage >= (usize)sfnt_u16(gsub, subtable + 4):
+                return none
+            let sequence = subtable + (usize)sfnt_u16(gsub, subtable + 6 + coverage * 2)
+            let count = (usize)sfnt_u16(gsub, sequence)
+            if count == 0:
+                ak.vector_remove(&buffer.infos, index)
+                return index
+            let original = *ak.vector_at(&buffer.infos, index)
+            gsub_replace_glyph(face, buffer, index, (u32)sfnt_u16(gsub, sequence + 2))
+            for position in 1..<count:
+                var added = original
+                added.codepoint = (u32)sfnt_u16(gsub, sequence + 2 + position * 2)
+                added.substituted = true
+                added.glyph_class = hb_class_for_substitute(face, added.codepoint, original.glyph_class)
+                ak.vector_insert(&buffer.infos, index + position, added)
+            return index + count
+        3:
+            if coverage >= (usize)sfnt_u16(gsub, subtable + 4):
+                return none
+            let alternate_set = subtable + (usize)sfnt_u16(gsub, subtable + 6 + coverage * 2)
+            let count = (u32)sfnt_u16(gsub, alternate_set)
+            # The feature's value selects the alternate; 1 is the first.
+            if feature_value == 0 or feature_value > count:
+                return none
+            gsub_replace_glyph(face, buffer, index, (u32)sfnt_u16(gsub, alternate_set + 2 + (usize)(feature_value - 1) * 2))
+            return index + 1
+        4:
+            return gsub_apply_ligature(face, lookup, subtable, coverage, buffer, index)
+        _:
+            # FIXME: contextual (5), chaining contextual (6) and reverse chaining (8)
+            # substitutions are not applied.
+            return none
+
+func gsub_replace_glyph(face: const SfntFace*, buffer: HbBufferT*, index: usize, glyph: u32):
+    let info = ak.vector_at(&buffer.infos, index)
+    info.codepoint = glyph
+    info.substituted = true
+    info.glyph_class = hb_class_for_substitute(face, glyph, info.glyph_class)
+
+## Ligature substitution: the first ligature of the glyph's set whose components follow it
+## (skipping what the lookup flags skip, and default ignorables that are not components).
+func gsub_apply_ligature(face: const SfntFace*, lookup: const OtLookup*, subtable: usize, coverage: usize, buffer: HbBufferT*, index: usize) -> usize?:
+    let gsub = face.gsub
+    if coverage >= (usize)sfnt_u16(gsub, subtable + 4):
+        return none
+    let ligature_set = subtable + (usize)sfnt_u16(gsub, subtable + 6 + coverage * 2)
+    let ligature_count = (usize)sfnt_u16(gsub, ligature_set)
+    for ligature_index in 0..<ligature_count:
+        let ligature = ligature_set + (usize)sfnt_u16(gsub, ligature_set + 2 + ligature_index * 2)
+        let ligature_glyph = (u32)sfnt_u16(gsub, ligature)
+        let component_count = (usize)sfnt_u16(gsub, ligature + 2)
+        if component_count == 0:
+            continue
+        var matched: ak.Vector[usize]
+        var cursor = index
+        var ok = true
+        for component in 1..<component_count:
+            let wanted = (u32)sfnt_u16(gsub, ligature + 4 + (component - 1) * 2)
+            var found = false
+            var candidate = cursor + 1
+            let infos = ak.vector_span_const(&buffer.infos)
+            while candidate < infos.length:
+                let info = &infos[candidate]
+                if info.codepoint == wanted and not ot_lookup_skips(face, lookup, info):
+                    found = true
+                    break
+                if ot_lookup_skips(face, lookup, info) or (info.is_default_ignorable and not info.is_zwj and not info.is_zwnj):
+                    candidate += 1
+                    continue
+                break
+            if not found:
+                ok = false
+                break
+            ak.vector_append_t(&matched, candidate)
+            cursor = candidate
+        if not ok:
+            continue
+        # merge_clusters over the matched range, then the components are removed.
+        let infos = ak.vector_span(&buffer.infos)
+        var cluster = infos[index].cluster
+        for position in index..<cursor + 1:
+            if infos[position].cluster < cluster:
+                cluster = infos[position].cluster
+        for position in index..<cursor + 1:
+            infos[position].cluster = cluster
+        gsub_replace_glyph(face, buffer, index, ligature_glyph)
+        let first = ak.vector_at(&buffer.infos, index)
+        first.ligated = true
+        first.glyph_class = hb_class_for_substitute(face, ligature_glyph, 2)
+        var removed: usize = 0
+        for position in ak.vector_span_const(&matched):
+            ak.vector_remove(&buffer.infos, position - removed)
+            removed += 1
+        return index + 1
+    return none

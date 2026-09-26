@@ -1,0 +1,221 @@
+#==============================================================================================
+#
+#   tests_support - helpers of the web_fonts tests: loading the test fonts and checking the
+#                   module's answers against the reference build's
+#
+#   DESCRIPTION:
+#       The test fonts live in tests/web_fonts/fonts (see NOTICE there); `luce-base test`
+#       runs from the repository root (test.sh). tests_oracle.lucb holds the expectations,
+#       printed by a local program over the reference build's LibGfx (Skia's FreeType
+#       backend with the FontConfig font manager, as Ladybird's test mode forces, and
+#       HarfBuzz; DESIGN.md §6.7). The test bodies are `noinline` functions (# workaround:
+#       compiler-issues/ranges_facts_cubic).
+#
+#==============================================================================================
+
+## The directory of the test fonts, relative to the repository root.
+let test_fonts_directory: str = "tests/web_fonts/fonts/"
+
+## A typeface loaded once per test run.
+struct TestLoadedTypeface:
+    var name: str
+    var typeface: Typeface*
+
+var test_loaded_typefaces: ak.Vector[TestLoadedTypeface]
+
+## Reads a test file into a ByteBuffer.
+func test_read_file(relative_path: str) -> ak.ByteBuffer:
+    return path_font_provider_read_file(path_font_provider_c_string(relative_path)) else trap("cannot read a test file")
+
+## The typeface of the test font `name` (a file of tests/web_fonts/fonts).
+func test_typeface(name: str) -> Typeface*:
+    for loaded in ak.vector_span_const(&test_loaded_typefaces):
+        if loaded.name == name:
+            return loaded.typeface
+    let path = path_font_provider_joined(test_fonts_directory, name)
+    let font_data = font_data_create_from_byte_buffer(test_read_file(path))
+    let typeface = typeface_try_load_from_font_data(font_data, 0) else trap("cannot load a test font")
+    ak.vector_append_t(&test_loaded_typefaces, TestLoadedTypeface(name = name, typeface = typeface))
+    return typeface
+
+## A Utf16String's view.
+func test_utf16(text: str) -> ak.Utf16String:
+    return ak.utf16_string_from_str(text)
+
+## The text of a FlyString.
+func test_fly_text(string: ak.FlyString) -> str:
+    return ak.string_view_text(ak.fly_string_bytes_as_string_view(&string))
+
+## Asserts that two floats are the same float (bit for bit), naming what differs.
+func test_expect_bits(what: str, actual: f32, expected_bits: u32):
+    if actual.bits() != expected_bits:
+        print(f"{what}: got {actual} ({hex(actual.bits())}), expected {f32.bits(expected_bits)} ({hex(expected_bits)})")
+        assert(false, "a float differs from the reference build")
+
+## One glyph of a shaping expectation.
+struct ShapedGlyph:
+    var id: u32
+    var x: u32
+    var y: u32
+    var width: u32
+    var length: usize
+
+# mark: Test bodies =================================================================================
+
+## A face's names and numbers.
+noinline func test_body_face(file: str, family: str, weight: u16, width: u16, slope: u8, units_per_em: u16, glyph_count: u32):
+    # The test fonts and what is made from them outlive the test (the typeface cache),
+    # so they come from the C heap, not the per-test buffer.
+    with memory.heap:
+        let typeface = test_typeface(file)
+        assert(test_fly_text(typeface_family(typeface)) == family)
+        assert(typeface_weight(typeface) == weight)
+        assert(typeface_width(typeface) == width)
+        assert(typeface_slope(typeface) == slope)
+        assert(typeface_units_per_em(typeface) == units_per_em)
+        assert(typeface_glyph_count(typeface) == glyph_count)
+        assert(typeface_is_skia(typeface))
+
+## Glyph ids of code points.
+noinline func test_body_glyph_ids(file: str, code_points: u32[12], glyphs: u32[12]):
+    # The test fonts and what is made from them outlive the test (the typeface cache),
+    # so they come from the C heap, not the per-test buffer.
+    with memory.heap:
+        let typeface = test_typeface(file)
+        for (index, code_point) in code_points.indexed():
+            let glyph = typeface_glyph_id_for_code_point(typeface, code_point)
+            if glyph != glyphs[index]:
+                print(f"U+{hex(code_point)}: glyph {glyph}, expected {glyphs[index]}")
+            assert(glyph == glyphs[index])
+            let font = typeface_font(typeface, 12.0)
+            assert(font_contains_glyph(font, code_point) == (glyphs[index] != 0))
+
+## FontPixelMetrics (size, x_height, advance_of_ascii_zero, ascent, descent, line_gap) and
+## ScaledFontMetrics (ascender, descender, line_gap, x_height) with preferred_line_height.
+noinline func test_body_metrics(file: str, point_size: f32, pixel: u32[6], scaled: u32[5]):
+    # The test fonts and what is made from them outlive the test (the typeface cache),
+    # so they come from the C heap, not the per-test buffer.
+    with memory.heap:
+        let font = typeface_font(test_typeface(file), point_size)
+        let m = font_pixel_metrics(font)
+        test_expect_bits("size", m.size, pixel[0])
+        test_expect_bits("x_height", m.x_height, pixel[1])
+        test_expect_bits("advance_of_ascii_zero", m.advance_of_ascii_zero, pixel[2])
+        test_expect_bits("ascent", m.ascent, pixel[3])
+        test_expect_bits("descent", m.descent, pixel[4])
+        test_expect_bits("line_gap", m.line_gap, pixel[5])
+        let s = font_metrics(font)
+        test_expect_bits("ascender", s.ascender, scaled[0])
+        test_expect_bits("descender", s.descender, scaled[1])
+        test_expect_bits("scaled line_gap", s.line_gap, scaled[2])
+        test_expect_bits("scaled x_height", s.x_height, scaled[3])
+        test_expect_bits("preferred_line_height", font_preferred_line_height(font), scaled[4])
+        test_expect_bits("pixel_size", font_pixel_size(font), pixel[0])
+        test_expect_bits("point_size", font_point_size(font), point_size.bits())
+
+## shape_text(baseline_start = (3.5, 20.25), letter_spacing, text, font, Common) and
+## measure_text_width.
+noinline func test_body_shape(file: str, point_size: f32, text: str, letter_spacing: f32, expected: const ShapedGlyph[], run_width: u32, measured_width: u32):
+    # The test fonts and what is made from them outlive the test (the typeface cache),
+    # so they come from the C heap, not the per-test buffer.
+    with memory.heap:
+        let font = typeface_font(test_typeface(file), point_size)
+        let string = test_utf16(text)
+        let view = ak.utf16_string_base_utf16_view(&string.utf16_string_base)
+        let run = shape_text_f32(gfx.FloatPoint(m_x = 3.5, m_y = 20.25), letter_spacing, view, font, GlyphRunTextType.common)
+        let glyphs = ak.vector_span_const(&run.m_glyphs)
+        if glyphs.length != expected.length:
+            print(f"{text}: {glyphs.length} glyphs, expected {expected.length}")
+            for glyph in glyphs:
+                print(f"  glyph {glyph.glyph_id} at {glyph.position.m_x} width {glyph.glyph_width} length {glyph.length_in_code_units}")
+        assert(glyphs.length == expected.length)
+        for (index, glyph) in glyphs.indexed():
+            if glyph.glyph_id != expected[index].id or glyph.length_in_code_units != expected[index].length:
+                print(f"{text} glyph {index}: id {glyph.glyph_id} length {glyph.length_in_code_units}, expected id {expected[index].id} length {expected[index].length}")
+            assert(glyph.glyph_id == expected[index].id)
+            assert(glyph.length_in_code_units == expected[index].length)
+            test_expect_bits("glyph x", glyph.position.m_x, expected[index].x)
+            test_expect_bits("glyph y", glyph.position.m_y, expected[index].y)
+            test_expect_bits("glyph width", glyph.glyph_width, expected[index].width)
+        test_expect_bits("run width", glyph_run_width(run), run_width)
+        test_expect_bits("measured width", measure_text_width(view, font, letter_spacing), measured_width)
+        # A second shaping of the same text comes from the font's shaping cache.
+        let again = shape_text_f32(gfx.FloatPoint(m_x = 3.5, m_y = 20.25), letter_spacing, view, font, GlyphRunTextType.common)
+        test_expect_bits("cached run width", glyph_run_width(again), run_width)
+
+## SkFont::getPath of the glyph of `code_point` at the font's size times `scale`.
+noinline func test_body_path(file: str, point_size: f32, code_point: u32, scale: f32, glyph: u32, verbs: const u8[], points: const u32[]):
+    # The test fonts and what is made from them outlive the test (the typeface cache),
+    # so they come from the C heap, not the per-test buffer.
+    with memory.heap:
+        let font = typeface_font(test_typeface(file), point_size)
+        assert(font_glyph_id_for_code_point(font, code_point) == glyph)
+        let path = font_glyph_path(font, glyph, scale)
+        let actual_verbs = ak.vector_span_const(&path.verbs)
+        let actual_points = ak.vector_span_const(&path.points)
+        if actual_verbs.length != verbs.length or actual_points.length * 2 != points.length:
+            print(f"path of U+{hex(code_point)}: {actual_verbs.length} verbs and {actual_points.length} points, expected {verbs.length} and {points.length // 2}")
+        assert(actual_verbs.length == verbs.length)
+        assert(actual_points.length * 2 == points.length)
+        for (index, verb) in actual_verbs.indexed():
+            assert((u8)verb == verbs[index])
+        for (index, point) in actual_points.indexed():
+            test_expect_bits("path x", point.m_x, points[index * 2])
+            test_expect_bits("path y", point.m_y, points[index * 2 + 1])
+
+## GlyphRun::ensure_text_blob and cached_blob_bounds (Skia's conservative text-blob bounds).
+noinline func test_body_blob_bounds(file: str, point_size: f32, text: str, scale: f32, bounds: u32[4]):
+    # The test fonts and what is made from them outlive the test (the typeface cache),
+    # so they come from the C heap, not the per-test buffer.
+    with memory.heap:
+        let font = typeface_font(test_typeface(file), point_size)
+        let string = test_utf16(text)
+        let run = shape_text_f32(gfx.FloatPoint(m_x = 3.5, m_y = 20.25), 0.0, ak.utf16_string_base_utf16_view(&string.utf16_string_base), font, GlyphRunTextType.common)
+        glyph_run_ensure_text_blob(run, scale)
+        let actual = glyph_run_cached_blob_bounds(run)
+        test_expect_bits("blob x", actual.m_location.m_x, bounds[0])
+        test_expect_bits("blob y", actual.m_location.m_y, bounds[1])
+        test_expect_bits("blob width", actual.m_size.m_width, bounds[2])
+        test_expect_bits("blob height", actual.m_size.m_height, bounds[3])
+        assert(glyph_run_cached_skia_text_blob(run) != none)
+
+## GlyphRun::get_glyph_intercepts for the band 14..16 (times the scale): the port solves
+## curves by subdivision, so the intervals match Skia's to a small tolerance.
+noinline func test_body_intercepts(file: str, point_size: f32, text: str, scale: f32, expected: const f32[]):
+    # The test fonts and what is made from them outlive the test (the typeface cache),
+    # so they come from the C heap, not the per-test buffer.
+    with memory.heap:
+        let font = typeface_font(test_typeface(file), point_size)
+        let string = test_utf16(text)
+        let run = shape_text_f32(gfx.FloatPoint(m_x = 3.5, m_y = 20.25), 0.0, ak.utf16_string_base_utf16_view(&string.utf16_string_base), font, GlyphRunTextType.common)
+        let intercepts = glyph_run_get_glyph_intercepts(run, scale, 14.0 * scale, 16.0 * scale)
+        let actual = ak.vector_span_const(&intercepts)
+        if actual.length != expected.length:
+            print(f"{text}: {actual.length} intercepts, expected {expected.length}")
+        assert(actual.length == expected.length)
+        for (index, value) in actual.indexed():
+            let difference = value - expected[index]
+            if difference > 0.05 or difference < -0.05:
+                print(f"{text} intercept {index}: {value}, expected {expected[index]}")
+            assert(difference <= 0.05 and difference >= -0.05)
+
+## WOFF::try_load_from_bytes of HashSans.woff: the face, its metrics at 12pt and a shaping.
+noinline func test_body_woff(family: str, glyph_count: u32, units_per_em: u16, pixel: u32[6], text: str, run_glyphs: usize, run_width: u32):
+    with memory.heap:
+        let bytes = test_read_file("tests/web_fonts/fonts/HashSans.woff")
+        let typeface = woff_try_load_from_bytes(ak.byte_buffer_bytes_const(&bytes)) else trap("cannot load HashSans.woff")
+        assert(test_fly_text(typeface_family(typeface)) == family)
+        assert(typeface_glyph_count(typeface) == glyph_count)
+        assert(typeface_units_per_em(typeface) == units_per_em)
+        let font = typeface_font(typeface, 12.0)
+        let m = font_pixel_metrics(font)
+        test_expect_bits("size", m.size, pixel[0])
+        test_expect_bits("x_height", m.x_height, pixel[1])
+        test_expect_bits("advance_of_ascii_zero", m.advance_of_ascii_zero, pixel[2])
+        test_expect_bits("ascent", m.ascent, pixel[3])
+        test_expect_bits("descent", m.descent, pixel[4])
+        test_expect_bits("line_gap", m.line_gap, pixel[5])
+        let string = test_utf16(text)
+        let run = shape_text_f32(gfx.FloatPoint(m_x = 3.5, m_y = 20.25), 0.0, ak.utf16_string_base_utf16_view(&string.utf16_string_base), font, GlyphRunTextType.common)
+        assert(ak.vector_size(&run.m_glyphs) == run_glyphs)
+        test_expect_bits("run width", glyph_run_width(run), run_width)

@@ -78,6 +78,8 @@ pub struct FontDatabase:
     pub var m_system_font_provider: SystemFontProvider*?
     pub var m_code_point_fallback_cache: ak.HashMap[CodePointFallbackKey, FontDatabaseCodePointFallbackEntry, CodePointFallbackKeyTraits]
 
-## Gfx::FontDatabase::CodePointFallbackEntry (Libraries/LibGfx/Font/FontDatabase.h:62): opaque in this phase (not in the phase-1 closure).
+## Gfx::FontDatabase::CodePointFallbackEntry (Libraries/LibGfx/Font/FontDatabase.h:62), filled
+## by region r09.
 pub struct FontDatabaseCodePointFallbackEntry:
-    pub var opaque_: u8
+    pub var family_name: ak.FlyString
+    pub var typeface: Typeface*?

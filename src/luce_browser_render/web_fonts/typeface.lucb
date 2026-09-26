@@ -1,0 +1,148 @@
+#==============================================================================================
+#
+#   typeface - Typeface: a font face loaded from bytes, and its cache of Fonts per size
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Font/Typeface.cpp (lines 1-85) with the inline functions of
+#       Libraries/LibGfx/Font/Typeface.h (lines 1-109), and AK::Traits<Gfx::ShapeFeatures>
+#       of Libraries/LibGfx/ShapeFeature.h (lines 1-45), which FontCacheKey::hash uses.
+#       Typeface is abstract (TypefaceSkia is the one implementation); its pure virtuals
+#       stay traps. ~Typeface's hb_face_destroy/hb_blob_destroy have nothing to release
+#       (managed memory, DESIGN.md §3.3).
+#
+#==============================================================================================
+
+## Ported from Libraries/LibGfx/Font/Typeface.h:35 Gfx::ScaledFontMetrics::height.
+pub func scaled_font_metrics_height(this: const ScaledFontMetrics*) -> f32:
+    return this.ascender + this.descender
+
+## Ported from Libraries/LibGfx/Font/Typeface.h:46 Gfx::FontCacheKey::operator==.
+pub func font_cache_key_eq(this: const FontCacheKey*, other: FontCacheKey) -> bool:
+    return this.point_size == other.point_size and ak.vector_eq(&this.axes, &other.axes) and ak.vector_eq(&this.shape_features, &other.shape_features)
+
+## Ported from Libraries/LibGfx/ShapeFeature.h:30 AK::Traits<Gfx::ShapeFeatures>::hash.
+pub func shape_features_hash(features: const ak.Vector[ShapeFeature]*) -> u32:
+    var features_hash: u32 = 0
+
+    for feature in ak.vector_span_const(features):
+        # `char` is signed in the donor's build (-fsigned-char): tags widen with their sign.
+        features_hash = ak.pair_int_hash(features_hash, (u32)(i32)(i8)feature.tag[0])
+        features_hash = ak.pair_int_hash(features_hash, (u32)(i32)(i8)feature.tag[1])
+        features_hash = ak.pair_int_hash(features_hash, (u32)(i32)(i8)feature.tag[2])
+        features_hash = ak.pair_int_hash(features_hash, (u32)(i32)(i8)feature.tag[3])
+        features_hash = ak.pair_int_hash(features_hash, feature.value)
+
+    return features_hash
+
+## Ported from Libraries/LibGfx/Font/Typeface.h:51 Gfx::FontCacheKey::hash.
+pub func font_cache_key_hash(this: const FontCacheKey*) -> u32:
+    var h = ak.pair_int_hash(this.point_size.bits(), (u32)ak.vector_size(&this.axes))
+    for axis in ak.vector_span_const(&this.axes):
+        h = ak.pair_int_hash(h, ak.pair_int_hash(gfx.four_cc_to_u32(&axis.tag), axis.value.bits()))
+    h = ak.pair_int_hash(h, shape_features_hash(&this.shape_features))
+    return h
+
+# mark: Loading =================================================================================
+
+## Ported from Libraries/LibGfx/Font/Typeface.cpp:16 Gfx::Typeface::try_load_from_resource.
+pub func typeface_try_load_from_resource(resource: const ak.CoreResource*, ttc_index: u32 = 0) -> Typeface*!:
+    let font_data = font_data_create_from_resource(resource)
+    return try typeface_try_load_from_font_data(font_data, ttc_index)
+
+## Ported from Libraries/LibGfx/Font/Typeface.cpp:22 Gfx::Typeface::try_load_from_font_data.
+pub func typeface_try_load_from_font_data(font_data: FontData*, ttc_index: u32 = 0) -> Typeface*!:
+    let typeface = try typeface_try_load_from_externally_owned_memory(font_data_bytes(font_data), ttc_index)
+    typeface.m_font_data = font_data
+    return typeface
+
+## Ported from Libraries/LibGfx/Font/Typeface.cpp:29 Gfx::Typeface::try_load_from_temporary_memory.
+pub func typeface_try_load_from_temporary_memory(bytes: const u8[], ttc_index: u32 = 0) -> Typeface*!:
+    let buffer = try ak.byte_buffer_copy_span_u8(bytes)
+    let font_data = font_data_create_from_byte_buffer(buffer)
+    return try typeface_try_load_from_font_data(font_data, ttc_index)
+
+## Ported from Libraries/LibGfx/Font/Typeface.cpp:36 Gfx::Typeface::try_load_from_externally_owned_memory.
+pub func typeface_try_load_from_externally_owned_memory(bytes: const u8[], ttc_index: u32 = 0) -> Typeface*!:
+    let typeface = try typeface_skia_load_from_buffer(bytes, ttc_index)
+    return typeface.typeface()
+
+# mark: Abstract interface ======================================================================
+
+## Ported from Libraries/LibGfx/Font/Typeface.h:70 Gfx::Typeface::glyph_count (virtual).
+pub func typeface_glyph_count_impl(this: Typeface*) -> u32:
+    trap("pure virtual: Gfx::Typeface::glyph_count")
+
+## Ported from Libraries/LibGfx/Font/Typeface.h:71 Gfx::Typeface::units_per_em (virtual).
+pub func typeface_units_per_em_impl(this: Typeface*) -> u16:
+    trap("pure virtual: Gfx::Typeface::units_per_em")
+
+## Ported from Libraries/LibGfx/Font/Typeface.h:72 Gfx::Typeface::glyph_id_for_code_point (virtual).
+pub func typeface_glyph_id_for_code_point_impl(this: Typeface*, code_point: u32) -> u32:
+    trap("pure virtual: Gfx::Typeface::glyph_id_for_code_point")
+
+## Ported from Libraries/LibGfx/Font/Typeface.h:73 Gfx::Typeface::family (virtual).
+pub func typeface_family_impl(this: Typeface*) -> ak.FlyString:
+    trap("pure virtual: Gfx::Typeface::family")
+
+## Ported from Libraries/LibGfx/Font/Typeface.h:74 Gfx::Typeface::weight (virtual).
+pub func typeface_weight_impl(this: Typeface*) -> u16:
+    trap("pure virtual: Gfx::Typeface::weight")
+
+## Ported from Libraries/LibGfx/Font/Typeface.h:75 Gfx::Typeface::width (virtual).
+pub func typeface_width_impl(this: Typeface*) -> u16:
+    trap("pure virtual: Gfx::Typeface::width")
+
+## Ported from Libraries/LibGfx/Font/Typeface.h:76 Gfx::Typeface::slope (virtual).
+pub func typeface_slope_impl(this: Typeface*) -> u8:
+    trap("pure virtual: Gfx::Typeface::slope")
+
+## `Typeface::font`'s cap on the fonts a typeface caches.
+let typeface_max_cached_font_size_count: usize = 128
+
+## Ported from Libraries/LibGfx/Font/Typeface.cpp:51 Gfx::Typeface::font.
+pub func typeface_font(this: Typeface*, point_size: f32, variations: FontVariationSettings = FontVariationSettings(), shape_features: ak.Vector[ShapeFeature] = ak.Vector[ShapeFeature]()) -> Font*:
+    let key = FontCacheKey(point_size = point_size, axes = font_variation_settings_to_sorted_list(&variations), shape_features = ak.vector_clone(&shape_features))
+
+    if let cached = ak.hash_map_get_k(&this.m_fonts, key):
+        return *cached
+
+    # FIXME: It might be nice to have a global cap on the number of fonts we cache
+    #        instead of doing it at the per-Typeface level like this.
+    if ak.hash_map_size(&this.m_fonts) > typeface_max_cached_font_size_count:
+        ak.hash_map_remove_opaque(&this.m_fonts, ak.hash_map_begin(&this.m_fonts))
+
+    var used_typeface: Typeface* = this
+    if not font_variation_settings_is_empty(&variations):
+        if let skia_typeface = as_if_typeface_skia(this):
+            if let derived = typeface_skia_clone_with_variations(skia_typeface, font_variation_settings_to_sorted_list(&variations)):
+                used_typeface = derived.typeface()
+
+    let font = new Font(m_typeface = used_typeface) else trap("out of memory")
+    font_construct(font, used_typeface, point_size, point_size, default_dpi, default_dpi, variations, shape_features)
+    discard(ak.hash_map_set(&this.m_fonts, key, font))
+    return font
+
+## Ported from Libraries/LibGfx/Font/Typeface.cpp:76 Gfx::Typeface::harfbuzz_typeface.
+pub func typeface_harfbuzz_typeface(this: Typeface*) -> HbFaceT*?:
+    if this.m_harfbuzz_blob == none:
+        this.m_harfbuzz_blob = hb_blob_create(typeface_buffer(this))
+    if this.m_harfbuzz_face == none:
+        let blob = this.m_harfbuzz_blob else trap("VERIFY_NOT_REACHED")
+        this.m_harfbuzz_face = hb_face_create(blob, typeface_ttc_index(this))
+    return this.m_harfbuzz_face
+
+## Ported from Libraries/LibGfx/Font/Typeface.h:85 Gfx::Typeface::is_skia (virtual).
+pub func typeface_is_skia_impl(this: Typeface*) -> bool:
+    return false
+
+## Ported from Libraries/LibGfx/Font/Typeface.cpp:41 Gfx::Typeface::Typeface.
+pub func typeface_construct(this: Typeface*):
+    return
+
+## Ported from Libraries/LibGfx/Font/Typeface.h:90 Gfx::Typeface::buffer (virtual).
+pub func typeface_buffer_impl(this: Typeface*) -> const u8[]:
+    trap("pure virtual: Gfx::Typeface::buffer")
+
+## Ported from Libraries/LibGfx/Font/Typeface.h:91 Gfx::Typeface::ttc_index (virtual).
+pub func typeface_ttc_index_impl(this: Typeface*) -> u32:
+    trap("pure virtual: Gfx::Typeface::ttc_index")

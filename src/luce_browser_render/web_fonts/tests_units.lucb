@@ -1,0 +1,575 @@
+#==============================================================================================
+#
+#   tests_units - the web_fonts tests that need no reference build: Ladybird's TestWOFF and
+#                 TestWOFF2, and focused tests of the ported classes
+#
+#   DESCRIPTION:
+#       Ported from Tests/LibGfx/TestWOFF.cpp and TestWOFF2.cpp (their inputs are in
+#       tests/web_fonts/woff), and focused tests pinned to the donor's code for UnicodeRange,
+#       FontStyleMapping, FontSupport, FontCascadeList, Typeface's font cache, Font,
+#       PathFontProvider, FontDatabase, GlyphRun and the TTC reader. The tests that need
+#       FourCC (region r10: its hash, to_u32 and operator<) wait for that region:
+#       `tests_r10_four_cc_is_ported` gates them until the integration merges r10.
+#
+#==============================================================================================
+
+## Whether region r10's FourCC functions are ported (flip at integration).
+var tests_r10_four_cc_is_ported: bool = false
+
+# mark: Tests/LibGfx/TestWOFF.cpp and TestWOFF2.cpp ===============================================
+
+noinline func test_body_malformed_woff():
+    with memory.heap:
+        let test_inputs: str[1] = ["tests/web_fonts/woff/invalid_sfnt_size.woff"]
+        for test_input in test_inputs:
+            let file = test_read_file(test_input)
+            let font_or_error: Typeface*? = woff_try_load_from_bytes(ak.byte_buffer_bytes_const(&file)) catch:
+                recover none
+            assert(font_or_error == none)
+
+test "malformed_woff":
+    test_body_malformed_woff()
+
+# TestWOFF2's tolerate_incorrect_sfnt_size loads a WOFF2 font; the port has no Brotli decoder
+# (woff2_loader.lucb), so it is not ported. The conversion reports the failure instead.
+noinline func test_body_woff2_without_brotli():
+    with memory.heap:
+        let file = test_read_file("tests/web_fonts/woff/incorrect_sfnt_size.woff2")
+        let font_or_error: Typeface*? = woff2_try_load_from_bytes(ak.byte_buffer_bytes_const(&file)) catch:
+            recover none
+        assert(font_or_error == none)
+
+test "woff2_without_brotli":
+    test_body_woff2_without_brotli()
+
+noinline func test_body_malformed_woff2():
+    with memory.heap:
+        let test_inputs: str[2] = ["tests/web_fonts/woff/incorrect_compressed_size.woff2", "tests/web_fonts/woff/invalid_numtables.woff2"]
+        for test_input in test_inputs:
+            let file = test_read_file(test_input)
+            let font_or_error: Typeface*? = woff2_try_load_from_bytes(ak.byte_buffer_bytes_const(&file)) catch:
+                recover none
+            assert(font_or_error == none)
+
+test "malformed_woff2":
+    test_body_malformed_woff2()
+
+## WOFF2ByteBufferOut's two writes and size.
+noinline func test_body_woff2_byte_buffer_out():
+    with memory.heap:
+        var buffer: ak.ByteBuffer
+        var output = woff2_byte_buffer_out_create(&buffer)
+        let first: u8[3] = [1, 2, 3]
+        assert(woff2_byte_buffer_out_write(&output, (const void*)&first[0], 3))
+        assert(woff2_byte_buffer_out_size(&output) == 3)
+        let second: u8[2] = [8, 9]
+        assert(woff2_byte_buffer_out_write_usize(&output, (const void*)&second[0], 5, 2))
+        assert(woff2_byte_buffer_out_size(&output) == 7)
+        assert(ak.byte_buffer_bytes_const(&buffer)[5] == 8 and ak.byte_buffer_bytes_const(&buffer)[6] == 9)
+        assert(not woff2_byte_buffer_out_write_usize(&output, (const void*)&second[0], ~(usize)0, 2))
+
+test "woff2_byte_buffer_out":
+    test_body_woff2_byte_buffer_out()
+
+## Whether WOFF::try_load_from_bytes succeeds.
+func test_woff_loads(bytes: const u8[]) -> bool:
+    let font_or_error: Typeface*? = woff_try_load_from_bytes(bytes) catch:
+        recover none
+    return font_or_error != none
+
+## WOFF's header checks, on hand-made headers.
+noinline func test_body_woff_header_checks():
+    with memory.heap:
+        var header: u8[44]
+        # A wrong signature.
+        assert(not test_woff_loads(header))
+        # 'wOFF' with no tables.
+        header[0] = 'w'
+        header[1] = 'O'
+        header[2] = 'F'
+        header[3] = 'F'
+        header[11] = 44
+        assert(not test_woff_loads(header))
+        # Too short for a header.
+        assert(not test_woff_loads(header[0..<20]))
+        assert(woff_pow_2_less_than_or_equal(1) == 1)
+        assert(woff_pow_2_less_than_or_equal(5) == 8)
+        assert(woff_pow_2_less_than_or_equal(16) == 16)
+
+test "woff_header_checks":
+    test_body_woff_header_checks()
+
+# mark: UnicodeRange, FontStyleMapping, FontSupport ==========================================
+
+noinline func test_body_unicode_range():
+    with memory.heap:
+        let range = unicode_range_create(0x41, 0x5A)
+        assert(unicode_range_contains(&range, 0x41))
+        assert(unicode_range_contains(&range, 0x5A))
+        assert(not unicode_range_contains(&range, 0x40))
+        assert(not unicode_range_contains(&range, 0x5B))
+        assert(unicode_range_eq(&range, unicode_range_create(0x41, 0x5A)))
+        assert(not unicode_range_eq(&range, unicode_range_create(0x41, 0x5B)))
+        let text = unicode_range_to_string(&range)
+        assert(ak.string_view_text(ak.string_bytes_as_string_view(&text)) == "U+41-5A")
+        let single = unicode_range_create(0x1F600, 0x1F600)
+        let single_text = unicode_range_to_string(&single)
+        assert(ak.string_view_text(ak.string_bytes_as_string_view(&single_text)) == "U+1F600")
+        let everything = unicode_range_create(0, 0x10FFFF)
+        let everything_text = unicode_range_to_string(&everything)
+        assert(ak.string_view_text(ak.string_bytes_as_string_view(&everything_text)) == "U+0-10FFFF")
+
+test "unicode_range":
+    test_body_unicode_range()
+
+noinline func test_body_font_style_mapping():
+    assert(ak.string_view_text(weight_to_name(700)) == "Bold")
+    assert(ak.string_view_text(weight_to_name(950)) == "Extra Black")
+    assert(ak.string_view_text(weight_to_name(450)) == "")
+    assert(name_to_weight(ak.sv("Semi Bold")) == 600)
+    assert(name_to_weight(ak.sv("Bolder")) == 0)
+    assert(ak.string_view_text(slope_to_name(2)) == "Oblique")
+    assert(name_to_slope(ak.sv("Reclined")) == 3)
+    assert(ak.string_view_text(width_to_name(5)) == "Normal")
+    assert(name_to_width(ak.sv("Ultra Expanded")) == 9)
+    assert(name_to_width(ak.sv("")) == 0)
+
+test "font_style_mapping":
+    test_body_font_style_mapping()
+
+noinline func test_body_font_support():
+    assert(not font_format_is_supported(FontFormat.embedded_open_type))
+    assert(font_format_is_supported(FontFormat.open_type))
+    assert(not font_format_is_supported(FontFormat.svg))
+    assert(font_format_is_supported(FontFormat.true_type))
+    assert(font_format_is_supported(FontFormat.woff2))
+    assert(font_tech_is_supported(FontTech.features_opentype))
+    assert(not font_tech_is_supported(FontTech.features_graphite))
+    assert(not font_tech_is_supported(FontTech.incremental))
+    assert(font_tech_is_supported(FontTech.avar2))
+
+test "font_support":
+    test_body_font_support()
+
+# mark: Typeface and Font ========================================================================
+
+noinline func test_body_typeface_font_cache():
+    with memory.heap:
+        let typeface = test_typeface("SerenitySans-Regular.ttf")
+        let font = typeface_font(typeface, 12.0)
+        # The same key answers the same Font.
+        assert(typeface_font(typeface, 12.0) == font)
+        assert(typeface_font(typeface, 13.0) != font)
+        # Different shape features are a different key.
+        var features: ak.Vector[ShapeFeature]
+        ak.vector_append_t(&features, ShapeFeature(tag = ['l', 'i', 'g', 'a'], value = 0))
+        let without_ligatures = typeface_font(typeface, 12.0, FontVariationSettings(), features)
+        assert(without_ligatures != font)
+        assert(typeface_font(typeface, 12.0, FontVariationSettings(), features) == without_ligatures)
+        # scaled_with_size answers the font itself at its own size.
+        assert(font_scaled_with_size(font, 12.0) == font)
+        assert(font_with_size(font, 16.0) == typeface_font(typeface, 16.0))
+        assert(font_typeface(font) == typeface)
+        test_expect_bits("pixel_size", font_pixel_size(font), f32(16.0).bits())
+
+test "typeface_font_cache":
+    test_body_typeface_font_cache()
+
+noinline func test_body_font_queries():
+    with memory.heap:
+        let font = typeface_font(test_typeface("SerenitySans-Regular.ttf"), 12.0)
+        # glyph_width is measure_text_width of the one code point: 'f' is 6.4375 px at 16 px.
+        test_expect_bits("glyph_width", font_glyph_width(font, (u32)'f'), f32(6.4375).bits())
+        let text = test_utf16("foo")
+        test_expect_bits("width", font_width(font, ak.utf16_string_base_utf16_view(&text.utf16_string_base)), f32(27.15625).bits())
+        # x_height and baseline are the point height (FIXME: Read from font).
+        assert(font_x_height(font) == 12)
+        assert(font_baseline(font) == 12)
+        assert(font_weight(font) == 400)
+        assert(font_slope(font) == 0)
+        assert(test_fly_text(font_family(font)) == "SerenitySans")
+        assert(font_contains_glyph(font, (u32)'a'))
+        assert(not font_contains_glyph(font, 0x1F600))
+        assert(font_glyph_id_for_code_point(font, (u32)'a') == 68)
+        let metrics = font_pixel_metrics(font)
+        test_expect_bits("line_spacing", font_pixel_metrics_line_spacing(&metrics), f32(12.796875 + 3.203125 + 1.46875).bits())
+        let scaled = font_metrics(font)
+        test_expect_bits("height", scaled_font_metrics_height(&scaled), f32(16.0).bits())
+
+test "font_queries":
+    test_body_font_queries()
+
+noinline func test_body_is_emoji_font():
+    with memory.heap:
+        # The first call answers false whatever it finds (a donor quirk), then the answer.
+        let emoji = typeface_font(test_typeface("NotoEmoji.ttf"), 12.0)
+        assert(not font_is_emoji_font(emoji))
+        # "Noto Emoji" does not contain "emoji" (case sensitive) and has no color tables.
+        assert(not font_is_emoji_font(emoji))
+        let text = typeface_font(test_typeface("SerenitySans-Regular.ttf"), 12.0)
+        assert(not font_is_emoji_font(text))
+        assert(not font_is_emoji_font(text))
+
+test "is_emoji_font":
+    test_body_is_emoji_font()
+
+## A font collection made of two copies of SerenitySans: the TTC header, then the font with
+## its table offsets moved by the header's size.
+noinline func test_body_font_collection():
+    with memory.heap:
+        let font_file = test_read_file("tests/web_fonts/fonts/SerenitySans-Regular.ttf")
+        let bytes = ak.byte_buffer_bytes_const(&font_file)
+        let header_size: usize = 20
+        var collection = ak.byte_buffer_create_zeroed(header_size + bytes.length) else trap("out of memory")
+        let data = ak.byte_buffer_bytes(&collection)
+        let header: u8[20] = ['t', 't', 'c', 'f', 0, 1, 0, 0, 0, 0, 0, 2, 0, 0, 0, 20, 0, 0, 0, 20]
+        memory.copy(data, header, header_size)
+        memory.copy(data[header_size..], bytes, bytes.length)
+        let table_count = (usize)sfnt_u16(bytes, 4)
+        for index in 0..<table_count:
+            let record = header_size + 12 + index * 16 + 8
+            let offset = sfnt_u32(data, record) + (u32)header_size
+            data[record] = (u8)(offset >> 24)
+            data[record + 1] = (u8)(offset >> 16)
+            data[record + 2] = (u8)(offset >> 8)
+            data[record + 3] = (u8)offset
+        assert(number_of_fonts_in_ttc(data) == 2)
+        assert(number_of_fonts_in_ttc(bytes) == 1)
+        let second = typeface_try_load_from_temporary_memory(data, 1) else trap("cannot load the second font of the collection")
+        assert(typeface_ttc_index(second) == 1)
+        assert(test_fly_text(typeface_family(second)) == "SerenitySans")
+        assert(typeface_glyph_id_for_code_point(second, (u32)'a') == 68)
+        let third: Typeface*? = typeface_try_load_from_temporary_memory(data, 2) catch:
+            recover none
+        assert(third == none)
+        # A single font has only index 0.
+        let other: Typeface*? = typeface_try_load_from_temporary_memory(bytes, 1) catch:
+            recover none
+        assert(other == none)
+        let garbage: u8[4] = [1, 2, 3, 4]
+        let not_a_font: Typeface*? = typeface_try_load_from_temporary_memory(garbage) catch:
+            recover none
+        assert(not_a_font == none)
+
+test "font_collection":
+    test_body_font_collection()
+
+# mark: FontCascadeList and shaping across fonts ================================================
+
+## The start_load of a pending face: counts its calls.
+func test_count_start_load(context: void*?):
+    let count = (u32*)(context else trap("VERIFY_NOT_REACHED"))
+    *count += 1
+
+noinline func test_body_font_cascade_list():
+    with memory.heap:
+        let text_font = typeface_font(test_typeface("SerenitySans-Regular.ttf"), 12.0)
+        let emoji_font = typeface_font(test_typeface("NotoEmoji.ttf"), 12.0)
+        let list = font_cascade_list_create()
+        assert(font_cascade_list_is_empty(list))
+        font_cascade_list_add(list, text_font)
+        font_cascade_list_add(list, emoji_font)
+        font_cascade_list_set_last_resort_font(list, (Font*)text_font)
+        assert(font_cascade_list_size(list) == 2)
+        assert(not font_cascade_list_is_empty(list))
+        assert(font_cascade_list_first(list) == text_font)
+        assert(font_cascade_list_first_text_face(list) == text_font)
+        assert(font_cascade_list_font_for_code_point(list, (u32)'a') == text_font)
+        # The ASCII cache answers again.
+        assert(font_cascade_list_font_for_code_point(list, (u32)'a') == text_font)
+        assert(font_cascade_list_font_for_code_point(list, 0x1F600) == emoji_font)
+        # Nobody has U+0915: the last resort font.
+        assert(font_cascade_list_font_for_code_point(list, 0x0915) == text_font)
+        var entries: usize = 0
+        for entry in font_cascade_list_for_each_font_entry(list):
+            assert(entry.range_data == none)
+            entries += 1
+        assert(entries == 2)
+
+        # A range restricts the font to its code points.
+        let ranged = font_cascade_list_create()
+        var ranges: ak.Vector[UnicodeRange]
+        ak.vector_append_t(&ranges, unicode_range_create(0x61, 0x62))
+        ak.vector_append_t(&ranges, unicode_range_create(0x30, 0x31))
+        font_cascade_list_add_vector(ranged, text_font, ranges)
+        font_cascade_list_add(ranged, emoji_font)
+        font_cascade_list_set_last_resort_font(ranged, (Font*)emoji_font)
+        assert(font_cascade_list_font_for_code_point(ranged, (u32)'a') == text_font)
+        assert(font_cascade_list_font_for_code_point(ranged, (u32)'0') == text_font)
+        # 'c' is outside the ranges; Noto Emoji lacks it too: the last resort font.
+        assert(font_cascade_list_font_for_code_point(ranged, (u32)'c') == emoji_font)
+        let entry = font_cascade_list_for_each_font_entry(ranged)[0]
+        let range_data = entry.range_data else trap("the ranged entry has no ranges")
+        assert(unicode_range_eq(&range_data.enclosing_range, unicode_range_create(0x30, 0x62)))
+
+        # A pending face starts loading once, for a covered code point, when asked to.
+        var loads: u32 = 0
+        var pending_ranges: ak.Vector[UnicodeRange]
+        ak.vector_append_t(&pending_ranges, unicode_range_create(0x400, 0x4FF))
+        font_cascade_list_add_pending_face(ranged, pending_ranges, ak.Function0[unit](call = test_count_start_load, context = &loads))
+        font_cascade_list_add_pending_face(ranged, ak.Vector[UnicodeRange](), ak.Function0[unit](call = test_count_start_load, context = &loads))
+        assert(ak.vector_size(&ranged.m_pending_faces) == 1)
+        discard(font_cascade_list_font_for_code_point(ranged, 0x416))
+        assert(loads == 0)
+        discard(font_cascade_list_font_for_code_point(ranged, 0x100, FontCascadeListTriggerPendingLoads.yes))
+        assert(loads == 0)
+        discard(font_cascade_list_font_for_code_point(ranged, 0x416, FontCascadeListTriggerPendingLoads.yes))
+        assert(loads == 1)
+        discard(font_cascade_list_font_for_code_point(ranged, 0x417, FontCascadeListTriggerPendingLoads.yes))
+        assert(loads == 1)
+        assert(ak.vector_size(&ranged.m_pending_faces) == 0)
+
+        # equals compares the fonts in order; extend appends them.
+        let copy = font_cascade_list_create()
+        font_cascade_list_extend(copy, list)
+        assert(font_cascade_list_equals(copy, list))
+        # Only the fonts are compared, not their ranges.
+        assert(font_cascade_list_equals(copy, ranged))
+        font_cascade_list_add(copy, text_font)
+        assert(not font_cascade_list_equals(copy, list))
+
+test "font_cascade_list":
+    test_body_font_cascade_list()
+
+## The system font fallback: answers the emoji font for everything.
+func test_fallback_to_emoji(context: void*?, code_point: u32, first: const Font*) -> const Font*?:
+    return (const Font*)(context else trap("VERIFY_NOT_REACHED"))
+
+noinline func test_body_font_cascade_list_fallback():
+    with memory.heap:
+        let text_font = typeface_font(test_typeface("SerenitySans-Regular.ttf"), 12.0)
+        let emoji_font = typeface_font(test_typeface("NotoEmoji.ttf"), 12.0)
+        let list = font_cascade_list_create()
+        font_cascade_list_add(list, text_font)
+        font_cascade_list_set_last_resort_font(list, (Font*)text_font)
+        font_cascade_list_set_system_font_fallback_callback(list, ak.Function2[u32, const Font*, const Font*?](call = test_fallback_to_emoji, context = (void*)emoji_font))
+        # The fallback's font joins the cascade.
+        assert(font_cascade_list_font_for_code_point(list, 0x1F600) == emoji_font)
+        assert(font_cascade_list_size(list) == 2)
+        assert(font_cascade_list_font_for_code_point(list, 0x1F601) == emoji_font)
+        assert(font_cascade_list_size(list) == 2)
+
+test "font_cascade_list_fallback":
+    test_body_font_cascade_list_fallback()
+
+noinline func test_body_shape_text_across_fonts():
+    with memory.heap:
+        let text_font = typeface_font(test_typeface("SerenitySans-Regular.ttf"), 12.0)
+        let emoji_font = typeface_font(test_typeface("NotoEmoji.ttf"), 12.0)
+        let list = font_cascade_list_create()
+        font_cascade_list_add(list, text_font)
+        font_cascade_list_add(list, emoji_font)
+        font_cascade_list_set_last_resort_font(list, (Font*)text_font)
+        let string = test_utf16("ab\u{1F600}\u{1F601}c")
+        let view = ak.utf16_string_base_utf16_view(&string.utf16_string_base)
+        let runs = shape_text_utf16_view(gfx.FloatPoint(m_x = 1.0, m_y = 2.0), view, list, 0.5)
+        assert(ak.vector_size(&runs) == 3)
+        let first = *ak.vector_at_const(&runs, 0)
+        let second = *ak.vector_at_const(&runs, 1)
+        let third = *ak.vector_at_const(&runs, 2)
+        assert(glyph_run_font(first) == text_font)
+        assert(glyph_run_font(second) == emoji_font)
+        assert(glyph_run_font(third) == text_font)
+        assert(ak.vector_size(&first.m_glyphs) == 2)
+        assert(ak.vector_size(&second.m_glyphs) == 2)
+        assert(ak.vector_at(&second.m_glyphs, 0).length_in_code_units == 2)
+        # Each run starts where the one before ended.
+        test_expect_bits("second run start", ak.vector_at(&second.m_glyphs, 0).position.m_x, (1.0 + glyph_run_width(first)).bits())
+        test_expect_bits("third run start", ak.vector_at(&third.m_glyphs, 0).position.m_x, (1.0 + glyph_run_width(first) + glyph_run_width(second)).bits())
+        # An empty string has no runs.
+        let empty = test_utf16("")
+        let no_runs = shape_text_utf16_view(gfx.FloatPoint(), ak.utf16_string_base_utf16_view(&empty.utf16_string_base), list)
+        assert(ak.vector_size(&no_runs) == 0)
+
+test "shape_text_across_fonts":
+    test_body_shape_text_across_fonts()
+
+noinline func test_body_glyph_run_slice():
+    with memory.heap:
+        let font = typeface_font(test_typeface("SerenitySans-Regular.ttf"), 12.0)
+        let string = test_utf16("foo bar")
+        let run = shape_text_f32(gfx.FloatPoint(m_x = 0.0, m_y = 0.0), 0.0, ak.utf16_string_base_utf16_view(&string.utf16_string_base), font, GlyphRunTextType.ltr)
+        assert(glyph_run_text_type(run) == GlyphRunTextType.ltr)
+        assert(not glyph_run_is_empty(run))
+        let slice = glyph_run_slice(run, 4, 3)
+        assert(ak.vector_size(&slice.m_glyphs) == 3)
+        assert(ak.vector_at(&slice.m_glyphs, 0).glyph_id == ak.vector_at(&run.m_glyphs, 4).glyph_id)
+        test_expect_bits("slice width", glyph_run_width(slice), f32(9.46875 + 9.34375 + 8.828125).bits())
+        assert(glyph_run_font(slice) == font)
+        let empty = glyph_run_slice(run, 2, 0)
+        assert(glyph_run_is_empty(empty))
+        test_expect_bits("empty width", glyph_run_width(empty), f32(0.0).bits())
+        # A run's glyphs can be changed in place.
+        ak.vector_at(glyph_run_glyphs(run), 0).glyph_id = 5
+        assert(ak.vector_at(&run.m_glyphs, 0).glyph_id == 5)
+        # An empty run has an empty blob and zero bounds.
+        glyph_run_ensure_text_blob(empty, 1.0)
+        assert(glyph_run_cached_skia_text_blob(empty) == none)
+        let bounds = glyph_run_cached_blob_bounds(empty)
+        assert(bounds.m_size.m_width == 0.0 and bounds.m_size.m_height == 0.0)
+
+test "glyph_run_slice":
+    test_body_glyph_run_slice()
+
+# mark: PathFontProvider and FontDatabase ========================================================
+
+## The provider every FontDatabase test uses (FontDatabase::the() is process-wide).
+var test_provider: PathFontProvider*?
+
+func test_font_database() -> FontDatabase*:
+    if test_provider == none:
+        let provider = path_font_provider_create()
+        path_font_provider_load_all_fonts_from_uri(provider, ak.sv("file://tests/web_fonts/fonts"))
+        discard(font_database_install_system_font_provider(font_database_the(), provider.system_font_provider()))
+        test_provider = provider
+    return font_database_the()
+
+## for_each_typeface_with_family_name's callback: counts the typefaces.
+func test_count_typefaces(context: void*?, typeface: Typeface*):
+    let count = (u32*)(context else trap("VERIFY_NOT_REACHED"))
+    *count += 1
+
+noinline func test_body_path_font_provider():
+    with memory.heap:
+        let database = test_font_database()
+        assert(ak.string_view_text(font_database_system_font_provider_name(database)) == "Path")
+        var count: u32 = 0
+        let callback = ak.Function1[Typeface*, unit](call = test_count_typefaces, context = &count)
+        font_database_for_each_typeface_with_family_name(database, ak.fly_string_from_str("SerenitySans"), callback)
+        assert(count == 1)
+        # Family names match ignoring ASCII case.
+        font_database_for_each_typeface_with_family_name(database, ak.fly_string_from_str("serenitysans"), callback)
+        assert(count == 2)
+        # The WOFF file is loaded too.
+        font_database_for_each_typeface_with_family_name(database, ak.fly_string_from_str("HashSans"), callback)
+        assert(count == 3)
+        font_database_for_each_typeface_with_family_name(database, ak.fly_string_from_str("Lato"), callback)
+        font_database_for_each_typeface_with_family_name(database, ak.fly_string_from_str("Noto Emoji"), callback)
+        font_database_for_each_typeface_with_family_name(database, ak.fly_string_from_str("Noto Sans Tifinagh"), callback)
+        assert(count == 6)
+        font_database_for_each_typeface_with_family_name(database, ak.fly_string_from_str("Nonexistent"), callback)
+        assert(count == 6)
+
+        # get with explicit settings (the defaults need FourCC, region r10).
+        var features: ak.Vector[ShapeFeature]
+        ak.vector_append_t(&features, ShapeFeature(tag = ['k', 'e', 'r', 'n'], value = 1))
+        let font = font_database_get(database, ak.fly_string_from_str("Lato"), 12.0, 700, 5, 0, FontVariationSettings(), features) else trap("no Lato Bold")
+        assert(font_weight(font) == 700)
+        assert(ak.vector_size(&font.m_shape_features) == 1)
+        # Weight, width and slope must match exactly.
+        assert(font_database_get(database, ak.fly_string_from_str("Lato"), 12.0, 400, 5, 0, FontVariationSettings(), features) == none)
+        assert(font_database_get(database, ak.fly_string_from_str("Lato"), 12.0, 700, 5, 1, FontVariationSettings(), features) == none)
+        assert(font_database_get(database, ak.fly_string_from_str("Nonexistent"), 12.0, 400, 5, 0, FontVariationSettings(), features) == none)
+
+        # bold_variant: SerenitySans has no bold face, so it is itself. (Lato Bold's own bold
+        # variant is made with the default variation settings: font_database_defaults.)
+        let serenity = font_database_get(database, ak.fly_string_from_str("SerenitySans"), 12.0, 400, 5, 0, FontVariationSettings(), features) else trap("no SerenitySans")
+        assert(font_bold_variant(serenity) == serenity)
+
+        # No system font manager: nothing to fall back to.
+        assert(font_database_get_font_for_code_point(database, 0x1F600, 12.0, 400, 5, 0) == none)
+        assert(font_database_get_font_for_code_point(database, 0x1F600, 12.0, 400, 5, 0) == none)
+        assert(typeface_skia_resolve_generic_family(ak.sv("sans-serif"), 400, 0) == none)
+
+        # A provider's name can be changed.
+        let named = path_font_provider_create()
+        path_font_provider_set_name_but_fixme_should_create_custom_system_font_provider(named, ak.string_from_str("FontConfig"))
+        assert(ak.string_view_text(system_font_provider_name(named.system_font_provider())) == "FontConfig")
+        # A missing directory, and an unsupported scheme, load nothing.
+        path_font_provider_load_all_fonts_from_uri(named, ak.sv("file://tests/web_fonts/missing"))
+        path_font_provider_load_all_fonts_from_uri(named, ak.sv("resource://fonts"))
+        assert(ak.hash_map_is_empty(&named.m_typeface_by_family))
+
+test "path_font_provider":
+    test_body_path_font_provider()
+
+noinline func test_body_font_database_defaults():
+    if not tests_r10_four_cc_is_ported:
+        return
+    with memory.heap:
+        let database = test_font_database()
+        # PathFontProvider's default variation settings (wght, opsz, wdth) and features.
+        let font = font_database_get(database, ak.fly_string_from_str("SerenitySans"), 12.0, 400, 5, 0) else trap("no SerenitySans")
+        assert(ak.vector_size(&font.m_shape_features) == 3)
+        assert(ak.hash_map_size(&font.m_font_variation_settings.axes) == 3)
+        let sorted = font_variation_settings_to_sorted_list(&font.m_font_variation_settings)
+        assert(ak.vector_at_const(&sorted, 0).tag == gfx.FourCc(cc = ['o', 'p', 's', 'z']))
+        test_expect_bits("opsz", ak.vector_at_const(&sorted, 0).value, f32(16.0).bits())
+        assert(ak.vector_at_const(&sorted, 1).tag == gfx.FourCc(cc = ['w', 'd', 't', 'h']))
+        assert(ak.vector_at_const(&sorted, 2).tag == gfx.FourCc(cc = ['w', 'g', 'h', 't']))
+        test_expect_bits("wght", ak.vector_at_const(&sorted, 2).value, f32(400.0).bits())
+        # The same metrics as without the variations (SerenitySans has no fvar).
+        test_expect_bits("ascent", font_pixel_metrics(font).ascent, f32(12.796875).bits())
+        # Lato Bold's bold variant is Lato Bold with the default settings.
+        let lato = font_database_get(database, ak.fly_string_from_str("Lato"), 12.0, 700, 5, 0) else trap("no Lato Bold")
+        assert(font_bold_variant(lato) == lato)
+
+test "font_database_defaults":
+    test_body_font_database_defaults()
+
+noinline func test_body_font_variation_settings():
+    if not tests_r10_four_cc_is_ported:
+        return
+    with memory.heap:
+        var settings: FontVariationSettings
+        assert(font_variation_settings_is_empty(&settings))
+        font_variation_settings_set_width(&settings, 75.0)
+        font_variation_settings_set_weight(&settings, 700.0)
+        font_variation_settings_set_optical_sizing(&settings, 12.0)
+        font_variation_settings_set_weight(&settings, 800.0)
+        assert(not font_variation_settings_is_empty(&settings))
+        let sorted = font_variation_settings_to_sorted_list(&settings)
+        assert(ak.vector_size(&sorted) == 3)
+        var axis: FontVariationAxis
+        font_variation_axis_construct(&axis, gfx.FourCc(cc = ['w', 'g', 'h', 't']), 800.0)
+        assert(font_variation_axis_eq(ak.vector_at_const(&sorted, 2), axis))
+
+test "font_variation_settings":
+    test_body_font_variation_settings()
+
+noinline func test_body_font_directories():
+    with memory.heap:
+        let directories = font_database_font_directories() else trap("font_directories failed")
+        assert(ak.vector_size(&directories) >= 2)
+
+test "font_directories":
+    test_body_font_directories()
+
+# mark: The OpenType reader ======================================================================
+
+noinline func test_body_fixed_point():
+    # FreeType's arithmetic (ftcalc.c): FT_MulFix rounds halves away from zero.
+    assert(ft_mul_fix(0x10000, 3) == 3)
+    assert(ft_mul_fix(0x8000, 1) == 1)
+    assert(ft_mul_fix(0x7FFF, 1) == 0)
+    assert(ft_mul_fix(-0x7FFF, 1) == 0)
+    assert(ft_mul_fix(-0x8000, 1) == -1)
+    assert(ft_div_fix(1, 2) == 0x8000)
+    assert(ft_div_fix(-1, 2) == -0x8000)
+    assert(ft_div_fix(5, 0) == 0x7FFFFFFF)
+    assert(ft_mul_div(7, 3, 2) == 11)
+    assert(ft_mul_div(-7, 3, 2) == -11)
+    assert(ft_pix_round(95) == 64)
+    assert(ft_pix_round(96) == 128)
+    assert(ft_pix_round(-33) == -64)
+    assert(ft_pix_round(-32) == 0)
+
+test "fixed_point":
+    test_body_fixed_point()
+
+noinline func test_body_sfnt_reads():
+    let data: u8[5] = [0x12, 0x34, 0x56, 0x78, 0x9A]
+    assert(sfnt_u16(data, 0) == 0x1234)
+    assert(sfnt_u24(data, 1) == 0x345678)
+    assert(sfnt_u32(data, 1) == 0x3456789A)
+    # Reads past the end answer 0 instead of trapping.
+    assert(sfnt_u16(data, 4) == 0)
+    assert(sfnt_u32(data, 2) == 0)
+    assert(sfnt_u8(data, 9) == 0)
+    assert(sfnt_i16(data, 3) == (i16)0x789A)
+    assert(sfnt_slice(data, 3, 10).length == 2)
+    assert(sfnt_slice(data, 7, 1).length == 0)
+    assert(sfnt_tag('k', 'e', 'r', 'n') == 0x6B65726E)
+
+test "sfnt_reads":
+    test_body_sfnt_reads()

@@ -35,6 +35,12 @@ def package "luce-browser-render" {
         str path = "../luce-browser-foundation"
     }
 
+    def dependency "luce-compress" {
+        str owner = "dymokomi"
+        str version = "^0.2.0"
+        str path = "../luce-compress"
+    }
+
     def dependency "luce-browser-css" {
         str owner = "dymokomi"
         str version = "^0.1.0"

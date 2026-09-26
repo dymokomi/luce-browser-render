@@ -1,0 +1,176 @@
+#==============================================================================================
+#
+#   hb_position - OpenType positioning for the shaper: GPOS and the legacy kern table
+#
+#   DESCRIPTION:
+#       New code of the luce-browser port (DESIGN.md §7.1), the positioning half of HarfBuzz's
+#       hb-ot-layout for the default shaper (the plan and GSUB are in hb_layout.lucb):
+#
+#       - GPOS lookups 1 (single adjustment), 2 (pair adjustment) and 9 (extension), with
+#         the lookup flags, values scaled as hb_font_t scales them;
+#       - the legacy 'kern' table (Microsoft format 0) when GPOS has no kern feature, applied
+#         as hb_kern_machine_t does.
+#
+#       FIXME: cursive and mark attachment (GPOS 3-6), contextual positioning (GPOS 7, 8) and
+#       device tables are not applied.
+#
+#==============================================================================================
+
+# mark: GPOS and kern ===========================================================================
+
+## Applies the plan's GPOS lookups, or the kern table.
+func hb_layout_position(font: const HbFontT*, face: const SfntFace*, plan: const HbLayoutPlan*, buffer: HbBufferT*):
+    for planned in ak.vector_span_const(&plan.gpos_lookups):
+        gpos_apply_lookup(font, face, planned, buffer)
+    if plan.apply_kern_table:
+        kern_table_apply(font, face, buffer)
+
+func gpos_apply_lookup(font: const HbFontT*, face: const SfntFace*, planned: HbPlanLookup, buffer: HbBufferT*):
+    let lookup = ot_lookup(face.gpos, planned.index) else return
+    let subtable_count = (usize)sfnt_u16(face.gpos, lookup.offset + 4)
+    var index: usize = 0
+    let count = ak.vector_size(&buffer.infos)
+    while index < count:
+        let info = *ak.vector_at(&buffer.infos, index)
+        if ot_lookup_skips(face, &lookup, &info):
+            index += 1
+            continue
+        var next = index + 1
+        for subtable_index in 0..<subtable_count:
+            let (lookup_type, subtable) = ot_lookup_subtable(&lookup, subtable_index, 9)
+            if let applied = gpos_apply_subtable(font, face, &lookup, lookup_type, subtable, buffer, index):
+                next = applied
+                break
+        index = next
+
+## The size of a ValueRecord of `value_format`.
+func gpos_value_size(value_format: u16) -> usize:
+    var size: usize = 0
+    var bits = value_format
+    while bits != 0:
+        size += (usize)(bits & 1) * 2
+        bits >>= 1
+    return size
+
+## ValueFormat::apply_value for horizontal text (device tables are not applied: HarfBuzz
+## only reads them with a ppem or variations set).
+func gpos_apply_value(font: const HbFontT*, table: const u8[], value_format: u16, offset: usize, position: HbGlyphPosition*):
+    var cursor = offset
+    if (value_format & 0x01) != 0:
+        position.x_offset += hb_font_em_scale_x(font, sfnt_i16(table, cursor))
+        cursor += 2
+    if (value_format & 0x02) != 0:
+        position.y_offset += (i32)(((i64)sfnt_i16(table, cursor) * font.y_mult + 32768) >> 16)
+        cursor += 2
+    if (value_format & 0x04) != 0:
+        position.x_advance += hb_font_em_scale_x(font, sfnt_i16(table, cursor))
+        cursor += 2
+
+func gpos_apply_subtable(font: const HbFontT*, face: const SfntFace*, lookup: const OtLookup*, lookup_type: u16, subtable: usize, buffer: HbBufferT*, index: usize) -> usize?:
+    let gpos = face.gpos
+    let glyph = ak.vector_at(&buffer.infos, index).codepoint
+    let coverage = ot_coverage_index(gpos, subtable + (usize)sfnt_u16(gpos, subtable + 2), glyph) else return none
+    let subtable_format = sfnt_u16(gpos, subtable)
+    match lookup_type:
+        1:
+            let value_format = sfnt_u16(gpos, subtable + 4)
+            var value = subtable + 6
+            if subtable_format == 2:
+                if coverage >= (usize)sfnt_u16(gpos, subtable + 6):
+                    return none
+                value = subtable + 8 + coverage * gpos_value_size(value_format)
+            gpos_apply_value(font, gpos, value_format, value, ak.vector_at(&buffer.positions, index))
+            return index + 1
+        2:
+            let second_index = ot_next_glyph(face, lookup, ak.vector_span_const(&buffer.infos), index) else return none
+            let second = ak.vector_at(&buffer.infos, second_index).codepoint
+            let value_format1 = sfnt_u16(gpos, subtable + 4)
+            let value_format2 = sfnt_u16(gpos, subtable + 6)
+            let size1 = gpos_value_size(value_format1)
+            let size2 = gpos_value_size(value_format2)
+            var record: usize? = none
+            if subtable_format == 1:
+                if coverage >= (usize)sfnt_u16(gpos, subtable + 8):
+                    return none
+                let pair_set = subtable + (usize)sfnt_u16(gpos, subtable + 10 + coverage * 2)
+                let pair_count = (usize)sfnt_u16(gpos, pair_set)
+                let record_size = 2 + size1 + size2
+                var low: usize = 0
+                var high = pair_count
+                while low < high:
+                    let middle = low + (high - low) // 2
+                    let candidate = pair_set + 2 + middle * record_size
+                    let candidate_glyph = (u32)sfnt_u16(gpos, candidate)
+                    if second < candidate_glyph:
+                        high = middle
+                    elif second > candidate_glyph:
+                        low = middle + 1
+                    else:
+                        record = candidate + 2
+                        break
+            elif subtable_format == 2:
+                let class1 = (usize)ot_class_of(gpos, subtable + (usize)sfnt_u16(gpos, subtable + 8), glyph)
+                let class2 = (usize)ot_class_of(gpos, subtable + (usize)sfnt_u16(gpos, subtable + 10), second)
+                let class1_count = (usize)sfnt_u16(gpos, subtable + 12)
+                let class2_count = (usize)sfnt_u16(gpos, subtable + 14)
+                if class1 >= class1_count or class2 >= class2_count:
+                    return none
+                record = subtable + 16 + (class1 * class2_count + class2) * (size1 + size2)
+            let values = record else return none
+            gpos_apply_value(font, gpos, value_format1, values, ak.vector_at(&buffer.positions, index))
+            gpos_apply_value(font, gpos, value_format2, values + size1, ak.vector_at(&buffer.positions, second_index))
+            # With a second value record the pair is consumed; otherwise the second glyph can
+            # start the next pair.
+            if value_format2 != 0:
+                return second_index + 1
+            return second_index
+        _:
+            # FIXME: cursive (3), mark attachment (4, 5, 6) and contextual positioning (7, 8)
+            # are not applied.
+            return none
+
+## The legacy kern table (hb-ot-kern-table.hh, Microsoft format 0), applied as
+## hb_kern_machine_t does: half of each pair's kerning to each glyph.
+func kern_table_apply(font: const HbFontT*, face: const SfntFace*, buffer: HbBufferT*):
+    let kern = face.kern
+    if sfnt_u16(kern, 0) != 0:
+        # FIXME: Apple's kern table (version 1.0) is not read.
+        return
+    let table_count = (usize)sfnt_u16(kern, 2)
+    var offset: usize = 4
+    for _table in 0..<table_count:
+        let length = (usize)sfnt_u16(kern, offset + 2)
+        let coverage = sfnt_u16(kern, offset + 4)
+        # Horizontal (bit 0), not minimum (bit 1) or cross-stream (bit 2), format 0.
+        if (coverage & 0x07) == 0x01 and (coverage >> 8) == 0:
+            kern_table_apply_subtable(font, kern, offset + 6, buffer)
+        if length == 0:
+            break
+        offset += length
+
+func kern_table_apply_subtable(font: const HbFontT*, kern: const u8[], pairs_header: usize, buffer: HbBufferT*):
+    let pair_count = (usize)sfnt_u16(kern, pairs_header)
+    let infos = ak.vector_span_const(&buffer.infos)
+    let positions = ak.vector_span(&buffer.positions)
+    if infos.length < 2:
+        return
+    for index in 0..<infos.length - 1:
+        let key = (infos[index].codepoint << 16) | infos[index + 1].codepoint
+        var low: usize = 0
+        var high = pair_count
+        while low < high:
+            let middle = low + (high - low) // 2
+            let pair = pairs_header + 8 + middle * 6
+            let candidate = sfnt_u32(kern, pair)
+            if key < candidate:
+                high = middle
+            elif key > candidate:
+                low = middle + 1
+            else:
+                let value = hb_font_em_scale_x(font, sfnt_i16(kern, pair + 4))
+                let kern1 = value >> 1
+                let kern2 = value - kern1
+                positions[index].x_advance += kern1
+                positions[index + 1].x_advance += kern2
+                positions[index + 1].x_offset += kern2
+                break

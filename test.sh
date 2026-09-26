@@ -9,6 +9,11 @@ for module in gfx web_fonts display_list; do
     luce-base check "src/luce_browser_render/$module"
 done
 
+# web_fonts: its unit tests and the expectations of the reference build (tests_oracle), with
+# the test fonts of tests/web_fonts.
+echo "== luce-base test src/luce_browser_render/web_fonts"
+luce-base test src/luce_browser_render/web_fonts
+
 # raster: written by hand (not generated); run its tests once it exists.
 if [ -f src/luce_browser_render/raster/ORDER ]; then
     echo "== luce-base test src/luce_browser_render/raster"

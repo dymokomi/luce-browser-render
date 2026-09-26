@@ -8,6 +8,9 @@
 #       (Ladybird 47c82b38d0) by the skeleton generator (DESIGN.md §4.4). Regenerate rather
 #       than edit, except to fill a field the generator could not map.
 #
+#       Edited by region r09: the four WOFF/sfnt structs are `packed`, as the donor's
+#       [[gnu::packed]] structs are (read and written as bytes).
+#
 #==============================================================================================
 
 # mark: Woff2ByteBufferOut ======================================================================
@@ -66,7 +69,7 @@ pub func as_woff2_byte_buffer_out[P: IsWoff2ByteBufferOut](p: P*) -> Woff2ByteBu
 # mark: Header ==================================================================================
 
 ## WOFF::Header (Libraries/LibGfx/Font/WOFF/Loader.cpp:18).
-pub struct Header:
+pub packed struct Header:
     pub var signature: ak.BigEndian[u32]
     pub var flavor: ak.BigEndian[u32]
     pub var length: ak.BigEndian[u32]
@@ -84,7 +87,7 @@ pub struct Header:
 # mark: TableDirectoryEntry =====================================================================
 
 ## WOFF::TableDirectoryEntry (Libraries/LibGfx/Font/WOFF/Loader.cpp:37).
-pub struct TableDirectoryEntry:
+pub packed struct TableDirectoryEntry:
     pub var tag: gfx.FourCc
     pub var offset: ak.BigEndian[u32]
     pub var comp_length: ak.BigEndian[u32]
@@ -97,7 +100,7 @@ pub let woff_woff_signature: u32 = 0x774f4646
 # mark: TableDirectory ==========================================================================
 
 ## WOFF::TableDirectory (Libraries/LibGfx/Font/WOFF/Loader.cpp:84).
-pub struct TableDirectory:
+pub packed struct TableDirectory:
     pub var sfnt_version: ak.BigEndian[u32]
     pub var num_tables: ak.BigEndian[u16]
     pub var search_range: ak.BigEndian[u16]
@@ -107,7 +110,7 @@ pub struct TableDirectory:
 # mark: TableRecord =============================================================================
 
 ## WOFF::TableRecord (Libraries/LibGfx/Font/WOFF/Loader.cpp:97).
-pub struct TableRecord:
+pub packed struct TableRecord:
     pub var table_tag: gfx.FourCc
     pub var checksum: ak.BigEndian[u32]
     pub var offset: ak.BigEndian[u32]
