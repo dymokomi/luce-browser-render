@@ -53,10 +53,6 @@ struct CpuLayer:
 
 # mark: Geometry ===============================================================================
 
-## Whether `rect` is empty (SkIRect::isEmpty).
-func cpu_irect_is_empty(rect: CpuIRect) -> bool:
-    return rect.left >= rect.right or rect.top >= rect.bottom
-
 ## The current clip's device bounds (SkDevice::devClipBounds); empty when the clip is.
 func cpu_canvas_clip_bounds(canvas: CpuCanvas*) -> CpuIRect:
     let state = cpu_canvas_state(canvas)

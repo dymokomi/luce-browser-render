@@ -1,0 +1,380 @@
+#==============================================================================================
+#
+#   cpu_filter_blur - SkImageFilters::Blur: the blur filter, Builder::blur and the raster blur
+#                     engine
+#
+#   DESCRIPTION:
+#       Port of Skia m144's src/effects/imagefilters/SkBlurImageFilter.cpp (mapSigma,
+#       kernelBounds, onFilterImage), FilterResult::Builder::blur (src/core/
+#       SkImageFilterTypes.cpp:2108) and the RGBA8888 algorithm of the raster blur engine
+#       (src/core/SkBlurEngine.cpp lines 57-740, 1200-1265): the X pass then the Y pass (in
+#       place, over rows outset by the Y radius), each a GaussianPass for sigma < 2 (a true
+#       Gaussian kernel in float), a ThreeBoxApproxPass (three box blurs combined into one
+#       integer pass, divided by skvx::ScaledDividerU32) or a TentPass. Sigmas above the
+#       engine's 135 would be blurred on a downscaled image (FilterResult::rescale); the port
+#       blurs them at full resolution with the TentPass Skia keeps for legacy blurs (FIXME).
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+# mark: Sigma and bounds =======================================================================
+
+## SkBlurImageFilter's kMaxSigma.
+let cpu_blur_max_sigma: f32 = 532.0
+
+## Raster8888BlurAlgorithm::maxSigma.
+let cpu_blur_engine_max_sigma: f32 = 135.0
+
+## SkBlurEngine::IsEffectivelyIdentity.
+func cpu_blur_is_identity(sigma: f32) -> bool:
+    return sigma <= 0.03
+
+## SkBlurEngine::SigmaToRadius.
+func cpu_blur_sigma_to_radius(sigma: f32) -> i32:
+    if cpu_blur_is_identity(sigma):
+        return 0
+    return cpu_f32_to_i32(math32.ceil(3.0 * sigma))
+
+## SkBlurEngine::BoxBlurWindow: the SVG box width for `sigma`.
+func cpu_blur_box_window(sigma: f32) -> i32:
+    let possible = cpu_f32_to_i32(math32.floor(sigma * 3.0 * (f32)math.sqrt(2.0 * (f64)math32.pi) / 4.0 + 0.5))
+    return cpu_max_i32(1, possible)
+
+## SkBlurImageFilter::mapSigma: the sigma in layer space, clamped, 0 on identity axes.
+func cpu_blur_map_sigma(layer: CpuFMatrix, sigma_x: f32, sigma_y: f32) -> (f32, f32):
+    let mapped = cpu_fm_map_size(layer, sigma_x, sigma_y)
+    var sx = cpu_min_f32(mapped.0, cpu_blur_max_sigma)
+    var sy = cpu_min_f32(mapped.1, cpu_blur_max_sigma)
+    if not math32.is_finite(sx) or cpu_blur_is_identity(sx):
+        sx = 0.0
+    if not math32.is_finite(sy) or cpu_blur_is_identity(sy):
+        sy = 0.0
+    return (sx, sy)
+
+## SkBlurImageFilter::kernelBounds: `bounds` outset by ceil(3 sigma).
+func cpu_blur_kernel_bounds(layer: CpuFMatrix, sigma_x: f32, sigma_y: f32, bounds: CpuIRect) -> CpuIRect:
+    let sigma = cpu_blur_map_sigma(layer, sigma_x, sigma_y)
+    return cpu_irect_outset(bounds, cpu_size_ceil(3.0 * sigma.0), cpu_size_ceil(3.0 * sigma.1))
+
+# mark: The filter =============================================================================
+
+## SkBlurImageFilter::onFilterImage.
+func cpu_filter_blur(ctx: const CpuFilterContext*, sigma_x: f32, sigma_y: f32, input: const gfx.ImageFilter*?) -> CpuFr:
+    let input_ctx = cpu_ctx_with_desired(ctx, cpu_blur_kernel_bounds(ctx.layer, sigma_x, sigma_y, ctx.desired))
+    let child = cpu_filter_node_evaluate(input, &input_ctx)
+    let sigma = cpu_blur_map_sigma(ctx.layer, sigma_x, sigma_y)
+    if sigma.0 == 0.0 and sigma.1 == 0.0:
+        return child
+    return cpu_fr_blur(ctx, &child, sigma.0, sigma.1)
+
+## FilterResult::Builder::blur of one input at a layer-space sigma.
+func cpu_fr_blur(ctx: const CpuFilterContext*, input: const CpuFr*, sigma_x: f32, sigma_y: f32) -> CpuFr:
+    if not cpu_fr_has_image(input):
+        return cpu_fr_empty()
+    let radius_x = cpu_size_ceil(3.0 * sigma_x)
+    let radius_y = cpu_size_ceil(3.0 * sigma_y)
+    let max_output = cpu_irect_outset(input.bounds, radius_x, radius_y)
+    let output = cpu_irect_intersect(max_output, ctx.desired) else return cpu_fr_empty()
+    let sample_bounds = cpu_irect_outset(output, radius_x, radius_y)
+    # rescale() at scale 1: the input with its effects applied, decal outside its visible bounds.
+    let visible = cpu_irect_intersect(input.bounds, sample_bounds) else return cpu_fr_empty()
+    let sample_ctx = cpu_ctx_with_desired(ctx, sample_bounds)
+    let low_res = cpu_fr_resolve(&sample_ctx, input, visible, false)
+    let source = low_res.pixels else return cpu_fr_empty()
+    let origin = cpu_fm_integer_translation(low_res.transform) else trap("VERIFY: a resolved image is pixel aligned")
+    # The image the engine blurs is `visible`, read from the resolved pixels.
+    let width = cpu_irect_width(visible)
+    let height = cpu_irect_height(visible)
+    let image = cpu_blur_view(ctx.arena, source, low_res.width, visible.left - origin.0, visible.top - origin.1, width, height)
+    # The output in the image's pixel space, within the blurred image's reach, outset by 1.
+    let reach = cpu_irect_outset(cpu_irect(0, 0, width, height), cpu_size_ceil(3.0 * sigma_x), cpu_size_ceil(3.0 * sigma_y))
+    let relative = cpu_irect(output.left - visible.left, output.top - visible.top, output.right - visible.left, output.bottom - visible.top)
+    let subset = cpu_irect_intersect(reach, relative) else return cpu_fr_empty()
+    let dst = cpu_irect_outset(subset, 1, 1)
+    let blurred = cpu_blur_eval_passes(ctx.arena, sigma_x, sigma_y, image, width, height, dst)
+    var result = cpu_fr_of_pixels(blurred, cpu_irect_width(dst), cpu_irect_height(dst), dst.left + visible.left, dst.top + visible.top)
+    result.bounds = output
+    return result
+
+## The `width` x `height` pixels at (x, y) of an image `stride` pixels wide, packed.
+func cpu_blur_view(arena: CpuFilterArena*, source: const u8[], stride: i32, x: i32, y: i32, width: i32, height: i32) -> const u8[]:
+    if x == 0 and y == 0 and stride == width:
+        return source
+    let packed = cpu_filter_arena_pixmap(arena, width, height)
+    for row in 0..<height:
+        for i in 0..<(usize)width * 4:
+            packed[((usize)row * (usize)width) * 4 + i] = source[((usize)(y + row) * (usize)stride + (usize)x) * 4 + i]
+    return packed
+
+# mark: The raster blur engine ==================================================================
+
+## What a blur pass is (the Pass subclasses of SkBlurEngine.cpp).
+enum CpuBlurPassKind as u8:
+    gaussian = 0
+    three_box = 1
+    tent = 2
+
+## A scanline blur pass: its kind, border and state.
+struct CpuBlurPass:
+    var kind: CpuBlurPassKind
+    ## The distance from the first dst pixel to the first src pixel that affects it.
+    var border: i32
+    var window: i32
+    ## GaussianPass: the kernel and the circular buffer of window x 4 floats.
+    var kernel: f32[]
+    var float_buffer: f32[]
+    var base: i32
+    ## ThreeBoxApproxPass / TentPass: circular buffers of 4-channel sums, their ends and cursors.
+    var buffer: u32[]
+    var buffer1: i32
+    var buffer2: i32
+    var buffers_end: i32
+    var cursor0: i32
+    var cursor1: i32
+    var cursor2: i32
+    var sum0: u32[4]
+    var sum1: u32[4]
+    var sum2: u32[4]
+    ## skvx::ScaledDividerU32.
+    var divisor_factor: u32
+    var half: u32
+
+## The pass Raster8888BlurAlgorithm::blur makes for `sigma` (Gaussian, three-box or tent).
+func cpu_blur_make_pass(sigma: f32) -> CpuBlurPass:
+    if sigma < 2.0:
+        # GaussianPass
+        let radius = cpu_blur_sigma_to_radius(sigma)
+        let window = 2 * radius + 1
+        let kernel = (new f32[(usize)window] in memory.heap) else trap("out of memory")
+        cpu_blur_gaussian_kernel(sigma, radius, kernel)
+        let buffer = (new f32[(usize)window * 4] in memory.heap) else trap("out of memory")
+        return CpuBlurPass(kind = CpuBlurPassKind.gaussian, border = radius, window = window, kernel = kernel, float_buffer = buffer)
+    let window = cpu_blur_box_window(sigma)
+    if window < 255:
+        # ThreeBoxApproxPass
+        let pass_size = window - 1
+        let count = 3 * pass_size if (window & 1) == 1 else 3 * pass_size + 1
+        let buffer = (new u32[(usize)count * 4] in memory.heap) else trap("out of memory")
+        let border = 3 * ((window - 1) // 2) if (window & 1) == 1 else 3 * (window // 2) - 1
+        let window2 = (u32)window * (u32)window
+        let divisor = window2 * (u32)window if (window & 1) == 1 else window2 * (u32)window + window2
+        return cpu_blur_box_pass(CpuBlurPassKind.three_box, window, border, buffer, pass_size, 2 * pass_size, count, divisor)
+    # TentPass
+    let tent_window = 3 * window // 2
+    let pass_size = tent_window - 1
+    let buffer = (new u32[(usize)(2 * pass_size) * 4] in memory.heap) else trap("out of memory")
+    return cpu_blur_box_pass(CpuBlurPassKind.tent, tent_window, tent_window - 1, buffer, pass_size, 2 * pass_size, 2 * pass_size,
+                             (u32)tent_window * (u32)tent_window)
+
+func cpu_blur_box_pass(kind: CpuBlurPassKind, window: i32, border: i32, buffer: u32[], buffer1: i32, buffer2: i32, end: i32, divisor: u32) -> CpuBlurPass:
+    # ScaledDividerU32: round((1.0 / divisor) * 2^32), and (divisor + 1) >> 1.
+    let factor = (u32)math.round((1.0 / (f64)divisor) * 4294967296.0)
+    return CpuBlurPass(kind = kind, border = border, window = window, buffer = buffer, buffer1 = buffer1, buffer2 = buffer2,
+                       buffers_end = end, divisor_factor = factor, half = (divisor + 1) >> 1)
+
+## Frees a pass's buffers.
+func cpu_blur_pass_release(pass: CpuBlurPass*):
+    if pass.kind == CpuBlurPassKind.gaussian:
+        free(pass.kernel) in memory.heap
+        free(pass.float_buffer) in memory.heap
+    else:
+        free(pass.buffer) in memory.heap
+
+## SkShaderBlurAlgorithm::Compute1DBlurKernel: exp(-x^2 / (2 sigma^2)), normalized.
+func cpu_blur_gaussian_kernel(sigma: f32, radius: i32, kernel: f32[]):
+    let two_sigma_sqrd: f32 = 2.0 * sigma * sigma
+    let denominator: f32 = 1.0 / two_sigma_sqrd if radius > 0 else 1.0
+    var sum: f32 = 0.0
+    for x in 0..<(usize)(2 * radius + 1):
+        var term = (f32)((i32)x - radius)
+        term = term * term * denominator
+        let value = math32.exp(-(term + 0.0))
+        kernel[x] = value
+        sum += value
+    let scale = 1.0 / sum
+    for i in 0..<kernel.length:
+        kernel[i] *= scale
+
+## Pass::startBlur.
+func cpu_blur_pass_start(pass: CpuBlurPass*):
+    if pass.kind == CpuBlurPassKind.gaussian:
+        for i in 0..<pass.float_buffer.length:
+            pass.float_buffer[i] = 0.0
+        pass.base = 0
+        return
+    for c in 0..<4:
+        pass.sum0[c] = 0
+        pass.sum1[c] = pass.half if pass.kind == CpuBlurPassKind.tent else 0
+        pass.sum2[c] = pass.half
+    for i in 0..<pass.buffer.length:
+        pass.buffer[i] = 0
+    pass.cursor0 = 0
+    pass.cursor1 = pass.buffer1
+    pass.cursor2 = pass.buffer2
+
+## Where a pass reads and writes: pixel `index` of `data` (4 bytes a pixel), moving `stride`
+## pixels a step; `data` none reads zeros or writes nothing.
+struct CpuBlurCursor:
+    var read: (const u8[])?
+    var write: u8[]?
+    var index: i32
+    var stride: i32
+
+## Pass::blurSegment: `n` steps of the pass.
+func cpu_blur_pass_segment(pass: CpuBlurPass*, n: i32, src: CpuBlurCursor*, dst: CpuBlurCursor*):
+    for step in 0..<n:
+        discard(step)
+        var edge: u32[4] = [0, 0, 0, 0]
+        if let data = src.read:
+            let offset = (usize)src.index * 4
+            for c in 0..<4usize:
+                edge[c] = data[offset + c]
+            src.index += src.stride
+        var out: u8[4] = [0, 0, 0, 0]
+        if pass.kind == CpuBlurPassKind.gaussian:
+            out = cpu_blur_gaussian_step(pass, edge, dst.write != none)
+        else:
+            out = cpu_blur_box_step(pass, edge)
+        if let data = dst.write:
+            let offset = (usize)dst.index * 4
+            for c in 0..<4usize:
+                data[offset + c] = out[c]
+            dst.index += dst.stride
+
+## One GaussianPass step: the leading edge into the circular buffer, then the convolution.
+func cpu_blur_gaussian_step(pass: CpuBlurPass*, edge: u32[4], convolve: bool) -> u8[4]:
+    let w = pass.window
+    let slot = (usize)((pass.base + w - 1) % w) * 4
+    for c in 0..<4usize:
+        pass.float_buffer[slot + c] = (f32)edge[c] * (1.0 / 255.0)
+    var out: u8[4] = [0, 0, 0, 0]
+    if convolve:
+        var sum: f32[4] = [0.0, 0.0, 0.0, 0.0]
+        for i in 0..<w:
+            let s = (usize)((i + pass.base) % w) * 4
+            let k = pass.kernel[(usize)i]
+            for c in 0..<4usize:
+                sum[c] = sum[c] + pass.float_buffer[s + c] * k
+        for c in 0..<4usize:
+            let v = sum[c] * 255.0 + 0.5
+            out[c] = (u8)cpu_min_f32(cpu_max_f32_nan0(v), 255.0)
+    pass.base = (pass.base + 1) % w
+    return out
+
+## One ThreeBoxApproxPass or TentPass step (processValue).
+func cpu_blur_box_step(pass: CpuBlurPass*, edge: u32[4]) -> u8[4]:
+    var out: u8[4] = [0, 0, 0, 0]
+    let three = pass.kind == CpuBlurPassKind.three_box
+    let c0 = (usize)pass.cursor0 * 4
+    let c1 = (usize)pass.cursor1 * 4
+    let c2 = (usize)pass.cursor2 * 4
+    for c in 0..<4usize:
+        pass.sum0[c] = pass.sum0[c] +% edge[c]
+        pass.sum1[c] = pass.sum1[c] +% pass.sum0[c]
+        if three:
+            pass.sum2[c] = pass.sum2[c] +% pass.sum1[c]
+            out[c] = (u8)(((u64)pass.sum2[c] * (u64)pass.divisor_factor) >> 32)
+            pass.sum2[c] = pass.sum2[c] -% pass.buffer[c2 + c]
+            pass.buffer[c2 + c] = pass.sum1[c]
+        else:
+            out[c] = (u8)(((u64)pass.sum1[c] * (u64)pass.divisor_factor) >> 32)
+        pass.sum1[c] = pass.sum1[c] -% pass.buffer[c1 + c]
+        pass.buffer[c1 + c] = pass.sum0[c]
+        pass.sum0[c] = pass.sum0[c] -% pass.buffer[c0 + c]
+        pass.buffer[c0 + c] = edge[c]
+    if three:
+        pass.cursor2 = pass.cursor2 + 1 if pass.cursor2 + 1 < pass.buffers_end else pass.buffer2
+        pass.cursor1 = pass.cursor1 + 1 if pass.cursor1 + 1 < pass.buffer2 else pass.buffer1
+    else:
+        pass.cursor1 = pass.cursor1 + 1 if pass.cursor1 + 1 < pass.buffers_end else pass.buffer1
+    pass.cursor0 = pass.cursor0 + 1 if pass.cursor0 + 1 < pass.buffer1 else 0
+    return out
+
+## Pass::blur: one row or column, src pixels [src_left, src_right) and dst pixels [0, dst_right)
+## in dst coordinates.
+func cpu_blur_pass_blur(pass: CpuBlurPass*, src_left: i32, src_right: i32, dst_right: i32, src: CpuBlurCursor, dst: CpuBlurCursor):
+    cpu_blur_pass_start(pass)
+    var src_cursor = src
+    var dst_cursor = dst
+    let src_end = src_right - pass.border
+    var src_index = src_left - pass.border
+    var dst_index: i32 = 0
+    var nothing = CpuBlurCursor(read = none, write = none, index = 0, stride = 0)
+    var nowhere = CpuBlurCursor(read = none, write = none, index = 0, stride = 0)
+    if dst_index < src_index:
+        # The destination pixels are not affected by the source: zero.
+        let common_end = cpu_min_i32(src_index, dst_right)
+        while dst_index < common_end:
+            if let data = dst_cursor.write:
+                let offset = (usize)dst_cursor.index * 4
+                for c in 0..<4usize:
+                    data[offset + c] = 0
+            dst_cursor.index += dst_cursor.stride
+            dst_index += 1
+    elif src_index < dst_index:
+        # Preload the sums with the source pixels before the destination starts.
+        let common_end = cpu_min_i32(dst_index, src_end)
+        if src_index < common_end:
+            let n = common_end - src_index
+            cpu_blur_pass_segment(pass, n, &src_cursor, &nowhere)
+            src_index += n
+        if src_index < dst_index:
+            let n = dst_index - src_index
+            cpu_blur_pass_segment(pass, n, &nothing, &nowhere)
+            src_index += n
+    let common_end = cpu_min_i32(dst_right, src_end)
+    if dst_index < common_end:
+        let n = common_end - dst_index
+        cpu_blur_pass_segment(pass, n, &src_cursor, &dst_cursor)
+        dst_index += n
+        src_index += n
+    if dst_index < dst_right:
+        cpu_blur_pass_segment(pass, dst_right - dst_index, &nothing, &dst_cursor)
+
+## eval_blur_passes<uint32_t>: the X pass from `source` (`width` x `height`, at the origin) into
+## a buffer over `dst` outset by the Y radius, then the Y pass in place; the result covers `dst`
+## (in the source's pixel space) and lives in the arena.
+func cpu_blur_eval_passes(arena: CpuFilterArena*, sigma_x: f32, sigma_y: f32, source: const u8[], width: i32, height: i32, dst: CpuIRect) -> const u8[]:
+    var pass_x = cpu_blur_make_pass(sigma_x)
+    defer cpu_blur_pass_release(&pass_x)
+    var pass_y = cpu_blur_make_pass(sigma_y)
+    defer cpu_blur_pass_release(&pass_y)
+    let x_blurs = pass_x.window > 1
+    var buffer_bounds = dst
+    if x_blurs:
+        buffer_bounds = cpu_irect_outset(dst, 0, cpu_blur_sigma_to_radius(sigma_y))
+    let buffer_width = cpu_irect_width(buffer_bounds)
+    let buffer = cpu_filter_arena_pixmap(arena, buffer_width, cpu_irect_height(buffer_bounds))
+    var src_data: const u8[] = source
+    var src_bounds = cpu_irect(0, 0, width, height)
+    var src_row_pixels = width
+    var dst_bounds = buffer_bounds
+    var loop_start = cpu_max_i32(src_bounds.left, dst_bounds.left)
+    var loop_end = cpu_min_i32(src_bounds.right, dst_bounds.right)
+    var dst_y_offset: i32 = 0
+    if x_blurs:
+        loop_start = cpu_max_i32(src_bounds.top, dst_bounds.top)
+        loop_end = cpu_min_i32(src_bounds.bottom, dst_bounds.bottom)
+        for y in loop_start..<loop_end:
+            let src = CpuBlurCursor(read = src_data, write = none, index = (y - src_bounds.top) * src_row_pixels, stride = 1)
+            let out = CpuBlurCursor(read = none, write = buffer, index = (y - dst_bounds.top) * buffer_width, stride = 1)
+            cpu_blur_pass_blur(&pass_x, src_bounds.left - dst_bounds.left, src_bounds.right - dst_bounds.left, cpu_irect_width(dst_bounds), src, out)
+        src_data = buffer
+        src_row_pixels = buffer_width
+        loop_start = dst.left
+        loop_end = dst.right
+        dst_y_offset = dst.top - buffer_bounds.top
+        src_bounds = buffer_bounds
+        dst_bounds = dst
+    if pass_y.window > 1:
+        for x in loop_start..<loop_end:
+            let src = CpuBlurCursor(read = src_data, write = none, index = x - src_bounds.left, stride = src_row_pixels)
+            let out = CpuBlurCursor(read = none, write = buffer, index = dst_y_offset * buffer_width + (x - dst_bounds.left), stride = buffer_width)
+            cpu_blur_pass_blur(&pass_y, src_bounds.top - dst_bounds.top, src_bounds.bottom - dst_bounds.top, cpu_irect_height(dst_bounds), src, out)
+    if not x_blurs:
+        return buffer
+    # The rows of `dst` within the taller buffer.
+    let rows = (usize)dst_y_offset * (usize)buffer_width * 4
+    return buffer[rows..<rows + (usize)cpu_irect_width(dst) * (usize)cpu_irect_height(dst) * 4]

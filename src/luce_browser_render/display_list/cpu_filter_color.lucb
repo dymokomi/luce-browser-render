@@ -1,0 +1,244 @@
+#==============================================================================================
+#
+#   cpu_filter_color - color filters and pixel math in the raster pipeline's float stages
+#
+#   DESCRIPTION:
+#       The color filters an image filter graph defers (cpu_filter_result's color op chain), as
+#       Skia m144's raster pipeline evaluates them in its highp (float) stages on aarch64
+#       (src/opts/SkRasterPipeline_opts.h): load_8888 (from_byte), unpremul, matrix_4x5 (fused
+#       multiply-adds, as NEON's mad), clamp_01 / clamp_a_01, premul, byte_tables, parametric
+#       (with approx_powf), the SkBlendModeColorFilter stages and store_8888 (to_unorm, which
+#       rounds to nearest even as vcvtnq_u32_f32 does). The color filters are those of
+#       src/effects/colorfilters: SkMatrixColorFilter, SkTableColorFilter,
+#       SkColorSpaceXformColorFilter (SRGBToLinearGamma, LinearToSRGBGamma),
+#       SkBlendModeColorFilter (kDstIn for a layer's alpha, kSrcIn for a drop shadow's color)
+#       and the luma runtime color filter (SkLumaColorFilter).
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+# mark: Pixels =================================================================================
+
+## A color as the raster pipeline holds it: four floats, premultiplied unless a stage says not.
+struct CpuRgba:
+    var r: f32
+    var g: f32
+    var b: f32
+    var a: f32
+
+func cpu_rgba_zero() -> CpuRgba:
+    return CpuRgba(r = 0.0, g = 0.0, b = 0.0, a = 0.0)
+
+## clamp_01_: each channel clamped to [0, 1] (NaN becomes 0).
+func cpu_rgba_clamp01(c: CpuRgba) -> CpuRgba:
+    return CpuRgba(r = cpu_clamp_unit(c.r), g = cpu_clamp_unit(c.g), b = cpu_clamp_unit(c.b), a = cpu_clamp_unit(c.a))
+
+## load_8888: the RGBA bytes at `offset` as floats.
+func cpu_load_rgba(data: const u8[], offset: usize) -> CpuRgba:
+    let k: f32 = 1.0 / 255.0
+    return CpuRgba(r = (f32)data[offset] * k, g = (f32)data[offset + 1] * k, b = (f32)data[offset + 2] * k, a = (f32)data[offset + 3] * k)
+
+## store_8888: `c` rounded to bytes (to_unorm(v, 255)) at `offset`.
+func cpu_store_rgba(data: u8[], offset: usize, c: CpuRgba):
+    data[offset] = cpu_to_unorm8(c.r)
+    data[offset + 1] = cpu_to_unorm8(c.g)
+    data[offset + 2] = cpu_to_unorm8(c.b)
+    data[offset + 3] = cpu_to_unorm8(c.a)
+
+## to_unorm(v, 255): round(min(max(0, v * 255), 255)), rounding half to even.
+func cpu_to_unorm8(v: f32) -> u8:
+    return (u8)cpu_round_even(cpu_min_f32(cpu_max_f32_nan0(v * 255.0), 255.0))
+
+## max(0, v) as the pipeline's max(x, y) = x < y ? y : x picks it (NaN becomes 0).
+func cpu_max_f32_nan0(v: f32) -> f32:
+    if 0.0 < v:
+        return v
+    return 0.0
+
+## vcvtn: the nearest integer, ties to even (for v in [0, 2^23)).
+func cpu_round_even(v: f32) -> i32:
+    let f = math32.floor(v)
+    let d = v - f
+    let i = (i32)f
+    if d > 0.5:
+        return i + 1
+    if d < 0.5:
+        return i
+    return i + (i & 1)
+
+## Source-over in the highp pipeline: d * (1 - sa) + s, one fused multiply-add per channel.
+func cpu_blend_src_over(s: CpuRgba, d: CpuRgba) -> CpuRgba:
+    let inv = 1.0 - s.a
+    return CpuRgba(r = math32.fma(d.r, inv, s.r), g = math32.fma(d.g, inv, s.g), b = math32.fma(d.b, inv, s.b), a = math32.fma(d.a, inv, s.a))
+
+## The unpremul stage: rgb scaled by 1 / a when that is finite, by 0 otherwise.
+func cpu_unpremul(c: CpuRgba) -> CpuRgba:
+    let inverse = 1.0 / c.a
+    let scale: f32 = inverse if inverse < math32.infinity else 0.0
+    return CpuRgba(r = c.r * scale, g = c.g * scale, b = c.b * scale, a = c.a)
+
+## The premul stage.
+func cpu_premul(c: CpuRgba) -> CpuRgba:
+    return CpuRgba(r = c.r * c.a, g = c.g * c.a, b = c.b * c.a, a = c.a)
+
+# mark: Color ops ==============================================================================
+
+## What a deferred color filter is.
+enum CpuColorOpKind as u8:
+    ## A gfx.ColorFilter node (matrix, table, sRGB/linear gamma).
+    node = 0
+    ## SkColorFilters::Blend((0, 0, 0, alpha), kDstIn): the layer paint's alpha.
+    dst_in = 1
+    ## SkColorFilters::Blend(color, kSrcIn): a drop shadow's color (premultiplied in `color`).
+    src_in = 2
+    ## SkLumaColorFilter.
+    luma = 3
+
+## One deferred color filter.
+struct CpuColorOp:
+    var kind: CpuColorOpKind = CpuColorOpKind.luma
+    var filter: const gfx.ColorFilter*? = none
+    var color: CpuRgba = CpuRgba(r = 0.0, g = 0.0, b = 0.0, a = 0.0)
+
+func cpu_color_op_node(filter: const gfx.ColorFilter*) -> CpuColorOp:
+    return CpuColorOp(kind = CpuColorOpKind.node, filter = filter)
+
+func cpu_color_op_dst_in(alpha: f32) -> CpuColorOp:
+    return CpuColorOp(kind = CpuColorOpKind.dst_in, color = CpuRgba(r = 0.0, g = 0.0, b = 0.0, a = alpha))
+
+## SkColorFilters::Blend(color, kSrcIn) for an unpremultiplied sRGB color: the constant color is
+## premultiplied (SkColorSpaceXformSteps from unpremul sRGB to the premul destination).
+func cpu_color_op_src_in(color: gfx.Color) -> CpuColorOp:
+    let value = color.m_value
+    let a = (f32)((value >> 24) & 0xff) * (1.0 / 255.0)
+    let r = (f32)((value >> 16) & 0xff) * (1.0 / 255.0)
+    let g = (f32)((value >> 8) & 0xff) * (1.0 / 255.0)
+    let b = (f32)(value & 0xff) * (1.0 / 255.0)
+    return CpuColorOp(kind = CpuColorOpKind.src_in, color = CpuRgba(r = r * a, g = g * a, b = b * a, a = a))
+
+func cpu_color_op_luma() -> CpuColorOp:
+    return CpuColorOp(kind = CpuColorOpKind.luma)
+
+## SkColorFilterBase::affectsTransparentBlack.
+func cpu_color_op_affects_transparent(op: const CpuColorOp*) -> bool:
+    let color = cpu_color_op_apply(op, cpu_rgba_zero())
+    return color.r != 0.0 or color.g != 0.0 or color.b != 0.0 or color.a != 0.0
+
+## The color filter's stages applied to a premultiplied color.
+func cpu_color_op_apply(op: const CpuColorOp*, c: CpuRgba) -> CpuRgba:
+    match op.kind:
+        .node:
+            let filter = op.filter else trap("VERIFY: a color filter node")
+            return cpu_color_filter_apply(filter, c)
+        .dst_in:
+            # move_src_dst, the constant color as the source, then kDstIn: d * sa.
+            let sa = op.color.a
+            return CpuRgba(r = c.r * sa, g = c.g * sa, b = c.b * sa, a = c.a * sa)
+        .src_in:
+            # kSrcIn: s * da.
+            return CpuRgba(r = op.color.r * c.a, g = op.color.g * c.a, b = op.color.b * c.a, a = op.color.a * c.a)
+        .luma:
+            # sk_luma(color.rgb): saturate(dot(half3(0.2126, 0.7152, 0.0722), rgb)).000r.
+            let luma = cpu_clamp_unit(c.r * 0.2126 + c.g * 0.7152 + c.b * 0.0722)
+            return CpuRgba(r = 0.0, g = 0.0, b = 0.0, a = luma)
+        _: trap("VERIFY_NOT_REACHED")
+
+## The stages of one gfx.ColorFilter (SkColorFilterBase::appendStages with a non-opaque shader).
+func cpu_color_filter_apply(filter: const gfx.ColorFilter*, input: CpuRgba) -> CpuRgba:
+    let c = cpu_unpremul(input)
+    match filter.node:
+        .matrix(m, clamp):
+            # matrix_4x5: mad(r, m0, mad(g, m1, mad(b, m2, mad(a, m3, m4)))) per row.
+            var r = math32.fma(c.r, m[0], math32.fma(c.g, m[1], math32.fma(c.b, m[2], math32.fma(c.a, m[3], m[4]))))
+            var g = math32.fma(c.r, m[5], math32.fma(c.g, m[6], math32.fma(c.b, m[7], math32.fma(c.a, m[8], m[9]))))
+            var b = math32.fma(c.r, m[10], math32.fma(c.g, m[11], math32.fma(c.b, m[12], math32.fma(c.a, m[13], m[14]))))
+            let a = math32.fma(c.r, m[15], math32.fma(c.g, m[16], math32.fma(c.b, m[17], math32.fma(c.a, m[18], m[19]))))
+            if clamp:
+                r = cpu_clamp_unit(r)
+                g = cpu_clamp_unit(g)
+                b = cpu_clamp_unit(b)
+            return cpu_premul(CpuRgba(r = r, g = g, b = b, a = cpu_clamp_unit(a)))
+        .table_argb(ta, tr, tg, tb):
+            # byte_tables: each channel through its table at to_unorm(v, 255).
+            let r = (f32)tr[(usize)cpu_to_unorm8(c.r)] * (1.0 / 255.0)
+            let g = (f32)tg[(usize)cpu_to_unorm8(c.g)] * (1.0 / 255.0)
+            let b = (f32)tb[(usize)cpu_to_unorm8(c.b)] * (1.0 / 255.0)
+            let a = (f32)ta[(usize)cpu_to_unorm8(c.a)] * (1.0 / 255.0)
+            return cpu_premul(CpuRgba(r = r, g = g, b = b, a = a))
+        .srgb_to_linear_gamma:
+            let tf = cpu_srgb_transfer_function()
+            return cpu_premul(CpuRgba(r = cpu_parametric(&tf, c.r), g = cpu_parametric(&tf, c.g), b = cpu_parametric(&tf, c.b), a = c.a))
+        .linear_to_srgb_gamma:
+            let tf = cpu_inverse_srgb_transfer_function()
+            return cpu_premul(CpuRgba(r = cpu_parametric(&tf, c.r), g = cpu_parametric(&tf, c.g), b = cpu_parametric(&tf, c.b), a = c.a))
+        _: trap("VERIFY_NOT_REACHED")
+
+# mark: Transfer functions =====================================================================
+
+## skcms_TransferFunction: v <= d ? c * v + f : (a * v + b)^g + e.
+struct CpuTransferFunction:
+    var g: f32
+    var a: f32
+    var b: f32
+    var c: f32
+    var d: f32
+    var e: f32
+    var f: f32
+
+## skcms_sRGB_TransferFunction (SkColorSpace::MakeSRGB()->transferFn), bit for bit.
+func cpu_srgb_transfer_function() -> CpuTransferFunction:
+    return CpuTransferFunction(g = f32.bits(0x4019999a), a = f32.bits(0x3f72a76e), b = f32.bits(0x3d558919), c = f32.bits(0x3d9e8391),
+                               d = f32.bits(0x3d25aee6), e = 0.0, f = 0.0)
+
+## Its inverse (SkColorSpace::MakeSRGB()->invTransferFn, skcms_TransferFunction_invert).
+func cpu_inverse_srgb_transfer_function() -> CpuTransferFunction:
+    return CpuTransferFunction(g = f32.bits(0x3ed55555), a = f32.bits(0x3f919280), b = f32.bits(0x80000000), c = f32.bits(0x414eb852),
+                               d = f32.bits(0x3b4d2e31), e = f32.bits(0xbd612800), f = f32.bits(0x80000000))
+
+## The parametric stage: the sign is set aside, the function applied to |v|, the sign restored.
+func cpu_parametric(tf: const CpuTransferFunction*, input: f32) -> f32:
+    let bits = input.bits()
+    let sign = bits & 0x80000000
+    let v = f32.bits(bits ^ sign)
+    var result: f32 = 0.0
+    if v <= tf.d:
+        result = math32.fma(tf.c, v, tf.f)
+    else:
+        result = cpu_approx_powf(math32.fma(tf.a, v, tf.b), tf.g) + tf.e
+    return f32.bits(sign | result.bits())
+
+## approx_powf: x^y through approx_log2 and approx_pow2 (exact for 0 and 1).
+func cpu_approx_powf(x: f32, y: f32) -> f32:
+    if x == 0.0 or x == 1.0:
+        return x
+    return cpu_approx_pow2(cpu_approx_log2(x) * y)
+
+## approx_log2.
+func cpu_approx_log2(x: f32) -> f32:
+    let bits = x.bits()
+    let e = (f32)bits * (1.0 / 8388608.0)
+    let m = f32.bits((bits & 0x007fffff) | 0x3f000000)
+    # nmad(m, 1.498030302, e - 124.225514990) = (e - 124.22...) - m * 1.498...
+    return math32.fma(-m, 1.498030302, e - 124.225514990) - 1.725879990 / (0.3520887068 + m)
+
+## approx_pow2.
+func cpu_approx_pow2(x: f32) -> f32:
+    let f = cpu_fract(x)
+    var approx = math32.fma(-f, 1.490129070, x + 121.274057500)
+    approx += 27.728023300 / (4.84252568 - f)
+    approx *= 8388608.0
+    approx = cpu_min_f32(cpu_max_f32_nan0(approx), 2139095040.0)
+    return f32.bits((u32)cpu_round_even_u32(approx))
+
+## vcvtnq_u32_f32 for values up to 2^31.
+func cpu_round_even_u32(v: f32) -> u32:
+    let f = math32.floor(v)
+    let d = v - f
+    let i = (u32)f
+    if d > 0.5:
+        return i + 1
+    if d < 0.5:
+        return i
+    return i + (i & 1)

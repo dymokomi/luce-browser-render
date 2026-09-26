@@ -1,0 +1,166 @@
+#==============================================================================================
+#
+#   cpu_filter_lowp - FilterResult draws in the raster pipeline's lowp (16-bit) mode
+#
+#   DESCRIPTION:
+#       Skia's raster pipeline runs a draw in lowp, 8-bit values in 16-bit lanes, whenever every
+#       stage has a lowp implementation (src/opts/SkRasterPipeline_opts.h lines 5400-6810). A
+#       FilterResult drawn without color filters, or with only the constant-color blends
+#       (SkColorFilters::Blend: a layer's alpha, a drop shadow's color), is such a draw: gather_8888
+#       or bilerp_clamp_8888 (16.16 fixed point, Q15 lerps with vqrdmulh), uniform_color, the
+#       lowp blend modes with NEON's div255 (a rounding shift), and a lowp src-over. This fragment
+#       computes those draws bit for bit; anything else stays in the float stages of
+#       cpu_filter_color.
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+## A pixel as lowp holds it: four channels in [0, 255].
+struct CpuLowp:
+    var r: u32
+    var g: u32
+    var b: u32
+    var a: u32
+
+## Whether drawing `fr` runs in lowp: every deferred color filter is a constant-color blend.
+func cpu_fr_is_lowp(fr: const CpuFr*) -> bool:
+    # An SkImage drawn with a fractional transform and linear sampling goes through the
+    # shader-tiled (strict) image shader, whose stages are float.
+    if not fr.padded and fr.linear and cpu_fm_integer_translation(fr.transform) == none:
+        return false
+    for i in 0..<fr.op_count:
+        let kind = fr.ops[i].kind
+        if kind != CpuColorOpKind.dst_in and kind != CpuColorOpKind.src_in:
+            return false
+    return true
+
+## div255 on NEON (vrshrq_n_u16(vrsraq_n_u16(v, v, 8), 8)): (v + ((v + 128) >> 8) + 128) >> 8,
+## exact for every product of two bytes.
+func cpu_div255(v: u32) -> u32:
+    let t = (v + ((v + 128) >> 8)) & 0xffff
+    return (t + 128) >> 8
+
+## The byte pixel (x, y) of `fr`'s image, or transparent outside it.
+func cpu_lowp_texel(fr: const CpuFr*, x: i32, y: i32) -> CpuLowp:
+    let pixels = fr.pixels else return CpuLowp(r = 0, g = 0, b = 0, a = 0)
+    if x < 0 or y < 0 or x >= fr.width or y >= fr.height:
+        return CpuLowp(r = 0, g = 0, b = 0, a = 0)
+    let i = ((usize)y * (usize)fr.width + (usize)x) * 4
+    return CpuLowp(r = pixels[i], g = pixels[i + 1], b = pixels[i + 2], a = pixels[i + 3])
+
+## `fr`'s pixel at layer pixel (x, y) drawn in lowp: sampled, then its constant-color blends.
+func cpu_fr_pixel_lowp(fr: const CpuFr*, sampler: const (CpuFMatrix, (i32, i32)?)*, x: i32, y: i32) -> CpuLowp:
+    if not cpu_fr_in_bounds(fr, x, y) or not cpu_fr_has_image(fr):
+        return CpuLowp(r = 0, g = 0, b = 0, a = 0)
+    var c = CpuLowp(r = 0, g = 0, b = 0, a = 0)
+    if let origin = (*sampler).1:
+        c = cpu_lowp_of_float(cpu_fr_tiled_texel(fr, x - origin.0, y - origin.1))
+    else:
+        let u = cpu_fm_pipeline_x((*sampler).0, (f32)x + 0.5, (f32)y + 0.5)
+        let v = cpu_fm_pipeline_y((*sampler).0, (f32)x + 0.5, (f32)y + 0.5)
+        if not fr.linear:
+            c = cpu_lowp_of_float(cpu_fr_nearest_texel(fr, u, v))
+        else:
+            c = cpu_lowp_bilerp(fr, u, v)
+    for i in 0..<fr.op_count:
+        let op = fr.ops[i]
+        if op.kind == CpuColorOpKind.dst_in:
+            # uniform_color (the constant as a byte), then dstin: div255(d * sa).
+            let sa = cpu_uniform_byte(op.color.a)
+            c = CpuLowp(r = cpu_div255(c.r * sa), g = cpu_div255(c.g * sa), b = cpu_div255(c.b * sa), a = cpu_div255(c.a * sa))
+        else:
+            # srcin: div255(s * da).
+            let s = CpuLowp(r = cpu_uniform_byte(op.color.r), g = cpu_uniform_byte(op.color.g), b = cpu_uniform_byte(op.color.b), a = cpu_uniform_byte(op.color.a))
+            c = CpuLowp(r = cpu_div255(s.r * c.a), g = cpu_div255(s.g * c.a), b = cpu_div255(s.b * c.a), a = cpu_div255(s.a * c.a))
+    return c
+
+## A texel read as floats (v / 255), back to its byte.
+func cpu_lowp_of_float(c: CpuRgba) -> CpuLowp:
+    return CpuLowp(r = (u32)cpu_to_unorm8(c.r), g = (u32)cpu_to_unorm8(c.g), b = (u32)cpu_to_unorm8(c.b), a = (u32)cpu_to_unorm8(c.a))
+
+## appendConstantColor's byte: (uint16_t)(v * 255 + 0.5).
+func cpu_uniform_byte(v: f32) -> u32:
+    return (u32)(v * 255.0 + 0.5)
+
+## bilerp_clamp_8888 in lowp at image coordinates (u, v). A padded image is read through its
+## transparent 1-pixel outset (drawSpecial of makePixelOutset()); another image is clamped.
+func cpu_lowp_bilerp(fr: const CpuFr*, u: f32, v: f32) -> CpuLowp:
+    var x = u
+    var y = v
+    var low: i32 = 0
+    var high_x = fr.width - 1
+    var high_y = fr.height - 1
+    if fr.padded and not fr.clamp:
+        x = u + 1.0
+        y = v + 1.0
+        low = -1
+        high_x = fr.width
+        high_y = fr.height
+    let qx = cpu_f32_to_i32(math32.floor(65536.0 * x + 0.5)) - 32768
+    let qy = cpu_f32_to_i32(math32.floor(65536.0 * y + 0.5)) - 32768
+    var sx = qx >> 16
+    var sy = qy >> 16
+    let tx = cpu_i16(qx ^ 0x8000)
+    let ty = cpu_i16(qy ^ 0x8000)
+    if fr.padded and not fr.clamp:
+        sx -= 1
+        sy -= 1
+    let x0 = cpu_clamp_i32(sx, low, high_x)
+    let x1 = cpu_clamp_i32(sx + 1, low, high_x)
+    let y0 = cpu_clamp_i32(sy, low, high_y)
+    let y1 = cpu_clamp_i32(sy + 1, low, high_y)
+    let tl = cpu_lowp_texel(fr, x0, y0)
+    let tr = cpu_lowp_texel(fr, x1, y0)
+    let bl = cpu_lowp_texel(fr, x0, y1)
+    let br = cpu_lowp_texel(fr, x1, y1)
+    let top = CpuLowp(r = cpu_lerp_x(tx, tl.r, tr.r), g = cpu_lerp_x(tx, tl.g, tr.g), b = cpu_lerp_x(tx, tl.b, tr.b), a = cpu_lerp_x(tx, tl.a, tr.a))
+    let bottom = CpuLowp(r = cpu_lerp_x(tx, bl.r, br.r), g = cpu_lerp_x(tx, bl.g, br.g), b = cpu_lerp_x(tx, bl.b, br.b), a = cpu_lerp_x(tx, bl.a, br.a))
+    return CpuLowp(r = cpu_lerp_y(ty, top.r, bottom.r), g = cpu_lerp_y(ty, top.g, bottom.g), b = cpu_lerp_y(ty, top.b, bottom.b), a = cpu_lerp_y(ty, top.a, bottom.a))
+
+## The low 16 bits of `v` as a signed 16-bit value.
+func cpu_i16(v: i32) -> i32:
+    let low = v & 0xffff
+    return low - 65536 if low >= 32768 else low
+
+## scaled_mult (vqrdmulhq_s16): (2 a b + 2^15) >> 16, saturated.
+func cpu_scaled_mult(a: i32, b: i32) -> i32:
+    let product = (i64)a * (i64)b * 2 + 32768
+    let result = product >> 16
+    if result > 32767:
+        return 32767
+    return (i32)result
+
+## lerpX: ((tx * ((R - L) << 7) >> 15) + ((R + L) << 7) + 1) >> 1 in 16-bit lanes.
+func cpu_lerp_x(tx: i32, left: u32, right: u32) -> u32:
+    let width = cpu_i16((i32)(((right -% left) & 0xffff) << 7))
+    let middle = ((right + left) << 7) & 0xffff
+    let v2 = ((u32)(cpu_scaled_mult(tx, width) & 0xffff) + middle + 1) & 0xffff
+    return v2 >> 1
+
+## lerpY: (ty * (B - T) >> 15) + (B + T) + 0x80, over 256.
+func cpu_lerp_y(ty: i32, top: u32, bottom: u32) -> u32:
+    let width = cpu_i16((i32)bottom - (i32)top)
+    let middle = (bottom + top) & 0xffff
+    let blend = ((u32)(cpu_scaled_mult(ty, width) & 0xffff) + middle + 0x80) & 0xffff
+    return blend >> 8
+
+## The lowp src-over: s + div255(d * (255 - sa)).
+func cpu_lowp_src_over(s: CpuLowp, d: CpuLowp) -> CpuLowp:
+    let inv = 255 - s.a
+    return CpuLowp(r = s.r + cpu_div255(d.r * inv), g = s.g + cpu_div255(d.g * inv), b = s.b + cpu_div255(d.b * inv), a = s.a + cpu_div255(d.a * inv))
+
+## Stores a lowp pixel at `offset`.
+func cpu_store_lowp(data: u8[], offset: usize, c: CpuLowp):
+    data[offset] = (u8)cpu_min_u32(c.r, 255)
+    data[offset + 1] = (u8)cpu_min_u32(c.g, 255)
+    data[offset + 2] = (u8)cpu_min_u32(c.b, 255)
+    data[offset + 3] = (u8)cpu_min_u32(c.a, 255)
+
+func cpu_min_u32(a: u32, b: u32) -> u32:
+    return a if a < b else b
+
+## Loads a byte pixel at `offset`.
+func cpu_load_lowp(data: const u8[], offset: usize) -> CpuLowp:
+    return CpuLowp(r = data[offset], g = data[offset + 1], b = data[offset + 2], a = data[offset + 3])

@@ -1,0 +1,360 @@
+#==============================================================================================
+#
+#   cpu_filter_blend - blends, arithmetic and displacement: the image filters that evaluate a
+#                      shader over their inputs
+#
+#   DESCRIPTION:
+#       Port of Skia m144's SkBlendImageFilter::onFilterImage (src/effects/imagefilters/
+#       SkBlendImageFilter.cpp: SkShaders::Blend of the background and foreground drawn over
+#       the blend's possible output), the raster pipeline's highp blend-mode stages
+#       (src/opts/SkRasterPipeline_opts.h lines 2200-2400), the arithmetic runtime blender
+#       (sk_arithmetic_blend, src/sksl/sksl_rt_shader.sksl), LibGfx's plus-darker and
+#       plus-lighter runtime blenders (SkiaUtils.cpp to_skia_blender), and
+#       SkDisplacementMapImageFilter::onFilterImage with sk_displacement.
+#
+#       rcp_fast is NEON's reciprocal estimate refined once on aarch64; the port divides
+#       exactly (the color-dodge, color-burn and non-separable modes may differ by a level).
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+# mark: Blend filters ==========================================================================
+
+## SkBlendImageFilter::onFilterImage for a blend or arithmetic node.
+func cpu_filter_blend_node(ctx: const CpuFilterContext*, filter: const gfx.ImageFilter*?, background: const gfx.ImageFilter*?, foreground: const gfx.ImageFilter*?) -> CpuFr:
+    let node = filter else trap("VERIFY")
+    var source_bounds = cpu_irect_empty()
+    if cpu_fr_has_image(&ctx.source):
+        source_bounds = ctx.source.bounds
+    var required = ctx.desired
+    if let max_output = cpu_filter_node_output_bounds(filter, ctx.layer, source_bounds):
+        required = cpu_irect_intersect(max_output, ctx.desired) else return cpu_fr_empty()
+    let input_ctx = cpu_ctx_with_desired(ctx, required)
+    let bg = cpu_filter_node_evaluate(background, &input_ctx)
+    let fg = cpu_filter_node_evaluate(foreground, &input_ctx)
+    # Builder::eval over `required` within the desired output.
+    let out = cpu_irect_intersect(required, ctx.desired) else return cpu_fr_empty()
+    let affects_transparent = cpu_blend_transparency(&node.node) == none
+    if not cpu_fr_has_image(&bg) and not cpu_fr_has_image(&fg) and not affects_transparent:
+        return cpu_fr_empty()
+    let width = cpu_irect_width(out)
+    let height = cpu_irect_height(out)
+    let data = cpu_filter_arena_pixmap(ctx.arena, width, height)
+    let bg_sampler = cpu_fr_sampler(&bg)
+    let fg_sampler = cpu_fr_sampler(&fg)
+    let lowp_mode = cpu_blend_lowp_mode(&node.node)
+    if lowp_mode >= 0 and cpu_fr_is_lowp(&bg) and cpu_fr_is_lowp(&fg):
+        # Every stage of the SkShaders::Blend draw has a lowp implementation.
+        for y in 0..<height:
+            for x in 0..<width:
+                let d = cpu_fr_pixel_lowp(&bg, &bg_sampler, out.left + x, out.top + y)
+                let s = cpu_fr_pixel_lowp(&fg, &fg_sampler, out.left + x, out.top + y)
+                cpu_store_lowp(data, ((usize)y * (usize)width + (usize)x) * 4, cpu_blend_lowp(lowp_mode, s, d))
+        return cpu_fr_of_pixels(data, width, height, out.left, out.top)
+    for y in 0..<height:
+        for x in 0..<width:
+            let cx = (f32)(out.left + x) + 0.5
+            let cy = (f32)(out.top + y) + 0.5
+            let d = cpu_fr_shader_sample(&bg, &bg_sampler, cx, cy, false)
+            let s = cpu_fr_shader_sample(&fg, &fg_sampler, cx, cy, false)
+            cpu_store_rgba(data, ((usize)y * (usize)width + (usize)x) * 4, cpu_rgba_clamp01(cpu_blend_node_apply(&node.node, s, d)))
+    return cpu_fr_of_pixels(data, width, height, out.left, out.top)
+
+## The blender of a blend or arithmetic node on source `s` (foreground) and destination `d`
+## (background), premultiplied.
+func cpu_blend_node_apply(node: const gfx.ImageFilterNode*, s: CpuRgba, d: CpuRgba) -> CpuRgba:
+    match *node:
+        .arithmetic(k1, k2, k3, k4, enforce_premultiplied_color, _, _):
+            return cpu_blend_arithmetic(k1, k2, k3, k4, enforce_premultiplied_color, s, d)
+        .blend(mode, _, _):
+            return cpu_blend_mode_apply(mode, s, d)
+        _: trap("VERIFY_NOT_REACHED")
+
+## The lowp blend stage of a blend node (an index for cpu_blend_lowp), or -1 when the mode has
+## none (the float stages then run the whole draw).
+func cpu_blend_lowp_mode(node: const gfx.ImageFilterNode*) -> i32:
+    match *node:
+        .blend(mode, _, _):
+            match mode:
+                .normal, .source_over: return 0
+                .destination_over: return 1
+                .source_in: return 2
+                .destination_in: return 3
+                .source_out: return 4
+                .destination_out: return 5
+                .source_a_top: return 6
+                .destination_a_top: return 7
+                .xor: return 8
+                .lighter: return 9
+                .multiply: return 10
+                .screen: return 11
+                .darken: return 12
+                .lighten: return 13
+                .difference: return 14
+                .exclusion: return 15
+                .hard_light: return 16
+                .overlay: return 17
+                _: return -1
+        _: return -1
+
+## The lowp blend modes (SkRasterPipeline_opts.h lines 5837-5905, 16-bit lanes).
+func cpu_blend_lowp(mode: i32, s: CpuLowp, d: CpuLowp) -> CpuLowp:
+    if mode >= 12:
+        # Color channels by the mode, alpha by src-over.
+        return CpuLowp(r = cpu_blend_lowp_channel(mode, s.r, d.r, s.a, d.a), g = cpu_blend_lowp_channel(mode, s.g, d.g, s.a, d.a),
+                       b = cpu_blend_lowp_channel(mode, s.b, d.b, s.a, d.a), a = (s.a + cpu_div255(d.a * (255 - s.a))) & 0xffff)
+    return CpuLowp(r = cpu_blend_lowp_channel(mode, s.r, d.r, s.a, d.a), g = cpu_blend_lowp_channel(mode, s.g, d.g, s.a, d.a),
+                   b = cpu_blend_lowp_channel(mode, s.b, d.b, s.a, d.a), a = cpu_blend_lowp_channel(mode, s.a, d.a, s.a, d.a))
+
+func cpu_blend_lowp_channel(mode: i32, s: u32, d: u32, sa: u32, da: u32) -> u32:
+    let isa = 255 - sa
+    let ida = 255 - da
+    var result: u32 = 0
+    match mode:
+        0: result = s + cpu_div255(d * isa)
+        1: result = d + cpu_div255(s * ida)
+        2: result = cpu_div255(s * da)
+        3: result = cpu_div255(d * sa)
+        4: result = cpu_div255(s * ida)
+        5: result = cpu_div255(d * isa)
+        6: result = cpu_div255((s * da + d * isa) & 0xffff)
+        7: result = cpu_div255((d * sa + s * ida) & 0xffff)
+        8: result = cpu_div255((s * ida + d * isa) & 0xffff)
+        9: result = cpu_min_u32(s + d, 255)
+        10: result = cpu_div255((s * ida + d * isa + s * d) & 0xffff)
+        11: result = s + d -% cpu_div255(s * d)
+        12: result = s + d -% cpu_div255(cpu_max_u32(s * da, d * sa))
+        13: result = s + d -% cpu_div255(cpu_min_u32(s * da, d * sa))
+        14: result = s + d -% 2 * cpu_div255(cpu_min_u32(s * da, d * sa))
+        15: result = s + d -% 2 * cpu_div255(s * d)
+        16, 17:
+            let key = s if mode == 16 else d
+            let key_alpha = sa if mode == 16 else da
+            var term: u32 = 0
+            if 2 * key <= key_alpha:
+                term = 2 * s * d
+            else:
+                term = sa * da -% 2 * (sa -% s) * (da -% d)
+            result = cpu_div255((s * ida + d * isa + term) & 0xffff)
+        _: trap("VERIFY_NOT_REACHED")
+    return result & 0xffff
+
+func cpu_max_u32(a: u32, b: u32) -> u32:
+    return a if a > b else b
+
+## sk_arithmetic_blend: saturate(k1 s d + k2 s + k3 d + k4), color clamped to max(alpha,
+## pmClamp) (pmClamp is 0 when enforcing premultiplied colors, 1 otherwise).
+func cpu_blend_arithmetic(k1: f32, k2: f32, k3: f32, k4: f32, enforce: bool, s: CpuRgba, d: CpuRgba) -> CpuRgba:
+    let pm_clamp: f32 = 0.0 if enforce else 1.0
+    let a = cpu_clamp_unit(k1 * s.a * d.a + k2 * s.a + k3 * d.a + k4)
+    let limit = cpu_max_f32(a, pm_clamp)
+    return CpuRgba(r = cpu_min_f32(cpu_clamp_unit(k1 * s.r * d.r + k2 * s.r + k3 * d.r + k4), limit),
+                   g = cpu_min_f32(cpu_clamp_unit(k1 * s.g * d.g + k2 * s.g + k3 * d.g + k4), limit),
+                   b = cpu_min_f32(cpu_clamp_unit(k1 * s.b * d.b + k2 * s.b + k3 * d.b + k4), limit), a = a)
+
+## to_skia_blender(mode) evaluated on premultiplied `s` over `d`.
+func cpu_blend_mode_apply(mode: gfx.CompositingAndBlendingOperator, s: CpuRgba, d: CpuRgba) -> CpuRgba:
+    match mode:
+        .normal, .source_over: return cpu_blend_src_over(s, d)
+        .destination_over: return cpu_blend_each(s, d, 1)
+        .source_in: return CpuRgba(r = s.r * d.a, g = s.g * d.a, b = s.b * d.a, a = s.a * d.a)
+        .destination_in: return CpuRgba(r = d.r * s.a, g = d.g * s.a, b = d.b * s.a, a = d.a * s.a)
+        .source_out: return cpu_blend_each(s, d, 2)
+        .destination_out: return cpu_blend_each(s, d, 3)
+        .source_a_top: return cpu_blend_each(s, d, 4)
+        .destination_a_top: return cpu_blend_each(s, d, 5)
+        .xor: return cpu_blend_each(s, d, 6)
+        .lighter: return cpu_blend_each(s, d, 7)
+        .multiply: return cpu_blend_each(s, d, 8)
+        .screen: return cpu_blend_each(s, d, 9)
+        .darken, .lighten, .difference, .exclusion, .color_burn, .color_dodge, .hard_light, .overlay, .soft_light:
+            return CpuRgba(r = cpu_blend_separable(mode, s.r, d.r, s.a, d.a), g = cpu_blend_separable(mode, s.g, d.g, s.a, d.a),
+                           b = cpu_blend_separable(mode, s.b, d.b, s.a, d.a), a = math32.fma(d.a, 1.0 - s.a, s.a))
+        .hue, .saturation, .color, .luminosity:
+            return cpu_blend_non_separable(mode, s, d)
+        .plus_darker:
+            # saturate(saturate(da + sa) - saturate(da - d) - saturate(sa - s)) per channel.
+            return CpuRgba(r = cpu_plus_darker(s.r, d.r, s.a, d.a), g = cpu_plus_darker(s.g, d.g, s.a, d.a),
+                           b = cpu_plus_darker(s.b, d.b, s.a, d.a), a = cpu_plus_darker(s.a, d.a, s.a, d.a))
+        .plus_lighter:
+            return CpuRgba(r = cpu_clamp_unit(s.r + d.r), g = cpu_clamp_unit(s.g + d.g), b = cpu_clamp_unit(s.b + d.b), a = cpu_clamp_unit(s.a + d.a))
+        _: trap("VERIFY_NOT_REACHED")
+
+func cpu_plus_darker(s: f32, d: f32, sa: f32, da: f32) -> f32:
+    return cpu_clamp_unit(cpu_clamp_unit(da + sa) - cpu_clamp_unit(da - d) - cpu_clamp_unit(sa - s))
+
+## The blend modes that treat all four channels alike (BLEND_MODE of the first group).
+func cpu_blend_each(s: CpuRgba, d: CpuRgba, which: i32) -> CpuRgba:
+    return CpuRgba(r = cpu_blend_channel(which, s.r, d.r, s.a, d.a), g = cpu_blend_channel(which, s.g, d.g, s.a, d.a),
+                   b = cpu_blend_channel(which, s.b, d.b, s.a, d.a), a = cpu_blend_channel(which, s.a, d.a, s.a, d.a))
+
+func cpu_blend_channel(which: i32, s: f32, d: f32, sa: f32, da: f32) -> f32:
+    match which:
+        1: return math32.fma(s, 1.0 - da, d)
+        2: return s * (1.0 - da)
+        3: return d * (1.0 - sa)
+        4: return math32.fma(s, da, d * (1.0 - sa))
+        5: return math32.fma(d, sa, s * (1.0 - da))
+        6: return math32.fma(s, 1.0 - da, d * (1.0 - sa))
+        7: return cpu_min_f32(s + d, 1.0)
+        8: return math32.fma(s, d, math32.fma(s, 1.0 - da, d * (1.0 - sa)))
+        9: return math32.fma(-s, d, s + d)
+        _: trap("VERIFY_NOT_REACHED")
+
+## The separable blend modes' color channels (BLEND_MODE of the second group).
+func cpu_blend_separable(mode: gfx.CompositingAndBlendingOperator, s: f32, d: f32, sa: f32, da: f32) -> f32:
+    match mode:
+        .darken: return s + d - cpu_max_f32(s * da, d * sa)
+        .lighten: return s + d - cpu_min_f32(s * da, d * sa)
+        .difference:
+            let m = cpu_min_f32(s * da, d * sa)
+            return s + d - (m + m)
+        .exclusion:
+            let m = s * d
+            return s + d - (m + m)
+        .color_burn:
+            if d == da:
+                return d + s * (1.0 - da)
+            if s == 0.0:
+                return d * (1.0 - sa)
+            return sa * (da - cpu_min_f32(da, (da - d) * sa * (1.0 / s))) + s * (1.0 - da) + d * (1.0 - sa)
+        .color_dodge:
+            if d == 0.0:
+                return s * (1.0 - da)
+            if s == sa:
+                return s + d * (1.0 - sa)
+            return sa * cpu_min_f32(da, (d * sa) * (1.0 / (sa - s))) + s * (1.0 - da) + d * (1.0 - sa)
+        .hard_light:
+            let base = s * (1.0 - da) + d * (1.0 - sa)
+            if s + s <= sa:
+                return base + (s * d + s * d)
+            let m = (da - d) * (sa - s)
+            return base + (sa * da - (m + m))
+        .overlay:
+            let base = s * (1.0 - da) + d * (1.0 - sa)
+            if d + d <= da:
+                return base + (s * d + s * d)
+            let m = (da - d) * (sa - s)
+            return base + (sa * da - (m + m))
+        .soft_light:
+            let m: f32 = d / da if da > 0.0 else 0.0
+            let s2 = s + s
+            let m4 = (m + m) + (m + m)
+            let dark_src = d * (sa + (s2 - sa) * (1.0 - m))
+            let dark_dst = (m4 * m4 + m4) * (m - 1.0) + 7.0 * m
+            let lite_dst = math32.sqrt(m) - m
+            let chosen = dark_dst if (d + d) + (d + d) <= da else lite_dst
+            let lite_src = d * sa + da * (s2 - sa) * chosen
+            return s * (1.0 - da) + d * (1.0 - sa) + (dark_src if s2 <= sa else lite_src)
+        _: trap("VERIFY_NOT_REACHED")
+
+## lum: mad(r, 0.30, mad(g, 0.59, b * 0.11)).
+func cpu_blend_lum(r: f32, g: f32, b: f32) -> f32:
+    return math32.fma(r, 0.30, math32.fma(g, 0.59, b * 0.11))
+
+## sat: max - min.
+func cpu_blend_sat(r: f32, g: f32, b: f32) -> f32:
+    return cpu_max_f32(r, cpu_max_f32(g, b)) - cpu_min_f32(r, cpu_min_f32(g, b))
+
+## hue, saturation, color and luminosity (the non-separable stages).
+func cpu_blend_non_separable(mode: gfx.CompositingAndBlendingOperator, s: CpuRgba, d: CpuRgba) -> CpuRgba:
+    var c = CpuRgba(r = 0.0, g = 0.0, b = 0.0, a = 0.0)
+    match mode:
+        .hue:
+            c = CpuRgba(r = s.r * s.a, g = s.g * s.a, b = s.b * s.a, a = 0.0)
+            c = cpu_blend_set_sat(c, cpu_blend_sat(d.r, d.g, d.b) * s.a)
+            c = cpu_blend_set_lum(c, cpu_blend_lum(d.r, d.g, d.b) * s.a)
+        .saturation:
+            c = CpuRgba(r = d.r * s.a, g = d.g * s.a, b = d.b * s.a, a = 0.0)
+            c = cpu_blend_set_sat(c, cpu_blend_sat(s.r, s.g, s.b) * d.a)
+            c = cpu_blend_set_lum(c, cpu_blend_lum(d.r, d.g, d.b) * s.a)
+        .color:
+            c = CpuRgba(r = s.r * d.a, g = s.g * d.a, b = s.b * d.a, a = 0.0)
+            c = cpu_blend_set_lum(c, cpu_blend_lum(d.r, d.g, d.b) * s.a)
+        .luminosity:
+            c = CpuRgba(r = d.r * s.a, g = d.g * s.a, b = d.b * s.a, a = 0.0)
+            c = cpu_blend_set_lum(c, cpu_blend_lum(s.r, s.g, s.b) * d.a)
+        _: trap("VERIFY_NOT_REACHED")
+    c = cpu_blend_clip_color(c, s.a * d.a)
+    return CpuRgba(r = math32.fma(s.r, 1.0 - d.a, math32.fma(d.r, 1.0 - s.a, c.r)),
+                   g = math32.fma(s.g, 1.0 - d.a, math32.fma(d.g, 1.0 - s.a, c.g)),
+                   b = math32.fma(s.b, 1.0 - d.a, math32.fma(d.b, 1.0 - s.a, c.b)),
+                   a = s.a + math32.fma(-s.a, d.a, d.a))
+
+func cpu_blend_set_sat(c: CpuRgba, s: f32) -> CpuRgba:
+    let mn = cpu_min_f32(c.r, cpu_min_f32(c.g, c.b))
+    let mx = cpu_max_f32(c.r, cpu_max_f32(c.g, c.b))
+    let sat = mx - mn
+    let scale: f32 = 0.0 if sat == 0.0 else s * (1.0 / sat)
+    return CpuRgba(r = (c.r - mn) * scale, g = (c.g - mn) * scale, b = (c.b - mn) * scale, a = c.a)
+
+func cpu_blend_set_lum(c: CpuRgba, l: f32) -> CpuRgba:
+    let diff = l - cpu_blend_lum(c.r, c.g, c.b)
+    return CpuRgba(r = c.r + diff, g = c.g + diff, b = c.b + diff, a = c.a)
+
+func cpu_blend_clip_color(c: CpuRgba, a: f32) -> CpuRgba:
+    let mn = cpu_min_f32(c.r, cpu_min_f32(c.g, c.b))
+    let mx = cpu_max_f32(c.r, cpu_max_f32(c.g, c.b))
+    let l = cpu_blend_lum(c.r, c.g, c.b)
+    let mn_scale = l * (1.0 / (l - mn))
+    let mx_scale = (a - l) * (1.0 / (mx - l))
+    let clip_low = mn < 0.0 and l != mn
+    let clip_high = mx > a and l != mx
+    return CpuRgba(r = cpu_blend_clip_channel(c.r, l, clip_low, clip_high, mn_scale, mx_scale),
+                   g = cpu_blend_clip_channel(c.g, l, clip_low, clip_high, mn_scale, mx_scale),
+                   b = cpu_blend_clip_channel(c.b, l, clip_low, clip_high, mn_scale, mx_scale), a = c.a)
+
+func cpu_blend_clip_channel(input: f32, l: f32, clip_low: bool, clip_high: bool, mn_scale: f32, mx_scale: f32) -> f32:
+    var c = input
+    if clip_low:
+        c = math32.fma(mn_scale, c - l, l)
+    if clip_high:
+        c = math32.fma(mx_scale, c - l, l)
+    return cpu_max_f32(c, 0.0)
+
+# mark: Displacement ===========================================================================
+
+## SkDisplacementMapImageFilter::onFilterImage: each pixel takes the color at its position plus
+## scale * (the selected channels of the unpremultiplied displacement - 1/2), nearest-neighbor.
+func cpu_filter_displacement(ctx: const CpuFilterContext*, x_channel: gfx.ChannelSelector, y_channel: gfx.ChannelSelector, scale: f32, displacement: const gfx.ImageFilter*?, color: const gfx.ImageFilter*?) -> CpuFr:
+    let required_color = cpu_displacement_outset(ctx.layer, scale, ctx.desired)
+    let color_ctx = cpu_ctx_with_desired(ctx, required_color)
+    let color_output = cpu_filter_node_evaluate(color, &color_ctx)
+    if not cpu_fr_has_image(&color_output):
+        return cpu_fr_empty()
+    let out = cpu_irect_intersect(cpu_displacement_outset(ctx.layer, scale, color_output.bounds), ctx.desired) else return cpu_fr_empty()
+    let displacement_ctx = cpu_ctx_with_desired(ctx, out)
+    let displacement_output = cpu_filter_node_evaluate(displacement, &displacement_ctx)
+    let vector = cpu_fm_map_vector(ctx.layer, scale, scale)
+    if not cpu_fr_has_image(&displacement_output):
+        # (0, 0, 0, 0) displaces by (-scale / 2, -scale / 2): a translation.
+        return cpu_fr_apply_transform(ctx, &color_output, cpu_fm_translate(-0.5 * vector.0, -0.5 * vector.1), false)
+    let width = cpu_irect_width(out)
+    let height = cpu_irect_height(out)
+    let data = cpu_filter_arena_pixmap(ctx.arena, width, height)
+    let displacement_sampler = cpu_fr_sampler(&displacement_output)
+    let color_sampler = cpu_fr_sampler(&color_output)
+    for y in 0..<height:
+        for x in 0..<width:
+            let cx = (f32)(out.left + x) + 0.5
+            let cy = (f32)(out.top + y) + 0.5
+            let displ = cpu_fr_shader_sample(&displacement_output, &displacement_sampler, cx, cy, false)
+            # unpremul(c): c.rgb / max(c.a, 0.0001).
+            let divisor = cpu_max_f32(displ.a, 0.0001)
+            let unpremul = CpuRgba(r = displ.r / divisor, g = displ.g / divisor, b = displ.b / divisor, a = displ.a)
+            let dx = vector.0 * (cpu_select_channel(unpremul, x_channel) - 0.5)
+            let dy = vector.1 * (cpu_select_channel(unpremul, y_channel) - 0.5)
+            let c = cpu_fr_shader_sample(&color_output, &color_sampler, cx + dx, cy + dy, true)
+            cpu_store_rgba(data, ((usize)y * (usize)width + (usize)x) * 4, cpu_rgba_clamp01(c))
+    return cpu_fr_of_pixels(data, width, height, out.left, out.top)
+
+## dot(color, select) for a one-hot channel selector.
+func cpu_select_channel(c: CpuRgba, channel: gfx.ChannelSelector) -> f32:
+    match channel:
+        .red: return c.r
+        .green: return c.g
+        .blue: return c.b
+        .alpha: return c.a
+        _: trap("VERIFY_NOT_REACHED")

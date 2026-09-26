@@ -30,6 +30,14 @@ cpu_color_space.lucb
 cpu_gradient.lucb
 cpu_shapes.lucb
 cpu_filter.lucb
+cpu_filter_result.lucb
+cpu_filter_color.lucb
+cpu_filter_bounds.lucb
+cpu_filter_nodes.lucb
+cpu_filter_blur.lucb
+cpu_filter_blend.lucb
+cpu_filter_noise.lucb
+cpu_filter_lowp.lucb
 display_list_player_cpu.lucb
 display_list_player_cpu_2.lucb
 display_list_recorder.lucb
@@ -46,3 +54,10 @@ tests_cpu_gradient.lucb
 tests_scroll_and_paint_style.lucb
 tests_skia_reference_data_2.lucb
 tests_cpu_player_2.lucb
+tests_cpu_filter_support.lucb
+tests_cpu_filter.lucb
+tests_cpu_filter_blend.lucb
+tests_cpu_filter_data_1.lucb
+tests_cpu_filter_data_2.lucb
+tests_cpu_filter_data_3.lucb
+tests_cpu_filter_data_4.lucb

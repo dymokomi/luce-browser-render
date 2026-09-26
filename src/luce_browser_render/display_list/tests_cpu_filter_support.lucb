@@ -1,0 +1,220 @@
+#==============================================================================================
+#
+#   tests_cpu_filter_support - the harness of the image filter tests
+#
+#   DESCRIPTION:
+#       Each scene of tests_cpu_filter*.lucb evaluates a gfx.Filter graph with cpu_filter_evaluate
+#       as SkCanvas would for the oracle's scene (tests_cpu_filter_data_*.lucb) and compares the
+#       pixels with Skia's. The oracle draws content into a saveLayer whose paint carries the
+#       filter (blend mode kSrc, over a transparent canvas, through a clip), so Skia's pixels are
+#       the filter's result within the clip; the harness takes the layer's content from the
+#       oracle's unfiltered scenes on a 48x48 canvas ("content" and, under the scale-and-translate
+#       CTM, "content_scale"), restricted to what the filter reads (cpu_filter_input_bounds) as the
+#       layer bounds restrict it. A backdrop scene filters the whole prior canvas (the content
+#       drawn through the clip), clamped at its edges. The test bodies are `noinline` functions (# workaround:
+#       compiler-issues/ranges_facts_cubic).
+#
+#==============================================================================================
+
+## One scene: the canvas size, the CTM (the layer matrix), the clip, the restore paint's alpha
+## and luma color filter, and whether the filter is a backdrop.
+struct TestFilterScene:
+    var width: i32 = 24
+    var height: i32 = 24
+    var scaled: bool = false
+    var rotated: bool = false
+    var clip: CpuIRect = CpuIRect(left = 0, top = 0, right = 1000, bottom = 1000)
+    var alpha: f32 = 1.0
+    var luma: bool = false
+    var backdrop: bool = false
+
+## The oracle's CTM: for scaled scenes: Translate(1, 2.3) * Scale(2, 1.25) (no pixel center falls on a
+## sampling tie, so the content drawn in the layer is the content drawn on the canvas).
+func test_filter_layer_matrix(scene: const TestFilterScene*) -> raster.Transform:
+    if scene.rotated:
+        # SkMatrix::RotateDeg(30, {12, 12}), bit for bit.
+        return raster.Transform.from_row(f32.bits(0x3f5db3d7), f32.bits(0x3f000000), f32.bits(0xbf000000), f32.bits(0x3f5db3d7),
+                                         f32.bits(0x40f3723e), f32.bits(0xc08c8dc2))
+    if scene.scaled:
+        return raster.Transform.from_row(2.0, 0.0, 0.0, 1.25, 1.0, 2.3)
+    return raster.Transform.identity()
+
+## The pixels of an oracle scene as RGBA bytes (`width` x `height`).
+func test_filter_parse(text: str, width: i32, height: i32) -> u8[]:
+    let count = (usize)width * (usize)height
+    let pixels = (new u8[count * 4] in memory.heap) else trap("out of memory")
+    let bytes = text.bytes
+    var index: usize = 0
+    var i: usize = 0
+    while i < bytes.length:
+        let c = bytes[i]
+        if c == ' ' or c == '\n':
+            i += 1
+            continue
+        if c == 'z':
+            i += 1
+            var run: usize = 0
+            while i < bytes.length and bytes[i] >= '0' and bytes[i] <= '9':
+                run = run * 10 + (usize)(bytes[i] - '0')
+                i += 1
+            index += run
+            continue
+        var value: u32 = 0
+        for k in 0..<8usize:
+            value = (value << 4) | test_hex_digit(bytes[i + k])
+        i += 8
+        if index >= count:
+            trap("more expected pixels than the scene has")
+        pixels[index * 4] = (u8)((value >> 16) & 0xff)
+        pixels[index * 4 + 1] = (u8)((value >> 8) & 0xff)
+        pixels[index * 4 + 2] = (u8)(value & 0xff)
+        pixels[index * 4 + 3] = (u8)(value >> 24)
+        index += 1
+    if index != count:
+        trap("the expected pixels do not fill the scene")
+    return pixels
+
+## The part `area` of a canvas of `width` pixels, as a filter image (none when empty).
+func test_filter_crop(pixels: const u8[], width: i32, area: CpuIRect) -> CpuFilterImage:
+    if cpu_irect_is_empty(area):
+        return CpuFilterImage(pixmap = none, left = 0, top = 0)
+    var pixmap = raster.Pixmap.new_((u32)cpu_irect_width(area), (u32)cpu_irect_height(area)) else trap("empty")
+    let data = pixmap.data_mut()
+    let w = cpu_irect_width(area)
+    for y in area.top..<area.bottom:
+        for x in area.left..<area.right:
+            for c in 0..<4usize:
+                data[((usize)(y - area.top) * (usize)w + (usize)(x - area.left)) * 4 + c] = pixels[((usize)y * (usize)width + (usize)x) * 4 + c]
+    return CpuFilterImage(pixmap = pixmap, left = area.left, top = area.top)
+
+## Evaluates `filter` for `scene` and compares the canvas with Skia's `expected` pixels: at
+## most `max_pixels` pixels may differ, none by more than `max_difference` in any channel.
+func test_filter_expect(name: str, scene: TestFilterScene, filter: const gfx.ImageFilter*?, expected: str, max_difference: u32, max_pixels: usize):
+    with memory.heap:
+        let width = scene.width
+        let height = scene.height
+        let canvas = cpu_irect(0, 0, width, height)
+        # The layer's content, drawn on a canvas larger than the scene's: a layer is not limited
+        # to the device, and a filter can read content drawn beyond it.
+        let content_width: i32 = 48
+        var content_text = filter_skia_content_scale if scene.scaled else filter_skia_content
+        if scene.rotated:
+            content_text = filter_skia_content_rotate
+        let content = test_filter_parse(content_text, content_width, content_width)
+        defer free(content) in memory.heap
+        let layer = test_filter_layer_matrix(&scene)
+        let desired = cpu_irect_intersect(scene.clip, canvas) else trap("an empty clip")
+        var source = CpuFilterImage(pixmap = none, left = 0, top = 0)
+        var tile = CpuFilterSourceTile.decal
+        if scene.backdrop:
+            # The oracle drew the content through the clip: the prior canvas is transparent
+            # outside it.
+            source = test_filter_crop(content, content_width, canvas)
+            if let pixmap = source.pixmap:
+                var clipped = pixmap
+                let data = clipped.data_mut()
+                for y in 0..<height:
+                    for x in 0..<width:
+                        if x < desired.left or y < desired.top or x >= desired.right or y >= desired.bottom:
+                            for c in 0..<4usize:
+                                data[((usize)y * (usize)width + (usize)x) * 4 + c] = 0
+            tile = CpuFilterSourceTile.clamp
+        else:
+            let input = cpu_filter_input_bounds(filter, layer, desired)
+            let drawn = cpu_irect(0, 0, content_width, content_width)
+            source = test_filter_crop(content, content_width, cpu_irect_intersect(input, drawn) else cpu_irect_empty())
+        var result = cpu_filter_evaluate(filter, layer, &source, tile, desired, scene.alpha, scene.luma)
+        if let pixmap = source.pixmap:
+            var owned = pixmap
+            owned.release()
+        # The canvas: transparent, with the result drawn (kSrc) within the clip.
+        let actual = (new u8[(usize)width * (usize)height * 4] in memory.heap) else trap("out of memory")
+        defer free(actual) in memory.heap
+        if let pixmap = result.pixmap:
+            let data = pixmap.data()
+            let w = (i32)pixmap.width()
+            for y in 0..<(i32)pixmap.height():
+                for x in 0..<w:
+                    let cx = result.left + x
+                    let cy = result.top + y
+                    if cx < desired.left or cy < desired.top or cx >= desired.right or cy >= desired.bottom:
+                        continue
+                    for c in 0..<4usize:
+                        actual[((usize)cy * (usize)width + (usize)cx) * 4 + c] = data[((usize)y * (usize)w + (usize)x) * 4 + c]
+            var owned = pixmap
+            owned.release()
+        let wanted = test_filter_parse(expected, width, height)
+        defer free(wanted) in memory.heap
+        var max_seen: u32 = 0
+        var differing: usize = 0
+        for i in 0..<(usize)width * (usize)height:
+            var pixel_difference: u32 = 0
+            for c in 0..<4usize:
+                let a = (u32)actual[i * 4 + c]
+                let b = (u32)wanted[i * 4 + c]
+                let d = a - b if a > b else b - a
+                if d > pixel_difference:
+                    pixel_difference = d
+            if pixel_difference > 0:
+                differing += 1
+            if pixel_difference > max_seen:
+                max_seen = pixel_difference
+        if max_seen > max_difference or differing > max_pixels:
+            print(f"{name}: {differing} pixels differ from Skia's, by up to {max_seen} (allowed: {max_pixels} by {max_difference})")
+            test_filter_print(actual, wanted, width, height)
+            trap("the filter's pixels are not close enough to Skia's")
+
+## Prints both images, a row per line, as 0xAARRGGBB words (actual / expected when they differ).
+func test_filter_print(actual: const u8[], wanted: const u8[], width: i32, height: i32):
+    for y in 0..<height:
+        var builder = ak.string_builder_new()
+        for x in 0..<width:
+            let i = ((usize)y * (usize)width + (usize)x) * 4
+            test_filter_append_pixel(&builder, actual, i)
+            var same = true
+            for c in 0..<4usize:
+                if actual[i + c] != wanted[i + c]:
+                    same = false
+            if not same:
+                ak.string_builder_append(&builder, "/")
+                test_filter_append_pixel(&builder, wanted, i)
+            ak.string_builder_append_u8(&builder, ' ')
+        print(test_builder_text(&builder))
+
+func test_filter_append_pixel(builder: ak.StringBuilder*, pixels: const u8[], i: usize):
+    let value = ((u32)pixels[i + 3] << 24) | ((u32)pixels[i] << 16) | ((u32)pixels[i + 1] << 8) | (u32)pixels[i + 2]
+    let digits = "0123456789abcdef".bytes
+    for k in 0..<8usize:
+        ak.string_builder_append_u8(builder, digits[(usize)((value >> (u32)(28 - 4 * k)) & 0xf)])
+
+## The filter graph of a gfx.Filter.
+func test_filter_graph(filter: const gfx.Filter*) -> const gfx.ImageFilter*?:
+    return filter.m_impl.filter
+
+## gfx.Color(r, g, b, a).
+func test_filter_color(r: u32, g: u32, b: u32, a: u32) -> gfx.Color:
+    return gfx.Color(m_value = (a << 24) | (r << 16) | (g << 8) | b)
+
+## The oracle's 10x8 pattern (pattern_pixel), premultiplied BGRA, as an ImmutableBitmap.
+func test_filter_pattern_bitmap(width: i32, height: i32) -> gfx.ImmutableBitmap*:
+    let bitmap = gfx.bitmap_create_alpha_type(gfx.BitmapFormat.bgra8888, gfx.AlphaType.premultiplied, gfx.IntSize(m_width = width, m_height = height)) else trap("bitmap")
+    for j in 0..<height:
+        let row = gfx.bitmap_scanline(bitmap, j) else trap("scanline")
+        for i in 0..<width:
+            let r = (i * 255) // (width - 1)
+            let g = (j * 255) // (height - 1)
+            let b = cpu_max_i32(0, 255 - (i + j) * 13)
+            let a = 255 - ((i * 7 + j * 11) % 5) * 40
+            row[(usize)i] = ((u32)a << 24) | ((u32)test_filter_premul(r, a) << 16) | ((u32)test_filter_premul(g, a) << 8) | (u32)test_filter_premul(b, a)
+    var color_space: gfx.ColorSpace = ---
+    gfx.color_space_construct(&color_space)
+    return gfx.immutable_bitmap_create_color_space(bitmap, color_space)
+
+## SkPremultiplyARGBInline's rounding: (c * a + 128) scaled by 257 / 65536.
+func test_filter_premul(c: i32, a: i32) -> i32:
+    let product = c * a + 128
+    return (product + (product >> 8)) >> 8
+
+## gfx.DevicePixelRect(x, y, width, height).
+func test_filter_rect(x: i32, y: i32, width: i32, height: i32) -> gfx.DevicePixelRect:
+    return gfx.DevicePixelRect(m_location = gfx.IntPoint(m_x = x, m_y = y), m_size = gfx.IntSize(m_width = width, m_height = height))

@@ -1,0 +1,259 @@
+#==============================================================================================
+#
+#   cpu_filter_bounds - what each image filter needs of its source and what it can produce
+#
+#   DESCRIPTION:
+#       The onGetInputLayerBounds and onGetOutputLayerBounds of Skia m144's image filters
+#       (src/effects/imagefilters: SkBlendImageFilter, SkBlurImageFilter, SkColorFilterImageFilter,
+#       SkComposeImageFilter, SkDisplacementMapImageFilter, SkImageImageFilter,
+#       SkMatrixTransformImageFilter (Offset, and the drop shadow's offset), SkMergeImageFilter,
+#       SkMorphologyImageFilter, SkShaderImageFilter; SkDropShadowImageFilter builds a graph of
+#       those) and SkImageFilter_Base's getChildInputLayerBounds / getChildOutputLayerBounds
+#       (src/core/SkImageFilter.cpp). An output bound of none is unbounded; a content bound of
+#       none is unknown content.
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+# mark: Shared geometry ========================================================================
+
+## SkDisplacementMapImageFilter::outsetByMaxDisplacement.
+func cpu_displacement_outset(layer: CpuFMatrix, scale: f32, bounds: CpuIRect) -> CpuIRect:
+    let max_displacement = cpu_fm_map_size(layer, 0.5 * scale, 0.5 * scale)
+    return cpu_irect_outset(bounds, cpu_size_ceil(max_displacement.0), cpu_size_ceil(max_displacement.1))
+
+## SkMorphologyImageFilter::radii: the rounded layer-space radii, at most 256.
+func cpu_morphology_radii(layer: CpuFMatrix, radius_x: f32, radius_y: f32) -> (i32, i32):
+    let mapped = cpu_fm_map_size(layer, radius_x, radius_y)
+    return (cpu_min_i32(cpu_round_to_int(mapped.0), 256), cpu_min_i32(cpu_round_to_int(mapped.1), 256))
+
+## SkMatrixTransformImageFilter::requiredInput for a translation by (dx, dy): what maps over
+## `desired`, outset by a pixel when the sampling is not nearest-neighbor.
+func cpu_translate_required_input(layer: CpuFMatrix, dx: f32, dy: f32, linear: bool, desired: CpuIRect) -> CpuIRect:
+    let transform = cpu_fm_param_to_layer_matrix(layer, cpu_fm_translate(dx, dy))
+    let required = cpu_fm_inverse_map_irect(transform, desired) else return cpu_irect_empty()
+    if linear:
+        return cpu_irect_outset(required, 1, 1)
+    return required
+
+## SkImageImageFilter's (srcRect, dstRect) after SkImageFilters::Image's adjustments, or none
+## for SkImageFilters::Empty(): an empty rectangle, or a srcRect outside the image.
+func cpu_image_rects(bitmap: const gfx.ImmutableBitmap*, src_rect: gfx.DevicePixelRect, dest_rect: gfx.DevicePixelRect) -> ((f32, f32, f32, f32), (f32, f32, f32, f32))?:
+    let sl = (f32)src_rect.m_location.m_x
+    let st = (f32)src_rect.m_location.m_y
+    let sr = sl + (f32)src_rect.m_size.m_width
+    let sb = st + (f32)src_rect.m_size.m_height
+    let dl = (f32)dest_rect.m_location.m_x
+    let dt = (f32)dest_rect.m_location.m_y
+    let dr = dl + (f32)dest_rect.m_size.m_width
+    let db = dt + (f32)dest_rect.m_size.m_height
+    if not (sl < sr and st < sb) or not (dl < dr and dt < db):
+        return none
+    let image = gfx.immutable_bitmap_bitmap(bitmap) else return none
+    let width = (f32)gfx.bitmap_width(image)
+    let height = (f32)gfx.bitmap_height(image)
+    if sl >= 0.0 and st >= 0.0 and sr <= width and sb <= height:
+        return ((sl, st, sr, sb), (dl, dt, dr, db))
+    # SkMatrix::RectToRectOrIdentity(srcRect, dstRect) maps the intersection with the image.
+    let il = cpu_max_f32(sl, 0.0)
+    let it = cpu_max_f32(st, 0.0)
+    let ir = cpu_min_f32(sr, width)
+    let ib = cpu_min_f32(sb, height)
+    if not (il < ir and it < ib):
+        return none
+    let rect_to_rect = cpu_fm_rect_to_rect(sl, st, sr, sb, dl, dt, dr, db)
+    let mapped = cpu_fm_map_rect(rect_to_rect, il, it, ir, ib)
+    if not (mapped.0 < mapped.2 and mapped.1 < mapped.3):
+        return none
+    return ((il, it, ir, ib), mapped)
+
+## SkMatrix::RectToRect(src, dst, kFill).
+func cpu_fm_rect_to_rect(sl: f32, st: f32, sr: f32, sb: f32, dl: f32, dt: f32, dr: f32, db: f32) -> CpuFMatrix:
+    let sx = (dr - dl) / (sr - sl)
+    let sy = (db - dt) / (sb - st)
+    return CpuFMatrix(sx = sx, tx = dl - sl * sx, sy = sy, ty = dt - st * sy)
+
+# mark: Blend coefficients =====================================================================
+
+## How a blend node bounds its output: which inputs' outsides stay transparent, or none for an
+## unbounded blend (a runtime blender).
+func cpu_blend_transparency(node: const gfx.ImageFilterNode*) -> (bool, bool)?:
+    match *node:
+        .arithmetic(_, k2, k3, k4, _, _, _):
+            if k4 != 0.0:
+                return none
+            return (k3 == 0.0, k2 == 0.0)
+        .blend(mode, _, _):
+            # SkBlendMode_AsCoeff: (outside the foreground, outside the background) transparent.
+            match mode:
+                .normal, .source_over: return (false, false)
+                .destination_over: return (false, false)
+                .source_in: return (true, true)
+                .destination_in: return (true, true)
+                .source_out: return (true, false)
+                .destination_out: return (false, true)
+                .source_a_top: return (false, true)
+                .destination_a_top: return (true, false)
+                .xor: return (false, false)
+                .lighter: return (false, false)
+                .screen: return (false, false)
+                .plus_darker, .plus_lighter: return none
+                _: return (false, false)
+        _: trap("VERIFY_NOT_REACHED")
+
+# mark: Output bounds ==========================================================================
+
+## onGetOutputLayerBounds (getChildOutputLayerBounds for a child): where `filter` can draw for
+## source content `content`.
+func cpu_filter_node_output_bounds(filter: const gfx.ImageFilter*?, layer: CpuFMatrix, content: CpuIRect?) -> CpuIRect?:
+    let node = filter else return content
+    match node.node:
+        .arithmetic(k1, k2, k3, k4, _, background, foreground):
+            match cpu_arithmetic_mode(k1, k2, k3, k4):
+                .source: return cpu_filter_node_output_bounds(foreground, layer, content)
+                .destination: return cpu_filter_node_output_bounds(background, layer, content)
+                .clear: return cpu_irect_empty()
+                _: return cpu_blend_output_bounds(&node.node, background, foreground, layer, content)
+        .blend(mode, background, foreground):
+            if mode == gfx.CompositingAndBlendingOperator.copy:
+                return cpu_filter_node_output_bounds(foreground, layer, content)
+            if mode == gfx.CompositingAndBlendingOperator.clear:
+                return cpu_irect_empty()
+            return cpu_blend_output_bounds(&node.node, background, foreground, layer, content)
+        .compose(outer, inner):
+            return cpu_filter_node_output_bounds(outer, layer, cpu_filter_node_output_bounds(inner, layer, content))
+        .blur(sigma_x, sigma_y, input):
+            let child = cpu_filter_node_output_bounds(input, layer, content) else return none
+            return cpu_blur_kernel_bounds(layer, sigma_x, sigma_y, child)
+        .shader(_):
+            return none
+        .displacement_map(_, _, scale, _, color):
+            let child = cpu_filter_node_output_bounds(color, layer, content) else return none
+            return cpu_displacement_outset(layer, scale, child)
+        .drop_shadow(dx, dy, sigma_x, sigma_y, _, input):
+            let child = cpu_filter_node_output_bounds(input, layer, content) else return none
+            let transform = cpu_fm_param_to_layer_matrix(layer, cpu_fm_translate(dx, dy))
+            let shadow = cpu_fm_map_irect(transform, cpu_blur_kernel_bounds(layer, sigma_x, sigma_y, child))
+            return cpu_irect_join(shadow, child)
+        .color_filter(color_filter, input):
+            let op = cpu_color_op_node(color_filter)
+            if cpu_color_op_affects_transparent(&op):
+                return none
+            return cpu_filter_node_output_bounds(input, layer, content)
+        .image(bitmap, src_rect, dest_rect, _):
+            let rects = cpu_image_rects(bitmap, src_rect, dest_rect) else return cpu_irect_empty()
+            let dst = rects.1
+            let mapped = cpu_fm_map_rect(layer, dst.0, dst.1, dst.2, dst.3)
+            return cpu_irect_round_out(mapped.0, mapped.1, mapped.2, mapped.3)
+        .merge(inputs):
+            var joined = cpu_irect_empty()
+            for input in ak.vector_span_const(&inputs):
+                let child = cpu_filter_node_output_bounds(input, layer, content) else return none
+                joined = cpu_irect_join(joined, child)
+            return joined
+        .offset(dx, dy, input):
+            let child = cpu_filter_node_output_bounds(input, layer, content) else return none
+            return cpu_fm_map_irect(cpu_fm_param_to_layer_matrix(layer, cpu_fm_translate(dx, dy)), child)
+        .erode(radius_x, radius_y, input):
+            let child = cpu_filter_node_output_bounds(input, layer, content) else return none
+            let radii = cpu_morphology_radii(layer, radius_x, radius_y)
+            return cpu_irect_outset(child, -radii.0, -radii.1)
+        .dilate(radius_x, radius_y, input):
+            let child = cpu_filter_node_output_bounds(input, layer, content) else return none
+            let radii = cpu_morphology_radii(layer, radius_x, radius_y)
+            return cpu_irect_outset(child, radii.0, radii.1)
+        _: trap("VERIFY_NOT_REACHED")
+
+## SkBlendImageFilter::onGetOutputLayerBounds.
+func cpu_blend_output_bounds(node: const gfx.ImageFilterNode*, background: const gfx.ImageFilter*?, foreground: const gfx.ImageFilter*?, layer: CpuFMatrix, content: CpuIRect?) -> CpuIRect?:
+    let transparency = cpu_blend_transparency(node) else return none
+    let outside_fg = transparency.0
+    let outside_bg = transparency.1
+    var fg = cpu_filter_node_output_bounds(foreground, layer, content)
+    var bg = cpu_filter_node_output_bounds(background, layer, content)
+    if outside_fg:
+        if outside_bg:
+            # The intersection of both.
+            if fg == none:
+                return bg
+            if let b = bg:
+                let f = fg else trap("VERIFY")
+                return cpu_irect_intersect(f, b) else cpu_irect_empty()
+        return fg
+    if not outside_bg:
+        let f = fg else return none
+        let b = bg else return none
+        return cpu_irect_join(b, f)
+    return bg
+
+# mark: Input bounds ===========================================================================
+
+## onGetInputLayerBounds (getChildInputLayerBounds for a child): what `filter` needs of the
+## source to produce `desired`.
+func cpu_filter_node_input_bounds(filter: const gfx.ImageFilter*?, layer: CpuFMatrix, desired: CpuIRect, content: CpuIRect?) -> CpuIRect:
+    if filter == none:
+        if let known = content:
+            return cpu_irect_intersect(desired, known) else cpu_irect_empty()
+        return desired
+    let node = filter else trap("VERIFY")
+    match node.node:
+        .arithmetic(k1, k2, k3, k4, _, background, foreground):
+            match cpu_arithmetic_mode(k1, k2, k3, k4):
+                .source: return cpu_filter_node_input_bounds(foreground, layer, desired, content)
+                .destination: return cpu_filter_node_input_bounds(background, layer, desired, content)
+                .clear: return cpu_irect_empty()
+                _: return cpu_blend_input_bounds(filter, background, foreground, layer, desired, content)
+        .blend(mode, background, foreground):
+            if mode == gfx.CompositingAndBlendingOperator.copy:
+                return cpu_filter_node_input_bounds(foreground, layer, desired, content)
+            if mode == gfx.CompositingAndBlendingOperator.clear:
+                return cpu_irect_empty()
+            return cpu_blend_input_bounds(filter, background, foreground, layer, desired, content)
+        .compose(outer, inner):
+            var outer_content: CpuIRect? = none
+            if let known = content:
+                outer_content = cpu_filter_node_output_bounds(inner, layer, known)
+            let inner_desired = cpu_filter_node_input_bounds(outer, layer, desired, outer_content)
+            return cpu_filter_node_input_bounds(inner, layer, inner_desired, content)
+        .blur(sigma_x, sigma_y, input):
+            return cpu_filter_node_input_bounds(input, layer, cpu_blur_kernel_bounds(layer, sigma_x, sigma_y, desired), content)
+        .shader(_):
+            return cpu_irect_empty()
+        .displacement_map(_, _, scale, displacement, color):
+            let color_input = cpu_filter_node_input_bounds(color, layer, cpu_displacement_outset(layer, scale, desired), content)
+            return cpu_irect_join(color_input, cpu_filter_node_input_bounds(displacement, layer, desired, content))
+        .drop_shadow(dx, dy, sigma_x, sigma_y, _, input):
+            # Merge(MatrixTransform(Translate(dx, dy), kLinear, ColorFilter(Blur(input))), input).
+            let shadow_desired = cpu_blur_kernel_bounds(layer, sigma_x, sigma_y, cpu_translate_required_input(layer, dx, dy, true, desired))
+            let shadow = cpu_filter_node_input_bounds(input, layer, shadow_desired, content)
+            return cpu_irect_join(shadow, cpu_filter_node_input_bounds(input, layer, desired, content))
+        .color_filter(_, input):
+            return cpu_filter_node_input_bounds(input, layer, desired, content)
+        .image(_, _, _, _):
+            return cpu_irect_empty()
+        .merge(inputs):
+            var joined = cpu_irect_empty()
+            for input in ak.vector_span_const(&inputs):
+                joined = cpu_irect_join(joined, cpu_filter_node_input_bounds(input, layer, desired, content))
+            return joined
+        .offset(dx, dy, input):
+            return cpu_filter_node_input_bounds(input, layer, cpu_translate_required_input(layer, dx, dy, false, desired), content)
+        .erode(radius_x, radius_y, input):
+            let radii = cpu_morphology_radii(layer, radius_x, radius_y)
+            return cpu_filter_node_input_bounds(input, layer, cpu_irect_outset(desired, radii.0, radii.1), content)
+        .dilate(radius_x, radius_y, input):
+            let radii = cpu_morphology_radii(layer, radius_x, radius_y)
+            return cpu_filter_node_input_bounds(input, layer, cpu_irect_outset(desired, radii.0, radii.1), content)
+        _: trap("VERIFY_NOT_REACHED")
+
+## SkBlendImageFilter::onGetInputLayerBounds.
+func cpu_blend_input_bounds(filter: const gfx.ImageFilter*?, background: const gfx.ImageFilter*?, foreground: const gfx.ImageFilter*?, layer: CpuFMatrix, desired: CpuIRect, content: CpuIRect?) -> CpuIRect:
+    var required = desired
+    if let known = content:
+        if let max_output = cpu_filter_node_output_bounds(filter, layer, known):
+            required = cpu_irect_intersect(max_output, desired) else return cpu_irect_empty()
+    let bg = cpu_filter_node_input_bounds(background, layer, required, content)
+    let fg = cpu_filter_node_input_bounds(foreground, layer, required, content)
+    return cpu_irect_join(bg, fg)

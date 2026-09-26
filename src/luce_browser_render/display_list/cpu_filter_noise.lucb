@@ -1,0 +1,205 @@
+#==============================================================================================
+#
+#   cpu_filter_noise - SkPerlinNoiseShader: fractal noise and turbulence (feTurbulence)
+#
+#   DESCRIPTION:
+#       Port of Skia m144's src/shaders/SkPerlinNoiseShaderImpl.cpp and .h (PaintingData: the
+#       SVG random number generator, the lattice selector, the permuted and normalized gradients,
+#       stitching) and the raster pipeline's perlin_noise stage (src/opts/
+#       SkRasterPipeline_opts.h:3789, with NEON's fused multiply-adds and round-to-nearest-even),
+#       drawn over the desired output in parameter space as FilterResult::MakeFromShader draws
+#       it (SkImageFilters::Shader of SkShaders::MakeTurbulence / MakeFractalNoise).
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+## PaintingData: the lattice selector, the gradients (per channel, per lattice point, x and y as
+## 16-bit values) and the stitching state.
+struct CpuPerlinData:
+    var seed: i32
+    var lattice: u8[256]
+    var noise: u16[2048]
+    var frequency_x: f32
+    var frequency_y: f32
+    var stitch_width: i32
+    var stitch_height: i32
+
+## PaintingData::random: the SVG specification's generator (Park and Miller).
+func cpu_perlin_random(data: CpuPerlinData*) -> i32:
+    let seed = data.seed
+    var result = 16807 * (seed % 127773) - 2836 * (seed // 127773)
+    if result <= 0:
+        result += 2147483647
+    data.seed = result
+    return result
+
+## PaintingData(tileSize, seed, baseFrequencyX, baseFrequencyY).
+func cpu_perlin_data(tile_width: i32, tile_height: i32, seed: f32, frequency_x: f32, frequency_y: f32) -> CpuPerlinData:
+    var data = CpuPerlinData(seed = 0, frequency_x = frequency_x, frequency_y = frequency_y, stitch_width = 0, stitch_height = 0)
+    # init(seed): the seed is truncated, then clamped to [1, 2^31 - 2].
+    var s = (i32)seed
+    if s <= 0:
+        s = -(s % 2147483646) + 1
+    if s > 2147483646:
+        s = 2147483646
+    data.seed = s
+    for channel in 0..<4usize:
+        for i in 0..<256usize:
+            data.lattice[i] = (u8)i
+            data.noise[(channel * 256 + i) * 2] = (u16)(cpu_perlin_random(&data) % 512)
+            data.noise[(channel * 256 + i) * 2 + 1] = (u16)(cpu_perlin_random(&data) % 512)
+    var i: i32 = 255
+    while i > 0:
+        let k = data.lattice[(usize)i]
+        let j = cpu_perlin_random(&data) % 256
+        data.lattice[(usize)i] = data.lattice[(usize)j]
+        data.lattice[(usize)j] = k
+        i -= 1
+    # The permutation of the noise data.
+    let copy = data.noise
+    for n in 0..<256usize:
+        for channel in 0..<4usize:
+            for c in 0..<2usize:
+                data.noise[(channel * 256 + n) * 2 + c] = copy[(channel * 256 + (usize)data.lattice[n]) * 2 + c]
+    # The gradients, normalized (SkPoint::normalize, in double) and stored as 16-bit values.
+    let half_max: f32 = 32767.5
+    let inv_block: f32 = 1.0 / 256.0
+    for channel in 0..<4usize:
+        for n in 0..<256usize:
+            let index = (channel * 256 + n) * 2
+            var gx = (f32)((i32)data.noise[index] - 256) * inv_block
+            var gy = (f32)((i32)data.noise[index + 1] - 256) * inv_block
+            let magnitude = math.sqrt((f64)gx * (f64)gx + (f64)gy * (f64)gy)
+            let scale = 1.0 / magnitude
+            gx = (f32)((f64)gx * scale)
+            gy = (f32)((f64)gy * scale)
+            if not math32.is_finite(gx) or not math32.is_finite(gy) or (gx == 0.0 and gy == 0.0):
+                gx = 0.0
+                gy = 0.0
+            data.noise[index] = (u16)cpu_round_to_int((gx + 1.0) * half_max)
+            data.noise[index + 1] = (u16)cpu_round_to_int((gy + 1.0) * half_max)
+    if tile_width > 0 and tile_height > 0:
+        cpu_perlin_stitch(&data, (f32)tile_width, (f32)tile_height)
+    return data
+
+## PaintingData::stitch: frequencies adjusted so that the tile's borders are continuous.
+func cpu_perlin_stitch(data: CpuPerlinData*, tile_width: f32, tile_height: f32):
+    if data.frequency_x != 0.0:
+        let low = math32.floor(tile_width * data.frequency_x) / tile_width
+        let high = math32.ceil(tile_width * data.frequency_x) / tile_width
+        data.frequency_x = low if data.frequency_x / low < high / data.frequency_x else high
+    if data.frequency_y != 0.0:
+        let low = math32.floor(tile_height * data.frequency_y) / tile_height
+        let high = math32.ceil(tile_height * data.frequency_y) / tile_height
+        data.frequency_y = low if data.frequency_y / low < high / data.frequency_y else high
+    # StitchData(tileWidth * frequencyX, tileHeight * frequencyY).
+    data.stitch_width = cpu_min_i32(cpu_round_to_int(tile_width * data.frequency_x), 2147483647 - 4096)
+    data.stitch_height = cpu_min_i32(cpu_round_to_int(tile_height * data.frequency_y), 2147483647 - 4096)
+
+## compute_perlin_vector: the gradient (sample's two 16-bit halves mapped to [-1, 1]) dotted
+## with (x, y).
+func cpu_perlin_vector(data: const CpuPerlinData*, channel: usize, lattice: i32, x: f32, y: f32) -> f32:
+    let index = (channel * 256 + (usize)lattice) * 2
+    let vx = math32.fma((f32)data.noise[index], 2.0 / 65535.0, -1.0)
+    let vy = math32.fma((f32)data.noise[index + 1], 2.0 / 65535.0, -1.0)
+    return math32.fma(vx, x, vy * y)
+
+## lerp(from, to, t): mad(to - from, t, from).
+func cpu_lerp(low: f32, high: f32, t: f32) -> f32:
+    return math32.fma(high - low, t, low)
+
+## The perlin_noise stage at the local point (x, y): premultiplied RGBA.
+func cpu_perlin_noise(data: const CpuPerlinData*, fractal: bool, octaves: i32, stitching: bool, x: f32, y: f32) -> CpuRgba:
+    var noise_x = (x + 0.5) * data.frequency_x
+    var noise_y = (y + 0.5) * data.frequency_y
+    var result: f32[4] = [0.0, 0.0, 0.0, 0.0]
+    var stitch_x = (f32)data.stitch_width
+    var stitch_y = (f32)data.stitch_height
+    var ratio: f32 = 1.0
+    for octave in 0..<octaves:
+        discard(octave)
+        var floor_x = math32.floor(noise_x)
+        var floor_y = math32.floor(noise_y)
+        var ceil_x = floor_x + 1.0
+        var ceil_y = floor_y + 1.0
+        let fract_x = noise_x - floor_x
+        let fract_y = noise_y - floor_y
+        if stitching:
+            if floor_x >= stitch_x:
+                floor_x -= stitch_x
+            if floor_y >= stitch_y:
+                floor_y -= stitch_y
+            if ceil_x >= stitch_x:
+                ceil_x -= stitch_x
+            if ceil_y >= stitch_y:
+                ceil_y -= stitch_y
+        let lattice_x = (f32)data.lattice[(usize)(cpu_round_even_i32(floor_x) & 0xff)]
+        let lattice_y = (f32)data.lattice[(usize)(cpu_round_even_i32(ceil_x) & 0xff)]
+        let b00 = cpu_round_even_i32(lattice_x + floor_y) & 0xff
+        let b10 = cpu_round_even_i32(lattice_y + floor_y) & 0xff
+        let b01 = cpu_round_even_i32(lattice_x + ceil_y) & 0xff
+        let b11 = cpu_round_even_i32(lattice_y + ceil_y) & 0xff
+        let smooth_x = fract_x * fract_x * (3.0 - 2.0 * fract_x)
+        let smooth_y = fract_y * fract_y * (3.0 - 2.0 * fract_y)
+        for channel in 0..<4usize:
+            var u = cpu_perlin_vector(data, channel, b00, fract_x, fract_y)
+            var v = cpu_perlin_vector(data, channel, b10, fract_x - 1.0, fract_y)
+            let a = cpu_lerp(u, v, smooth_x)
+            u = cpu_perlin_vector(data, channel, b01, fract_x, fract_y - 1.0)
+            v = cpu_perlin_vector(data, channel, b11, fract_x - 1.0, fract_y - 1.0)
+            let b = cpu_lerp(u, v, smooth_x)
+            var color = cpu_lerp(a, b, smooth_y)
+            if not fractal:
+                color = math32.abs(color)
+            result[channel] = math32.fma(color, ratio, result[channel])
+        noise_x *= 2.0
+        noise_y *= 2.0
+        stitch_x *= 2.0
+        stitch_y *= 2.0
+        ratio *= 0.5
+    if fractal:
+        for c in 0..<4usize:
+            result[c] = math32.fma(result[c], 0.5, 0.5)
+    let a = cpu_clamp_unit(result[3])
+    return CpuRgba(r = cpu_clamp_unit(result[0]) * a, g = cpu_clamp_unit(result[1]) * a, b = cpu_clamp_unit(result[2]) * a, a = a)
+
+## iround on NEON (vcvtnq_s32_f32): the nearest integer, ties to even.
+func cpu_round_even_i32(v: f32) -> i32:
+    let f = math32.floor(v)
+    let d = v - f
+    let i = cpu_f32_to_i32(f)
+    if d > 0.5:
+        return i + 1
+    if d < 0.5:
+        return i
+    return i + (i & 1)
+
+## SkImageFilters::Shader(SkShaders::MakeTurbulence / MakeFractalNoise(...)) over the desired
+## output: each pixel center mapped to parameter space (the surface renders in parameter space).
+func cpu_filter_turbulence(ctx: const CpuFilterContext*, turbulence_type: gfx.TurbulenceType, frequency_x: f32, frequency_y: f32, octaves: i32, seed: f32, tile_size: gfx.IntSize) -> CpuFr:
+    if not (frequency_x >= 0.0 and frequency_y >= 0.0) or octaves < 0 or octaves > 255 or tile_size.m_width < 0 or tile_size.m_height < 0 or not math32.is_finite(seed):
+        # valid_input fails: no shader, nothing drawn.
+        return cpu_fr_empty()
+    let fractal = turbulence_type == gfx.TurbulenceType.fractal_noise
+    let out = ctx.desired
+    let width = cpu_irect_width(out)
+    let height = cpu_irect_height(out)
+    let data_pixels = cpu_filter_arena_pixmap(ctx.arena, width, height)
+    if octaves == 0:
+        # MakeFractalNoise: SkShaders::Color({0.5, 0.5, 0.5, 0.5}); MakeTurbulence: transparent.
+        let gray = CpuRgba(r = 0.25, g = 0.25, b = 0.25, a = 0.5) if fractal else cpu_rgba_zero()
+        for i in 0..<(usize)width * (usize)height:
+            cpu_store_rgba(data_pixels, i * 4, gray)
+        return cpu_fr_of_pixels(data_pixels, width, height, out.left, out.top)
+    let stitching = tile_size.m_width > 0 and tile_size.m_height > 0
+    let data = cpu_perlin_data(tile_size.m_width, tile_size.m_height, seed, frequency_x, frequency_y)
+    let inverse = cpu_fm_invert(ctx.layer) else return cpu_fr_empty()
+    for y in 0..<height:
+        for x in 0..<width:
+            let cx = (f32)(out.left + x) + 0.5
+            let cy = (f32)(out.top + y) + 0.5
+            let color = cpu_perlin_noise(&data, fractal, octaves, stitching, cpu_fm_pipeline_x(inverse, cx, cy), cpu_fm_pipeline_y(inverse, cx, cy))
+            cpu_store_rgba(data_pixels, ((usize)y * (usize)width + (usize)x) * 4, cpu_rgba_clamp01(color))
+    return cpu_fr_of_pixels(data_pixels, width, height, out.left, out.top)
