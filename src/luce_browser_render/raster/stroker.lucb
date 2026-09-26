@@ -70,28 +70,28 @@ let quad_recursive_limit: usize = 3
 # quads with extreme widths (e.g. (0,1) (1,6) (0,3) width=5e7) recurse to point of failure
 # largest seen for normal cubics: 5, 26
 # largest seen for normal quads: 11
-let recursive_limits: i32[4] = [5 * 3, 26 * 3, 11 * 3, 11 * 3] # 3x limits seen in practice
+let recursive_limits: i32[4] = [5 * 3, 26 * 3, 11 * 3, 11 * 3]  # 3x limits seen in practice
 
 type CapProc = func(Point, Point, Point, const PathBuilder*?, PathBuilder*) -> unit
 
 type JoinProc = func(Point, Point, Point, f32, f32, bool, bool, SwappableBuilders) -> unit
 
 enum ReductionType as u8:
-    point = 0       # all curve points are practically identical
-    line = 1        # the control point is on the line between the ends
-    quad = 2        # the control point is outside the line between the ends
+    point = 0  # all curve points are practically identical
+    line = 1  # the control point is on the line between the ends
+    quad = 2  # the control point is outside the line between the ends
     degenerate = 3  # the control point is on the line but outside the ends
-    degenerate2 = 4 # two control points are on the line but outside ends (cubic)
-    degenerate3 = 5 # three areas of max curvature found (for cubic)
+    degenerate2 = 4  # two control points are on the line but outside ends (cubic)
+    degenerate3 = 5  # three areas of max curvature found (for cubic)
 
 enum StrokeType as i8:
     outer = 1  # use sign-opposite values later to flip perpendicular axis
     inner = -1
 
 enum ResultType as u8:
-    split = 0      # the caller should split the quad stroke in two
-    degenerate = 1 # the caller should add a line
-    quad = 2       # the caller should (continue to try to) add a quad stroke
+    split = 0  # the caller should split the quad stroke in two
+    degenerate = 1  # the caller should add a line
+    quad = 2  # the caller should (continue to try to) add a quad stroke
 
 enum IntersectRayType as u8:
     ctrl_pt = 0
@@ -129,9 +129,9 @@ pub struct PathStroker:
 
     var stroke_type: StrokeType
 
-    var recursion_depth: i32 # track stack depth to abort if numerics run amok
-    var found_tangents: bool # do less work until tangents meet (cubic)
-    var join_completed: bool # previous join was not degenerate
+    var recursion_depth: i32  # track stack depth to abort if numerics run amok
+    var found_tangents: bool  # do less work until tangents meet (cubic)
+    var join_completed: bool  # previous join was not degenerate
 
     ## Creates a new PathStroker.
     pub static func new_() -> PathStroker:
@@ -263,6 +263,9 @@ pub struct PathStroker:
                     last_segment_is_line = false
                 .cubic_to(p1, p2, p3):
                     self.cubic_to(p1, p2, p3)
+                    last_segment_is_line = false
+                .conic_to(p1, p2, weight):
+                    stroker_conic_to(&self, p1, p2, weight)
                     last_segment_is_line = false
                 .close:
                     if line_cap != .butt:

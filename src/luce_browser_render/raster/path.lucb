@@ -4,7 +4,8 @@
 #
 #   DESCRIPTION:
 #       Port of tiny-skia-path path.rs: PathVerb, Path (verbs, points, bounds; owns its
-#       storage, `release()` frees it), PathSegment and PathSegmentsIter. Rust's
+#       storage, `release()` frees it), PathSegment and PathSegmentsIter, with Skia's conics
+#       (SkPath's kConic verb and weights, which tiny-skia turns into quads). Rust's
 #       `Path::transform(self)` consumes the path; here it transforms in place and answers
 #       whether the result is still a valid path.
 #
@@ -17,12 +18,16 @@ pub enum PathVerb as u8:
     quad = 2
     cubic = 3
     close = 4
+    ## A conic: a quad with a weight (SkPath's kConic). Its weight is in the path's weights.
+    conic = 5
 
 ## A Bezier path. Can be created via `PathBuilder`. Where `PathBuilder` can be reused multiple
 ## times. `Path` is an immutable, finite and non-empty object.
 pub struct Path:
     var verbs: Vec[PathVerb]
     var points: Vec[Point]
+    ## The weights of the conics, in order.
+    var weights: Vec[f32]
     var bounds_: Rect
 
     ## Returns the number of segments in the path.
@@ -57,6 +62,8 @@ pub struct Path:
                     count = 1
                 .quad_to(p0, p1):
                     count = compute_quad_extremas(last_point, p0, p1, extremas)
+                .conic_to(p0, p1, w):
+                    count = compute_conic_extremas(last_point, p0, p1, w, extremas)
                 .cubic_to(p0, p1, p2):
                     count = compute_cubic_extremas(last_point, p0, p1, p2, extremas)
                 .close:
@@ -79,6 +86,10 @@ pub struct Path:
     pub func points_view() -> const Point[]:
         return self.points.view()
 
+    ## Returns the weights of the path's conics, in order.
+    pub func weights_view() -> const f32[]:
+        return self.weights.view()
+
     ## Transforms the path in place (Rust's `Path::transform`, which consumes the path).
     ## Answers false when the result has no valid bounds; the path must then be released.
     pub mutating func transform(ts: Transform) -> bool:
@@ -92,7 +103,7 @@ pub struct Path:
 
     ## Returns an iterator over path's segments.
     pub func segments() -> PathSegmentsIter:
-        return PathSegmentsIter(path = &self, verb_index = 0, points_index = 0, is_auto_close = false, last_move_to = Point.zero(), last_point = Point.zero())
+        return PathSegmentsIter(path = &self, verb_index = 0, points_index = 0, weight_index = 0, is_auto_close = false, last_move_to = Point.zero(), last_point = Point.zero())
 
     ## Returns a stroked path. Returns none when the stroke is invalid or the result is
     ## empty. `resolution_scale` can be obtained via `PathStroker.compute_resolution_scale`.
@@ -112,21 +123,24 @@ pub struct Path:
 
     ## A copy of the path with its own storage (Rust's `Path::clone`).
     pub func clone() -> Path:
-        return Path(verbs = self.verbs.clone(), points = self.points.clone(), bounds_ = self.bounds_)
+        return Path(verbs = self.verbs.clone(), points = self.points.clone(), weights = self.weights.clone(), bounds_ = self.bounds_)
 
     ## Clears the path and returns a `PathBuilder` that will reuse an allocated memory.
     pub mutating func clear() -> PathBuilder:
         self.verbs.clear()
         self.points.clear()
-        let builder = PathBuilder(verbs = self.verbs, points = self.points, last_move_to_index = 0, move_to_required = true)
+        self.weights.clear()
+        let builder = PathBuilder(verbs = self.verbs, points = self.points, weights = self.weights, last_move_to_index = 0, move_to_required = true)
         self.verbs = Vec[PathVerb]()
         self.points = Vec[Point]()
+        self.weights = Vec[f32]()
         return builder
 
     ## Frees the path's storage.
     pub mutating func release():
         self.verbs.release()
         self.points.release()
+        self.weights.release()
 
 func compute_quad_extremas(p0: Point, p1: Point, p2: Point, extremas: Point[]) -> usize:
     let src: Point[3] = [p0, p1, p2]
@@ -139,6 +153,22 @@ func compute_quad_extremas(p0: Point, p1: Point, p2: Point, extremas: Point[]) -
         extrema_idx += 1
     extremas[extrema_idx] = p2
     return extrema_idx + 1
+
+## SkPath.cpp's compute_conic_extremas: the conic's x and y extrema, then its end point.
+func compute_conic_extremas(p0: Point, p1: Point, p2: Point, w: f32, extremas: Point[]) -> usize:
+    let conic = Conic.new_(p0, p1, p2, w)
+    var ts: f32[2] = [0.0, 0.0]
+    var n: usize = 0
+    if let t = conic_find_extrema(p0.x, p1.x, p2.x, w):
+        ts[n] = t
+        n += 1
+    if let t = conic_find_extrema(p0.y, p1.y, p2.y, w):
+        ts[n] = t
+        n += 1
+    for i in 0..<n:
+        extremas[i] = conic.eval_at(ts[i])
+    extremas[n] = p2
+    return n + 1
 
 func compute_cubic_extremas(p0: Point, p1: Point, p2: Point, p3: Point, extremas: Point[]) -> usize:
     var ts0 = new_t_values()
@@ -165,12 +195,15 @@ pub enum PathSegment:
     line_to(p: Point)
     quad_to(p1: Point, p: Point)
     cubic_to(p1: Point, p2: Point, p: Point)
+    ## A conic (SkPath's conicTo): a quad whose middle point pulls with `weight`.
+    conic_to(p1: Point, p: Point, weight: f32)
 
 ## A path segments iterator.
 pub struct PathSegmentsIter:
     let path: const Path*
     var verb_index: usize
     var points_index: usize
+    var weight_index: usize
     var is_auto_close: bool
     var last_move_to: Point
     var last_point: Point
@@ -198,6 +231,10 @@ pub struct PathSegmentsIter:
                         continue
                     return true
                 .quad_to(p1, p2):
+                    if points_equal(iter.last_point, p1) and points_equal(iter.last_point, p2):
+                        continue
+                    return true
+                .conic_to(p1, p2, _):
                     if points_equal(iter.last_point, p1) and points_equal(iter.last_point, p2):
                         continue
                     return true
@@ -243,6 +280,11 @@ pub struct PathSegmentsIter:
                     self.points_index += 3
                     self.last_point = points[self.points_index - 1]
                     return .cubic_to(p1 = points[self.points_index - 3], p2 = points[self.points_index - 2], p = self.last_point)
+                .conic:
+                    self.points_index += 2
+                    self.weight_index += 1
+                    self.last_point = points[self.points_index - 1]
+                    return .conic_to(p1 = points[self.points_index - 2], p = self.last_point, weight = self.path.weights.data[self.weight_index - 1])
                 .close:
                     let seg = self.auto_close()
                     self.last_point = self.last_move_to

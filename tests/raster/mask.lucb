@@ -134,14 +134,14 @@ func skip_dest(t: Test*):
 
     var tmp_path1 = PathBuilder.from_rect((Rect.from_xywh(5.0, 5.0, 60.0, 60.0) else trap("unwrap")))
     defer tmp_path1.release()
-    pixmap.fill_path( &tmp_path1, &paint, FillRule.winding, Transform.identity(), none, )
+    pixmap.fill_path(&tmp_path1, &paint, FillRule.winding, Transform.identity(), none)
 
     var pixmap2 = Pixmap.new_(200, 200) else trap("pixmap")
     defer pixmap2.release()
     var tmp_path2 = PathBuilder.from_rect((Rect.from_xywh(35.0, 35.0, 60.0, 60.0) else trap("unwrap")))
     defer tmp_path2.release()
     var pixmap2_mut = pixmap2.as_mut()
-    pixmap2_mut.fill_path( &tmp_path2, &paint, FillRule.winding, Transform.identity(), none, )
+    pixmap2_mut.fill_path(&tmp_path2, &paint, FillRule.winding, Transform.identity(), none)
 
     var clip_path = PathBuilder.from_rect((Rect.from_xywh(40.0, 40.0, 40.0, 40.0) else trap("unwrap")))
     defer clip_path.release()
@@ -172,7 +172,7 @@ func intersect_aa(t: Test*):
 
     var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
     defer pixmap.release()
-    pixmap.fill_rect( (Rect.from_xywh(0.0, 0.0, 200.0, 200.0) else trap("unwrap")), &paint, Transform.identity(), (&mask), )
+    pixmap.fill_rect((Rect.from_xywh(0.0, 0.0, 200.0, 200.0) else trap("unwrap")), &paint, Transform.identity(), (&mask))
 
     harness.expect_png(t, &pixmap, "mask/intersect-aa.png")
 
@@ -191,7 +191,7 @@ func ignore_memset(t: Test*):
 
     var pixmap = Pixmap.new_(100, 100) else trap("pixmap")
     defer pixmap.release()
-    pixmap.fill_rect( (Rect.from_xywh(0.0, 0.0, 100.0, 100.0) else trap("unwrap")), &paint, Transform.identity(), (&mask), )
+    pixmap.fill_rect((Rect.from_xywh(0.0, 0.0, 100.0, 100.0) else trap("unwrap")), &paint, Transform.identity(), (&mask))
 
     harness.expect_png(t, &pixmap, "mask/ignore-memset.png")
 
@@ -212,7 +212,7 @@ func ignore_source(t: Test*):
     var pixmap = Pixmap.new_(100, 100) else trap("pixmap")
     defer pixmap.release()
     pixmap.fill(Color.white())
-    pixmap.fill_rect( (Rect.from_xywh(0.0, 0.0, 100.0, 100.0) else trap("unwrap")), &paint, Transform.identity(), (&mask), )
+    pixmap.fill_rect((Rect.from_xywh(0.0, 0.0, 100.0, 100.0) else trap("unwrap")), &paint, Transform.identity(), (&mask))
 
     harness.expect_png(t, &pixmap, "mask/ignore-source.png")
 

@@ -3,13 +3,19 @@
 #   lowp - the low precision (u16) raster pipeline: driver, stage table, memory stages
 #
 #   DESCRIPTION:
-#       Port of tiny-skia pipeline/lowp.rs, part 1. A lowp pipeline uses u16 instead of f32
-#       for math. Because of that, it doesn't implement stages that require high precision.
-#       The pipeline compiler will automatically decide which one to use. Skia uses u16x8
-#       (128bit) types for a generic CPU and u16x16 (256bit) for modern x86 CPUs; tiny-skia
-#       uses u16x16 (`U16x16`, 16 lanes), as here. Coordinates travel through the u16 lanes
-#       as the bits of f32x16 (`lowp_join` / `lowp_split`). The blend and shader stages are
-#       in lowp_stages.lucb.
+#       Port of tiny-skia pipeline/lowp.rs, part 1, brought to Skia m144's lowp stages
+#       (namespace lowp of src/opts/SkRasterPipeline_opts.h) as its NEON build computes
+#       them. A lowp pipeline uses u16 instead of f32 for colors; the pipeline compiler
+#       picks it when every stage has a lowp implementation, and the table below has one
+#       exactly for the stages m144's has. Skia's NEON lowp is 8 lanes wide; here the
+#       registers hold 16 lanes (`U16x16`), which computes the same per-pixel values.
+#       Coordinates travel through the u16 lanes as the bits of f32x16 (`lowp_join` /
+#       `lowp_split`). The blend, gradient and image stages are in lowp_stages.lucb and
+#       lowp_image.lucb.
+#
+#       Copyright (c) 2018 Google Inc. All rights reserved.
+#       Copyright (c) 2020 Yevhenii Reizner All rights reserved.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia, LICENSE-tiny-skia)
 #
 #==============================================================================================
 
@@ -20,6 +26,7 @@ type LowpStageFn = func(LowpPipeline*) -> unit
 struct LowpPipeline:
     var index: usize
     var functions: const LowpStageFn[]
+    var pixmap_src: PixmapRef
     var pixmap: SubPixmapMut*
     var mask_ctx: MaskCtx
     var aa_mask_ctx: AAMaskCtx
@@ -41,12 +48,12 @@ func lowp_next_stage(p: LowpPipeline*):
     p.index += 1
     next(p)
 
-# Must be in the same order as Stage
-let lowp_stages: LowpStageFn[79] = [
+# Must be in the same order as Stage; lowp_null_fn marks a stage m144 has no lowp version of.
+let lowp_stages: LowpStageFn[83] = [
     lowp_move_source_to_destination,
     lowp_move_destination_to_source,
-    lowp_null_fn, # Clamp0
-    lowp_null_fn, # ClampA
+    lowp_clamp_01,
+    lowp_clamp_gamut,
     lowp_premultiply,
     lowp_uniform_color,
     lowp_seed_shader,
@@ -54,13 +61,15 @@ let lowp_stages: LowpStageFn[79] = [
     lowp_store,
     lowp_load_dst_u8,
     lowp_store_u8,
-    lowp_null_fn, # Gather
+    lowp_gather,
     lowp_load_mask_u8,
     lowp_mask_u8,
     lowp_scale_u8,
     lowp_lerp_u8,
     lowp_scale_1_float,
     lowp_lerp_1_float,
+    lowp_scale_paint_alpha,
+    lowp_null_fn, # Dither
     lowp_destination_atop,
     lowp_destination_in,
     lowp_destination_out,
@@ -88,20 +97,21 @@ let lowp_stages: LowpStageFn[79] = [
     lowp_null_fn, # Saturation
     lowp_null_fn, # Color
     lowp_null_fn, # Luminosity
-    lowp_source_over_rgba,
     lowp_transform,
-    lowp_null_fn, # Reflect
+    lowp_scale_translate_x,
     lowp_null_fn, # Repeat
+    lowp_null_fn, # Mirror
     lowp_null_fn, # Bilinear
     lowp_null_fn, # Bicubic
-    lowp_pad_x1,
-    lowp_reflect_x1,
-    lowp_repeat_x1,
+    lowp_bilerp_clamp_8888,
+    lowp_null_fn, # BicubicClamp8888
+    lowp_clamp_x_1,
+    lowp_mirror_x_1,
+    lowp_repeat_x_1,
     lowp_gradient,
+    lowp_evenly_spaced_gradient,
     lowp_evenly_spaced_2_stop_gradient,
-    # TODO: Can be implemented for lowp as well. The implementation is very similar to its
-    # highp variant.
-    lowp_null_fn, # XYToUnitAngle
+    lowp_xy_to_unit_angle,
     lowp_xy_to_radius,
     lowp_null_fn, # XYTo2PtConicalFocalOnCircle
     lowp_null_fn, # XYTo2PtConicalWellBehaved
@@ -114,7 +124,6 @@ let lowp_stages: LowpStageFn[79] = [
     lowp_null_fn, # Alter2PtConicalCompensateFocal
     lowp_null_fn, # Alter2PtConicalUnswap
     lowp_null_fn, # NegateX
-    lowp_null_fn, # ApplyConcentricScaleBias
     lowp_null_fn, # GammaExpand2
     lowp_null_fn, # GammaExpandDestination2
     lowp_null_fn, # GammaCompress2
@@ -126,10 +135,11 @@ let lowp_stages: LowpStageFn[79] = [
     lowp_null_fn, # GammaCompressSrgb
 ]
 
-func lowp_start(functions: const LowpStageFn[], functions_tail: const LowpStageFn[], rect: ScreenIntRect, aa_mask_ctx: AAMaskCtx, mask_ctx: MaskCtx, ctx: Context*, pixmap: SubPixmapMut*):
+func lowp_start(functions: const LowpStageFn[], functions_tail: const LowpStageFn[], rect: ScreenIntRect, aa_mask_ctx: AAMaskCtx, mask_ctx: MaskCtx, ctx: Context*, pixmap_src: PixmapRef, pixmap: SubPixmapMut*):
     var p = LowpPipeline(
         index = 0,
         functions = functions,
+        pixmap_src = pixmap_src,
         pixmap = pixmap,
         mask_ctx = mask_ctx,
         aa_mask_ctx = aa_mask_ctx,
@@ -160,6 +170,14 @@ func lowp_start(functions: const LowpStageFn[], functions_tail: const LowpStageF
             p.tail = end - x
             lowp_next_stage(&p)
 
+func lowp_just_return(_p: LowpPipeline*):
+    return  # Ends the loop.
+
+func lowp_null_fn(_p: LowpPipeline*):
+    return  # Just for unsupported functions in STAGES.
+
+# mark: Basic stages ==========================================================================
+
 func lowp_move_source_to_destination(p: LowpPipeline*):
     p.dr = p.r
     p.dg = p.g
@@ -173,6 +191,26 @@ func lowp_move_destination_to_source(p: LowpPipeline*):
     p.g = p.dg
     p.b = p.db
     p.a = p.da
+
+    lowp_next_stage(p)
+
+# No need to clamp against 0 here (values are unsigned).
+func lowp_clamp_01(p: LowpPipeline*):
+    let max = u16[8](255)
+    for h: usize in 0..<2:
+        p.r[h] = u16x8_min(p.r[h], max)
+        p.g[h] = u16x8_min(p.g[h], max)
+        p.b[h] = u16x8_min(p.b[h], max)
+        p.a[h] = u16x8_min(p.a[h], max)
+
+    lowp_next_stage(p)
+
+func lowp_clamp_gamut(p: LowpPipeline*):
+    for h: usize in 0..<2:
+        p.a[h] = u16x8_min(p.a[h], u16[8](255))
+        p.r[h] = u16x8_min(p.r[h], p.a[h])
+        p.g[h] = u16x8_min(p.g[h], p.a[h])
+        p.b[h] = u16x8_min(p.b[h], p.a[h])
 
     lowp_next_stage(p)
 
@@ -204,6 +242,8 @@ func lowp_seed_shader(p: LowpPipeline*):
 
     lowp_next_stage(p)
 
+# mark: Memory ================================================================================
+
 func lowp_dst_pixels(p: LowpPipeline*) -> PremultipliedColorU8[]:
     let offset = p.pixmap.offset(p.dx, p.dy)
     return pixels_of(p.pixmap.data)[offset..]
@@ -234,7 +274,6 @@ func lowp_load_dst_u8(p: LowpPipeline*):
 
 func lowp_load_dst_u8_tail(p: LowpPipeline*):
     # Fill a dummy array with `tail` values. `tail` is always in a 1..STAGE_WIDTH-1 range.
-    # This way we can reuse the `load_8888__` method and remove any branches.
     let data = lowp_dst_mask(p)
     var tmp: u8[16]
     for i in 0..<p.tail:
@@ -243,20 +282,21 @@ func lowp_load_dst_u8_tail(p: LowpPipeline*):
 
     lowp_next_stage(p)
 
+# store_a8: min(a, 255), then the low byte.
 func lowp_store_u8(p: LowpPipeline*):
     let data = lowp_dst_mask(p)
     if data.length < 16:
         trap("index out of bounds")
     let dst = (u8*)data.data
     for i: usize in 0..<16:
-        dst[i] = (u8)p.a[i >> 3][i & 7]
+        dst[i] = (u8)u16_min(p.a[i >> 3][i & 7], 255)
 
     lowp_next_stage(p)
 
 func lowp_store_u8_tail(p: LowpPipeline*):
     let data = lowp_dst_mask(p)
     for i in 0..<p.tail:
-        data[i] = (u8)p.a[i >> 3][i & 7]
+        data[i] = (u8)u16_min(p.a[i >> 3][i & 7], 255)
 
     lowp_next_stage(p)
 
@@ -275,6 +315,7 @@ func lowp_load_mask_u8(p: LowpPipeline*):
 
     lowp_next_stage(p)
 
+# tiny-skia's clip mask stage (Skia clips with a clip blitter instead).
 func lowp_mask_u8(p: LowpPipeline*):
     let offset = p.mask_ctx.offset(p.dx, p.dy)
 
@@ -298,24 +339,29 @@ func lowp_mask_u8(p: LowpPipeline*):
 
     lowp_next_stage(p)
 
-func lowp_scale_u8(p: LowpPipeline*):
-    # Load u8xTail and cast it to u16x16.
-    let data = p.aa_mask_ctx.copy_at_xy(p.dx, p.dy, p.tail)
-    let c0: U16x8 = [(u16)data[0], (u16)data[1], 0, 0, 0, 0, 0, 0]
-    let c1 = u16[8](0)
+# mark: Coverage ==============================================================================
 
-    p.r = [div255(p.r[0] *% c0), div255(p.r[1] *% c1)]
-    p.g = [div255(p.g[0] *% c0), div255(p.g[1] *% c1)]
-    p.b = [div255(p.b[0] *% c0), div255(p.b[1] *% c1)]
-    p.a = [div255(p.a[0] *% c0), div255(p.a[1] *% c1)]
+## The blitted mask's coverage of the stage's lanes (zero past `tail`).
+func lowp_aa_coverage(p: LowpPipeline*) -> U16x16:
+    var bytes: u8[16]
+    p.aa_mask_ctx.load(p.dx, p.dy, p.tail, bytes)
+    var c: U16x16 = ---
+    for i: usize in 0..<16:
+        c[i >> 3][i & 7] = (u16)bytes[i]
+    return c
+
+func lowp_scale_u8(p: LowpPipeline*):
+    let c = lowp_aa_coverage(p)
+    for h: usize in 0..<2:
+        p.r[h] = div255(p.r[h] *% c[h])
+        p.g[h] = div255(p.g[h] *% c[h])
+        p.b[h] = div255(p.b[h] *% c[h])
+        p.a[h] = div255(p.a[h] *% c[h])
 
     lowp_next_stage(p)
 
 func lowp_lerp_u8(p: LowpPipeline*):
-    # Load u8xTail and cast it to u16x16.
-    let data = p.aa_mask_ctx.copy_at_xy(p.dx, p.dy, p.tail)
-    let c: U16x16 = [[(u16)data[0], (u16)data[1], 0, 0, 0, 0, 0, 0], u16[8](0)]
-
+    let c = lowp_aa_coverage(p)
     for h: usize in 0..<2:
         p.r[h] = lowp_lerp(p.dr[h], p.r[h], c[h])
         p.g[h] = lowp_lerp(p.dg[h], p.g[h], c[h])
@@ -324,8 +370,8 @@ func lowp_lerp_u8(p: LowpPipeline*):
 
     lowp_next_stage(p)
 
-func lowp_scale_1_float(p: LowpPipeline*):
-    let c = lowp_from_float(p.ctx.current_coverage)
+func lowp_scale_by(p: LowpPipeline*, f: f32):
+    let c = lowp_from_float(f)
     for h: usize in 0..<2:
         p.r[h] = div255(p.r[h] *% c)
         p.g[h] = div255(p.g[h] *% c)
@@ -333,6 +379,12 @@ func lowp_scale_1_float(p: LowpPipeline*):
         p.a[h] = div255(p.a[h] *% c)
 
     lowp_next_stage(p)
+
+func lowp_scale_1_float(p: LowpPipeline*):
+    lowp_scale_by(p, p.ctx.current_coverage)
+
+func lowp_scale_paint_alpha(p: LowpPipeline*):
+    lowp_scale_by(p, p.ctx.paint_alpha)
 
 func lowp_lerp_1_float(p: LowpPipeline*):
     let c = lowp_from_float(p.ctx.current_coverage)
@@ -344,15 +396,11 @@ func lowp_lerp_1_float(p: LowpPipeline*):
 
     lowp_next_stage(p)
 
+## load_8888_dst, srcover and store_8888 fused (an optimization: the same math, one stage).
 func lowp_source_over_rgba(p: LowpPipeline*):
     let pixels = lowp_dst_pixels(p)
     lowp_load_8888(pixels, &p.dr, &p.dg, &p.db, &p.da)
-    for h: usize in 0..<2:
-        let inv_a = u16[8](255) -% p.a[h]
-        p.r[h] = p.r[h] +% div255(p.dr[h] *% inv_a)
-        p.g[h] = p.g[h] +% div255(p.dg[h] *% inv_a)
-        p.b[h] = p.b[h] +% div255(p.db[h] *% inv_a)
-        p.a[h] = p.a[h] +% div255(p.da[h] *% inv_a)
+    lowp_source_over_math(p)
     lowp_store_8888(&p.r, &p.g, &p.b, &p.a, pixels)
 
     lowp_next_stage(p)
@@ -360,21 +408,10 @@ func lowp_source_over_rgba(p: LowpPipeline*):
 func lowp_source_over_rgba_tail(p: LowpPipeline*):
     let pixels = lowp_dst_pixels(p)
     lowp_load_8888_tail(p.tail, pixels, &p.dr, &p.dg, &p.db, &p.da)
-    for h: usize in 0..<2:
-        let inv_a = u16[8](255) -% p.a[h]
-        p.r[h] = p.r[h] +% div255(p.dr[h] *% inv_a)
-        p.g[h] = p.g[h] +% div255(p.dg[h] *% inv_a)
-        p.b[h] = p.b[h] +% div255(p.db[h] *% inv_a)
-        p.a[h] = p.a[h] +% div255(p.da[h] *% inv_a)
+    lowp_source_over_math(p)
     lowp_store_8888_tail(&p.r, &p.g, &p.b, &p.a, p.tail, pixels)
 
     lowp_next_stage(p)
-
-func lowp_just_return(_p: LowpPipeline*):
-    return # Ends the loop.
-
-func lowp_null_fn(_p: LowpPipeline*):
-    return # Just for unsupported functions in STAGES.
 
 # mark: Load and store ========================================================================
 # The 16 pixels are checked to be in bounds once (Rust's `first_chunk_mut().unwrap()`), then
@@ -402,21 +439,22 @@ func lowp_load_8888(data: const PremultipliedColorU8[], r: U16x16*, g: U16x16*, 
 
 func lowp_load_8888_tail(tail: usize, data: const PremultipliedColorU8[], r: U16x16*, g: U16x16*, b: U16x16*, a: U16x16*):
     # Fill a dummy array with `tail` values. `tail` is always in a 1..STAGE_WIDTH-1 range.
-    # This way we can reuse the `load_8888__` method and remove any branches.
     var tmp: PremultipliedColorU8[16]
     for i in 0..<tail:
         tmp[i] = data[i]
     lowp_load_8888(tmp, r, g, b, a)
 
+# store_8888_: min(v, 255), then the low byte.
 func lowp_store_8888(r: const U16x16*, g: const U16x16*, b: const U16x16*, a: const U16x16*, data: PremultipliedColorU8[]):
     if data.length < 16:
         trap("index out of bounds")
     let dst = (u8*)data.data
+    let max = u16[8](255)
     for h: usize in 0..<2:
-        let rr = (*r)[h]
-        let gg = (*g)[h]
-        let bb = (*b)[h]
-        let aa = (*a)[h]
+        let rr = u16x8_min((*r)[h], max)
+        let gg = u16x8_min((*g)[h], max)
+        let bb = u16x8_min((*b)[h], max)
+        let aa = u16x8_min((*a)[h], max)
         for l: usize in 0..<8:
             let q = (h * 8 + l) * 4
             dst[q] = (u8)rr[l]
@@ -428,7 +466,7 @@ func lowp_store_8888_tail(r: const U16x16*, g: const U16x16*, b: const U16x16*, 
     for i in 0..<tail:
         let h = i >> 3
         let l = i & 7
-        data[i] = PremultipliedColorU8(rgba = [(u8)(*r)[h][l], (u8)(*g)[h][l], (u8)(*b)[h][l], (u8)(*a)[h][l]])
+        data[i] = PremultipliedColorU8(rgba = [(u8)u16_min((*r)[h][l], 255), (u8)u16_min((*g)[h][l], 255), (u8)u16_min((*b)[h][l], 255), (u8)u16_min((*a)[h][l], 255)])
 
 func lowp_load_8(data: const u8[], a: U16x16*):
     if data.length < 16:
@@ -440,10 +478,19 @@ func lowp_load_8(data: const u8[], a: U16x16*):
             aa[l] = (u16)src[h * 8 + l]
         (*a)[h] = aa
 
+# mark: Helpers ===============================================================================
+
+func u16_min(a: u16, b: u16) -> u16:
+    return a if a < b else b
+
+## div255 of NEON, `vrshrq_n_u16(vrsraq_n_u16(v, v, 8), 8)`: (v + 128 + ((v + 128) >> 8)) >> 8,
+## the correctly rounded v / 255 (Skia's div255_accurate is the same on NEON; x86 builds
+## compute (v + 255) >> 8 instead). Computed in u16 lanes, which is exact for v <= 65152: every
+## product of two u8 values, and every sum the stages form from premultiplied colors (at most
+## 255 * 255). Past that, NEON's rounding shifts keep a 17th bit this does not.
 func div255(v: U16x8) -> U16x8:
-    # Skia uses `vrshrq_n_u16(vrsraq_n_u16(v, v, 8), 8)` here when NEON is available, but it
-    # doesn't affect performance much and breaks reproducible result. Ignore it.
-    return (v +% u16[8](255)) >> 8
+    let q = v +% u16[8](128)
+    return (q +% (q >> 8)) >> 8
 
 func lowp_inv(v: U16x8) -> U16x8:
     return u16[8](255) -% v
@@ -474,6 +521,18 @@ func lowp_join(lo: U16x16, hi: U16x16) -> F16:
     b.u = hi
     return [a.f[0], a.f[1], b.f[0], b.f[1]]
 
+## lowp's mad: a + f * m, two roundings (lowp does not fuse).
 func lowp_mad(f: F4, m: F4, a: F4) -> F4:
-    # NEON vmlaq_f32 doesn't seem to affect performance in any way. Ignore it.
-    return f * m + a
+    return a + f * m
+
+## lowp's max(x, y): if_then_else(x < y, y, x).
+func lowp_fmax(x: F4, y: F4) -> F4:
+    return [y[0] if x[0] < y[0] else x[0], y[1] if x[1] < y[1] else x[1], y[2] if x[2] < y[2] else x[2], y[3] if x[3] < y[3] else x[3]]
+
+## lowp's min(x, y): if_then_else(x < y, x, y).
+func lowp_fmin(x: F4, y: F4) -> F4:
+    return [x[0] if x[0] < y[0] else y[0], x[1] if x[1] < y[1] else y[1], x[2] if x[2] < y[2] else y[2], x[3] if x[3] < y[3] else y[3]]
+
+## lowp's clamp_01_: min(max(0, v), 1).
+func lowp_clamp_01_(v: F4) -> F4:
+    return lowp_fmin(lowp_fmax(f32[4](0.0), v), f32[4](1.0))

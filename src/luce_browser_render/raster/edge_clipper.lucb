@@ -250,16 +250,34 @@ struct EdgeClipper:
         else:
             self.edges.push(.cubic_to(p0 = pts[0], p1 = pts[1], p2 = pts[2], p3 = pts[3]))
 
+## SkEdgeClipper::ClipPath as an iterator: the clipped edges of each path edge in turn (a
+## conic's quads, within 1/4 pixel, one at a time).
 struct EdgeClipperIter:
     var edge_iter: PathEdgeIter
     var clip: Rect
     var can_cull_to_the_right: bool
+    var conic_quads: AutoConicToQuads
+    ## The next quad of `conic_quads` to clip (conic_quads.len when none is pending).
+    var conic_index: usize
 
     static func new_(path: const Path*, clip: Rect, can_cull_to_the_right: bool) -> EdgeClipperIter:
-        return EdgeClipperIter(edge_iter = edge_iter(path), clip = clip, can_cull_to_the_right = can_cull_to_the_right)
+        var iter: EdgeClipperIter = ---
+        iter.edge_iter = edge_iter(path)
+        iter.clip = clip
+        iter.can_cull_to_the_right = can_cull_to_the_right
+        iter.conic_quads.len = 0
+        iter.conic_index = 0
+        return iter
 
     mutating func next() -> ClippedEdges?:
-        while let edge = self.edge_iter.next():
+        while true:
+            while self.conic_index < self.conic_quads.len:
+                let q = self.conic_quads.quad(self.conic_index)
+                self.conic_index += 1
+                var clipper = EdgeClipper.new_(self.clip, self.can_cull_to_the_right)
+                if let edges = clipper.clip_quad(q[0], q[1], q[2]):
+                    return edges
+            let edge = self.edge_iter.next() else return none
             var clipper = EdgeClipper.new_(self.clip, self.can_cull_to_the_right)
 
             match edge:
@@ -272,8 +290,9 @@ struct EdgeClipperIter:
                 .cubic_to(p0, p1, p2, p3):
                     if let edges = clipper.clip_cubic(p0, p1, p2, p3):
                         return edges
-
-        return none
+                .conic_to(p0, p1, p2, weight):
+                    self.conic_quads = AutoConicToQuads.compute(p0, p1, p2, weight, 0.25)
+                    self.conic_index = 0
 
 func quick_reject(bounds: Rect, clip: Rect) -> bool:
     return bounds.top() >= clip.bottom() or bounds.bottom() <= clip.top()

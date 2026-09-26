@@ -34,8 +34,9 @@ func line(t: Test*):
         PathSegment.line_to(p = Point.from_xy(30.0, 40.0)),
     ]
     harness.expect_segments(t, &path, expected)
-    # Rust's Debug formatting of a Path ("Path { segments: \"M 10 20 L 30 40\", bounds: ...")
-    # has no Luce counterpart; the segments and bounds it prints are checked above.
+
+# Rust's Debug formatting of a Path ("Path { segments: \"M 10 20 L 30 40\", bounds: ...")
+# has no Luce counterpart; the segments and bounds it prints are checked above.
 
 func no_move_before_line(t: Test*):
     var pb = PathBuilder.new_()
@@ -263,11 +264,11 @@ func invalid_transform(t: Test*):
     t.check(not path.transform(Transform.from_scale(3.40282347e+38, 3.40282347e+38)), "the transform must fail")
 
 func circle(t: Test*):
-    var path = PathBuilder.from_circle(250.0, 250.0, 300.0) else trap("must be some") # Must not panic.
+    var path = PathBuilder.from_circle(250.0, 250.0, 300.0) else trap("must be some")  # Must not panic.
     path.release()
 
 func large_circle(t: Test*):
-    var path = PathBuilder.from_circle(250.0, 250.0, 2000.0) else trap("must be some") # Must not panic.
+    var path = PathBuilder.from_circle(250.0, 250.0, 2000.0) else trap("must be some")  # Must not panic.
     path.release()
 
 func tight_bounds_1(t: Test*):

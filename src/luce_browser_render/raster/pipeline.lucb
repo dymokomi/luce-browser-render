@@ -3,32 +3,38 @@
 #   pipeline - the raster pipeline: stages, contexts, builder and compiled pipeline
 #
 #   DESCRIPTION:
-#       Port of tiny-skia pipeline/mod.rs. A raster pipeline implementation. Despite having
-#       a lot of changes compared to `SkRasterPipeline`, the core principles are the same:
+#       Port of tiny-skia pipeline/mod.rs, brought to Skia m144's SkRasterPipeline
+#       (src/core/SkRasterPipeline.cpp) as Ladybird's libskia runs it on arm64:
 #
-#       1. A pipeline consists of stages.
-#       2. A pipeline has a global context shared by all stages. Unlike Skia, were each stage
-#          has it's own, possibly shared, context.
-#       3. Each stage has a high precision implementation (highp*.lucb).
-#       4. Some stages have a low precision implementation (lowp*.lucb).
-#       5. Each stage calls the "next" stage after its done.
-#       6. During pipeline "compilation", if **all** stages have a lowp implementation, the
-#          lowp pipeline will be used. Otherwise, the highp variant will be used.
-#       7. The pipeline "compilation" produces a list of function pointer. The last pointer
-#          is a pointer to the "return" function, which simply stops the execution of the
-#          pipeline.
+#       1. A pipeline consists of stages; each calls the next one when it is done.
+#       2. A pipeline has one context shared by all stages (Skia gives each stage its own).
+#       3. Each stage has a high precision implementation (highp*.lucb); the stages m144 has
+#          a lowp implementation of have one too (lowp*.lucb).
+#       4. Compiling picks lowp when **all** stages have a lowp implementation (Skia's
+#          buildLowpPipeline), unless high precision is forced (Skia's test hook
+#          gForceHighPrecisionRasterPipeline: `set_force_highp_pipeline`, or a builder's
+#          `set_force_hq_pipeline`).
+#       5. The compiled program is a list of function pointers ending in "return".
+#
+#       Where Skia runs a chain of stages that only pass state through their contexts (the
+#       bilinear and bicubic samplers: *_setup, the per-tap x/y setup, tiling, gather and
+#       accumulate), one fused stage here computes the same operations in the same order.
 #
 #       A compiled RasterPipeline owns its gradient context; `release()` frees it.
 #
+#       Copyright (c) 2016 Google Inc. All rights reserved.
+#       Copyright (c) 2020 Yevhenii Reizner All rights reserved.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia, LICENSE-tiny-skia)
+#
 #==============================================================================================
 
-let max_stages: usize = 32 # More than enough.
+let max_stages: usize = 32  # More than enough.
 
 enum Stage as u8:
     move_source_to_destination = 0
     move_destination_to_source = 1
-    clamp_0 = 2
-    clamp_a = 3
+    clamp_01 = 2
+    clamp_gamut = 3
     premultiply = 4
     uniform_color = 5
     seed_shader = 6
@@ -43,87 +49,98 @@ enum Stage as u8:
     lerp_u8 = 15
     scale_1_float = 16
     lerp_1_float = 17
-    destination_atop = 18
-    destination_in = 19
-    destination_out = 20
-    destination_over = 21
-    source_atop = 22
-    source_in = 23
-    source_out = 24
-    source_over = 25
-    clear = 26
-    modulate = 27
-    multiply = 28
-    plus = 29
-    screen = 30
-    xor = 31
-    color_burn = 32
-    color_dodge = 33
-    darken = 34
-    difference = 35
-    exclusion = 36
-    hard_light = 37
-    lighten = 38
-    overlay = 39
-    soft_light = 40
-    hue = 41
-    saturation = 42
-    color = 43
-    luminosity = 44
-    source_over_rgba = 45
-    transform = 46
-    reflect = 47
-    repeat = 48
-    bilinear = 49
-    bicubic = 50
-    pad_x1 = 51
-    reflect_x1 = 52
-    repeat_x1 = 53
-    gradient = 54
-    evenly_spaced_2_stop_gradient = 55
-    xy_to_unit_angle = 56
-    xy_to_radius = 57
-    xy_to_2pt_conical_focal_on_circle = 58
-    xy_to_2pt_conical_well_behaved = 59
-    xy_to_2pt_conical_smaller = 60
-    xy_to_2pt_conical_greater = 61
-    xy_to_2pt_conical_strip = 62
-    mask_2pt_conical_nan = 63
-    mask_2pt_conical_degenerates = 64
-    apply_vector_mask = 65
-    alter_2pt_conical_compensate_focal = 66
-    alter_2pt_conical_unswap = 67
-    negate_x = 68
-    apply_concentric_scale_bias = 69
-    gamma_expand_2 = 70
-    gamma_expand_destination_2 = 71
-    gamma_compress_2 = 72
-    gamma_expand_22 = 73
-    gamma_expand_destination_22 = 74
-    gamma_compress_22 = 75
-    gamma_expand_srgb = 76
-    gamma_expand_destination_srgb = 77
-    gamma_compress_srgb = 78
+    scale_paint_alpha = 18
+    dither = 19
+    destination_atop = 20
+    destination_in = 21
+    destination_out = 22
+    destination_over = 23
+    source_atop = 24
+    source_in = 25
+    source_out = 26
+    source_over = 27
+    clear = 28
+    modulate = 29
+    multiply = 30
+    plus = 31
+    screen = 32
+    xor = 33
+    color_burn = 34
+    color_dodge = 35
+    darken = 36
+    difference = 37
+    exclusion = 38
+    hard_light = 39
+    lighten = 40
+    overlay = 41
+    soft_light = 42
+    hue = 43
+    saturation = 44
+    color = 45
+    luminosity = 46
+    transform = 47
+    scale_translate_x = 48
+    repeat = 49
+    mirror = 50
+    bilinear = 51
+    bicubic = 52
+    bilerp_clamp_8888 = 53
+    bicubic_clamp_8888 = 54
+    clamp_x_1 = 55
+    mirror_x_1 = 56
+    repeat_x_1 = 57
+    gradient = 58
+    evenly_spaced_gradient = 59
+    evenly_spaced_2_stop_gradient = 60
+    xy_to_unit_angle = 61
+    xy_to_radius = 62
+    xy_to_2pt_conical_focal_on_circle = 63
+    xy_to_2pt_conical_well_behaved = 64
+    xy_to_2pt_conical_smaller = 65
+    xy_to_2pt_conical_greater = 66
+    xy_to_2pt_conical_strip = 67
+    mask_2pt_conical_nan = 68
+    mask_2pt_conical_degenerates = 69
+    apply_vector_mask = 70
+    alter_2pt_conical_compensate_focal = 71
+    alter_2pt_conical_unswap = 72
+    negate_x = 73
+    gamma_expand_2 = 74
+    gamma_expand_destination_2 = 75
+    gamma_compress_2 = 76
+    gamma_expand_22 = 77
+    gamma_expand_destination_22 = 78
+    gamma_compress_22 = 79
+    gamma_expand_srgb = 80
+    gamma_expand_destination_srgb = 81
+    gamma_compress_srgb = 82
 
-let stages_count: usize = 79
+let stages_count: usize = 83
+
+## Skia's gForceHighPrecisionRasterPipeline: every pipeline compiles to highp while set.
+var force_highp: bool = false
+
+## Forces every raster pipeline built from now on to high precision (Skia's test hook
+## gForceHighPrecisionRasterPipeline), or lets them pick lowp again.
+pub func set_force_highp_pipeline(force: bool):
+    force_highp = force
 
 # mark: Contexts ==============================================================================
 
+## The coverage of a blitted mask (Skia's MemoryCtx of scale_u8 / lerp_u8): lane `i` of the
+## stage at (dx, dy) reads `pixels[stride * dy + dx + i - shift]`. `shift` is the offset of the
+## span's first byte in pixmap coordinates (mask left + mask top * stride); a zero stride
+## repeats one row.
 struct AAMaskCtx:
-    var pixels: u8[2]
-    var stride: u32 # can be zero
-    var shift: usize # mask offset/position in pixmap coordinates
+    var pixels: const u8[]
+    var stride: u32  # can be zero
+    var shift: usize  # mask offset/position in pixmap coordinates
 
-    func copy_at_xy(dx: usize, dy: usize, tail: usize) -> u8[2]:
+    ## The coverage of `count` lanes from (dx, dy) into `out`.
+    func load(dx: usize, dy: usize, count: usize, out: u8[]):
         let offset = ((usize)self.stride * dy + dx) - self.shift
-        # We have only 3 variants, so unroll them.
-        if offset == 0 and tail == 1:
-            return [self.pixels[0], 0]
-        if offset == 0 and tail == 2:
-            return [self.pixels[0], self.pixels[1]]
-        if offset == 1 and tail == 1:
-            return [self.pixels[1], 0]
-        return [0, 0] # unreachable
+        for i in 0..<count:
+            out[i] = self.pixels[offset + i]
 
 struct MaskCtx:
     var data: const u8[]
@@ -133,30 +150,41 @@ struct MaskCtx:
         return (usize)self.real_width * dy + dx
 
 struct Context:
-    var current_coverage: f32
-    var sampler: SamplerCtx
+    var current_coverage: f32  # blitAntiH's coverage (scale_1_float, lerp_1_float)
+    var paint_alpha: f32  # the paint's alpha after the shader (scale_paint_alpha)
+    var dither_rate: f32
     var uniform_color: UniformColorCtx
     var evenly_spaced_2_stop_gradient: EvenlySpaced2StopGradientCtx
     var gradient: GradientCtx
     var two_point_conical_gradient: TwoPointConicalGradientCtx
+    var scale_translate_x: ScaleTranslateCtx
     var limit_x: TileCtx
     var limit_y: TileCtx
+    var gather: GatherCtx
+    var sampler: SamplerCtx
     var transform: Transform = Transform()
 
+## The tile modes of the fused bilinear / bicubic samplers (Skia appends repeat_x / mirror_x
+## and repeat_y / mirror_y per tap).
 struct SamplerCtx:
     var spread_mode: SpreadMode
-    var inv_width: f32
-    var inv_height: f32
+
+## Skia's GatherCtx: the image is the pipeline's source pixmap (stride = width).
+struct GatherCtx:
+    var width: f32
+    var height: f32
+    var round_down_at_integer: u32  # 1 for nearest sampling: integer coordinates snap left/up
+    var weights: f32[16]  # the bicubic resampler's matrix, column-major
 
 struct UniformColorCtx:
     var r: f32
     var g: f32
     var b: f32
     var a: f32
-    var rgba: u16[4] # [0,255] in a 16-bit lane.
+    var rgba: u16[4]  # [0,255] in a 16-bit lane.
 
-# A gradient color is an unpremultiplied RGBA not in a 0..1 range. It basically can have any
-# float value.
+# A gradient color is an RGBA not in a 0..1 range (unpremultiplied unless the gradient
+# interpolates premultiplied). It basically can have any float value.
 struct GradientColor:
     var r: f32
     var g: f32
@@ -169,19 +197,28 @@ struct GradientColor:
     static func from_color(c: Color) -> GradientColor:
         return GradientColor(r = c.red(), g = c.green(), b = c.blue(), a = c.alpha())
 
+    func equals(o: GradientColor) -> bool:
+        return self.r == o.r and self.g == o.g and self.b == o.b and self.a == o.a
+
 struct EvenlySpaced2StopGradientCtx:
     var factor: GradientColor
     var bias: GradientColor
 
+## Skia's GradientCtx: `len` stops, each a factor and a bias (color = factor * t + bias), and
+## the t where each stop starts (the arbitrary-stop search; unused by evenly spaced ones).
+## The arrays hold at least 16 entries, so any lane index below 16 is in bounds.
 struct GradientCtx:
     var len: usize
     var factors: Vec[GradientColor]
     var biases: Vec[GradientColor]
     var t_values: Vec[f32]
 
+    mutating func push_stop(factor: GradientColor, bias: GradientColor):
+        self.factors.push(factor)
+        self.biases.push(bias)
+
     mutating func push_const_color(color: GradientColor):
-        self.factors.push(GradientColor.new_(0.0, 0.0, 0.0, 0.0))
-        self.biases.push(color)
+        self.push_stop(GradientColor.new_(0.0, 0.0, 0.0, 0.0), color)
 
     mutating func release():
         self.factors.release()
@@ -194,9 +231,16 @@ struct TwoPointConicalGradientCtx:
     var p0: f32
     var p1: f32
 
+## A scale-translate matrix appended after the gradient's main one (Skia's appendMatrix of the
+## sweep's t scale and bias, or the concentric radial's): x = x * sx + tx.
+struct ScaleTranslateCtx:
+    var sx: f32
+    var tx: f32
+
 struct TileCtx:
     var scale: f32
-    var inv_scale: f32 # cache of 1/scale
+    var inv_scale: f32  # cache of 1/scale
+    var mirror_bias_dir: u32  # 1 for nearest sampling, else -1 (see SkImageShader's MipLevelHelper)
 
 # mark: Builder ===============================================================================
 
@@ -209,6 +253,7 @@ struct RasterPipelineBuilder:
     static func new_() -> RasterPipelineBuilder:
         return RasterPipelineBuilder(ctx = Context())
 
+    ## Compiles this pipeline to highp (a test hook, as Skia's global one).
     mutating func set_force_hq_pipeline(hq: bool):
         self.force_hq_pipeline = hq
 
@@ -218,22 +263,30 @@ struct RasterPipelineBuilder:
         self.stages[self.stages_len] = stage
         self.stages_len += 1
 
+    ## Skia's appendMatrix: nothing for the identity (the stage computes the same values for
+    ## every other kind of affine matrix).
     mutating func push_transform(ts: Transform):
         if ts.is_finite() and not ts.is_identity():
             self.push(.transform)
             self.ctx.transform = ts
 
+    ## Skia's appendMatrix of a matrix that only scales and translates x.
+    mutating func push_scale_translate_x(sx: f32, tx: f32):
+        if sx != 1.0 or tx != 0.0:
+            self.ctx.scale_translate_x = ScaleTranslateCtx(sx = sx, tx = tx)
+            self.push(.scale_translate_x)
+
+    ## Skia's appendConstantColor of a premultiplied color in range.
     mutating func push_uniform_color(c: PremultipliedColor):
         let r = c.red()
         let g = c.green()
         let b = c.blue()
         let a = c.alpha()
+        # To make loads more direct, we store 8-bit values in 16-bit slots.
         let rgba: u16[4] = [(u16)(r * 255.0 + 0.5), (u16)(g * 255.0 + 0.5), (u16)(b * 255.0 + 0.5), (u16)(a * 255.0 + 0.5)]
 
-        let ctx = UniformColorCtx(r = r, g = g, b = b, a = a, rgba = rgba)
-
         self.push(.uniform_color)
-        self.ctx.uniform_color = ctx
+        self.ctx.uniform_color = UniformColorCtx(r = r, g = g, b = b, a = a, rgba = rgba)
 
     ## Frees the builder's context (when it is not compiled).
     mutating func release():
@@ -249,22 +302,19 @@ struct RasterPipelineBuilder:
             self.release()
             return p
 
-        var is_lowp_compatible = true
+        var is_lowp_compatible = not force_highp and not self.force_hq_pipeline
         for stage in self.stages[..<self.stages_len]:
             if (void*)lowp_stages[(usize)stage] == (void*)lowp_null_fn:
                 is_lowp_compatible = false
 
-        if self.force_hq_pipeline or not is_lowp_compatible:
+        if not is_lowp_compatible:
             for i in 0..<self.stages_len:
                 p.highp_functions[i] = highp_stages[(usize)self.stages[i]]
             p.highp_functions[self.stages_len] = highp_just_return
             p.len = self.stages_len + 1
 
-            # I wasn't able to reproduce Skia's load_8888_/store_8888_ performance. Skia uses
-            # fallthrough switch, which is probably the reason. In Rust, any branching in
-            # load/store code drastically affects the performance. So instead, we're using
-            # two "programs": one for "full stages" and one for "tail stages". While the only
-            # difference is the load/store methods.
+            # Skia patches the memory contexts of the last, partial chunk of a row to point at
+            # scratch memory; here the load and store stages have "tail" variants instead.
             for i in 0..<p.len:
                 let fun = p.highp_functions[i]
                 var tail_fun = fun
@@ -276,17 +326,22 @@ struct RasterPipelineBuilder:
                     tail_fun = highp_load_dst_u8_tail
                 elif (void*)fun == (void*)highp_store_u8:
                     tail_fun = highp_store_u8_tail
-                elif (void*)fun == (void*)highp_source_over_rgba:
-                    # SourceOverRgba calls load/store manually, without the pipeline,
-                    # therefore we have to switch it too.
-                    tail_fun = highp_source_over_rgba_tail
                 p.highp_tail_functions[i] = tail_fun
         else:
             p.is_lowp = true
-            for i in 0..<self.stages_len:
-                p.lowp_functions[i] = lowp_stages[(usize)self.stages[i]]
-            p.lowp_functions[self.stages_len] = lowp_just_return
-            p.len = self.stages_len + 1
+            var n: usize = 0
+            var k: usize = 0
+            while k < self.stages_len:
+                # load_dst, srcover, store in one stage: the same u16 math with one call.
+                if k + 2 < self.stages_len and self.stages[k] == .load_destination and self.stages[k + 1] == .source_over and self.stages[k + 2] == .store:
+                    p.lowp_functions[n] = lowp_source_over_rgba
+                    k += 3
+                else:
+                    p.lowp_functions[n] = lowp_stages[(usize)self.stages[k]]
+                    k += 1
+                n += 1
+            p.lowp_functions[n] = lowp_just_return
+            p.len = n + 1
 
             # See above.
             for i in 0..<p.len:
@@ -301,8 +356,6 @@ struct RasterPipelineBuilder:
                 elif (void*)fun == (void*)lowp_store_u8:
                     tail_fun = lowp_store_u8_tail
                 elif (void*)fun == (void*)lowp_source_over_rgba:
-                    # SourceOverRgba calls load/store manually, without the pipeline,
-                    # therefore we have to switch it too.
                     tail_fun = lowp_source_over_rgba_tail
                 p.lowp_tail_functions[i] = tail_fun
 
@@ -323,8 +376,7 @@ struct RasterPipeline:
 
     mutating func run(rect: ScreenIntRect, aa_mask_ctx: AAMaskCtx, mask_ctx: MaskCtx, pixmap_src: PixmapRef, pixmap_dst: SubPixmapMut*):
         if self.is_lowp:
-            # lowp doesn't support pattern, so no `pixmap_src` for it.
-            lowp_start(self.lowp_functions[..<self.len], self.lowp_tail_functions[..<self.len], rect, aa_mask_ctx, mask_ctx, &self.ctx, pixmap_dst)
+            lowp_start(self.lowp_functions[..<self.len], self.lowp_tail_functions[..<self.len], rect, aa_mask_ctx, mask_ctx, &self.ctx, pixmap_src, pixmap_dst)
         else:
             highp_start(self.highp_functions[..<self.len], self.highp_tail_functions[..<self.len], rect, aa_mask_ctx, mask_ctx, &self.ctx, pixmap_src, pixmap_dst)
 

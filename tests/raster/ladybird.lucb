@@ -1,0 +1,1019 @@
+#==============================================================================================
+#
+#   ladybird - scenes of what Ladybird draws, against Skia m144's pixels
+#
+#   DESCRIPTION:
+#       Small scenes of the drawing LibWeb does through Skia: rounded rectangles and
+#       ellipses built from conics, thin lines and hairlines, stroked and dashed borders,
+#       translucent overlapping fills, images and patterns, clips, glyph-like outlines,
+#       transformed paths and gradient-filled boxes. Each test renders one scene and
+#       compares it with the image the Skia oracle (.donors/oracles/raster-skia,
+#       scenes_ladybird_*.cpp) renders for the same drawing, pixel for pixel.
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause
+#
+#==============================================================================================
+
+import harness
+from harness import Test, TestCase
+from raster import Paint, Path, PathBuilder, Pixmap, PixmapPaint, Transform, Rect, Point, Color, Stroke, StrokeDash, LineCap, LineJoin, FillRule, SpreadMode, FilterQuality, GradientStop, LinearGradient, RadialGradient, Pattern, Mask
+
+# mark: helpers --------------------------------------------------------------------------------
+
+## The conic weight of a quarter ellipse, sqrt(2) / 2.
+let quarter_weight: f32 = 0.707106781
+
+## A pixmap of the scene's size; `background` fills it with an opaque off-white first.
+func new_pixmap(width: u32, height: u32, background: bool) -> Pixmap:
+    var pixmap = Pixmap.new_(width, height) else trap("pixmap")
+    if background:
+        pixmap.fill(Color.from_rgba8(240, 236, 226, 255))
+    return pixmap
+
+## A solid color paint.
+func solid(r: u8, g: u8, b: u8, a: u8, anti_alias: bool) -> Paint:
+    var paint = Paint()
+    paint.set_color_rgba8(r, g, b, a)
+    paint.anti_alias = anti_alias
+    return paint
+
+func finish(pb: PathBuilder*) -> Path:
+    return pb.finish() else trap("finish")
+
+## A rounded rectangle: `radii` holds the (x, y) radii of the top-left, top-right,
+## bottom-right and bottom-left corners; each corner is a conic of weight sqrt(2) / 2, and a
+## corner with both radii zero is square.
+func rounded_rect_radii(x: f32, y: f32, w: f32, h: f32, radii: const f32[]) -> Path:
+    let right = x + w
+    let bottom = y + h
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(x + radii[0], y)
+    pb.line_to(right - radii[2], y)
+    if radii[2] > 0.0 or radii[3] > 0.0:
+        pb.conic_to(right, y, right, y + radii[3], quarter_weight)
+    pb.line_to(right, bottom - radii[5])
+    if radii[4] > 0.0 or radii[5] > 0.0:
+        pb.conic_to(right, bottom, right - radii[4], bottom, quarter_weight)
+    pb.line_to(x + radii[6], bottom)
+    if radii[6] > 0.0 or radii[7] > 0.0:
+        pb.conic_to(x, bottom, x, bottom - radii[7], quarter_weight)
+    pb.line_to(x, y + radii[1])
+    if radii[0] > 0.0 or radii[1] > 0.0:
+        pb.conic_to(x, y, x + radii[0], y, quarter_weight)
+    pb.close()
+    return finish(&pb)
+
+## A rounded rectangle with the same elliptical radii at every corner.
+func elliptical_rect(x: f32, y: f32, w: f32, h: f32, rx: f32, ry: f32) -> Path:
+    return rounded_rect_radii(x, y, w, h, [rx, ry, rx, ry, rx, ry, rx, ry])
+
+## A rounded rectangle with the same circular radius at every corner.
+func rounded_rect(x: f32, y: f32, w: f32, h: f32, r: f32) -> Path:
+    return elliptical_rect(x, y, w, h, r, r)
+
+## A circle: PathBuilder.push_circle, four conics.
+func circle(cx: f32, cy: f32, r: f32) -> Path:
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.push_circle(cx, cy, r)
+    return finish(&pb)
+
+## An ellipse inside (x, y, w, h): PathBuilder.push_oval, four conics.
+func oval(x: f32, y: f32, w: f32, h: f32) -> Path:
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.push_oval((Rect.from_xywh(x, y, w, h) else trap("rect")))
+    return finish(&pb)
+
+func rect_path(x: f32, y: f32, w: f32, h: f32) -> Path:
+    return PathBuilder.from_rect((Rect.from_xywh(x, y, w, h) else trap("rect")))
+
+## Fill `path` (winding, no transform, no mask), then release it.
+func fill(pixmap: Pixmap*, path: Path, paint: const Paint*):
+    var p = path
+    pixmap.fill_path(&p, paint, FillRule.winding, Transform.identity(), none)
+    p.release()
+
+## Fill `path` under `ts`, then release it.
+func fill_ts(pixmap: Pixmap*, path: Path, paint: const Paint*, ts: Transform):
+    var p = path
+    pixmap.fill_path(&p, paint, FillRule.winding, ts, none)
+    p.release()
+
+## Stroke `path` (no transform, no mask), then release it.
+func stroke(pixmap: Pixmap*, path: Path, paint: const Paint*, style: const Stroke*):
+    var p = path
+    pixmap.stroke_path(&p, paint, style, Transform.identity(), none)
+    p.release()
+
+## A test image of `size` x `size` premultiplied pixels: a red/green ramp with a blue
+## checker, a translucent bottom-right quadrant and a transparent 2x2 top-left corner.
+func source_image(size: u32) -> Pixmap:
+    var pixmap = Pixmap.new_(size, size) else trap("pixmap")
+    let n = (usize)size
+    let data = pixmap.data_mut()
+    for y in 0..<n:
+        for x in 0..<n:
+            var r = x * 255 // (n - 1)
+            var g = y * 255 // (n - 1)
+            var b = ((x + y) % 4) * 60
+            var a: usize = 255
+            if x >= n // 2 and y >= n // 2:
+                a = 160
+                r = r * a // 255
+                g = g * a // 255
+                b = b * a // 255
+            if x < 2 and y < 2:
+                r = 0
+                g = 0
+                b = 0
+                a = 0
+            let i = (y * n + x) * 4
+            data[i + 0] = (u8)r
+            data[i + 1] = (u8)g
+            data[i + 2] = (u8)b
+            data[i + 3] = (u8)a
+    return pixmap
+
+## Six lines, offset by `o`: horizontal, vertical, 45 degrees, 30 degrees, nearly horizontal
+## and nearly vertical, as separate contours of one path.
+func line_set(o: f32) -> Path:
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(10.0 + o, 10.0 + o)
+    pb.line_to(90.0 + o, 10.0 + o)
+    pb.move_to(10.0 + o, 20.0 + o)
+    pb.line_to(10.0 + o, 90.0 + o)
+    pb.move_to(20.0 + o, 20.0 + o)
+    pb.line_to(60.0 + o, 60.0 + o)
+    pb.move_to(20.0 + o, 70.0 + o)
+    pb.line_to(71.96 + o, 40.0 + o)
+    pb.move_to(20.0 + o, 85.0 + o)
+    pb.line_to(90.0 + o, 88.0 + o)
+    pb.move_to(80.0 + o, 15.0 + o)
+    pb.line_to(83.0 + o, 75.0 + o)
+    return finish(&pb)
+
+## An open zigzag polyline for the join tests.
+func zigzag() -> Path:
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(10.0, 50.0)
+    pb.line_to(30.0, 15.0)
+    pb.line_to(50.0, 50.0)
+    pb.line_to(70.0, 20.0)
+    pb.line_to(80.0, 55.0)
+    pb.line_to(110.0, 30.0)
+    return finish(&pb)
+
+func triangle(x0: f32, y0: f32, x1: f32, y1: f32, x2: f32, y2: f32) -> Path:
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(x0, y0)
+    pb.line_to(x1, y1)
+    pb.line_to(x2, y2)
+    pb.close()
+    return finish(&pb)
+
+## A glyph like an 'o' in a 16 x 20 box: two elliptical cubic contours, the inner one a hole
+## under the even-odd rule.
+func push_glyph_o(pb: PathBuilder*):
+    pb.move_to(16.0, 10.0)
+    pb.cubic_to(16.0, 15.52, 12.42, 20.0, 8.0, 20.0)
+    pb.cubic_to(3.58, 20.0, 0.0, 15.52, 0.0, 10.0)
+    pb.cubic_to(0.0, 4.48, 3.58, 0.0, 8.0, 0.0)
+    pb.cubic_to(12.42, 0.0, 16.0, 4.48, 16.0, 10.0)
+    pb.close()
+    pb.move_to(12.5, 10.0)
+    pb.cubic_to(12.5, 13.59, 10.49, 16.5, 8.0, 16.5)
+    pb.cubic_to(5.51, 16.5, 3.5, 13.59, 3.5, 10.0)
+    pb.cubic_to(3.5, 6.41, 5.51, 3.5, 8.0, 3.5)
+    pb.cubic_to(10.49, 3.5, 12.5, 6.41, 12.5, 10.0)
+    pb.close()
+
+## A glyph like an 'e' in a 16 x 20 box: a quadratic outline with a bar and an eye (a hole
+## under the even-odd rule).
+func push_glyph_e(pb: PathBuilder*):
+    pb.move_to(15.0, 11.0)
+    pb.line_to(3.8, 11.0)
+    pb.quad_to(4.2, 16.8, 9.0, 16.8)
+    pb.quad_to(12.0, 16.8, 13.6, 14.6)
+    pb.line_to(15.4, 15.9)
+    pb.quad_to(13.0, 20.0, 8.8, 20.0)
+    pb.quad_to(0.2, 20.0, 0.2, 10.0)
+    pb.quad_to(0.2, 0.0, 8.0, 0.0)
+    pb.quad_to(15.0, 0.0, 15.0, 9.0)
+    pb.close()
+    pb.move_to(3.9, 8.0)
+    pb.quad_to(4.3, 3.2, 8.0, 3.2)
+    pb.quad_to(11.3, 3.2, 11.5, 8.0)
+    pb.close()
+
+func glyph(e: bool) -> Path:
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    if e:
+        push_glyph_e(&pb)
+    else:
+        push_glyph_o(&pb)
+    return finish(&pb)
+
+## Draw a glyph scaled by `s` (20 * s pixels tall) at (x, y), even-odd.
+func draw_glyph(pixmap: Pixmap*, e: bool, s: f32, x: f32, y: f32, paint: const Paint*):
+    var path = glyph(e)
+    defer path.release()
+    pixmap.fill_path(&path, paint, FillRule.even_odd, Transform.from_row(s, 0.0, 0.0, s, x, y), none)
+
+# mark: rounded rectangles ---------------------------------------------------------------------
+
+func rrect_opaque_int(t: Test*):
+    var pixmap = new_pixmap(100, 80, true)
+    defer pixmap.release()
+    var paint = solid(30, 90, 200, 255, true)
+    defer paint.release()
+    fill(&pixmap, rounded_rect(10.0, 10.0, 80.0, 60.0, 10.0), &paint)
+    harness.expect_png(t, &pixmap, "skia/ladybird/rrect_opaque_int.png")
+
+func rrect_translucent_frac(t: Test*):
+    var pixmap = new_pixmap(100, 80, false)
+    defer pixmap.release()
+    var paint = solid(200, 50, 60, 150, true)
+    defer paint.release()
+    fill(&pixmap, rounded_rect(10.3, 12.6, 70.5, 50.25, 8.5), &paint)
+    harness.expect_png(t, &pixmap, "skia/ladybird/rrect_translucent_frac.png")
+
+func rrect_small_radius(t: Test*):
+    var pixmap = new_pixmap(64, 48, true)
+    defer pixmap.release()
+    var blue = solid(30, 90, 200, 255, true)
+    defer blue.release()
+    var black = solid(0, 0, 0, 180, true)
+    defer black.release()
+    fill(&pixmap, rounded_rect(5.5, 6.5, 40.0, 20.0, 2.0), &blue)
+    fill(&pixmap, rounded_rect(8.25, 30.75, 50.0, 12.0, 1.5), &black)
+    harness.expect_png(t, &pixmap, "skia/ladybird/rrect_small_radius.png")
+
+func rrect_pill(t: Test*):
+    var pixmap = new_pixmap(128, 64, true)
+    defer pixmap.release()
+    var opaque = solid(80, 160, 70, 255, true)
+    defer opaque.release()
+    var translucent = solid(80, 160, 70, 200, true)
+    defer translucent.release()
+    fill(&pixmap, rounded_rect(10.0, 17.0, 100.0, 30.0, 15.0), &opaque)
+    fill(&pixmap, rounded_rect(14.4, 50.2, 60.5, 9.0, 4.5), &translucent)
+    harness.expect_png(t, &pixmap, "skia/ladybird/rrect_pill.png")
+
+func rrect_elliptical(t: Test*):
+    var pixmap = new_pixmap(128, 80, false)
+    defer pixmap.release()
+    var paint = solid(120, 40, 160, 220, true)
+    defer paint.release()
+    fill(&pixmap, elliptical_rect(8.0, 8.0, 110.0, 60.0, 30.0, 12.0), &paint)
+    harness.expect_png(t, &pixmap, "skia/ladybird/rrect_elliptical.png")
+
+func rrect_tiny(t: Test*):
+    var pixmap = new_pixmap(24, 24, true)
+    defer pixmap.release()
+    var blue = solid(30, 90, 200, 200, true)
+    defer blue.release()
+    var orange = solid(220, 120, 20, 160, true)
+    defer orange.release()
+    fill(&pixmap, rounded_rect(3.25, 4.75, 12.0, 10.0, 3.0), &blue)
+    fill(&pixmap, rounded_rect(10.5, 9.5, 9.0, 9.0, 4.5), &orange)
+    harness.expect_png(t, &pixmap, "skia/ladybird/rrect_tiny.png")
+
+func rrect_mixed_corners(t: Test*):
+    var pixmap = new_pixmap(120, 90, true)
+    defer pixmap.release()
+    var paint = solid(40, 40, 40, 255, true)
+    defer paint.release()
+    fill(&pixmap, rounded_rect_radii(10.5, 10.5, 100.0, 70.0, [20.0, 20.0, 0.0, 0.0, 30.0, 15.0, 5.0, 40.0]), &paint)
+    harness.expect_png(t, &pixmap, "skia/ladybird/rrect_mixed_corners.png")
+
+func rrect_non_aa(t: Test*):
+    var pixmap = new_pixmap(100, 80, true)
+    defer pixmap.release()
+    var paint = solid(30, 90, 200, 255, false)
+    defer paint.release()
+    fill(&pixmap, rounded_rect(10.3, 12.6, 70.5, 50.25, 12.0), &paint)
+    harness.expect_png(t, &pixmap, "skia/ladybird/rrect_non_aa.png")
+
+# mark: circles and ellipses -------------------------------------------------------------------
+
+func circle_small_radii(t: Test*):
+    var pixmap = new_pixmap(96, 16, true)
+    defer pixmap.release()
+    var paint = solid(0, 0, 0, 255, true)
+    defer paint.release()
+    let centers: f32[6] = [6.3, 18.7, 31.1, 44.5, 60.2, 80.6]
+    let radii: f32[6] = [0.5, 1.0, 1.5, 2.0, 3.0, 4.5]
+    for i in 0..<6:
+        fill(&pixmap, circle(centers[i], 8.4, radii[i]), &paint)
+    harness.expect_png(t, &pixmap, "skia/ladybird/circle_small_radii.png")
+
+func circle_frac(t: Test*):
+    var pixmap = new_pixmap(48, 48, false)
+    defer pixmap.release()
+    var paint = solid(30, 90, 200, 230, true)
+    defer paint.release()
+    fill(&pixmap, circle(20.4, 20.6, 12.3), &paint)
+    harness.expect_png(t, &pixmap, "skia/ladybird/circle_frac.png")
+
+func circle_large_translucent(t: Test*):
+    var pixmap = new_pixmap(100, 100, true)
+    defer pixmap.release()
+    var paint = solid(200, 50, 60, 128, true)
+    defer paint.release()
+    fill(&pixmap, circle(50.5, 50.25, 40.0), &paint)
+    harness.expect_png(t, &pixmap, "skia/ladybird/circle_large_translucent.png")
+
+func circle_int_opaque(t: Test*):
+    var pixmap = new_pixmap(64, 64, true)
+    defer pixmap.release()
+    var paint = solid(0, 0, 0, 255, true)
+    defer paint.release()
+    fill(&pixmap, circle(32.0, 32.0, 20.0), &paint)
+    harness.expect_png(t, &pixmap, "skia/ladybird/circle_int_opaque.png")
+
+func ellipse_wide(t: Test*):
+    var pixmap = new_pixmap(120, 70, true)
+    defer pixmap.release()
+    var paint = solid(80, 160, 70, 255, true)
+    defer paint.release()
+    fill(&pixmap, oval(10.5, 20.25, 100.0, 30.0), &paint)
+    harness.expect_png(t, &pixmap, "skia/ladybird/ellipse_wide.png")
+
+func ellipse_tall(t: Test*):
+    var pixmap = new_pixmap(60, 80, false)
+    defer pixmap.release()
+    var paint = solid(120, 40, 160, 200, true)
+    defer paint.release()
+    fill(&pixmap, oval(20.7, 5.1, 18.6, 70.0), &paint)
+    harness.expect_png(t, &pixmap, "skia/ladybird/ellipse_tall.png")
+
+## 25 circles with radii from 0.5 to 38.9, overlapping.
+func circle_grid(t: Test*):
+    var pixmap = new_pixmap(200, 200, true)
+    defer pixmap.release()
+    var paint = solid(30, 90, 200, 110, true)
+    defer paint.release()
+    for j in 0..<5:
+        for i in 0..<5:
+            let r = 0.5 + (f32)(j * 5 + i) * 1.6
+            fill(&pixmap, circle(20.3 + (f32)i * 40.0, 20.6 + (f32)j * 40.0, r), &paint)
+    harness.expect_png(t, &pixmap, "skia/ladybird/circle_grid.png")
+
+# mark: thin lines -----------------------------------------------------------------------------
+
+## The line set offset by `o`, stroked `width` wide with `cap`.
+func lines_scene(t: Test*, image: str, width: f32, anti_alias: bool, cap: LineCap, o: f32):
+    var pixmap = new_pixmap(100, 100, true)
+    defer pixmap.release()
+    var paint = solid(20, 20, 40, 220, anti_alias)
+    defer paint.release()
+    var s = Stroke()
+    defer harness.release_stroke(&s)
+    s.width = width
+    s.line_cap = cap
+    stroke(&pixmap, line_set(o), &paint, &s)
+    harness.expect_png(t, &pixmap, image)
+
+func lines_w0_aa(t: Test*):
+    lines_scene(t, "skia/ladybird/lines_w0_aa.png", 0.0, true, LineCap.butt, 0.0)
+
+func lines_w0_noaa(t: Test*):
+    lines_scene(t, "skia/ladybird/lines_w0_noaa.png", 0.0, false, LineCap.butt, 0.0)
+
+func lines_w05_aa(t: Test*):
+    lines_scene(t, "skia/ladybird/lines_w05_aa.png", 0.5, true, LineCap.butt, 0.0)
+
+func lines_w1_aa(t: Test*):
+    lines_scene(t, "skia/ladybird/lines_w1_aa.png", 1.0, true, LineCap.butt, 0.0)
+
+func lines_w1_half_aa(t: Test*):
+    lines_scene(t, "skia/ladybird/lines_w1_half_aa.png", 1.0, true, LineCap.butt, 0.5)
+
+func lines_w1_half_noaa(t: Test*):
+    lines_scene(t, "skia/ladybird/lines_w1_half_noaa.png", 1.0, false, LineCap.butt, 0.5)
+
+func lines_w15_aa_round(t: Test*):
+    lines_scene(t, "skia/ladybird/lines_w15_aa_round.png", 1.5, true, LineCap.round, 0.25)
+
+func lines_w2_aa_square(t: Test*):
+    lines_scene(t, "skia/ladybird/lines_w2_aa_square.png", 2.0, true, LineCap.square, 0.0)
+
+func lines_w2_noaa_square(t: Test*):
+    lines_scene(t, "skia/ladybird/lines_w2_noaa_square.png", 2.0, false, LineCap.square, 0.5)
+
+func lines_w3_half_aa_round(t: Test*):
+    lines_scene(t, "skia/ladybird/lines_w3_half_aa_round.png", 3.0, true, LineCap.round, 0.5)
+
+# mark: strokes --------------------------------------------------------------------------------
+
+func stroke_rect_w1_int(t: Test*):
+    var pixmap = new_pixmap(80, 60, true)
+    defer pixmap.release()
+    var paint = solid(30, 90, 200, 255, true)
+    defer paint.release()
+    var s = Stroke()
+    defer harness.release_stroke(&s)
+    stroke(&pixmap, rect_path(10.0, 10.0, 60.0, 40.0), &paint, &s)
+    harness.expect_png(t, &pixmap, "skia/ladybird/stroke_rect_w1_int.png")
+
+func stroke_rect_w1_half(t: Test*):
+    var pixmap = new_pixmap(80, 60, true)
+    defer pixmap.release()
+    var paint = solid(30, 90, 200, 255, true)
+    defer paint.release()
+    var s = Stroke()
+    defer harness.release_stroke(&s)
+    stroke(&pixmap, rect_path(10.5, 10.5, 60.0, 40.0), &paint, &s)
+    harness.expect_png(t, &pixmap, "skia/ladybird/stroke_rect_w1_half.png")
+
+## The zigzag stroked 6 wide with `join`, translucent so overlaps would show.
+func polyline_scene(t: Test*, image: str, join: LineJoin):
+    var pixmap = new_pixmap(120, 70, true)
+    defer pixmap.release()
+    var paint = solid(200, 50, 60, 200, true)
+    defer paint.release()
+    var s = Stroke()
+    defer harness.release_stroke(&s)
+    s.width = 6.0
+    s.line_join = join
+    stroke(&pixmap, zigzag(), &paint, &s)
+    harness.expect_png(t, &pixmap, image)
+
+func stroke_polyline_miter(t: Test*):
+    polyline_scene(t, "skia/ladybird/stroke_polyline_miter.png", LineJoin.miter)
+
+func stroke_polyline_round(t: Test*):
+    polyline_scene(t, "skia/ladybird/stroke_polyline_round.png", LineJoin.round)
+
+func stroke_polyline_bevel(t: Test*):
+    polyline_scene(t, "skia/ladybird/stroke_polyline_bevel.png", LineJoin.bevel)
+
+func stroke_closed_w8_miter(t: Test*):
+    var pixmap = new_pixmap(120, 80, true)
+    defer pixmap.release()
+    var paint = solid(30, 90, 200, 255, true)
+    defer paint.release()
+    var s = Stroke()
+    defer harness.release_stroke(&s)
+    s.width = 8.0
+    stroke(&pixmap, triangle(15.0, 70.0, 60.0, 10.0, 105.0, 70.0), &paint, &s)
+    harness.expect_png(t, &pixmap, "skia/ladybird/stroke_closed_w8_miter.png")
+
+func stroke_dash_rect(t: Test*):
+    var pixmap = new_pixmap(100, 70, true)
+    defer pixmap.release()
+    var paint = solid(40, 40, 40, 255, true)
+    defer paint.release()
+    var s = Stroke()
+    defer harness.release_stroke(&s)
+    s.width = 2.0
+    s.dash = StrokeDash.new_([6.0, 3.0], 0.0)
+    stroke(&pixmap, rect_path(10.5, 10.5, 80.0, 50.0), &paint, &s)
+    harness.expect_png(t, &pixmap, "skia/ladybird/stroke_dash_rect.png")
+
+## Dotted borders: zero-length dashes with round caps.
+func stroke_dash_dotted(t: Test*):
+    var pixmap = new_pixmap(120, 70, true)
+    defer pixmap.release()
+    var paint = solid(40, 40, 40, 255, true)
+    defer paint.release()
+    var line = PathBuilder.new_()
+    defer line.release()
+    line.move_to(10.0, 20.0)
+    line.line_to(110.0, 20.0)
+    var s = Stroke()
+    defer harness.release_stroke(&s)
+    s.width = 4.0
+    s.line_cap = LineCap.round
+    s.dash = StrokeDash.new_([0.0, 8.0], 0.0)
+    stroke(&pixmap, finish(&line), &paint, &s)
+    var s2 = Stroke()
+    defer harness.release_stroke(&s2)
+    s2.width = 2.0
+    s2.line_cap = LineCap.round
+    s2.dash = StrokeDash.new_([0.0, 6.0], 0.0)
+    stroke(&pixmap, rect_path(10.0, 35.0, 100.0, 25.0), &paint, &s2)
+    harness.expect_png(t, &pixmap, "skia/ladybird/stroke_dash_dotted.png")
+
+func stroke_dash_offset_polyline(t: Test*):
+    var pixmap = new_pixmap(120, 70, true)
+    defer pixmap.release()
+    var paint = solid(30, 90, 200, 255, true)
+    defer paint.release()
+    var s = Stroke()
+    defer harness.release_stroke(&s)
+    s.width = 2.0
+    s.line_join = LineJoin.round
+    s.dash = StrokeDash.new_([10.0, 5.0, 2.0, 5.0], 3.0)
+    stroke(&pixmap, zigzag(), &paint, &s)
+    harness.expect_png(t, &pixmap, "skia/ladybird/stroke_dash_offset_polyline.png")
+
+func stroke_rrect(t: Test*):
+    var pixmap = new_pixmap(100, 70, true)
+    defer pixmap.release()
+    var dark = solid(40, 40, 40, 255, true)
+    defer dark.release()
+    var red = solid(200, 50, 60, 180, true)
+    defer red.release()
+    var thin = Stroke()
+    defer harness.release_stroke(&thin)
+    stroke(&pixmap, rounded_rect(10.5, 10.5, 80.0, 50.0, 10.0), &dark, &thin)
+    var thick = Stroke()
+    defer harness.release_stroke(&thick)
+    thick.width = 3.0
+    stroke(&pixmap, rounded_rect(20.0, 20.0, 60.0, 30.0, 8.0), &red, &thick)
+    harness.expect_png(t, &pixmap, "skia/ladybird/stroke_rrect.png")
+
+func stroke_circles(t: Test*):
+    var pixmap = new_pixmap(100, 80, true)
+    defer pixmap.release()
+    var paint = solid(40, 40, 40, 255, true)
+    defer paint.release()
+    var s1 = Stroke()
+    defer harness.release_stroke(&s1)
+    stroke(&pixmap, circle(25.5, 25.5, 15.0), &paint, &s1)
+    var s2 = Stroke()
+    defer harness.release_stroke(&s2)
+    s2.width = 2.5
+    stroke(&pixmap, circle(70.3, 25.7, 15.0), &paint, &s2)
+    var s3 = Stroke()
+    defer harness.release_stroke(&s3)
+    s3.width = 0.0
+    stroke(&pixmap, circle(47.5, 60.0, 12.0), &paint, &s3)
+    harness.expect_png(t, &pixmap, "skia/ladybird/stroke_circles.png")
+
+func stroke_rrect_dashed(t: Test*):
+    var pixmap = new_pixmap(120, 80, true)
+    defer pixmap.release()
+    var paint = solid(30, 90, 200, 255, true)
+    defer paint.release()
+    var s = Stroke()
+    defer harness.release_stroke(&s)
+    s.width = 2.0
+    s.dash = StrokeDash.new_([8.0, 4.0], 0.0)
+    stroke(&pixmap, rounded_rect(10.0, 10.0, 100.0, 60.0, 15.0), &paint, &s)
+    harness.expect_png(t, &pixmap, "skia/ladybird/stroke_rrect_dashed.png")
+
+# mark: translucent overlaps -------------------------------------------------------------------
+
+func overlap_small_circles(t: Test*):
+    var pixmap = new_pixmap(32, 32, true)
+    defer pixmap.release()
+    var red = solid(220, 30, 30, 128, true)
+    defer red.release()
+    var green = solid(30, 180, 30, 128, true)
+    defer green.release()
+    var blue = solid(30, 30, 220, 128, true)
+    defer blue.release()
+    fill(&pixmap, circle(12.0, 12.0, 7.0), &red)
+    fill(&pixmap, circle(19.5, 12.5, 7.0), &green)
+    fill(&pixmap, circle(15.7, 18.9, 7.0), &blue)
+    harness.expect_png(t, &pixmap, "skia/ladybird/overlap_small_circles.png")
+
+func overlap_tiny_rects(t: Test*):
+    var pixmap = new_pixmap(24, 24, true)
+    defer pixmap.release()
+    var red = solid(200, 50, 60, 140, true)
+    defer red.release()
+    var blue = solid(30, 90, 200, 140, true)
+    defer blue.release()
+    var green = solid(80, 160, 70, 180, true)
+    defer green.release()
+    pixmap.fill_rect((Rect.from_xywh(2.3, 3.7, 10.5, 8.2) else trap("rect")), &red, Transform.identity(), none)
+    pixmap.fill_rect((Rect.from_xywh(7.6, 6.1, 12.2, 9.9) else trap("rect")), &blue, Transform.identity(), none)
+    pixmap.fill_rect((Rect.from_xywh(4.5, 12.25, 6.0, 6.0) else trap("rect")), &green, Transform.identity(), none)
+    harness.expect_png(t, &pixmap, "skia/ladybird/overlap_tiny_rects.png")
+
+## The background is a fill_rect, not Pixmap.fill.
+func overlap_large_circles(t: Test*):
+    var pixmap = new_pixmap(200, 200, false)
+    defer pixmap.release()
+    var background = solid(250, 250, 245, 255, false)
+    defer background.release()
+    pixmap.fill_rect((Rect.from_xywh(0.0, 0.0, 200.0, 200.0) else trap("rect")), &background, Transform.identity(), none)
+    var red = solid(220, 30, 30, 120, true)
+    defer red.release()
+    var green = solid(30, 180, 30, 120, true)
+    defer green.release()
+    var blue = solid(30, 30, 220, 120, true)
+    defer blue.release()
+    fill(&pixmap, circle(80.0, 80.0, 60.0), &red)
+    fill(&pixmap, circle(120.5, 80.5, 60.0), &green)
+    fill(&pixmap, circle(100.25, 115.75, 60.0), &blue)
+    harness.expect_png(t, &pixmap, "skia/ladybird/overlap_large_circles.png")
+
+func overlap_triangles(t: Test*):
+    var pixmap = new_pixmap(100, 100, true)
+    defer pixmap.release()
+    var red = solid(200, 50, 60, 150, true)
+    defer red.release()
+    var blue = solid(30, 90, 200, 150, true)
+    defer blue.release()
+    var black = solid(0, 0, 0, 100, true)
+    defer black.release()
+    fill(&pixmap, triangle(10.0, 90.0, 50.5, 8.3, 90.0, 90.0), &red)
+    fill(&pixmap, triangle(5.2, 30.4, 95.7, 45.1, 20.3, 85.9), &blue)
+    fill(&pixmap, triangle(30.0, 10.0, 70.0, 12.0, 52.0, 95.0), &black)
+    harness.expect_png(t, &pixmap, "skia/ladybird/overlap_triangles.png")
+
+## Sixteen triangles 3 to 12 pixels wide at fractional positions.
+func overlap_tiny_shapes(t: Test*):
+    var pixmap = new_pixmap(64, 64, true)
+    defer pixmap.release()
+    var dark = solid(20, 20, 60, 160, true)
+    defer dark.release()
+    var red = solid(200, 50, 60, 200, true)
+    defer red.release()
+    for i in 0..<16:
+        let x = 2.3 + (f32)(i % 4) * 15.1
+        let y = 3.7 + (f32)(i // 4) * 15.3
+        let size = 3.0 + (f32)i * 0.6
+        let path = triangle(x, y + size, x + size, y + size, x + size * 0.5, y)
+        if i % 2 == 0:
+            fill(&pixmap, path, &dark)
+        else:
+            fill(&pixmap, path, &red)
+    harness.expect_png(t, &pixmap, "skia/ladybird/overlap_tiny_shapes.png")
+
+# mark: images ---------------------------------------------------------------------------------
+
+## The 16x16 test image drawn into a `size` x `size` background at (x, y) under `ts`.
+func image_scene(t: Test*, image: str, size: u32, x: i32, y: i32, quality: FilterQuality, opacity: f32, ts: Transform):
+    var source = source_image(16)
+    defer source.release()
+    var pixmap = new_pixmap(size, size, true)
+    defer pixmap.release()
+    var paint = PixmapPaint()
+    paint.quality = quality
+    paint.opacity = opacity
+    pixmap.draw_pixmap(x, y, source.as_ref(), &paint, ts, none)
+    harness.expect_png(t, &pixmap, image)
+
+func image_int(t: Test*):
+    image_scene(t, "skia/ladybird/image_int.png", 48, 10, 12, FilterQuality.nearest, 1.0, Transform.identity())
+
+func image_frac_nearest(t: Test*):
+    image_scene(t, "skia/ladybird/image_frac_nearest.png", 48, 0, 0, FilterQuality.nearest, 1.0, Transform.from_translate(10.5, 12.25))
+
+func image_frac_bilinear(t: Test*):
+    image_scene(t, "skia/ladybird/image_frac_bilinear.png", 48, 0, 0, FilterQuality.bilinear, 1.0, Transform.from_translate(10.5, 12.25))
+
+func image_scale2_nearest(t: Test*):
+    image_scene(t, "skia/ladybird/image_scale2_nearest.png", 48, 0, 0, FilterQuality.nearest, 1.0, Transform.from_row(2.0, 0.0, 0.0, 2.0, 7.0, 5.0))
+
+func image_scale2_bilinear(t: Test*):
+    image_scene(t, "skia/ladybird/image_scale2_bilinear.png", 48, 0, 0, FilterQuality.bilinear, 1.0, Transform.from_row(2.0, 0.0, 0.0, 2.0, 7.0, 5.0))
+
+func image_scale2_bicubic(t: Test*):
+    image_scene(t, "skia/ladybird/image_scale2_bicubic.png", 48, 0, 0, FilterQuality.bicubic, 1.0, Transform.from_row(2.0, 0.0, 0.0, 2.0, 7.0, 5.0))
+
+func image_rotate_bilinear(t: Test*):
+    image_scene(t, "skia/ladybird/image_rotate_bilinear.png", 48, 0, 0, FilterQuality.bilinear, 1.0, Transform.from_row(0.8660254, 0.5, -0.5, 0.8660254, 20.0, 6.0))
+
+func image_opacity_half(t: Test*):
+    image_scene(t, "skia/ladybird/image_opacity_half.png", 48, 10, 12, FilterQuality.nearest, 0.5, Transform.identity())
+
+func image_opacity_half_bicubic(t: Test*):
+    image_scene(t, "skia/ladybird/image_opacity_half_bicubic.png", 48, 0, 0, FilterQuality.bicubic, 0.5, Transform.from_row(1.5, 0.0, 0.0, 1.5, 5.3, 6.6))
+
+## A 32x32 image drawn at half size.
+func image_scale_half_bilinear(t: Test*):
+    var source = source_image(32)
+    defer source.release()
+    var pixmap = new_pixmap(32, 32, true)
+    defer pixmap.release()
+    var paint = PixmapPaint()
+    paint.quality = FilterQuality.bilinear
+    pixmap.draw_pixmap(0, 0, source.as_ref(), &paint, Transform.from_row(0.5, 0.0, 0.0, 0.5, 8.25, 8.75), none)
+    harness.expect_png(t, &pixmap, "skia/ladybird/image_scale_half_bilinear.png")
+
+func pattern_repeat_nearest(t: Test*):
+    var source = source_image(16)
+    defer source.release()
+    var pixmap = new_pixmap(64, 64, true)
+    defer pixmap.release()
+    var paint = Paint()
+    defer paint.release()
+    paint.anti_alias = false
+    paint.shader = Pattern.new_(source.as_ref(), SpreadMode.repeat, FilterQuality.nearest, 1.0, Transform.from_translate(3.0, 5.0))
+    pixmap.fill_rect((Rect.from_xywh(4.0, 4.0, 56.0, 56.0) else trap("rect")), &paint, Transform.identity(), none)
+    harness.expect_png(t, &pixmap, "skia/ladybird/pattern_repeat_nearest.png")
+
+func pattern_pad_bilinear_rrect(t: Test*):
+    var source = source_image(16)
+    defer source.release()
+    var pixmap = new_pixmap(80, 80, true)
+    defer pixmap.release()
+    var paint = Paint()
+    defer paint.release()
+    paint.shader = Pattern.new_(source.as_ref(), SpreadMode.pad_, FilterQuality.bilinear, 1.0, Transform.from_row(3.0, 0.0, 0.0, 3.0, 10.0, 10.0))
+    fill(&pixmap, rounded_rect(8.5, 8.5, 60.0, 60.0, 12.0), &paint)
+    harness.expect_png(t, &pixmap, "skia/ladybird/pattern_pad_bilinear_rrect.png")
+
+# mark: clips ----------------------------------------------------------------------------------
+
+func clip_rrect_fill(t: Test*):
+    var pixmap = new_pixmap(100, 80, true)
+    defer pixmap.release()
+    var clip = rounded_rect(10.5, 10.25, 80.0, 60.0, 14.0)
+    defer clip.release()
+    var mask = Mask.new_(100, 80) else trap("mask")
+    defer mask.release()
+    mask.fill_path(&clip, FillRule.winding, true, Transform.identity())
+    var paint = solid(30, 90, 200, 255, false)
+    defer paint.release()
+    pixmap.fill_rect((Rect.from_xywh(0.0, 0.0, 100.0, 80.0) else trap("rect")), &paint, Transform.identity(), (&mask))
+    harness.expect_png(t, &pixmap, "skia/ladybird/clip_rrect_fill.png")
+
+func clip_circle_stroke(t: Test*):
+    var pixmap = new_pixmap(100, 100, true)
+    defer pixmap.release()
+    var clip = circle(50.3, 50.6, 35.0)
+    defer clip.release()
+    var mask = Mask.new_(100, 100) else trap("mask")
+    defer mask.release()
+    mask.fill_path(&clip, FillRule.winding, true, Transform.identity())
+    var paint = solid(200, 50, 60, 255, true)
+    defer paint.release()
+    var s = Stroke()
+    defer harness.release_stroke(&s)
+    s.width = 3.0
+    var lines = line_set(0.0)
+    defer lines.release()
+    pixmap.stroke_path(&lines, &paint, &s, Transform.identity(), (&mask))
+    harness.expect_png(t, &pixmap, "skia/ladybird/clip_circle_stroke.png")
+
+func clip_circle_image(t: Test*):
+    var source = source_image(16)
+    defer source.release()
+    var pixmap = new_pixmap(64, 64, true)
+    defer pixmap.release()
+    var clip = circle(32.5, 32.5, 24.0)
+    defer clip.release()
+    var mask = Mask.new_(64, 64) else trap("mask")
+    defer mask.release()
+    mask.fill_path(&clip, FillRule.winding, true, Transform.identity())
+    var paint = PixmapPaint()
+    paint.quality = FilterQuality.bilinear
+    pixmap.draw_pixmap(0, 0, source.as_ref(), &paint, Transform.from_row(3.5, 0.0, 0.0, 3.5, 4.0, 4.0), (&mask))
+    harness.expect_png(t, &pixmap, "skia/ladybird/clip_circle_image.png")
+
+func clip_polygon_noaa(t: Test*):
+    var pixmap = new_pixmap(100, 100, true)
+    defer pixmap.release()
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(50.0, 5.0)
+    pb.line_to(61.0, 38.0)
+    pb.line_to(95.0, 38.0)
+    pb.line_to(67.0, 58.0)
+    pb.line_to(78.0, 92.0)
+    pb.line_to(50.0, 72.0)
+    pb.line_to(22.0, 92.0)
+    pb.line_to(33.0, 58.0)
+    pb.line_to(5.0, 38.0)
+    pb.line_to(39.0, 38.0)
+    pb.close()
+    var star = finish(&pb)
+    defer star.release()
+    var mask = Mask.new_(100, 100) else trap("mask")
+    defer mask.release()
+    mask.fill_path(&star, FillRule.winding, false, Transform.identity())
+    var paint = solid(80, 160, 70, 200, true)
+    defer paint.release()
+    var disc = circle(50.0, 50.0, 45.0)
+    defer disc.release()
+    pixmap.fill_path(&disc, &paint, FillRule.winding, Transform.identity(), (&mask))
+    harness.expect_png(t, &pixmap, "skia/ladybird/clip_polygon_noaa.png")
+
+func clip_intersect(t: Test*):
+    var pixmap = new_pixmap(100, 100, true)
+    defer pixmap.release()
+    var disc = circle(40.0, 50.0, 35.0)
+    defer disc.release()
+    var box = rounded_rect(30.5, 20.5, 60.0, 60.0, 10.0)
+    defer box.release()
+    var mask = Mask.new_(100, 100) else trap("mask")
+    defer mask.release()
+    mask.fill_path(&disc, FillRule.winding, true, Transform.identity())
+    mask.intersect_path(&box, FillRule.winding, true, Transform.identity())
+    var paint = solid(120, 40, 160, 255, false)
+    defer paint.release()
+    pixmap.fill_rect((Rect.from_xywh(0.0, 0.0, 100.0, 100.0) else trap("rect")), &paint, Transform.identity(), (&mask))
+    harness.expect_png(t, &pixmap, "skia/ladybird/clip_intersect.png")
+
+func clip_pixel_rect(t: Test*):
+    var pixmap = new_pixmap(64, 64, true)
+    defer pixmap.release()
+    var clip = rect_path(8.0, 8.0, 48.0, 40.0)
+    defer clip.release()
+    var mask = Mask.new_(64, 64) else trap("mask")
+    defer mask.release()
+    mask.fill_path(&clip, FillRule.winding, false, Transform.identity())
+    var paint = solid(120, 40, 160, 230, true)
+    defer paint.release()
+    var disc = circle(32.3, 30.7, 26.0)
+    defer disc.release()
+    pixmap.fill_path(&disc, &paint, FillRule.winding, Transform.identity(), (&mask))
+    harness.expect_png(t, &pixmap, "skia/ladybird/clip_pixel_rect.png")
+
+# mark: glyphs ---------------------------------------------------------------------------------
+
+## Twelve 14-pixel 'o's at fractional positions.
+func glyphs_o_row(t: Test*):
+    var pixmap = new_pixmap(200, 32, false)
+    defer pixmap.release()
+    pixmap.fill(Color.white())
+    var paint = solid(0, 0, 0, 255, true)
+    defer paint.release()
+    var x: f32 = 3.3
+    for _i in 0..<12:
+        draw_glyph(&pixmap, false, 0.7, x, 8.35, &paint)
+        x += 15.7
+    harness.expect_png(t, &pixmap, "skia/ladybird/glyphs_o_row.png")
+
+## Two rows of 'o's and 'e's from 8 to 20 pixels tall on a common baseline.
+func glyphs_mixed_sizes(t: Test*):
+    var pixmap = new_pixmap(200, 52, false)
+    defer pixmap.release()
+    pixmap.fill(Color.white())
+    var paint = solid(0, 0, 0, 255, true)
+    defer paint.release()
+    for row in 0..<2:
+        var x = 2.7 + (f32)row * 0.45
+        let baseline = 22.6 + (f32)row * 26.0
+        for i in 0..<7:
+            let s = 0.4 + (f32)i * 0.1
+            draw_glyph(&pixmap, (i + row) % 2 == 1, s, x, baseline - 20.0 * s, &paint)
+            x += 16.0 * s + 2.3
+    harness.expect_png(t, &pixmap, "skia/ladybird/glyphs_mixed_sizes.png")
+
+## Twenty translucent 9-pixel glyphs over the background.
+func glyphs_translucent_small(t: Test*):
+    var pixmap = new_pixmap(160, 24, true)
+    defer pixmap.release()
+    var paint = solid(20, 20, 60, 200, true)
+    defer paint.release()
+    var x: f32 = 1.3
+    for i in 0..<20:
+        draw_glyph(&pixmap, i % 3 == 0, 0.45, x, 7.35, &paint)
+        x += 7.9
+    harness.expect_png(t, &pixmap, "skia/ladybird/glyphs_translucent_small.png")
+
+# mark: transforms -----------------------------------------------------------------------------
+
+func ts_rotate_rrect(t: Test*):
+    var pixmap = new_pixmap(100, 100, true)
+    defer pixmap.release()
+    var paint = solid(30, 90, 200, 230, true)
+    defer paint.release()
+    fill_ts(&pixmap, rounded_rect(-30.0, -20.0, 60.0, 40.0, 8.0), &paint, Transform.from_row(0.8660254, 0.5, -0.5, 0.8660254, 50.3, 50.1))
+    harness.expect_png(t, &pixmap, "skia/ladybird/ts_rotate_rrect.png")
+
+func ts_scale_circle(t: Test*):
+    var pixmap = new_pixmap(100, 80, true)
+    defer pixmap.release()
+    var paint = solid(200, 50, 60, 200, true)
+    defer paint.release()
+    fill_ts(&pixmap, circle(0.0, 0.0, 10.0), &paint, Transform.from_row(2.5, 0.0, 0.0, 1.5, 50.5, 40.25))
+    harness.expect_png(t, &pixmap, "skia/ladybird/ts_scale_circle.png")
+
+func ts_skew_rect(t: Test*):
+    var pixmap = new_pixmap(100, 80, true)
+    defer pixmap.release()
+    var paint = solid(80, 160, 70, 200, true)
+    defer paint.release()
+    fill_ts(&pixmap, rect_path(10.0, 10.0, 50.0, 40.0), &paint, Transform.from_row(1.0, 0.2, 0.4, 1.0, 5.0, 3.0))
+    harness.expect_png(t, &pixmap, "skia/ladybird/ts_skew_rect.png")
+
+func ts_rotate_stroke_rrect(t: Test*):
+    var pixmap = new_pixmap(100, 80, true)
+    defer pixmap.release()
+    var paint = solid(40, 40, 40, 255, true)
+    defer paint.release()
+    var s = Stroke()
+    defer harness.release_stroke(&s)
+    s.width = 2.0
+    var path = rounded_rect(-30.0, -18.0, 60.0, 36.0, 6.0)
+    defer path.release()
+    pixmap.stroke_path(&path, &paint, &s, Transform.from_row(0.9659258, 0.258819, -0.258819, 0.9659258, 50.0, 40.0), none)
+    harness.expect_png(t, &pixmap, "skia/ladybird/ts_rotate_stroke_rrect.png")
+
+# mark: gradients ------------------------------------------------------------------------------
+
+func grad_linear_rrect(t: Test*):
+    var pixmap = new_pixmap(100, 80, false)
+    defer pixmap.release()
+    var paint = Paint()
+    defer paint.release()
+    paint.shader = (LinearGradient.new_(Point.from_xy(10.0, 10.0), Point.from_xy(90.0, 70.0), [GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 255)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 255))], SpreadMode.pad_, Transform.identity()) else trap("gradient"))
+    fill(&pixmap, rounded_rect(10.5, 10.5, 80.0, 60.0, 12.0), &paint)
+    harness.expect_png(t, &pixmap, "skia/ladybird/grad_linear_rrect.png")
+
+func grad_linear_circle_3stops(t: Test*):
+    var pixmap = new_pixmap(100, 100, true)
+    defer pixmap.release()
+    var paint = Paint()
+    defer paint.release()
+    paint.shader = (LinearGradient.new_(Point.from_xy(10.0, 50.0), Point.from_xy(90.0, 50.0), [GradientStop.new_(0.0, Color.from_rgba8(220, 30, 30, 255)), GradientStop.new_(0.5, Color.from_rgba8(20, 200, 75, 200)), GradientStop.new_(1.0, Color.from_rgba8(30, 30, 220, 255))], SpreadMode.pad_, Transform.identity()) else trap("gradient"))
+    fill(&pixmap, circle(50.0, 50.0, 40.5), &paint)
+    harness.expect_png(t, &pixmap, "skia/ladybird/grad_linear_circle_3stops.png")
+
+func grad_radial_circle(t: Test*):
+    var pixmap = new_pixmap(100, 100, true)
+    defer pixmap.release()
+    var paint = Paint()
+    defer paint.release()
+    paint.shader = (RadialGradient.new_(Point.from_xy(50.5, 50.5), 0.0, Point.from_xy(50.5, 50.5), 40.0, [GradientStop.new_(0.0, Color.from_rgba8(255, 255, 255, 255)), GradientStop.new_(1.0, Color.from_rgba8(30, 90, 200, 255))], SpreadMode.pad_, Transform.identity()) else trap("gradient"))
+    fill(&pixmap, circle(50.5, 50.5, 40.0), &paint)
+    harness.expect_png(t, &pixmap, "skia/ladybird/grad_radial_circle.png")
+
+func grad_radial_rrect_3stops(t: Test*):
+    var pixmap = new_pixmap(120, 80, true)
+    defer pixmap.release()
+    var paint = Paint()
+    defer paint.release()
+    paint.shader = (RadialGradient.new_(Point.from_xy(60.0, 40.0), 0.0, Point.from_xy(60.0, 40.0), 50.0, [GradientStop.new_(0.0, Color.from_rgba8(250, 220, 50, 255)), GradientStop.new_(0.6, Color.from_rgba8(220, 80, 40, 200)), GradientStop.new_(1.0, Color.from_rgba8(60, 20, 120, 160))], SpreadMode.pad_, Transform.identity()) else trap("gradient"))
+    fill(&pixmap, rounded_rect(10.0, 10.0, 100.0, 60.0, 20.0), &paint)
+    harness.expect_png(t, &pixmap, "skia/ladybird/grad_radial_rrect_3stops.png")
+
+pub let tests: TestCase[71] = [
+    TestCase(name = "ladybird::rrect_opaque_int", run = rrect_opaque_int),
+    TestCase(name = "ladybird::rrect_translucent_frac", run = rrect_translucent_frac),
+    TestCase(name = "ladybird::rrect_small_radius", run = rrect_small_radius),
+    TestCase(name = "ladybird::rrect_pill", run = rrect_pill),
+    TestCase(name = "ladybird::rrect_elliptical", run = rrect_elliptical),
+    TestCase(name = "ladybird::rrect_tiny", run = rrect_tiny),
+    TestCase(name = "ladybird::rrect_mixed_corners", run = rrect_mixed_corners),
+    TestCase(name = "ladybird::rrect_non_aa", run = rrect_non_aa),
+    TestCase(name = "ladybird::circle_small_radii", run = circle_small_radii),
+    TestCase(name = "ladybird::circle_frac", run = circle_frac),
+    TestCase(name = "ladybird::circle_large_translucent", run = circle_large_translucent),
+    TestCase(name = "ladybird::circle_int_opaque", run = circle_int_opaque),
+    TestCase(name = "ladybird::ellipse_wide", run = ellipse_wide),
+    TestCase(name = "ladybird::ellipse_tall", run = ellipse_tall),
+    TestCase(name = "ladybird::circle_grid", run = circle_grid),
+    TestCase(name = "ladybird::lines_w0_aa", run = lines_w0_aa),
+    TestCase(name = "ladybird::lines_w0_noaa", run = lines_w0_noaa),
+    TestCase(name = "ladybird::lines_w05_aa", run = lines_w05_aa),
+    TestCase(name = "ladybird::lines_w1_aa", run = lines_w1_aa),
+    TestCase(name = "ladybird::lines_w1_half_aa", run = lines_w1_half_aa),
+    TestCase(name = "ladybird::lines_w1_half_noaa", run = lines_w1_half_noaa),
+    TestCase(name = "ladybird::lines_w15_aa_round", run = lines_w15_aa_round),
+    TestCase(name = "ladybird::lines_w2_aa_square", run = lines_w2_aa_square),
+    TestCase(name = "ladybird::lines_w2_noaa_square", run = lines_w2_noaa_square),
+    TestCase(name = "ladybird::lines_w3_half_aa_round", run = lines_w3_half_aa_round),
+    TestCase(name = "ladybird::stroke_rect_w1_int", run = stroke_rect_w1_int),
+    TestCase(name = "ladybird::stroke_rect_w1_half", run = stroke_rect_w1_half),
+    TestCase(name = "ladybird::stroke_polyline_miter", run = stroke_polyline_miter),
+    TestCase(name = "ladybird::stroke_polyline_round", run = stroke_polyline_round),
+    TestCase(name = "ladybird::stroke_polyline_bevel", run = stroke_polyline_bevel),
+    TestCase(name = "ladybird::stroke_closed_w8_miter", run = stroke_closed_w8_miter),
+    TestCase(name = "ladybird::stroke_dash_rect", run = stroke_dash_rect),
+    TestCase(name = "ladybird::stroke_dash_dotted", run = stroke_dash_dotted),
+    TestCase(name = "ladybird::stroke_dash_offset_polyline", run = stroke_dash_offset_polyline),
+    TestCase(name = "ladybird::stroke_rrect", run = stroke_rrect),
+    TestCase(name = "ladybird::stroke_circles", run = stroke_circles),
+    TestCase(name = "ladybird::stroke_rrect_dashed", run = stroke_rrect_dashed),
+    TestCase(name = "ladybird::overlap_small_circles", run = overlap_small_circles),
+    TestCase(name = "ladybird::overlap_tiny_rects", run = overlap_tiny_rects),
+    TestCase(name = "ladybird::overlap_large_circles", run = overlap_large_circles),
+    TestCase(name = "ladybird::overlap_triangles", run = overlap_triangles),
+    TestCase(name = "ladybird::overlap_tiny_shapes", run = overlap_tiny_shapes),
+    TestCase(name = "ladybird::image_int", run = image_int),
+    TestCase(name = "ladybird::image_frac_nearest", run = image_frac_nearest),
+    TestCase(name = "ladybird::image_frac_bilinear", run = image_frac_bilinear),
+    TestCase(name = "ladybird::image_scale2_nearest", run = image_scale2_nearest),
+    TestCase(name = "ladybird::image_scale2_bilinear", run = image_scale2_bilinear),
+    TestCase(name = "ladybird::image_scale2_bicubic", run = image_scale2_bicubic),
+    TestCase(name = "ladybird::image_rotate_bilinear", run = image_rotate_bilinear),
+    TestCase(name = "ladybird::image_opacity_half", run = image_opacity_half),
+    TestCase(name = "ladybird::image_opacity_half_bicubic", run = image_opacity_half_bicubic),
+    TestCase(name = "ladybird::image_scale_half_bilinear", run = image_scale_half_bilinear),
+    TestCase(name = "ladybird::pattern_repeat_nearest", run = pattern_repeat_nearest),
+    TestCase(name = "ladybird::pattern_pad_bilinear_rrect", run = pattern_pad_bilinear_rrect),
+    TestCase(name = "ladybird::clip_rrect_fill", run = clip_rrect_fill),
+    TestCase(name = "ladybird::clip_circle_stroke", run = clip_circle_stroke),
+    TestCase(name = "ladybird::clip_circle_image", run = clip_circle_image),
+    TestCase(name = "ladybird::clip_polygon_noaa", run = clip_polygon_noaa),
+    TestCase(name = "ladybird::clip_intersect", run = clip_intersect),
+    TestCase(name = "ladybird::clip_pixel_rect", run = clip_pixel_rect),
+    TestCase(name = "ladybird::glyphs_o_row", run = glyphs_o_row),
+    TestCase(name = "ladybird::glyphs_mixed_sizes", run = glyphs_mixed_sizes),
+    TestCase(name = "ladybird::glyphs_translucent_small", run = glyphs_translucent_small),
+    TestCase(name = "ladybird::ts_rotate_rrect", run = ts_rotate_rrect),
+    TestCase(name = "ladybird::ts_scale_circle", run = ts_scale_circle),
+    TestCase(name = "ladybird::ts_skew_rect", run = ts_skew_rect),
+    TestCase(name = "ladybird::ts_rotate_stroke_rrect", run = ts_rotate_stroke_rrect),
+    TestCase(name = "ladybird::grad_linear_rrect", run = grad_linear_rrect),
+    TestCase(name = "ladybird::grad_linear_circle_3stops", run = grad_linear_circle_3stops),
+    TestCase(name = "ladybird::grad_radial_circle", run = grad_radial_circle),
+    TestCase(name = "ladybird::grad_radial_rrect_3stops", run = grad_radial_rrect_3stops),
+]

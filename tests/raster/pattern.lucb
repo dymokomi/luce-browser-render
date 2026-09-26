@@ -42,7 +42,7 @@ func pad_nearest(t: Test*):
     var paint = Paint()
     defer paint.release()
     paint.anti_alias = false
-    paint.shader = Pattern.new_( triangle.as_ref(), SpreadMode.pad_, FilterQuality.nearest, 1.0, Transform.identity(), )
+    paint.shader = Pattern.new_(triangle.as_ref(), SpreadMode.pad_, FilterQuality.nearest, 1.0, Transform.identity())
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
     defer path.release()
@@ -60,7 +60,7 @@ func repeat_nearest(t: Test*):
     var paint = Paint()
     defer paint.release()
     paint.anti_alias = false
-    paint.shader = Pattern.new_( triangle.as_ref(), SpreadMode.repeat, FilterQuality.nearest, 1.0, Transform.identity(), )
+    paint.shader = Pattern.new_(triangle.as_ref(), SpreadMode.repeat, FilterQuality.nearest, 1.0, Transform.identity())
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
     defer path.release()
@@ -78,7 +78,7 @@ func reflect_nearest(t: Test*):
     var paint = Paint()
     defer paint.release()
     paint.anti_alias = false
-    paint.shader = Pattern.new_( triangle.as_ref(), SpreadMode.reflect, FilterQuality.nearest, 1.0, Transform.identity(), )
+    paint.shader = Pattern.new_(triangle.as_ref(), SpreadMode.reflect, FilterQuality.nearest, 1.0, Transform.identity())
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
     defer path.release()
@@ -98,7 +98,7 @@ func pad_bicubic(t: Test*):
     var paint = Paint()
     defer paint.release()
     paint.anti_alias = false
-    paint.shader = Pattern.new_( triangle.as_ref(), SpreadMode.pad_, FilterQuality.bicubic, 1.0,  Transform.from_row(1.1, 0.3, 0.0, 1.4, 0.0, 0.0), )
+    paint.shader = Pattern.new_(triangle.as_ref(), SpreadMode.pad_, FilterQuality.bicubic, 1.0, Transform.from_row(1.1, 0.3, 0.0, 1.4, 0.0, 0.0))
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
     defer path.release()
@@ -116,7 +116,7 @@ func repeat_bicubic(t: Test*):
     var paint = Paint()
     defer paint.release()
     paint.anti_alias = false
-    paint.shader = Pattern.new_( triangle.as_ref(), SpreadMode.repeat, FilterQuality.bicubic, 1.0,  Transform.from_row(1.1, 0.3, 0.0, 1.4, 0.0, 0.0), )
+    paint.shader = Pattern.new_(triangle.as_ref(), SpreadMode.repeat, FilterQuality.bicubic, 1.0, Transform.from_row(1.1, 0.3, 0.0, 1.4, 0.0, 0.0))
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
     defer path.release()
@@ -134,7 +134,7 @@ func reflect_bicubic(t: Test*):
     var paint = Paint()
     defer paint.release()
     paint.anti_alias = false
-    paint.shader = Pattern.new_( triangle.as_ref(), SpreadMode.reflect, FilterQuality.bicubic, 1.0,  Transform.from_row(1.1, 0.3, 0.0, 1.4, 0.0, 0.0), )
+    paint.shader = Pattern.new_(triangle.as_ref(), SpreadMode.reflect, FilterQuality.bicubic, 1.0, Transform.from_row(1.1, 0.3, 0.0, 1.4, 0.0, 0.0))
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
     defer path.release()
@@ -152,7 +152,7 @@ func filter_nearest_no_ts(t: Test*):
     var paint = Paint()
     defer paint.release()
     paint.anti_alias = false
-    paint.shader = Pattern.new_( triangle.as_ref(), SpreadMode.repeat, FilterQuality.nearest, 1.0, Transform.identity(), )
+    paint.shader = Pattern.new_(triangle.as_ref(), SpreadMode.repeat, FilterQuality.nearest, 1.0, Transform.identity())
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
     defer path.release()
@@ -170,7 +170,7 @@ func filter_nearest(t: Test*):
     var paint = Paint()
     defer paint.release()
     paint.anti_alias = false
-    paint.shader = Pattern.new_( triangle.as_ref(), SpreadMode.repeat, FilterQuality.nearest, 1.0, Transform.from_row(1.5, 0.0, -0.4, -0.8, 5.0, 1.0), )
+    paint.shader = Pattern.new_(triangle.as_ref(), SpreadMode.repeat, FilterQuality.nearest, 1.0, Transform.from_row(1.5, 0.0, -0.4, -0.8, 5.0, 1.0))
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
     defer path.release()
@@ -188,7 +188,7 @@ func filter_bilinear(t: Test*):
     var paint = Paint()
     defer paint.release()
     paint.anti_alias = false
-    paint.shader = Pattern.new_( triangle.as_ref(), SpreadMode.repeat, FilterQuality.bilinear, 1.0, Transform.from_row(1.5, 0.0, -0.4, -0.8, 5.0, 1.0), )
+    paint.shader = Pattern.new_(triangle.as_ref(), SpreadMode.repeat, FilterQuality.bilinear, 1.0, Transform.from_row(1.5, 0.0, -0.4, -0.8, 5.0, 1.0))
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
     defer path.release()
@@ -206,7 +206,7 @@ func filter_bicubic(t: Test*):
     var paint = Paint()
     defer paint.release()
     paint.anti_alias = false
-    paint.shader = Pattern.new_( triangle.as_ref(), SpreadMode.repeat, FilterQuality.bicubic, 1.0, Transform.from_row(1.5, 0.0, -0.4, -0.8, 5.0, 1.0), )
+    paint.shader = Pattern.new_(triangle.as_ref(), SpreadMode.repeat, FilterQuality.bicubic, 1.0, Transform.from_row(1.5, 0.0, -0.4, -0.8, 5.0, 1.0))
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
     defer path.release()

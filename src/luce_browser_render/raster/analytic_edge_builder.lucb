@@ -1,0 +1,190 @@
+#==============================================================================================
+#
+#   analytic_edge_builder - turning a path into analytic edges
+#
+#   DESCRIPTION:
+#       Port of the SkAnalyticEdgeBuilder half of Skia m144 src/core/SkEdgeBuilder.cpp:
+#       buildEdges (buildPoly for paths made only of lines, whose segments are clipped with
+#       SkLineClipper; build for the rest, clipped with SkEdgeClipper or chopped at their y
+#       extrema), addLine with combineVertical, addQuad and addCubic. The edges are a Vec in
+#       the order Skia's list has them.
+#
+#       Copyright (c) 2011 Google Inc.
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+## SkEdgeBuilder::buildEdges for analytic edges: the caller owns (and releases) the edges.
+## `clip` is the shifted clip (none when the path is contained in the clip); `convex` is
+## SkPathRaw::isKnownToBeConvex. Returns none when the clipped path has non-finite points.
+func build_analytic_edges(path: const Path*, clip: IRect?, convex: bool) -> Vec[AnalyticEdge]?:
+    # If we're convex, then we need both edges, even if the right edge is past the clip.
+    let can_cull_to_the_right = not convex
+
+    var edges: Vec[AnalyticEdge]
+    edges.reserve(64)
+
+    # We can use our buildPoly() optimization if all the segments are lines.
+    var only_lines = true
+    for verb in path.verbs.view():
+        if verb == .quad or verb == .cubic or verb == .conic:
+            only_lines = false
+
+    if only_lines:
+        # SkEdgeBuilder::buildPoly
+        var iter = edge_iter(path)
+        if let c = clip:
+            let clip_rect = c.to_rect()
+            while let edge = iter.next():
+                match edge:
+                    .line_to(p0, p1):
+                        let src: Point[2] = [p0, p1]
+                        var lines: Point[4] = ---
+                        # SkLineClipper::ClipLine: the clipped polyline's points (0 when
+                        # clipped out)
+                        let count = line_clipper_clip(src, clip_rect, can_cull_to_the_right, lines)
+                        if count > 1:
+                            for i in 0..<count - 1:
+                                analytic_add_line(&edges, lines[i], lines[i + 1])
+                    _:
+                        trap("raster: unexpected verb")
+        else:
+            while let edge = iter.next():
+                match edge:
+                    .line_to(p0, p1):
+                        analytic_add_line(&edges, p0, p1)
+                    _:
+                        trap("raster: unexpected verb")
+        return edges
+
+    if let c = clip:
+        var clipper_iter = EdgeClipperIter.new_(path, c.to_rect(), can_cull_to_the_right)
+        while let clipped = clipper_iter.next():
+            for edge in clipped.edges[..<clipped.len]:
+                match edge:
+                    .line_to(p0, p1):
+                        if not p0.is_finite() or not p1.is_finite():
+                            edges.release()
+                            return none
+                        analytic_add_line(&edges, p0, p1)
+                    .quad_to(p0, p1, p2):
+                        if not p0.is_finite() or not p1.is_finite() or not p2.is_finite():
+                            edges.release()
+                            return none
+                        let pts: Point[3] = [p0, p1, p2]
+                        analytic_add_quad(&edges, pts)
+                    .cubic_to(p0, p1, p2, p3):
+                        if not p0.is_finite() or not p1.is_finite() or not p2.is_finite() or not p3.is_finite():
+                            edges.release()
+                            return none
+                        let pts: Point[4] = [p0, p1, p2, p3]
+                        analytic_add_cubic(&edges, pts)
+                    _:
+                        trap("unreachable")
+        return edges
+
+    var iter = edge_iter(path)
+    while let edge = iter.next():
+        match edge:
+            .line_to(p0, p1):
+                analytic_add_line(&edges, p0, p1)
+            .quad_to(p0, p1, p2):
+                let points: Point[3] = [p0, p1, p2]
+                var mono_x: Point[5] = ---
+                let n = chop_quad_at_y_extrema(points, mono_x)
+                for i in 0..=n:
+                    analytic_add_quad(&edges, mono_x[i * 2..])
+            .cubic_to(p0, p1, p2, p3):
+                let points: Point[4] = [p0, p1, p2, p3]
+                var mono_y: Point[10] = ---
+                let n = chop_cubic_at_y_extrema(points, mono_y)
+                for i in 0..=n:
+                    analytic_add_cubic(&edges, mono_y[i * 3..])
+            .conic_to(p0, p1, p2, weight):
+                # SkAutoConicToQuads, within 1/4 pixel
+                let quads = AutoConicToQuads.compute(p0, p1, p2, weight, 0.25)
+                for q in 0..<quads.len:
+                    var mono_x: Point[5] = ---
+                    let n = chop_quad_at_y_extrema(quads.quad(q), mono_x)
+                    for i in 0..=n:
+                        analytic_add_quad(&edges, mono_x[i * 2..])
+    return edges
+
+func new_analytic_edge() -> AnalyticEdge:
+    var e: AnalyticEdge
+    e.next = edge_nil
+    e.prev = edge_nil
+    return e
+
+## SkAnalyticEdgeBuilder::addLine.
+func analytic_add_line(edges: Vec[AnalyticEdge]*, p0: Point, p1: Point):
+    var edge = new_analytic_edge()
+    if edge.set_line(p0, p1):
+        var combine = Combine.no
+        # We only consider edges that were originally lines to be vertical to avoid
+        # numerical issues (crbug.com/1154864).
+        let is_vertical = edge.dx == 0 and edge.edge_type == .line
+        if is_vertical and not edges.is_empty():
+            combine = analytic_combine_vertical(&edge, &edges.data[edges.len - 1])
+
+        match combine:
+            .total:
+                discard(edges.pop())
+            .partial:
+                return
+            _:
+                edges.push(edge)
+
+## SkAnalyticEdgeBuilder::addQuad.
+func analytic_add_quad(edges: Vec[AnalyticEdge]*, pts: const Point[]):
+    var edge = new_analytic_edge()
+    if edge.set_quadratic(pts):
+        edges.push(edge)
+
+## SkAnalyticEdgeBuilder::addCubic.
+func analytic_add_cubic(edges: Vec[AnalyticEdge]*, pts: const Point[]):
+    var edge = new_analytic_edge()
+    if edge.set_cubic(pts):
+        edges.push(edge)
+
+func aaa_approximately_equal(a: i32, b: i32) -> bool:
+    return abs32(a - b) < 0x100
+
+## SkAnalyticEdgeBuilder::combineVertical.
+func analytic_combine_vertical(edge: const AnalyticEdge*, last: AnalyticEdge*) -> Combine:
+    # We only consider edges that were originally lines to be vertical to avoid numerical
+    # issues (crbug.com/1154864).
+    if last.edge_type != .line or last.dx != 0 or edge.x != last.x:
+        return .no
+    if edge.winding == last.winding:
+        if edge.lower_y == last.upper_y:
+            last.upper_y = edge.upper_y
+            last.y = last.upper_y
+            return .partial
+        if aaa_approximately_equal(edge.upper_y, last.lower_y):
+            last.lower_y = edge.lower_y
+            return .partial
+        return .no
+    if aaa_approximately_equal(edge.upper_y, last.upper_y):
+        if aaa_approximately_equal(edge.lower_y, last.lower_y):
+            return .total
+        if edge.lower_y < last.lower_y:
+            last.upper_y = edge.lower_y
+            last.y = last.upper_y
+            return .partial
+        last.upper_y = last.lower_y
+        last.y = last.upper_y
+        last.lower_y = edge.lower_y
+        last.winding = edge.winding
+        return .partial
+    if aaa_approximately_equal(edge.lower_y, last.lower_y):
+        if edge.upper_y > last.upper_y:
+            last.lower_y = edge.upper_y
+            return .partial
+        last.lower_y = last.upper_y
+        last.upper_y = edge.upper_y
+        last.y = last.upper_y
+        last.winding = edge.winding
+        return .partial
+    return .no

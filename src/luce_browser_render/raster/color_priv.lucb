@@ -1,0 +1,30 @@
+#==============================================================================================
+#
+#   color_priv - Skia's 8-bit color helpers
+#
+#   DESCRIPTION:
+#       Port of SkMulDiv255Round (include/private/base/SkMath.h), which scales coverage by
+#       a clip's alpha, and of the channel conversion of SkColor4f::toSkColor
+#       (src/core/SkSwizzlePriv.h, Sk4f_toL32), with which SkPaint::getAlpha rounds.
+#
+#       Copyright (c) 2006 The Android Open Source Project
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+# mark: SkColorPriv ===========================================================================
+
+## SkMulDiv255Round: a * b / 255, rounded.
+func mul_div255_round(a: u32, b: u32) -> u32:
+    let prod = a * b + 128
+    return (prod + (prod >> 8)) >> 8
+
+## SkColor4f::toSkColor for one channel (Sk4f_toL32): pin(x * 255 + 0.5, 0, 255), truncated.
+func color_to_u8_channel(x: f32) -> u32:
+    var v = x * 255.0 + 0.5
+    if not (v >= 0.0):
+        v = 0.0
+    if v > 255.0:
+        v = 255.0
+    return (u32)v

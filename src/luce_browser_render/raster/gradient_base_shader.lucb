@@ -1,0 +1,283 @@
+#==============================================================================================
+#
+#   gradient_base_shader - the stops and pipeline stages shared by every gradient
+#
+#   DESCRIPTION:
+#       Port of Skia m144's SkGradientBaseShader (src/shaders/gradients/
+#       SkGradientBaseShader.cpp), on tiny-skia's Gradient API: the constructor (implicit
+#       first and last stops, monotonic positions pinned to [0, 1], evenly spaced stops
+#       detected and treated as implicit, duplicate stops removed), appendStages (tiling,
+#       AppendGradientFillStages with its evenly spaced two-stop, evenly spaced and
+#       arbitrary-stop forms, and the premultiply of unpremultiplied interpolation) and
+#       average_gradient_color of degenerate gradients. Colors interpolate in the
+#       destination color space (sRGB, as Ladybird's), unpremultiplied unless
+#       `interpolate_premul` (Ladybird's CSS gradients) is set. Rust's push_stages takes
+#       pre/post closures; here it is split into `push_stages_pre` (seed and matrix) and
+#       `push_stages_body` (tiling, the gradient and premultiply), with the caller's stages
+#       in between and after, in Skia's order.
+#
+#       Copyright (c) 2022 Google LLC. All rights reserved.
+#       Copyright (c) 2020 Yevhenii Reizner All rights reserved.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia, LICENSE-tiny-skia)
+#
+#==============================================================================================
+
+# The default SCALAR_NEARLY_ZERO threshold of .0024 is too big and causes regressions for svg
+# gradients defined in the wild.
+let degenerate_threshold: f32 = 1.0 / 32768.0
+
+## A gradient point.
+pub struct GradientStop:
+    var position: f32
+    var color: Color
+
+    ## Creates a new gradient point. `position` will be clamped to a 0..=1 range.
+    pub static func new_(position: f32, color: Color) -> GradientStop:
+        return GradientStop(position = normalized_clamped(position), color = color)
+
+struct Gradient:
+    var stops: Vec[GradientStop]  # with the implicit stops; positions unused without has_positions
+    var has_positions: bool  # false when the stops are evenly spaced
+    var tile_mode: SpreadMode
+    var transform: Transform
+    var points_to_unit: Transform
+    var colors_are_opaque: bool
+    var interpolate_premul: bool
+
+    ## Takes ownership of `stops0` (a Vec in `memory.heap`, at least two stops).
+    static func new_(stops0: Vec[GradientStop], tile_mode: SpreadMode, transform: Transform, points_to_unit: Transform) -> Gradient:
+        var stops = stops0
+        let count = stops.len
+
+        # Note: we let the caller skip the first and/or last position.
+        # i.e. pos[0] = 0.3, pos[1] = 0.7
+        # In these cases, we insert entries to ensure that the final data will be bracketed
+        # by [0, 1].
+        # i.e. our_pos[0] = 0, our_pos[1] = 0.3, our_pos[2] = 0.7, our_pos[3] = 1
+        let first_is_implicit = stops.data[0].position > 0.0
+        let last_is_implicit = stops.data[count - 1].position != 1.0
+
+        var colors_are_opaque = true
+        for stop in stops.view():
+            if stop.color.alpha() != 1.0:
+                colors_are_opaque = false
+
+        # The positions, the first forced to 0, then monotonic and the last pinned to 1.
+        var positions: Vec[f32]
+        defer positions.release()
+        positions.push(0.0)
+        let start_index: usize = 0 if first_is_implicit else 1
+        let end = count + (1 if last_is_implicit else 0)
+        var prev: f32 = 0.0
+        var uniform_stops = true
+        let uniform_step = stops.data[start_index].position - prev
+        for i in start_index..<end:
+            var curr: f32 = 1.0
+            if i != count:
+                curr = bound(stops.data[i].position, prev, 1.0)
+            uniform_stops = uniform_stops and is_nearly_equal(uniform_step, curr - prev)
+            positions.push(curr)
+            prev = curr
+
+        # Now copy over the colors, adding the duplicates at t=0 and t=1 as needed.
+        if first_is_implicit:
+            stops.insert(0, stops.data[0])
+        if last_is_implicit:
+            stops.push(stops.data[stops.len - 1])
+        for i in 0..<stops.len:
+            stops.data[i].position = positions.data[i]
+
+        if not uniform_stops:
+            # Remove duplicate stops with more than two of the same stop, keeping the leftmost
+            # and rightmost stop colors.
+            # i.e.       0, 0, 0,   0.2, 0.2, 0.3, 0.3, 0.3, 1, 1
+            # w/  clamp  0,    0,   0.2, 0.2, 0.3,      0.3, 1, 1
+            # w/o clamp        0,   0.2, 0.2, 0.3,      0.3, 1
+            let s = stops.data
+            let n = stops.len
+            var i: usize = 0
+            var deduped: usize = 0
+            for j in 1..<n + 1:
+                if j == n or s[i].position != s[j].position:
+                    let dup_stop = j - i > 1
+                    # Ignore the leftmost stop (i) if it is a non-clamp tilemode with a
+                    # duplicate stop on t = 0.
+                    let ignore_leftmost = dup_stop and tile_mode != .pad_ and s[i].position == 0.0
+                    if not ignore_leftmost:
+                        s[deduped] = s[i]
+                        deduped += 1
+                    # Include the rightmost stop (j-1) only if the stop has a duplicate,
+                    # ignoring the rightmost stop if it is a non-clamp tilemode with t = 1.
+                    let ignore_rightmost = tile_mode != .pad_ and s[j - 1].position == 1.0
+                    if dup_stop and not ignore_rightmost:
+                        s[deduped] = s[j - 1]
+                        deduped += 1
+                    i = j
+            stops.len = deduped
+
+        return Gradient(stops = stops, has_positions = not uniform_stops, tile_mode = tile_mode, transform = transform, points_to_unit = points_to_unit, colors_are_opaque = colors_are_opaque, interpolate_premul = false)
+
+    ## Skia's MatrixRec::apply: seed_shader and the inverse of the total matrix, followed by
+    ## the points-to-unit one.
+    func push_stages_pre(p: RasterPipelineBuilder*) -> bool:
+        p.push(.seed_shader)
+
+        let inv = self.transform.invert() else return false  # failed to invert a gradient transform. Nothing will be rendered
+        let ts = inv.post_concat(self.points_to_unit)
+        p.push_transform(ts)
+        return true
+
+    ## The tiling stage, AppendGradientFillStages and AppendInterpolatedToDstStages.
+    func push_stages_body(p: RasterPipelineBuilder*, cs: ColorSpace):
+        if self.tile_mode == .reflect:
+            p.push(.mirror_x_1)
+        elif self.tile_mode == .repeat:
+            p.push(.repeat_x_1)
+        elif not self.has_positions:
+            # We clamp only when the stops are evenly spaced. If not, there may be hard stops,
+            # and clamping ruins hard stops at 0 and/or 1. In that case, we must make sure
+            # we're using the general "gradient" stage, which is the only stage that will
+            # correctly handle unclamped t.
+            p.push(.clamp_x_1)
+
+        # The colors in the destination color space, premultiplied if interpolated so.
+        var colors: Vec[GradientColor]
+        defer colors.release()
+        for stop in self.stops.view():
+            let c = colorspace_expand_color(cs, stop.color)
+            if self.interpolate_premul:
+                colors.push(GradientColor.new_(c.red() * c.alpha(), c.green() * c.alpha(), c.blue() * c.alpha(), c.alpha()))
+            else:
+                colors.push(GradientColor.from_color(c))
+        push_gradient_fill_stages(p, colors.view(), self.stops.view(), self.has_positions)
+
+        # Colors interpolated unpremultiplied are premultiplied into the destination.
+        if not self.colors_are_opaque and not self.interpolate_premul:
+            p.push(.premultiply)
+
+    mutating func apply_opacity(opacity: f32):
+        for stop in &self.stops.view():
+            stop.color.apply_opacity(opacity)
+
+        self.colors_are_opaque = true
+        for stop in self.stops.view():
+            if not stop.color.is_opaque():
+                self.colors_are_opaque = false
+
+func color_sub(a: GradientColor, b: GradientColor) -> GradientColor:
+    return GradientColor.new_(a.r - b.r, a.g - b.g, a.b - b.b, a.a - b.a)
+
+func color_scale(a: GradientColor, s: f32) -> GradientColor:
+    return GradientColor.new_(a.r * s, a.g * s, a.b * s, a.a * s)
+
+## AppendGradientFillStages: color = factor * t + bias for the stop t falls in.
+func push_gradient_fill_stages(p: RasterPipelineBuilder*, colors: const GradientColor[], stops: const GradientStop[], has_positions: bool):
+    let count = colors.length
+
+    # The two-stop case with stops at 0 and 1.
+    if count == 2 and not has_positions:
+        p.ctx.evenly_spaced_2_stop_gradient = EvenlySpaced2StopGradientCtx(factor = color_sub(colors[1], colors[0]), bias = colors[0])
+        p.push(.evenly_spaced_2_stop_gradient)
+        return
+
+    var ctx: GradientCtx
+    ctx.factors.reserve(count + 1)
+    ctx.biases.reserve(count + 1)
+    ctx.t_values.reserve(count + 1)
+
+    if not has_positions:
+        # Handle evenly distributed stops: all stops have width 1/gap_count, and the stop
+        # parameter refers to the nth stop.
+        let gap_count = (f32)(count - 1)
+        var c_l = colors[0]
+        for i in 0..<count - 1:
+            let c_r = colors[i + 1]
+            # factor = (right - left) / gap, and gap = 1/gap_count
+            let factor = color_scale(color_sub(c_r, c_l), gap_count)
+            ctx.push_stop(factor, color_sub(c_l, color_scale(factor, (f32)i / gap_count)))
+            c_l = c_r
+        ctx.push_const_color(c_l)
+        ctx.len = count
+        p.ctx.gradient.release()
+        p.ctx.gradient = ctx
+        p.push(.evenly_spaced_gradient)
+        return
+
+    # Handle arbitrary stops. Remove the default stops inserted by the constructor because
+    # they are naturally handled by the search method.
+    var first_stop: usize = 0
+    var last_stop: usize = 1
+    if count > 2:
+        first_stop = 0 if not colors[0].equals(colors[1]) else 1
+        last_stop = count - 1 if not colors[count - 2].equals(colors[count - 1]) else count - 2
+
+    var t_l = stops[first_stop].position
+    var c_l = colors[first_stop]
+    ctx.push_const_color(c_l)
+    ctx.t_values.push(0.0)  # unused: idx 0 is the color to use before the first stop
+    # N.B. last_stop is the index of the last stop, not one after.
+    for i in first_stop..<last_stop:
+        let t_r = stops[i + 1].position
+        let c_r = colors[i + 1]
+        if t_l < t_r:
+            let c_scale = 1.0 / (t_r - t_l)
+            if math32.is_finite(c_scale):
+                # For each stop we calculate a bias B and a scale factor F, such that for any
+                # t between stops n and n+1, the color we want is B[n] + F[n]*t.
+                let factor = color_scale(color_sub(c_r, c_l), c_scale)
+                ctx.push_stop(factor, color_sub(c_l, color_scale(factor, t_l)))
+                ctx.t_values.push(t_l)
+        t_l = t_r
+        c_l = c_r
+
+    ctx.t_values.push(t_l)
+    ctx.push_const_color(c_l)
+    ctx.len = ctx.factors.len
+
+    p.ctx.gradient.release()
+    p.ctx.gradient = ctx
+    p.push(.gradient)
+
+func copy_stops(stops: const GradientStop[]) -> Vec[GradientStop]:
+    var v: Vec[GradientStop]
+    v.extend(stops)
+    return v
+
+func average_gradient_color(points: const GradientStop[]) -> Color:
+    # The gradient is a piecewise linear interpolation between colors. For a given interval,
+    # the integral between the two endpoints is 0.5 * (ci + cj) * (pj - pi), which provides
+    # that intervals average color. The overall average color is thus the sum of each piece.
+    # The thing to keep in mind is that the provided gradient definition may implicitly use
+    # p=0 and p=1.
+    var blend = f32[4](0.0)
+
+    # Bake 1/(colorCount - 1) uniform stop difference into this scale factor
+    let w_scale = f32[4](0.5)
+
+    for i in 0..<points.length - 1:
+        # Calculate the average color for the interval between pos(i) and pos(i+1)
+        let c0 = load_color(points[i].color)
+        let c1 = load_color(points[i + 1].color)
+        # when pos == null, there are colorCount uniformly distributed stops, going from 0
+        # to 1, so pos[i + 1] - pos[i] = 1/(colorCount-1)
+        let w = points[i + 1].position - points[i].position
+        blend = blend + w_scale * f32[4](w) * (c1 + c0)
+
+    # Now account for any implicit intervals at the start or end of the stop definitions
+    if points[0].position > 0.0:
+        # The first color is fixed between p = 0 to pos[0], so 0.5 * (ci + cj) * (pj - pi)
+        # becomes 0.5 * (c + c) * (pj - 0) = c * pj
+        let c = load_color(points[0].color)
+        blend = blend + f32[4](points[0].position) * c
+
+    let last_idx = points.length - 1
+    if points[last_idx].position < 1.0:
+        # The last color is fixed between pos[n-1] to p = 1, so 0.5 * (ci + cj) * (pj - pi)
+        # becomes 0.5 * (c + c) * (1 - pi) = c * (1 - pi)
+        let c = load_color(points[last_idx].color)
+        blend = blend + (f32[4](1.0) - f32[4](points[last_idx].position)) * c
+
+    return Color.from_rgba(blend[0], blend[1], blend[2], blend[3]) else trap("unreachable")
+
+func load_color(c: Color) -> f32[4]:
+    return [c.red(), c.green(), c.blue(), c.alpha()]

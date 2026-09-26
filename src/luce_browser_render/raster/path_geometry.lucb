@@ -107,11 +107,18 @@ func find_unit_quad_roots(a: f32, b: f32, c: f32, roots: f32[]) -> usize:
             roots[1] = tmp
         elif roots[0] == roots[1]:
             # nearly-equal?
-            roots_offset -= 1 # skip the double root
+            roots_offset -= 1  # skip the double root
 
     return roots_offset
 
 func chop_cubic_at2(src: const Point[], t: f32, dst: Point[]):
+    if t == 1.0:
+        for i: usize in 0..<4:
+            dst[i] = src[i]
+        dst[4] = src[3]
+        dst[5] = src[3]
+        dst[6] = src[3]
+        return
     let p0 = src[0].to_f32x2()
     let p1 = src[1].to_f32x2()
     let p2 = src[2].to_f32x2()

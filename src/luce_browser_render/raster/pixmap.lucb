@@ -298,11 +298,11 @@ pub struct PixmapMut:
     ## from weird clipping of horizontal/vertical edges. Used mainly to render a pixmap onto
     ## a pixmap.
     pub mutating func fill_rect(rect: Rect, paint: const Paint*, transform: Transform, mask: const Mask*?):
-        painter_fill_rect(&self, rect, paint, transform, mask)
+        draw_fill_rect(&self, rect, paint, transform, mask)
 
     ## Draws a filled path onto the pixmap. Returns silently when nothing to draw.
     pub mutating func fill_path(path: const Path*, paint: const Paint*, fill_rule: FillRule, transform: Transform, mask: const Mask*?):
-        painter_fill_path(&self, path, paint, fill_rule, transform, mask)
+        draw_fill_path(&self, path, paint, fill_rule, transform, mask)
 
     ## Strokes a path. Stroking is implemented using two separate algorithms: 1. If a stroke
     ## width is wider than 1px (after applying the transformation), a path will be converted
@@ -312,7 +312,7 @@ pub struct PixmapMut:
     ## hairline stroking, which doesn't involve a separate path allocation. Also, `Stroke`
     ## dashing is not supported for hairlines.
     pub mutating func stroke_path(path: const Path*, paint: const Paint*, stroke: const Stroke*, transform: Transform, mask: const Mask*?):
-        painter_stroke_path(&self, path, paint, stroke, transform, mask)
+        draw_stroke_path(&self, path, paint, stroke, transform, mask)
 
     ## Draws a `Pixmap` on top of the current `Pixmap`. The same as filling a rectangle
     ## with a `pixmap` pattern.

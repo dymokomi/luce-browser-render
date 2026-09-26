@@ -1,0 +1,216 @@
+#==============================================================================================
+#
+#   geometry_chop - chopping quads and cubics at their extrema
+#
+#   DESCRIPTION:
+#       Port of tiny-skia path_geometry.rs (chop_quad_at_x/y_extrema,
+#       chop_cubic_at_x/y_extrema, chop_cubic_at_max_curvature), with chop_cubic_at taken
+#       from Skia m144 src/core/SkGeometry.cpp (SkChopCubicAt with several t values, which
+#       splits two at a time). Chopping a monotonic cubic at a clip line is in cubics.lucb.
+#
+#       Copyright (c) 2006 The Android Open Source Project
+#       Copyright (c) 2020 Yevhenii Reizner
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+# mark: Monotonic chopping (path_geometry.rs) =================================================
+
+# TODO: return custom type
+func chop_quad_at_x_extrema(src: const Point[], dst: Point[]) -> usize:
+    let a = src[0].x
+    var b = src[1].x
+    let c = src[2].x
+
+    if is_not_monotonic(a, b, c):
+        if let t_value = valid_unit_divide(a - b, a - b - b + c):
+            chop_quad_at(src, t_value, dst)
+
+            # flatten double quad extrema
+            dst[1].x = dst[2].x
+            dst[3].x = dst[2].x
+
+            return 1
+
+        # if we get here, we need to force dst to be monotonic, even though we couldn't
+        # compute a unit_divide value (probably underflow).
+        b = a if math32.abs(a - b) < math32.abs(b - c) else c
+
+    dst[0] = Point.from_xy(a, src[0].y)
+    dst[1] = Point.from_xy(b, src[1].y)
+    dst[2] = Point.from_xy(c, src[2].y)
+    return 0
+
+func chop_quad_at_y_extrema(src: const Point[], dst: Point[]) -> usize:
+    let a = src[0].y
+    var b = src[1].y
+    let c = src[2].y
+
+    if is_not_monotonic(a, b, c):
+        if let t_value = valid_unit_divide(a - b, a - b - b + c):
+            chop_quad_at(src, t_value, dst)
+
+            # flatten double quad extrema
+            dst[1].y = dst[2].y
+            dst[3].y = dst[2].y
+
+            return 1
+
+        # if we get here, we need to force dst to be monotonic, even though we couldn't
+        # compute a unit_divide value (probably underflow).
+        b = a if math32.abs(a - b) < math32.abs(b - c) else c
+
+    dst[0] = Point.from_xy(src[0].x, a)
+    dst[1] = Point.from_xy(src[1].x, b)
+    dst[2] = Point.from_xy(src[2].x, c)
+    return 0
+
+func is_not_monotonic(a: f32, b: f32, c: f32) -> bool:
+    let ab = a - b
+    var bc = b - c
+    if ab < 0.0:
+        bc = -bc
+    return ab == 0.0 or bc < 0.0
+
+func chop_cubic_at_x_extrema(src: const Point[], dst: Point[]) -> usize:
+    var t_values = new_t_values()
+    let count = find_cubic_extrema(src[0].x, src[1].x, src[2].x, src[3].x, t_values)
+
+    chop_cubic_at(src, t_values[..<count], dst)
+    if count > 0:
+        # we do some cleanup to ensure our X extrema are flat
+        dst[2].x = dst[3].x
+        dst[4].x = dst[3].x
+        if count == 2:
+            dst[5].x = dst[6].x
+            dst[7].x = dst[6].x
+
+    return count
+
+func chop_cubic_at_y_extrema(src: const Point[], dst: Point[]) -> usize:
+    var t_values = new_t_values()
+    let count = find_cubic_extrema(src[0].y, src[1].y, src[2].y, src[3].y, t_values)
+
+    chop_cubic_at(src, t_values[..<count], dst)
+    if count > 0:
+        # we do some cleanup to ensure our Y extrema are flat
+        dst[2].y = dst[3].y
+        dst[4].y = dst[3].y
+        if count == 2:
+            dst[5].y = dst[6].y
+            dst[7].y = dst[6].y
+
+    return count
+
+## SkChopCubicAt(src, dst, tValues, count) of Skia m144: chops at every t (sorted, in
+## [0, 1]), two at a time where it can (the two chops share their arithmetic, see
+## chop_cubic_at_pair), renormalizing each t to the remaining cubic.
+func chop_cubic_at(src0: const Point[], t_values: const f32[], dst0: Point[]):
+    let count = t_values.length
+    if count == 0:
+        # nothing to chop
+        for i: usize in 0..<4:
+            dst0[i] = src0[i]
+        return
+
+    var src: Point[4] = [src0[0], src0[1], src0[2], src0[3]]
+    var dst = dst0
+    var i: usize = 0
+    while i + 1 < count:
+        # Do two chops at once.
+        var t0 = t_values[i]
+        var t1 = t_values[i + 1]
+        if i != 0:
+            let last_t = t_values[i - 1]
+            t0 = pin01((t0 - last_t) / (1.0 - last_t))
+            t1 = pin01((t1 - last_t) / (1.0 - last_t))
+        chop_cubic_at_pair(src, t0, t1, dst)
+        dst = dst[6..]
+        src = [dst[0], dst[1], dst[2], dst[3]]
+        i += 2
+    if i < count:
+        # Chop the final cubic if there was an odd number of chops.
+        var t = t_values[i]
+        if i != 0:
+            let last_t = t_values[i - 1]
+            t = pin01((t - last_t) / (1.0 - last_t))
+        chop_cubic_at2(src, t, dst)
+
+## SkTPin(x, 0, 1) (a NaN stays NaN, as skvx::pin and SkTPin leave it).
+func pin01(x: f32) -> f32:
+    if x < 0.0:
+        return 0.0
+    if x > 1.0:
+        return 1.0
+    return x
+
+## SkChopCubicAt(src, dst, t0, t1): the cubic chopped at t0 and t1 into dst[0..=9], both
+## chops computed at once (the middle cubic's inner points blossom from both).
+func chop_cubic_at_pair(src: const Point[], t0: f32, t1: f32, dst: Point[]):
+    if t1 == 1.0:
+        chop_cubic_at2(src, t0, dst)
+        dst[7] = src[3]
+        dst[8] = src[3]
+        dst[9] = src[3]
+        return
+
+    let p0 = src[0].to_f32x2()
+    let p1 = src[1].to_f32x2()
+    let p2 = src[2].to_f32x2()
+    let p3 = src[3].to_f32x2()
+    let ta = f32x2_splat(t0)
+    let tb = f32x2_splat(t1)
+
+    let ab_lo = mix_f32x2(p0, p1, ta)
+    let bc_lo = mix_f32x2(p1, p2, ta)
+    let cd_lo = mix_f32x2(p2, p3, ta)
+    let abc_lo = mix_f32x2(ab_lo, bc_lo, ta)
+    let bcd_lo = mix_f32x2(bc_lo, cd_lo, ta)
+    let abcd_lo = mix_f32x2(abc_lo, bcd_lo, ta)
+
+    let ab_hi = mix_f32x2(p0, p1, tb)
+    let bc_hi = mix_f32x2(p1, p2, tb)
+    let cd_hi = mix_f32x2(p2, p3, tb)
+    let abc_hi = mix_f32x2(ab_hi, bc_hi, tb)
+    let bcd_hi = mix_f32x2(bc_hi, cd_hi, tb)
+    let abcd_hi = mix_f32x2(abc_hi, bcd_hi, tb)
+
+    # middle = unchecked_mix(abc, bcd, shuffle<2,3,0,1>(T)): the low half mixes at t1, the
+    # high half at t0.
+    let middle_lo = mix_f32x2(abc_lo, bcd_lo, tb)
+    let middle_hi = mix_f32x2(abc_hi, bcd_hi, ta)
+
+    dst[0] = Point.from_f32x2(p0)
+    dst[1] = Point.from_f32x2(ab_lo)
+    dst[2] = Point.from_f32x2(abc_lo)
+    dst[3] = Point.from_f32x2(abcd_lo)
+    dst[4] = Point.from_f32x2(middle_lo)
+    dst[5] = Point.from_f32x2(middle_hi)
+    dst[6] = Point.from_f32x2(abcd_hi)
+    dst[7] = Point.from_f32x2(bcd_hi)
+    dst[8] = Point.from_f32x2(cd_hi)
+    dst[9] = Point.from_f32x2(p3)
+
+## unchecked_mix: (b - a) * t + a.
+func mix_f32x2(a: F32x2, b: F32x2, t: F32x2) -> F32x2:
+    return (b - a) * t + a
+
+func chop_cubic_at_max_curvature(src: const Point[], t_values: f32[], dst: Point[]) -> usize:
+    var roots: f32[3] = [0.0, 0.0, 0.0]
+    let roots_len = find_cubic_max_curvature(src, roots)
+
+    # Throw out values not inside 0..1.
+    var count: usize = 0
+    for root in roots[..<roots_len]:
+        if 0.0 < root and root < 1.0:
+            t_values[count] = root
+            count += 1
+
+    if count == 0:
+        for i: usize in 0..<4:
+            dst[i] = src[i]
+    else:
+        chop_cubic_at(src, t_values[..<count], dst)
+
+    return count + 1

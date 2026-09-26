@@ -20,7 +20,7 @@ func two_stops_linear_pad_lq(t: Test*):
     var paint = Paint()
     defer paint.release()
     paint.anti_alias = false
-    paint.shader = (LinearGradient.new_( Point.from_xy(10.0, 10.0), Point.from_xy(190.0, 190.0), [ GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+    paint.shader = (LinearGradient.new_(Point.from_xy(10.0, 10.0), Point.from_xy(190.0, 190.0), [GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180))], SpreadMode.pad_, Transform.identity()) else trap("unwrap"))
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
     defer path.release()
@@ -35,7 +35,7 @@ func two_stops_linear_repeat_lq(t: Test*):
     var paint = Paint()
     defer paint.release()
     paint.anti_alias = false
-    paint.shader = (LinearGradient.new_( Point.from_xy(10.0, 10.0), Point.from_xy(100.0, 100.0), [ GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.repeat, Transform.identity(), ) else trap("unwrap"))
+    paint.shader = (LinearGradient.new_(Point.from_xy(10.0, 10.0), Point.from_xy(100.0, 100.0), [GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180))], SpreadMode.repeat, Transform.identity()) else trap("unwrap"))
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
     defer path.release()
@@ -50,7 +50,7 @@ func two_stops_linear_reflect_lq(t: Test*):
     var paint = Paint()
     defer paint.release()
     paint.anti_alias = false
-    paint.shader = (LinearGradient.new_( Point.from_xy(10.0, 10.0), Point.from_xy(100.0, 100.0), [ GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.reflect, Transform.identity(), ) else trap("unwrap"))
+    paint.shader = (LinearGradient.new_(Point.from_xy(10.0, 10.0), Point.from_xy(100.0, 100.0), [GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180))], SpreadMode.reflect, Transform.identity()) else trap("unwrap"))
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
     defer path.release()
@@ -65,7 +65,7 @@ func three_stops_evenly_spaced_lq(t: Test*):
     var paint = Paint()
     defer paint.release()
     paint.anti_alias = false
-    paint.shader = (LinearGradient.new_( Point.from_xy(10.0, 10.0), Point.from_xy(190.0, 190.0), [ GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(0.50, Color.from_rgba8(220, 140, 75, 180)), GradientStop.new_(0.75, Color.from_rgba8(40, 180, 55, 160)), ],  SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+    paint.shader = (LinearGradient.new_(Point.from_xy(10.0, 10.0), Point.from_xy(190.0, 190.0), [GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(0.50, Color.from_rgba8(220, 140, 75, 180)), GradientStop.new_(0.75, Color.from_rgba8(40, 180, 55, 160))], SpreadMode.pad_, Transform.identity()) else trap("unwrap"))
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
     defer path.release()
@@ -80,7 +80,7 @@ func two_stops_unevenly_spaced_lq(t: Test*):
     var paint = Paint()
     defer paint.release()
     paint.anti_alias = false
-    paint.shader = (LinearGradient.new_( Point.from_xy(10.0, 10.0), Point.from_xy(190.0, 190.0), [ GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(0.75, Color.from_rgba8(220, 140, 75, 180)), ],  SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+    paint.shader = (LinearGradient.new_(Point.from_xy(10.0, 10.0), Point.from_xy(190.0, 190.0), [GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(0.75, Color.from_rgba8(220, 140, 75, 180))], SpreadMode.pad_, Transform.identity()) else trap("unwrap"))
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
     defer path.release()
@@ -96,7 +96,7 @@ func two_stops_linear_pad_hq(t: Test*):
     defer paint.release()
     paint.force_hq_pipeline = true
     paint.anti_alias = false
-    paint.shader = (LinearGradient.new_( Point.from_xy(10.0, 10.0), Point.from_xy(190.0, 190.0), [ GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+    paint.shader = (LinearGradient.new_(Point.from_xy(10.0, 10.0), Point.from_xy(190.0, 190.0), [GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180))], SpreadMode.pad_, Transform.identity()) else trap("unwrap"))
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
     defer path.release()
@@ -112,7 +112,7 @@ func two_stops_linear_repeat_hq(t: Test*):
     defer paint.release()
     paint.force_hq_pipeline = true
     paint.anti_alias = false
-    paint.shader = (LinearGradient.new_( Point.from_xy(10.0, 10.0), Point.from_xy(100.0, 100.0), [ GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.repeat, Transform.identity(), ) else trap("unwrap"))
+    paint.shader = (LinearGradient.new_(Point.from_xy(10.0, 10.0), Point.from_xy(100.0, 100.0), [GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180))], SpreadMode.repeat, Transform.identity()) else trap("unwrap"))
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
     defer path.release()
@@ -128,7 +128,7 @@ func two_stops_linear_reflect_hq(t: Test*):
     defer paint.release()
     paint.force_hq_pipeline = true
     paint.anti_alias = false
-    paint.shader = (LinearGradient.new_( Point.from_xy(10.0, 10.0), Point.from_xy(100.0, 100.0), [ GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.reflect, Transform.identity(), ) else trap("unwrap"))
+    paint.shader = (LinearGradient.new_(Point.from_xy(10.0, 10.0), Point.from_xy(100.0, 100.0), [GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180))], SpreadMode.reflect, Transform.identity()) else trap("unwrap"))
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
     defer path.release()
@@ -144,7 +144,7 @@ func three_stops_evenly_spaced_hq(t: Test*):
     defer paint.release()
     paint.force_hq_pipeline = true
     paint.anti_alias = false
-    paint.shader = (LinearGradient.new_( Point.from_xy(10.0, 10.0), Point.from_xy(190.0, 190.0), [ GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(0.50, Color.from_rgba8(220, 140, 75, 180)), GradientStop.new_(0.75, Color.from_rgba8(40, 180, 55, 160)), ],  SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+    paint.shader = (LinearGradient.new_(Point.from_xy(10.0, 10.0), Point.from_xy(190.0, 190.0), [GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(0.50, Color.from_rgba8(220, 140, 75, 180)), GradientStop.new_(0.75, Color.from_rgba8(40, 180, 55, 160))], SpreadMode.pad_, Transform.identity()) else trap("unwrap"))
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
     defer path.release()
@@ -160,7 +160,7 @@ func two_stops_unevenly_spaced_hq(t: Test*):
     defer paint.release()
     paint.force_hq_pipeline = true
     paint.anti_alias = false
-    paint.shader = (LinearGradient.new_( Point.from_xy(10.0, 10.0), Point.from_xy(190.0, 190.0), [ GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(0.75, Color.from_rgba8(220, 140, 75, 180)), ],  SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+    paint.shader = (LinearGradient.new_(Point.from_xy(10.0, 10.0), Point.from_xy(190.0, 190.0), [GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(0.75, Color.from_rgba8(220, 140, 75, 180))], SpreadMode.pad_, Transform.identity()) else trap("unwrap"))
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
     defer path.release()
@@ -178,7 +178,7 @@ func well_behaved_radial(t: Test*):
     var paint = Paint()
     defer paint.release()
     paint.anti_alias = false
-    paint.shader = (RadialGradient.new_( Point.from_xy(100.0, 100.0), 0.0, Point.from_xy(120.0, 80.0), 100.0, [ GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(0.75, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+    paint.shader = (RadialGradient.new_(Point.from_xy(100.0, 100.0), 0.0, Point.from_xy(120.0, 80.0), 100.0, [GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(0.75, Color.from_rgba8(220, 140, 75, 180))], SpreadMode.pad_, Transform.identity()) else trap("unwrap"))
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
     defer path.release()
@@ -193,7 +193,7 @@ func focal_on_circle_radial(t: Test*):
     var paint = Paint()
     defer paint.release()
     paint.anti_alias = false
-    paint.shader = (RadialGradient.new_( Point.from_xy(100.0, 100.0), 0.0, Point.from_xy(120.0, 80.0), 28.29, [ GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(0.75, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+    paint.shader = (RadialGradient.new_(Point.from_xy(100.0, 100.0), 0.0, Point.from_xy(120.0, 80.0), 28.29, [GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(0.75, Color.from_rgba8(220, 140, 75, 180))], SpreadMode.pad_, Transform.identity()) else trap("unwrap"))
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
     defer path.release()
@@ -208,7 +208,7 @@ func conical_greater_radial(t: Test*):
     var paint = Paint()
     defer paint.release()
     paint.anti_alias = false
-    paint.shader = (RadialGradient.new_( Point.from_xy(100.0, 100.0), 0.0, Point.from_xy(120.0, 80.0), 10.0, [ GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(0.75, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+    paint.shader = (RadialGradient.new_(Point.from_xy(100.0, 100.0), 0.0, Point.from_xy(120.0, 80.0), 10.0, [GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(0.75, Color.from_rgba8(220, 140, 75, 180))], SpreadMode.pad_, Transform.identity()) else trap("unwrap"))
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
     defer path.release()
@@ -223,7 +223,7 @@ func simple_radial_lq(t: Test*):
     var paint = Paint()
     defer paint.release()
     paint.anti_alias = false
-    paint.shader = (RadialGradient.new_( Point.from_xy(100.0, 100.0), 0.0, Point.from_xy(100.0, 100.0), 100.0, [ GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.00, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+    paint.shader = (RadialGradient.new_(Point.from_xy(100.0, 100.0), 0.0, Point.from_xy(100.0, 100.0), 100.0, [GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.00, Color.from_rgba8(220, 140, 75, 180))], SpreadMode.pad_, Transform.identity()) else trap("unwrap"))
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
     defer path.release()
@@ -239,7 +239,7 @@ func simple_radial_hq(t: Test*):
     defer paint.release()
     paint.force_hq_pipeline = true
     paint.anti_alias = false
-    paint.shader = (RadialGradient.new_( Point.from_xy(100.0, 100.0), 0.0, Point.from_xy(100.0, 100.0), 100.0, [ GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.00, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+    paint.shader = (RadialGradient.new_(Point.from_xy(100.0, 100.0), 0.0, Point.from_xy(100.0, 100.0), 100.0, [GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.00, Color.from_rgba8(220, 140, 75, 180))], SpreadMode.pad_, Transform.identity()) else trap("unwrap"))
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
     defer path.release()
@@ -255,7 +255,7 @@ func simple_radial_with_ts_hq(t: Test*):
     defer paint.release()
     paint.force_hq_pipeline = true
     paint.anti_alias = false
-    paint.shader = (RadialGradient.new_( Point.from_xy(100.0, 100.0), 0.0, Point.from_xy(100.0, 100.0), 100.0, [ GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.00, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.pad_, Transform.from_row(2.0, 0.3, -0.7, 1.2, 10.5, -12.3), ) else trap("unwrap"))
+    paint.shader = (RadialGradient.new_(Point.from_xy(100.0, 100.0), 0.0, Point.from_xy(100.0, 100.0), 100.0, [GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.00, Color.from_rgba8(220, 140, 75, 180))], SpreadMode.pad_, Transform.from_row(2.0, 0.3, -0.7, 1.2, 10.5, -12.3)) else trap("unwrap"))
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
     defer path.release()
@@ -272,7 +272,7 @@ func global_opacity(t: Test*):
     var paint = Paint()
     defer paint.release()
     paint.anti_alias = false
-    paint.shader = (RadialGradient.new_( Point.from_xy(100.0, 100.0), 0.0, Point.from_xy(100.0, 100.0), 100.0, [ GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 255)), GradientStop.new_(1.00, Color.from_rgba8(220, 140, 75, 255)), ], SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+    paint.shader = (RadialGradient.new_(Point.from_xy(100.0, 100.0), 0.0, Point.from_xy(100.0, 100.0), 100.0, [GradientStop.new_(0.25, Color.from_rgba8(50, 127, 150, 255)), GradientStop.new_(1.00, Color.from_rgba8(220, 140, 75, 255))], SpreadMode.pad_, Transform.identity()) else trap("unwrap"))
     paint.shader.apply_opacity(0.5)
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
@@ -289,7 +289,7 @@ func strip_gradient(t: Test*):
     var paint = Paint()
     defer paint.release()
     paint.anti_alias = false
-    paint.shader = (RadialGradient.new_( Point.from_xy(50.0, 100.0), 50.0, Point.from_xy(150.0, 100.0), 50.0, [ GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+    paint.shader = (RadialGradient.new_(Point.from_xy(50.0, 100.0), 50.0, Point.from_xy(150.0, 100.0), 50.0, [GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180))], SpreadMode.pad_, Transform.identity()) else trap("unwrap"))
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
     defer path.release()
@@ -305,7 +305,7 @@ func concentric_radial(t: Test*):
     var paint = Paint()
     defer paint.release()
     paint.anti_alias = false
-    paint.shader = (RadialGradient.new_( Point.from_xy(100.0, 100.0), 30.0, Point.from_xy(100.0, 100.0), 90.0, [ GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+    paint.shader = (RadialGradient.new_(Point.from_xy(100.0, 100.0), 30.0, Point.from_xy(100.0, 100.0), 90.0, [GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180))], SpreadMode.pad_, Transform.identity()) else trap("unwrap"))
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
     defer path.release()
@@ -325,7 +325,7 @@ func conical_smaller_radial(t: Test*):
     var paint = Paint()
     defer paint.release()
     paint.anti_alias = false
-    paint.shader = (RadialGradient.new_( Point.from_xy(100.0, 100.0), 60.0, Point.from_xy(150.0, 100.0), 30.0, [ GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+    paint.shader = (RadialGradient.new_(Point.from_xy(100.0, 100.0), 60.0, Point.from_xy(150.0, 100.0), 30.0, [GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180))], SpreadMode.pad_, Transform.identity()) else trap("unwrap"))
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
     defer path.release()
@@ -340,14 +340,14 @@ func sweep_gradient(t: Test*):
     var paint = Paint()
     defer paint.release()
     paint.anti_alias = false
-    paint.shader = (SweepGradient.new_( Point.from_xy(100.0, 100.0), 135.0, 225.0, [ GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+    paint.shader = (SweepGradient.new_(Point.from_xy(100.0, 100.0), 135.0, 225.0, [GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180))], SpreadMode.pad_, Transform.identity()) else trap("unwrap"))
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
     defer path.release()
 
     var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
     defer pixmap.release()
-    pixmap.fill_path( &path, &paint, FillRule.winding, Transform.identity(), none, )
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
 
     harness.expect_png(t, &pixmap, "gradients/sweep-gradient.png")
 
@@ -355,14 +355,14 @@ func sweep_gradient_full(t: Test*):
     var paint = Paint()
     defer paint.release()
     paint.anti_alias = false
-    paint.shader = (SweepGradient.new_( Point.from_xy(100.0, 100.0), 0.0, 360.0, [ GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180)), ], SpreadMode.pad_, Transform.identity(), ) else trap("unwrap"))
+    paint.shader = (SweepGradient.new_(Point.from_xy(100.0, 100.0), 0.0, 360.0, [GradientStop.new_(0.0, Color.from_rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, Color.from_rgba8(220, 140, 75, 180))], SpreadMode.pad_, Transform.identity()) else trap("unwrap"))
 
     var path = PathBuilder.from_rect((Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("unwrap")))
     defer path.release()
 
     var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
     defer pixmap.release()
-    pixmap.fill_path( &path, &paint, FillRule.winding, Transform.identity(), none, )
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
 
     harness.expect_png(t, &pixmap, "gradients/sweep-gradient-full.png")
 

@@ -4,9 +4,9 @@
 #
 #   DESCRIPTION:
 #       Port of tiny-skia-path scalar.rs (the Scalar trait and SCALAR_* constants) and
-#       floating_point.rs (SaturateCast, SaturateRound, f32_as_2s_compliment and the strict
+#       floating_point.rs (SaturateCast, SaturateRound and the strict
 #       number helpers), and of tiny-skia math.rs (left_shift, bound, approx_powf) and
-#       fixed_point.rs (FDot6, FDot8, FDot16). Also the Rust f32/f64 min and max semantics
+#       fixed_point.rs (FDot6, FDot8, FDot16). Also the Rust f32 min and max semantics
 #       the port relies on (fmin/fmax ignore a NaN operand, as Rust's std does; pmin/pmax
 #       are tiny-skia's "faster" min/max, which do not care about NaN).
 #
@@ -44,22 +44,6 @@ func fmax(a: f32, b: f32) -> f32:
     if math32.is_nan(a):
         return b
     if math32.is_nan(b):
-        return a
-    return a if a > b else b
-
-## Rust's `f64::min`: a NaN operand is ignored.
-func fmin64(a: f64, b: f64) -> f64:
-    if math.is_nan(a):
-        return b
-    if math.is_nan(b):
-        return a
-    return a if a < b else b
-
-## Rust's `f64::max`: a NaN operand is ignored.
-func fmax64(a: f64, b: f64) -> f64:
-    if math.is_nan(a):
-        return b
-    if math.is_nan(b):
         return a
     return a if a > b else b
 
@@ -116,14 +100,6 @@ func is_nearly_zero(x: f32) -> bool:
 func is_nearly_zero_within_tolerance(x: f32, tolerance: f32) -> bool:
     return math32.abs(x) <= tolerance
 
-## From SkPathOpsTypes.
-func almost_dequal_ulps(a: f32, b: f32) -> bool:
-    let ulps_epsilon: i32 = 16
-    let a_bits = f32_as_2s_compliment(a)
-    let b_bits = f32_as_2s_compliment(b)
-    # Find the difference in ULPs.
-    return a_bits < b_bits + ulps_epsilon and b_bits < a_bits + ulps_epsilon
-
 # mark: Floating point ========================================================================
 
 ## Return the closest integer for the given float. Returns MAX_I32_FITS_IN_F32 for NaN.
@@ -150,22 +126,6 @@ func saturate_ceil(x: f32) -> i32:
 
 func saturate_round(x: f32) -> i32:
     return saturate_from(math32.floor(x) + 0.5)
-
-## Return the float as a 2s compliment int. Just to be used to compare floats to each other
-## or against positive float-bit-constants (like 0). This does not return the int equivalent
-## of the float, just something cheaper for compares-only.
-func f32_as_2s_compliment(x: f32) -> i32:
-    return sign_bit_to_2s_compliment((i32)x.bits())
-
-## Convert a sign-bit int (i.e. float interpreted as int) into a 2s compliement int. This also
-## converts -0 (0x80000000) to 0. Doing this to a float allows it to be compared using normal
-## C operators (<, <=, etc.)
-func sign_bit_to_2s_compliment(value: i32) -> i32:
-    var x = value
-    if x < 0:
-        x &= 0x7FFFFFFF
-        x = -x
-    return x
 
 ## NormalizedF32::new_clamped: a value in [0, 1]; zero for NaN or infinity.
 func normalized_clamped(n: f32) -> f32:
@@ -258,10 +218,6 @@ func fdot6_div(a: FDot6, b: FDot6) -> FDot16:
         return left_shift(a, 16) // b
     return fdot16_div(a, b)
 
-
-func fdot6_small_scale(value: u8, dot6: FDot6) -> u8:
-    return (u8)(((i32)value * dot6) >> 6)
-
 # Extracted from SkScan_Antihair.cpp
 func fdot8_from_fdot16(x: FDot16) -> FDot8:
     return (x + 0x80) >> 8
@@ -273,12 +229,6 @@ func fdot8_from_fdot16(x: FDot16) -> FDot8:
 ## (float -> fixed -> float), but that's usually overkill.
 func fdot16_from_f32(x: f32) -> FDot16:
     return saturate_from(x * (f32)fdot16_one)
-
-func fdot16_floor_to_i32(x: FDot16) -> i32:
-    return x >> 16
-
-func fdot16_ceil_to_i32(x: FDot16) -> i32:
-    return (x + fdot16_one - 1) >> 16
 
 func fdot16_round_to_i32(x: FDot16) -> i32:
     return (x + fdot16_half) >> 16

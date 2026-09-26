@@ -1,0 +1,127 @@
+#==============================================================================================
+#
+#   tsort - Skia's introsort
+#
+#   DESCRIPTION:
+#       Port of Skia m144 src/base/SkTSort.h: SkTQSort (an introsort: quicksort with the
+#       middle element as pivot, insertion sort below 33 elements, heap sort past the depth
+#       limit) and the heap and insertion sorts it uses. It is not stable; the scan
+#       converters sort their edges with it, so edges that compare equal end up in Skia's
+#       order only when sorted exactly this way.
+#
+#       Copyright (c) 2006 The Android Open Source Project
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+## SkTQSort: sorts `items` so that `less(a, b)` holds for no later a and earlier b.
+func sk_tqsort[T](items: T[], less: func(const T*, const T*) -> bool):
+    let n = items.length
+    if n <= 1:
+        return
+    # Limit Introsort recursion depth to no more than 2 * ceil(log2(n-1)).
+    let depth = 2 * next_log2((u32)(n - 1))
+    sk_tintro_sort(depth, items, less)
+
+## SkNextLog2: the smallest k with (1 << k) >= value (value > 0).
+func next_log2(value: u32) -> i32:
+    return 32 - (i32)leading_zeros(value - 1)
+
+func sk_tintro_sort[T](depth0: i32, items0: T[], less: func(const T*, const T*) -> bool):
+    var depth = depth0
+    var items = items0
+    while true:
+        if items.length <= 32:
+            sk_tinsertion_sort(items, less)
+            return
+        if depth == 0:
+            sk_theap_sort(items, less)
+            return
+        depth -= 1
+        let middle = (items.length - 1) >> 1
+        let pivot = sk_tqsort_partition(items, middle, less)
+        sk_tintro_sort(depth, items[..<pivot], less)
+        items = items[pivot + 1..]
+
+func sk_tqsort_partition[T](items: T[], pivot: usize, less: func(const T*, const T*) -> bool) -> usize:
+    let right = items.length - 1
+    let pivot_value = items[pivot]
+    items[pivot] = items[right]
+    items[right] = pivot_value
+    var new_pivot: usize = 0
+    var left: usize = 0
+    while left < right:
+        if less(&items[left], &pivot_value):
+            let t = items[left]
+            items[left] = items[new_pivot]
+            items[new_pivot] = t
+            new_pivot += 1
+        left += 1
+    let t = items[new_pivot]
+    items[new_pivot] = items[right]
+    items[right] = t
+    return new_pivot
+
+func sk_tinsertion_sort[T](items: T[], less: func(const T*, const T*) -> bool):
+    for next in 1..<items.length:
+        if not less(&items[next], &items[next - 1]):
+            continue
+        let insert = items[next]
+        var hole = next
+        while true:
+            items[hole] = items[hole - 1]
+            hole -= 1
+            if not (0 < hole and less(&insert, &items[hole - 1])):
+                break
+        items[hole] = insert
+
+func sk_theap_sort[T](items: T[], less: func(const T*, const T*) -> bool):
+    let count = items.length
+    var i = count >> 1
+    while i > 0:
+        sk_theap_sift_down(items, i, count, less)
+        i -= 1
+    var j = count - 1
+    while j > 0:
+        let t = items[0]
+        items[0] = items[j]
+        items[j] = t
+        sk_theap_sift_up(items, 1, j, less)
+        j -= 1
+
+func sk_theap_sift_up[T](items: T[], root0: usize, bottom: usize, less: func(const T*, const T*) -> bool):
+    var root = root0
+    let x = items[root - 1]
+    let start = root
+    var j = root << 1
+    while j <= bottom:
+        if j < bottom and less(&items[j - 1], &items[j]):
+            j += 1
+        items[root - 1] = items[j - 1]
+        root = j
+        j = root << 1
+    j = root >> 1
+    while j >= start:
+        if less(&items[j - 1], &x):
+            items[root - 1] = items[j - 1]
+            root = j
+            j = root >> 1
+        else:
+            break
+    items[root - 1] = x
+
+func sk_theap_sift_down[T](items: T[], root0: usize, bottom: usize, less: func(const T*, const T*) -> bool):
+    var root = root0
+    let x = items[root - 1]
+    var child = root << 1
+    while child <= bottom:
+        if child < bottom and less(&items[child - 1], &items[child]):
+            child += 1
+        if less(&x, &items[child - 1]):
+            items[root - 1] = items[child - 1]
+            root = child
+            child = root << 1
+        else:
+            break
+    items[root - 1] = x

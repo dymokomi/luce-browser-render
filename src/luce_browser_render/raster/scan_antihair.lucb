@@ -1,0 +1,383 @@
+#==============================================================================================
+#
+#   scan_antihair - anti-aliased hairlines
+#
+#   DESCRIPTION:
+#       Port of the hairline half of Skia m144 src/core/SkScan_Antihair.cpp:
+#       AntiHairLineRgn (clipping to fixed-point range and to the clip), do_anti_hairline
+#       (which centres the line on the first pixel, with FDot6 coverage for its end caps)
+#       and the four SkAntiHairBlitters (horizontal, mostly horizontal, vertical, mostly
+#       vertical), one struct dispatching on its kind. It replaces tiny-skia's older port of
+#       the same file.
+#
+#       Copyright (c) 2011 The Android Open Source Project
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+# mark: Helpers ===============================================================================
+
+func scale_alpha_by_coverage(value: u32, coverage: FDot6) -> u32:
+    return (value * (u32)coverage) >> 6
+
+## Extracts the high 8 bits of the fractional part of a 16.16 fixed-point number, returning
+## an 8-bit alpha value.
+func antihair_fixed_to_alpha(f: FDot16) -> u32:
+    return (u32)((f >> 8) & 0xFF)
+
+## Returns the fractional part of the passed in number. e.g. 2.75 -> 0.75
+func fd6_frac(x: FDot6) -> FDot6:
+    return x & (fdot6_one - 1)
+
+## We want the fractional part of x or y, but we want multiples of 64 to return 64, not 0,
+## so we can't just say take the fractional component. We basically want to compute those
+## bits, and if they're 0, return 64. We can do that w/o a branch with an extra sub and add.
+func partial_pixel_coverage(pos: FDot6) -> FDot6:
+    return fd6_frac(pos - 1) + 1
+
+## Returns high-bit set iff x == 0x8000...
+func bad_int(x: i32) -> i32:
+    return x & -%x
+
+func any_bad_ints(a: i32, b: i32, c: i32, d: i32) -> i32:
+    return (bad_int(a) | bad_int(b) | bad_int(c) | bad_int(d)) >> 31
+
+# mark: SkAntiHairBlitter =====================================================================
+
+enum AntiHairKind as u8:
+    ## HLine_SkAntiHairBlitter: perfectly horizontal hairlines, over two rows.
+    hline = 0
+    ## Horish_SkAntiHairBlitter: slope between -1 and 1.
+    horish = 1
+    ## VLine_SkAntiHairBlitter: perfectly vertical hairlines.
+    vline = 2
+    ## Vertish_SkAntiHairBlitter: slope greater than 1 or less than -1.
+    vertish = 3
+
+## The four anti-hair blitters, drawing through `blitter`.
+struct AntiHairBlitter:
+    var kind: AntiHairKind
+    var blitter: Blitter
+
+    mutating func draw_cap(x: i32, fy0: FDot16, slope: FDot16, coverage: FDot6) -> FDot16:
+        let fy = fy0 + fdot16_half
+        let i = fixed_floor_to_int(fy)
+        let a = antihair_fixed_to_alpha(fy)
+        match self.kind:
+            .hline:
+                # lower line
+                var ma = scale_alpha_by_coverage(a, coverage)
+                if ma != 0:
+                    call_hline_blitter(x, i, 1, (u8)ma, self.blitter)
+                # upper line
+                ma = scale_alpha_by_coverage(255 - a, coverage)
+                if ma != 0:
+                    call_hline_blitter(x, i - 1, 1, (u8)ma, self.blitter)
+                return fy - fdot16_half
+            .horish:
+                let a0 = scale_alpha_by_coverage(255 - a, coverage)
+                let a1 = scale_alpha_by_coverage(a, coverage)
+                self.blitter.blit_anti_v2(x, i - 1, (u8)a0, (u8)a1)
+                return fy + slope - fdot16_half
+            .vline:
+                var ma = scale_alpha_by_coverage(a, coverage)
+                if ma != 0:
+                    self.blitter.blit_v(i, x, 1, (u8)ma)
+                ma = scale_alpha_by_coverage(255 - a, coverage)
+                if ma != 0:
+                    self.blitter.blit_v(i - 1, x, 1, (u8)ma)
+                return fy - fdot16_half
+            _:
+                self.blitter.blit_anti_h2(i - 1, x, (u8)scale_alpha_by_coverage(255 - a, coverage), (u8)scale_alpha_by_coverage(a, coverage))
+                return fy + slope - fdot16_half
+
+    mutating func draw_line(x0: i32, stop_x: i32, fy0: FDot16, slope: FDot16) -> FDot16:
+        var fy = fy0 + fdot16_half
+        match self.kind:
+            .hline:
+                let count = stop_x - x0
+                let y = fixed_floor_to_int(fy)
+                var a = antihair_fixed_to_alpha(fy)
+                # lower line
+                if a != 0:
+                    call_hline_blitter(x0, y, count, (u8)a, self.blitter)
+                # upper line
+                a = 255 - a
+                if a != 0:
+                    call_hline_blitter(x0, y - 1, count, (u8)a, self.blitter)
+                return fy - fdot16_half
+            .horish:
+                var x = x0
+                while true:
+                    let lower_y = fixed_floor_to_int(fy)
+                    let a = antihair_fixed_to_alpha(fy)
+                    self.blitter.blit_anti_v2(x, lower_y - 1, (u8)(255 - a), (u8)a)
+                    fy += slope
+                    x += 1
+                    if x >= stop_x:
+                        break
+                return fy - fdot16_half
+            .vline:
+                let x = fixed_floor_to_int(fy)
+                var a = antihair_fixed_to_alpha(fy)
+                if a != 0:
+                    self.blitter.blit_v(x, x0, stop_x - x0, (u8)a)
+                a = 255 - a
+                if a != 0:
+                    self.blitter.blit_v(x - 1, x0, stop_x - x0, (u8)a)
+                return fy - fdot16_half
+            _:
+                var y = x0
+                while true:
+                    let x = fixed_floor_to_int(fy)
+                    let a = antihair_fixed_to_alpha(fy)
+                    self.blitter.blit_anti_h2(x - 1, y, (u8)(255 - a), (u8)a)
+                    fy += slope
+                    y += 1
+                    if y >= stop_x:
+                        break
+                return fy - fdot16_half
+
+# mark: do_anti_hairline ======================================================================
+
+func do_anti_hairline(x00: FDot6, y00: FDot6, x10: FDot6, y10: FDot6, clip0: IRect?, blitter0: Blitter):
+    var x0 = x00
+    var y0 = y00
+    var x1 = x10
+    var y1 = y10
+    var clip = clip0
+    # check for integer NaN (0x80000000) which we can't handle (can't negate it). It appears
+    # typically from a huge float (inf or nan) being converted to int. If we see it, just
+    # don't draw.
+    if any_bad_ints(x0, y0, x1, y1) != 0:
+        return
+
+    # The caller must clip the line to [-32767.0 ... 32767.0] ahead of time (in dot6 format)
+
+    if abs32(x1 - x0) > fdot6_from_i32(511) or abs32(y1 - y0) > fdot6_from_i32(511):
+        # instead of (x0 + x1) >> 1, we shift each separately. This is less precise, but
+        # avoids overflowing the intermediate result if the values are huge. A better fix
+        # might be to clip the original pts directly (i.e. do the divide), so we don't spend
+        # time subdividing huge lines at all.
+        let hx = (x0 >> 1) + (x1 >> 1)
+        let hy = (y0 >> 1) + (y1 >> 1)
+        do_anti_hairline(x0, y0, hx, hy, clip, blitter0)
+        do_anti_hairline(hx, hy, x1, y1, clip, blitter0)
+        return
+
+    var start_coverage: FDot6 = 0
+    var stop_coverage: FDot6 = 0
+    var istart: i32 = 0
+    var istop: i32 = 0
+    var fstart: FDot16 = 0
+    var slope: FDot16 = 0
+    var kind = AntiHairKind.hline
+
+    if abs32(x1 - x0) > abs32(y1 - y0):  # mostly horizontal
+        if x0 > x1:  # we want to go left-to-right
+            var t = x0
+            x0 = x1
+            x1 = t
+            t = y0
+            y0 = y1
+            y1 = t
+
+        istart = fdot6_floor(x0)
+        istop = fdot6_ceil(x1)
+        if y0 == y1:  # completely horizontal, take fast case
+            slope = 0
+            kind = .hline
+            fstart = fdot6_to_fdot16(y0)
+        else:
+            slope = fdot16_fast_div(y1 - y0, x1 - x0)
+            # Adjust fstart to be the Y-intercept at the center of the first pixel.
+            let dx_to_center = 32 - fd6_frac(x0)
+            fstart = fdot6_to_fdot16(y0) + ((slope * dx_to_center + 32) >> 6)
+            kind = .horish
+
+        if istop - istart == 1:
+            # we are within a single pixel
+            start_coverage = x1 - x0
+            stop_coverage = 0
+        else:
+            start_coverage = fdot6_one - fd6_frac(x0)
+            stop_coverage = fd6_frac(x1)
+
+        if let c = clip:
+            if istart >= c.right or istop <= c.left:
+                return
+            if istart < c.left:
+                fstart += slope * (c.left - istart)
+                istart = c.left
+                start_coverage = fdot6_one
+                if istop - istart == 1:
+                    # we are within a single pixel
+                    start_coverage = partial_pixel_coverage(x1)
+                    stop_coverage = 0
+            if istop > c.right:
+                istop = c.right
+                stop_coverage = 0  # so we don't draw this last column
+
+            if istart == istop:
+                return
+            # now test if our Y values are completely inside the clip
+            var top: i32 = 0
+            var bottom: i32 = 0
+            if slope >= 0:  # T2B
+                top = fixed_floor_to_int(fstart - fdot16_half)
+                bottom = fixed_ceil_to_int(fstart + (istop - istart - 1) * slope + fdot16_half)
+            # B2T
+            else:
+                bottom = fixed_ceil_to_int(fstart + fdot16_half)
+                top = fixed_floor_to_int(fstart + (istop - istart - 1) * slope - fdot16_half)
+            # Expand outset to work around possible numerical calculation bug that lead to
+            # overflow
+            top -= 1
+            bottom += 1
+
+            if top >= c.bottom or bottom <= c.top:
+                return
+            if c.top <= top and c.bottom >= bottom:
+                clip = none
+    # mostly vertical
+    else:
+        if y0 > y1:  # we want to go top-to-bottom
+            var t = x0
+            x0 = x1
+            x1 = t
+            t = y0
+            y0 = y1
+            y1 = t
+
+        istart = fdot6_floor(y0)
+        istop = fdot6_ceil(y1)
+        if x0 == x1:
+            if y0 == y1:  # are we zero length?
+                return  # nothing to do
+            slope = 0
+            kind = .vline
+            fstart = fdot6_to_fdot16(x0)
+        else:
+            slope = fdot16_fast_div(x1 - x0, y1 - y0)
+            # Adjust fstart to be the X-intercept at the center of the first pixel row.
+            let dy_to_center = 32 - fd6_frac(y0)
+            fstart = fdot6_to_fdot16(x0) + ((slope * dy_to_center + 32) >> 6)
+            kind = .vertish
+
+        if istop - istart == 1:
+            # we are within a single pixel
+            start_coverage = y1 - y0
+            stop_coverage = 0
+        else:
+            start_coverage = fdot6_one - fd6_frac(y0)
+            stop_coverage = fd6_frac(y1)
+
+        if let c = clip:
+            if istart >= c.bottom or istop <= c.top:
+                return
+            if istart < c.top:
+                fstart += slope * (c.top - istart)
+                istart = c.top
+                start_coverage = fdot6_one
+                if istop - istart == 1:
+                    # we are within a single pixel
+                    start_coverage = partial_pixel_coverage(y1)
+                    stop_coverage = 0
+            if istop > c.bottom:
+                istop = c.bottom
+                stop_coverage = 0  # so we don't draw this last row
+
+            if istart == istop:
+                return
+
+            # now test if our X values are completely inside the clip
+            var left: i32 = 0
+            var right: i32 = 0
+            if slope >= 0:  # L2R
+                left = fixed_floor_to_int(fstart - fdot16_half)
+                right = fixed_ceil_to_int(fstart + (istop - istart - 1) * slope + fdot16_half)
+            # R2L
+            else:
+                right = fixed_ceil_to_int(fstart + fdot16_half)
+                left = fixed_floor_to_int(fstart + (istop - istart - 1) * slope - fdot16_half)
+            # Expand outset to work around possible numerical calculation bug that lead to
+            # overflow
+            left -= 1
+            right += 1
+
+            if left >= c.right or right <= c.left:
+                return
+            if c.left <= left and c.right >= right:
+                clip = none
+
+    var rect_clipper: RectClipBlitter = ---
+    var blitter = blitter0
+    if let c = clip:
+        rect_clipper = RectClipBlitter(blitter = blitter0, clip = c)
+        blitter = &rect_clipper
+
+    var hair = AntiHairBlitter(kind = kind, blitter = blitter)
+    fstart = hair.draw_cap(istart, fstart, slope, start_coverage)
+    istart += 1
+    let full_spans = istop - istart - (1 if stop_coverage > 0 else 0)
+    if full_spans > 0:
+        fstart = hair.draw_line(istart, istart + full_spans, fstart, slope)
+    if stop_coverage > 0:
+        discard(hair.draw_cap(istop - 1, fstart, slope, stop_coverage))
+
+# mark: AntiHairLineRgn =======================================================================
+
+## SkScan::AntiHairLineRgn: the anti-aliased hairlines between consecutive points, clipped to
+## `clip` (a rectangle here: the region clips wrap the blitter instead).
+func anti_hair_line_rgn(points: const Point[], clip: const ScreenIntRect*?, blitter: Blitter):
+    let max: f32 = 32767.0
+    let fixed_bounds = Rect.from_ltrb(-max, -max, max, max) else trap("unreachable")
+
+    var clip_bounds: Rect? = none
+    if let c = clip:
+        # We perform integral clipping later on, but we do a scalar clip first to ensure that
+        # our coordinates are expressible in fixed/integers.
+        #
+        # antialiased hairlines can draw up to 1/2 of a pixel outside of their bounds, so we
+        # need to outset the clip before calling the clipper. To make the numerics safer, we
+        # outset by a whole pixel, since the 1/2 pixel boundary is important to the antihair
+        # blitter, we don't want to risk numerical fate by chopping on that edge.
+        clip_bounds = c.to_rect().outset(1.0, 1.0)
+
+    for i in 0..<points.length - 1:
+        var pts: Point[2]
+
+        # We have to pre-clip the line to fit in a SkFixed, so we just chop the line.
+        if not line_clipper_intersect([points[i], points[i + 1]], fixed_bounds, pts):
+            continue
+
+        if let cb = clip_bounds:
+            let tmp = pts
+            if not line_clipper_intersect(tmp, cb, pts):
+                continue
+
+        let x0 = fdot6_from_f32(pts[0].x)
+        let y0 = fdot6_from_f32(pts[0].y)
+        let x1 = fdot6_from_f32(pts[1].x)
+        let y1 = fdot6_from_f32(pts[1].y)
+
+        if let c = clip:
+            let left = x0 if x0 < x1 else x1
+            let top = y0 if y0 < y1 else y1
+            let right = x0 if x0 > x1 else x1
+            let bottom = y0 if y0 > y1 else y1
+
+            let ir = IRect.ltrb(fdot6_floor(left) - 1, fdot6_floor(top) - 1, fdot6_ceil(right) + 1, fdot6_ceil(bottom) + 1)
+            let clip_rect = IRect.from_screen(*c)
+
+            if not clip_rect.intersects(ir):  # quickReject
+                continue
+            if not clip_rect.contains(ir):
+                # SkRegion::Cliperator over a rectangle: the clip, within ir.
+                if let sub = clip_rect.intersect(ir):
+                    do_anti_hairline(x0, y0, x1, y1, sub, blitter)
+                continue
+        # fall through to no-clip case
+
+        do_anti_hairline(x0, y0, x1, y1, none, blitter)

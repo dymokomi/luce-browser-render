@@ -1,0 +1,350 @@
+#==============================================================================================
+#
+#   path_convexity - whether a path is convex, and whether it is a rectangle
+#
+#   DESCRIPTION:
+#       Port of Skia m144 src/core/SkPathPriv.cpp: ComputeConvexity with its Convexicator
+#       (the scan converters take faster, differently rounding paths for convex paths, so
+#       the answer must be Skia's) and IsRectContour with trivial_rect (SkPathRaw::isRect,
+#       which lets the analytic AA converter blit a fat rectangle directly).
+#
+#       Copyright (c) 2006 The Android Open Source Project
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+# mark: ComputeConvexity ======================================================================
+
+enum DirChange as u8:
+    unknown = 0
+    left = 1
+    right = 2
+    straight = 3
+    ## if double back, allow simple lines to be convex
+    backwards = 4
+    invalid = 5
+
+## SkPathFirstDirection.
+enum FirstDirection as u8:
+    cw = 0
+    ccw = 1
+    unknown = 2
+
+## Only valid for a single contour.
+struct Convexicator:
+    ## The first point of the contour, e.g. moveTo(x,y).
+    var first_pt: Point
+    ## The direction leaving first_pt to the next vertex.
+    var first_vec: Point
+    ## The last point passed to add_pt().
+    var last_pt: Point
+    ## The direction that brought the path to last_pt.
+    var last_vec: Point
+    var expected_dir: DirChange = .invalid
+    var first_direction: FirstDirection = .unknown
+    var reversals: i32 = 0
+    var is_finite: bool = true
+
+    mutating func set_move_pt(pt: Point):
+        self.first_pt = pt
+        self.last_pt = pt
+        self.expected_dir = .invalid
+
+    mutating func add_pt(pt: Point) -> bool:
+        if self.last_pt.x == pt.x and self.last_pt.y == pt.y:
+            return true
+        # should only be true for first non-zero vector after set_move_pt was called. It is
+        # possible we doubled backed at the start so need to check if last_vec is zero or not.
+        if self.first_pt.x == self.last_pt.x and self.first_pt.y == self.last_pt.y and self.expected_dir == .invalid and self.last_vec.x == 0.0 and self.last_vec.y == 0.0:
+            self.last_vec = Point.from_xy(pt.x - self.last_pt.x, pt.y - self.last_pt.y)
+            self.first_vec = self.last_vec
+        elif not self.add_vec(Point.from_xy(pt.x - self.last_pt.x, pt.y - self.last_pt.y)):
+            return false
+        self.last_pt = pt
+        return true
+
+    ## If this was an explicit close, there was already a lineTo to first_pt, so this
+    ## add_pt() is a no-op. Otherwise, the add_pt implicitly closes the contour. In either
+    ## case, we have to check the direction change along the first vector in case it is
+    ## concave.
+    mutating func close() -> bool:
+        return self.add_pt(self.first_pt) and self.add_vec(self.first_vec)
+
+    func direction_change(cur_vec: Point) -> DirChange:
+        let cross = self.last_vec.x * cur_vec.y - self.last_vec.y * cur_vec.x
+        if not is_finite(cross):
+            return .unknown
+        if cross == 0.0:
+            if self.last_vec.x * cur_vec.x + self.last_vec.y * cur_vec.y < 0.0:
+                return .backwards
+            return .straight
+        return .right if cross > 0.0 else .left
+
+    mutating func add_vec(cur_vec: Point) -> bool:
+        let dir = self.direction_change(cur_vec)
+        match dir:
+            .left, .right:
+                if self.expected_dir == .invalid:
+                    self.expected_dir = dir
+                    self.first_direction = .cw if dir == .right else .ccw
+                elif dir != self.expected_dir:
+                    self.first_direction = .unknown
+                    return false
+                self.last_vec = cur_vec
+            .straight:
+                return true
+            .backwards:
+                # allow path to reverse direction twice
+                #   Given path.moveTo(0, 0); path.lineTo(1, 1);
+                #   - 1st reversal: direction change formed by line (0,0 1,1), line (1,1 0,0)
+                #   - 2nd reversal: direction change formed by line (1,1 0,0), line (0,0 1,1)
+                self.last_vec = cur_vec
+                self.reversals += 1
+                return self.reversals < 3
+            .unknown:
+                self.is_finite = false
+                return false
+            _:
+                trap("raster: Use of invalid direction change flag")
+        return true
+
+func sign_of(x: f32) -> i32:
+    return 1 if x < 0.0 else 0
+
+## Convexicator::IsConcaveBySign: whether the path changes direction more than three times.
+func is_concave_by_sign(points: const Point[]) -> bool:
+    let count = points.length
+    if count <= 3:
+        # point, line, or triangle are always convex
+        return false
+
+    var index: usize = 1
+    var curr_pt = points[0]
+    let first_pt = curr_pt
+    var dxes: i32 = 0
+    var dyes: i32 = 0
+    var last_sx: i32 = 2  # a value never returned by sign_of
+    var last_sy: i32 = 2
+    for outer_loop in 0..<2:
+        while true:
+            # the second pass visits the first point only
+            var pt = first_pt
+            if outer_loop == 0:
+                if index == count:
+                    break
+                pt = points[index]
+            let vx = pt.x - curr_pt.x
+            let vy = pt.y - curr_pt.y
+            if not (vx == 0.0 and vy == 0.0):
+                # give up if vector construction failed
+                if not is_finite(vx) or not is_finite(vy):
+                    return true  # treat as concave
+                let sx = sign_of(vx)
+                let sy = sign_of(vy)
+                dxes += 1 if sx != last_sx else 0
+                dyes += 1 if sy != last_sy else 0
+                if dxes > 3 or dyes > 3:
+                    return true
+                last_sx = sx
+                last_sy = sy
+            curr_pt = pt
+            index += 1
+            if outer_loop == 1:
+                break
+    return false  # that is, it may be convex, don't know yet
+
+## SkPathPriv::ComputeConvexity, reduced to what the scan converters ask: is it convex.
+func path_is_convex(path: const Path*) -> bool:
+    var verbs = path.verbs.view()
+    var points = path.points.view()
+    # trim_trailing_moves
+    while verbs.length > 0 and verbs[verbs.length - 1] == .move:
+        verbs = verbs[..<verbs.length - 1]
+        points = points[..<points.length - 1]
+
+    if verbs.length == 0:
+        return true  # kConvex_Degenerate
+
+    # Check to see if path changes direction more than three times as quick concave test
+    if is_concave_by_sign(points):
+        return false
+
+    var contour_count: i32 = 0
+    var needs_close = false
+    var state = Convexicator()
+
+    var p: usize = 0
+    for verb in verbs:
+        var pts_in_verb: usize = 0
+        match verb:
+            .line: pts_in_verb = 1
+            .quad: pts_in_verb = 2
+            .conic: pts_in_verb = 2
+            .cubic: pts_in_verb = 3
+            _: pts_in_verb = 0
+
+        # Looking for the last moveTo before non-move verbs start
+        if contour_count == 0:
+            if verb == .move:
+                state.set_move_pt(points[p])
+            else:
+                # Starting the actual contour, fall through to c=1 to add the points
+                contour_count += 1
+                needs_close = true
+        # Accumulating points into the Convexicator until we hit a close or another move
+        if contour_count == 1:
+            if verb == .close or verb == .move:
+                if not state.close():
+                    return false
+                needs_close = false
+                contour_count += 1
+            else:
+                # lines add 1 point, cubics add 3, quads add 2
+                for i in 0..<pts_in_verb:
+                    if not state.add_pt(points[p + i]):
+                        return false
+        else:
+            # The first contour has closed and anything other than spurious trailing moves
+            # means there's multiple contours and the path can't be convex
+            if verb != .move:
+                return false
+
+        if verb == .move:
+            p += 1
+        else:
+            p += pts_in_verb
+
+    # If the path isn't explicitly closed do so implicitly
+    if needs_close and not state.close():
+        return false
+
+    if state.first_direction == .unknown and state.reversals >= 3:
+        return false
+    return true
+
+# mark: IsRectContour =========================================================================
+
+## rect_make_dir: 0x1 is set if the segment is horizontal, 0x2 if it moves right or down.
+func rect_make_dir(dx: f32, dy: f32) -> i32:
+    let horizontal: i32 = 1 if dx != 0.0 else 0
+    let forward: i32 = 2 if (dx > 0.0 or dy > 0.0) else 0
+    return horizontal | forward
+
+func axis_aligned_orthogonal(a: Point, b: Point) -> bool:
+    return ((a.x == 0.0) != (b.x == 0.0)) and ((a.y == 0.0) != (b.y == 0.0))
+
+## SkPathPriv::IsRectContour(..., allowPartial = false): the rectangle the path is, if any.
+func path_is_rect_contour(path: const Path*) -> Rect?:
+    let verbs = path.verbs.view()
+    let pts = path.points.view()
+    for v in verbs:
+        if v == .quad or v == .cubic or v == .conic:
+            return none
+    if pts.length < 4 or verbs.length < 4:
+        return none
+
+    # Quick check for a "trivial" rect, i.e. a rect created via SkPath::Rect(),
+    # SkPathBuilder::addRect(), etc.
+    if pts.length == 4 and verbs.length == 5 and verbs[0] == .move and verbs[1] == .line and verbs[2] == .line and verbs[3] == .line and verbs[4] == .close:
+        let v0 = Point.from_xy(pts[1].x - pts[0].x, pts[1].y - pts[0].y)
+        let v1 = Point.from_xy(pts[2].x - pts[1].x, pts[2].y - pts[1].y)
+        let v2 = Point.from_xy(pts[3].x - pts[2].x, pts[3].y - pts[2].y)
+        let v3 = Point.from_xy(pts[0].x - pts[3].x, pts[0].y - pts[3].y)
+        # We have a rect iff the side vectors are axis aligned and form 3 right corners.
+        if ((v0.x == 0.0) != (v0.y == 0.0)) and axis_aligned_orthogonal(v0, v1) and axis_aligned_orthogonal(v1, v2) and axis_aligned_orthogonal(v2, v3):
+            return rect_sorted(pts[0], pts[2])
+
+    var corners: i32 = 0
+    var line_start = Point.from_xy(0.0, 0.0)
+    var first_pt: usize = 0  # first point in the rect (last of first moves)
+    var last_pt: usize = 0  # last point in the rect (last of lines or first if closed)
+    var first_corner = Point.zero()
+    var third_corner = Point.zero()
+    var p: usize = 0
+    var directions: i32[5] = [-1, -1, -1, -1, -1]
+    var closed_or_moved = false
+    var auto_close = false
+    for verb in verbs:
+        match verb:
+            .close, .line:
+                if verb == .close:
+                    auto_close = true
+                else:
+                    last_pt = p
+                var line_end = pts[first_pt]
+                if verb != .close:
+                    line_end = pts[p]
+                    p += 1
+                let dx = line_end.x - line_start.x
+                let dy = line_end.y - line_start.y
+                if dx != 0.0 and dy != 0.0:
+                    return none  # diagonal
+                if not is_finite(dx) or not is_finite(dy):
+                    return none  # path contains infinity or NaN
+                if line_start.x == line_end.x and line_start.y == line_end.y:
+                    continue  # single point on side OK
+                let next_direction = rect_make_dir(dx, dy)  # 0 to 3
+                if corners == 0:
+                    directions[0] = next_direction
+                    corners = 1
+                    closed_or_moved = false
+                    line_start = line_end
+                    continue
+                if closed_or_moved:
+                    return none  # closed followed by a line
+                if auto_close and next_direction == directions[0]:
+                    continue  # colinear with first
+                closed_or_moved = auto_close
+                if directions[(usize)(corners - 1)] == next_direction:
+                    if corners == 3 and verb == .line:
+                        third_corner = line_end
+                    line_start = line_end
+                    continue  # colinear segment
+                if corners >= 5:
+                    return none
+                directions[(usize)corners] = next_direction
+                corners += 1
+                # opposite lines must point in opposite directions; xoring them should equal 2
+                if corners == 2:
+                    first_corner = line_start
+                elif corners == 3:
+                    if (directions[0] ^ directions[2]) != 2:
+                        return none
+                    third_corner = line_end
+                elif corners == 4:
+                    if (directions[1] ^ directions[3]) != 2:
+                        return none
+                else:
+                    return none  # too many direction changes
+                line_start = line_end
+            .move:
+                if corners == 0:
+                    first_pt = p
+                else:
+                    let cx = pts[first_pt].x - pts[last_pt].x
+                    let cy = pts[first_pt].y - pts[last_pt].y
+                    if cx != 0.0 and cy != 0.0:
+                        return none  # we're diagonal, abort
+                line_start = pts[p]
+                p += 1
+                closed_or_moved = true
+            _:
+                return none  # quadratic, cubic not allowed
+    # Success if 4 corners and first point equals last
+    if corners < 3 or corners > 4:
+        return none
+    # check if close generates diagonal
+    let cx = pts[first_pt].x - pts[last_pt].x
+    let cy = pts[first_pt].y - pts[last_pt].y
+    if cx != 0.0 and cy != 0.0:
+        return none
+    return rect_sorted(first_corner, third_corner)
+
+## SkRect::set(a, b) / makeSorted: the rectangle with corners a and b.
+func rect_sorted(a: Point, b: Point) -> Rect?:
+    let l = a.x if a.x < b.x else b.x
+    let r = a.x if a.x > b.x else b.x
+    let t = a.y if a.y < b.y else b.y
+    let bb = a.y if a.y > b.y else b.y
+    return Rect.from_ltrb(l, t, r, bb)

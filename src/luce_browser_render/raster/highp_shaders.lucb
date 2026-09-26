@@ -3,13 +3,18 @@
 #   highp_shaders - the shader stages of the high precision pipeline
 #
 #   DESCRIPTION:
-#       Port of tiny-skia pipeline/highp.rs, part 3: transform, the tiling stages (reflect,
-#       repeat and their x1 variants), bilinear and bicubic sampling, the gradient stages
-#       (gradient lookup, the evenly spaced two-stop gradient, sweep angle, radius and the
-#       two-point conical gradient family with their masks) and the gamma stages.
+#       Port of tiny-skia pipeline/highp.rs, part 3, as Skia m144's highp stages compute
+#       them on NEON: the matrix stages, the x1 tiling stages of gradients, the gradient
+#       stages (gradient lookup, evenly spaced gradients, sweep angle, radius and the
+#       two-point conical gradient family with their masks) and tiny-skia's gamma stages.
+#
+#       Copyright (c) 2018 Google Inc. All rights reserved.
+#       Copyright (c) 2020 Yevhenii Reizner All rights reserved.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia, LICENSE-tiny-skia)
 #
 #==============================================================================================
 
+# matrix_2x3 (matrix_translate and matrix_scale_translate compute the same values).
 func highp_transform(p: HighpPipeline*):
     let ts = p.ctx.transform
 
@@ -20,163 +25,30 @@ func highp_transform(p: HighpPipeline*):
 
     highp_next_stage(p)
 
-# Tile x or y to [0,limit) == [0,limit - 1 ulp] (think, sampling from images). The gather
-# stages will hard clamp the output of these stages to [0,limit)... we just need to do the
-# basic repeat or mirroring.
-
-func highp_reflect(p: HighpPipeline*):
-    let ctx_x = p.ctx.limit_x
-    p.r = exclusive_reflect(p.r, ctx_x.scale, ctx_x.inv_scale)
-
-    let ctx_y = p.ctx.limit_y
-    p.g = exclusive_reflect(p.g, ctx_y.scale, ctx_y.inv_scale)
+# matrix_scale_translate with a unit y scale (y = y * 1 + 0 is y).
+func highp_scale_translate_x(p: HighpPipeline*):
+    let m = p.ctx.scale_translate_x
+    p.r = highp_mad(p.r, f8_splat(m.sx), f8_splat(m.tx))
 
     highp_next_stage(p)
 
-func exclusive_reflect(v: F8, limit0: f32, inv_limit0: f32) -> F8:
-    let limit = f8_splat(limit0)
-    let inv_limit = f8_splat(inv_limit0)
-    return f8_abs(f8_sub(f8_sub(f8_sub(v, limit), f8_mul(f8_add(limit, limit), f8_floor(f8_mul(f8_sub(v, limit), f8_mul(inv_limit, f8_splat(0.5)))))), limit))
+# Clamp x to [0,1], both sides inclusive (think, gradients). Even repeat and mirror funnel
+# through a clamp to handle bad inputs like +Inf, NaN.
 
-func highp_repeat(p: HighpPipeline*):
-    let ctx_x = p.ctx.limit_x
-    p.r = exclusive_repeat(p.r, ctx_x.scale, ctx_x.inv_scale)
-
-    let ctx_y = p.ctx.limit_y
-    p.g = exclusive_repeat(p.g, ctx_y.scale, ctx_y.inv_scale)
+func highp_clamp_x_1(p: HighpPipeline*):
+    p.r = f8_clamp_01(p.r)
 
     highp_next_stage(p)
 
-func exclusive_repeat(v: F8, limit: f32, inv_limit: f32) -> F8:
-    return f8_sub(v, f8_mul(f8_floor(f8_mul(v, f8_splat(inv_limit))), f8_splat(limit)))
-
-func highp_bilinear(p: HighpPipeline*):
-    let x = p.r
-    let fx = f8_fract(f8_add(x, f8_splat(0.5)))
-    let y = p.g
-    let fy = f8_fract(f8_add(y, f8_splat(0.5)))
+func highp_mirror_x_1(p: HighpPipeline*):
     let one = f8_splat(1.0)
-    let wx: F8[2] = [f8_sub(one, fx), fx]
-    let wy: F8[2] = [f8_sub(one, fy), fy]
-
-    sampler_2x2(p.pixmap_src, p.ctx.sampler, x, y, wx, wy, &p.r, &p.g, &p.b, &p.a)
+    let x = f8_sub(p.r, one)
+    p.r = f8_clamp_01(f8_abs(f8_sub(f8_sub(x, highp_two(f8_vfloor(f8_mul(x, f8_splat(0.5))))), one)))
 
     highp_next_stage(p)
 
-func highp_bicubic(p: HighpPipeline*):
-    let x = p.r
-    let fx = f8_fract(f8_add(x, f8_splat(0.5)))
-    let y = p.g
-    let fy = f8_fract(f8_add(y, f8_splat(0.5)))
-    let one = f8_splat(1.0)
-    let wx: F8[4] = [bicubic_far(f8_sub(one, fx)), bicubic_near(f8_sub(one, fx)), bicubic_near(fx), bicubic_far(fx)]
-    let wy: F8[4] = [bicubic_far(f8_sub(one, fy)), bicubic_near(f8_sub(one, fy)), bicubic_near(fy), bicubic_far(fy)]
-
-    sampler_4x4(p.pixmap_src, p.ctx.sampler, x, y, wx, wy, &p.r, &p.g, &p.b, &p.a)
-
-    highp_next_stage(p)
-
-# In bicubic interpolation, the 16 pixels and +/- 0.5 and +/- 1.5 offsets from the sample
-# pixel center are combined with a non-uniform cubic filter, with higher values near the
-# center.
-#
-# We break this function into two parts, one for near 0.5 offsets and one for far 1.5
-# offsets.
-
-func bicubic_near(t: F8) -> F8:
-    # 1/18 + 9/18t + 27/18t^2 - 21/18t^3 == t ( t ( -21/18t + 27/18) + 9/18) + 1/18
-    return highp_mad(t, highp_mad(t, highp_mad(f8_splat(-21.0 / 18.0), t, f8_splat(27.0 / 18.0)), f8_splat(9.0 / 18.0)), f8_splat(1.0 / 18.0))
-
-func bicubic_far(t: F8) -> F8:
-    # 0/18 + 0/18*t - 6/18t^2 + 7/18t^3 == t^2 (7/18t - 6/18)
-    return f8_mul(f8_mul(t, t), highp_mad(f8_splat(7.0 / 18.0), t, f8_splat(-6.0 / 18.0)))
-
-# The rr, gg, bb, aa locals of the samplers (a struct is a workaround:
-# compiler-issues/c_backend_address_of_local_array).
-struct Rgba8:
-    var r: F8
-    var g: F8
-    var b: F8
-    var a: F8
-
-func sampler_2x2(pixmap: PixmapRef, ctx: SamplerCtx, cx: F8, cy: F8, wx: const F8[], wy: const F8[], r: F8*, g: F8*, b: F8*, a: F8*):
-    *r = f8_splat(0.0)
-    *g = f8_splat(0.0)
-    *b = f8_splat(0.0)
-    *a = f8_splat(0.0)
-
-    let one = f8_splat(1.0)
-    let start: f32 = -0.5
-    var y = f8_add(cy, f8_splat(start))
-    for j: usize in 0..<2:
-        var x = f8_add(cx, f8_splat(start))
-        for i: usize in 0..<2:
-            var c = Rgba8(r = f8_splat(0.0), g = f8_splat(0.0), b = f8_splat(0.0), a = f8_splat(0.0))
-            sample(pixmap, ctx, x, y, &c.r, &c.g, &c.b, &c.a)
-
-            let w = f8_mul(wx[i], wy[j])
-            *r = highp_mad(w, c.r, *r)
-            *g = highp_mad(w, c.g, *g)
-            *b = highp_mad(w, c.b, *b)
-            *a = highp_mad(w, c.a, *a)
-
-            x = f8_add(x, one)
-
-        y = f8_add(y, one)
-
-func sampler_4x4(pixmap: PixmapRef, ctx: SamplerCtx, cx: F8, cy: F8, wx: const F8[], wy: const F8[], r: F8*, g: F8*, b: F8*, a: F8*):
-    *r = f8_splat(0.0)
-    *g = f8_splat(0.0)
-    *b = f8_splat(0.0)
-    *a = f8_splat(0.0)
-
-    let one = f8_splat(1.0)
-    let start: f32 = -1.5
-    var y = f8_add(cy, f8_splat(start))
-    for j: usize in 0..<4:
-        var x = f8_add(cx, f8_splat(start))
-        for i: usize in 0..<4:
-            var c = Rgba8(r = f8_splat(0.0), g = f8_splat(0.0), b = f8_splat(0.0), a = f8_splat(0.0))
-            sample(pixmap, ctx, x, y, &c.r, &c.g, &c.b, &c.a)
-
-            let w = f8_mul(wx[i], wy[j])
-            *r = highp_mad(w, c.r, *r)
-            *g = highp_mad(w, c.g, *g)
-            *b = highp_mad(w, c.b, *b)
-            *a = highp_mad(w, c.a, *a)
-
-            x = f8_add(x, one)
-
-        y = f8_add(y, one)
-
-func sample(pixmap: PixmapRef, ctx: SamplerCtx, x0: F8, y0: F8, r: F8*, g: F8*, b: F8*, a: F8*):
-    let x = highp_tile(x0, ctx.spread_mode, (f32)pixmap.width(), ctx.inv_width)
-    let y = highp_tile(y0, ctx.spread_mode, (f32)pixmap.height(), ctx.inv_height)
-
-    let ix = gather_ix(pixmap, x, y)
-    let pixels = gather_pixels(pixmap, ix)
-    highp_load_8888(pixels, r, g, b, a)
-
-func highp_tile(v: F8, mode: SpreadMode, limit: f32, inv_limit: f32) -> F8:
-    match mode:
-        .pad_: return v
-        .repeat: return exclusive_repeat(v, limit, inv_limit)
-        .reflect: return exclusive_reflect(v, limit, inv_limit)
-        _: return v
-
-func highp_pad_x1(p: HighpPipeline*):
-    p.r = f8_normalize(p.r)
-
-    highp_next_stage(p)
-
-func highp_reflect_x1(p: HighpPipeline*):
-    let one = f8_splat(1.0)
-    p.r = f8_normalize(f8_abs(f8_sub(f8_sub(f8_sub(p.r, one), highp_two(f8_floor(f8_mul(f8_sub(p.r, one), f8_splat(0.5))))), one)))
-
-    highp_next_stage(p)
-
-func highp_repeat_x1(p: HighpPipeline*):
-    p.r = f8_normalize(f8_sub(p.r, f8_floor(p.r)))
+func highp_repeat_x_1(p: HighpPipeline*):
+    p.r = f8_clamp_01(f8_sub(p.r, f8_vfloor(p.r)))
 
     highp_next_stage(p)
 
@@ -194,11 +66,24 @@ func highp_gradient(p: HighpPipeline*):
 
     highp_next_stage(p)
 
+func highp_evenly_spaced_gradient(p: HighpPipeline*):
+    let ctx = &p.ctx.gradient
+
+    let scale = (f32)(ctx.len - 1)
+    var idx: M8 = ---
+    for h: usize in 0..<2:
+        for l: usize in 0..<4:
+            idx[h][l] = (u32)f32_trunc_i32(p.r[h][l] * scale)
+    gradient_lookup(ctx, idx, p.r, &p.r, &p.g, &p.b, &p.a)
+
+    highp_next_stage(p)
+
+## The stops' factors and biases at `idx`, then mad(t, factor, bias). An index past the
+## context (Skia reads beyond its arrays then) is clamped.
 func gradient_lookup(ctx: const GradientCtx*, idx: M8, t: F8, r: F8*, g: F8*, b: F8*, a: F8*):
-    # Surprisingly, but bound checking doesn't affect the performance. And since `idx` can
-    # contain any number, we should leave it in place.
     let factors = ctx.factors.view()
     let biases = ctx.biases.view()
+    let last = (u32)factors.length - 1
     var fr: F8 = ---
     var fg: F8 = ---
     var fb: F8 = ---
@@ -209,7 +94,7 @@ func gradient_lookup(ctx: const GradientCtx*, idx: M8, t: F8, r: F8*, g: F8*, b:
     var ba: F8 = ---
     for h: usize in 0..<2:
         for l: usize in 0..<4:
-            let i = (usize)idx[h][l]
+            let i = (usize)(idx[h][l] if idx[h][l] < last else last)
             let f = factors[i]
             let bias = biases[i]
             fr[h][l] = f.r
@@ -242,7 +127,7 @@ func highp_xy_to_unit_angle(p: HighpPipeline*):
     let y = p.g
     let x_abs = f8_abs(x)
     let y_abs = f8_abs(y)
-    let slope = f8_div(f8_min(x_abs, y_abs), f8_max(x_abs, y_abs))
+    let slope = f8_div(f8_vmin(x_abs, y_abs), f8_vmax(x_abs, y_abs))
     let s = f8_mul(slope, slope)
     # Use a 7th degree polynomial to approximate atan.
     # This was generated using sollya.gforge.inria.fr.
@@ -252,7 +137,7 @@ func highp_xy_to_unit_angle(p: HighpPipeline*):
     phi = f8_blend(f8_cmp_lt(x_abs, y_abs), f8_sub(f8_splat(0.25), phi), phi)
     phi = f8_blend(f8_cmp_lt(x, f8_splat(0.0)), f8_sub(f8_splat(0.5), phi), phi)
     phi = f8_blend(f8_cmp_lt(y, f8_splat(0.0)), f8_sub(f8_splat(1.0), phi), phi)
-    phi = f8_blend(f8_cmp_ne(phi, phi), f8_splat(0.0), phi)
+    phi = f8_blend(f8_cmp_ne(phi, phi), f8_splat(0.0), phi)  # Check for NaN.
     p.r = phi
     highp_next_stage(p)
 
@@ -262,6 +147,8 @@ func highp_xy_to_radius(p: HighpPipeline*):
     p.r = f8_sqrt(f8_add(x2, y2))
 
     highp_next_stage(p)
+
+# Please see https://skia.org/dev/design/conical for how our 2pt conical shader works.
 
 func highp_xy_to_2pt_conical_focal_on_circle(p: HighpPipeline*):
     let x = p.r
@@ -346,15 +233,6 @@ func highp_alter_2pt_conical_unswap(p: HighpPipeline*):
 
 func highp_negate_x(p: HighpPipeline*):
     p.r = f8_neg(p.r)
-
-    highp_next_stage(p)
-
-func highp_apply_concentric_scale_bias(p: HighpPipeline*):
-    let ctx = p.ctx.two_point_conical_gradient
-
-    # Apply t = t * scale + bias for concentric gradients
-    let x = p.r
-    p.r = f8_add(f8_mul(x, f8_splat(ctx.p0)), f8_splat(ctx.p1))
 
     highp_next_stage(p)
 

@@ -1,0 +1,494 @@
+#==============================================================================================
+#
+#   skia_pipeline - the raster pipeline against Skia m144
+#
+#   DESCRIPTION:
+#       Scenes of the raster pipeline (every blend mode, linear, radial, two-point conical
+#       and sweep gradients with each tile mode, dither, premultiplied interpolation, and
+#       image patterns sampled through the pipeline), each compared pixel for pixel with the
+#       image Skia m144 renders for it (the oracle's scenes_rp.cpp, in the configuration
+#       Ladybird paints with). Backgrounds and images are written directly into the pixels,
+#       so only the pipeline is tested; shapes are non-AA pixel-aligned rects except in the
+#       *_aa scenes, whose fractional rects test anti-aliased coverage.
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+import harness
+from harness import Test, TestCase
+import raster
+from raster import PathBuilder, FillRule, Paint, Pixmap, Transform, Rect, Point, Color, BlendMode, SpreadMode, FilterQuality, GradientStop, LinearGradient, RadialGradient, SweepGradient, Pattern, Shader
+
+# mark: Helpers ===============================================================================
+
+## A color from bytes divided by 255 (Color::from_rgba8).
+func rgba8(r: u8, g: u8, b: u8, a: u8) -> Color:
+    return Color.from_rgba8(r, g, b, a)
+
+## The deterministic premultiplied background of every scene, written into the pixels.
+func background(pixmap: Pixmap*):
+    let alphas: u32[5] = [255, 0, 128, 200, 37]
+    let w = pixmap.width()
+    let data = pixmap.data_mut()
+    for y in 0..<pixmap.height():
+        for x in 0..<w:
+            let a = alphas[(usize)((x // 3 + y // 5) % 5)]
+            let r = (x * 7 + y * 3) & 255
+            let g = (x * 2 + y * 5 + 40) & 255
+            let b = (x * x + y * 11) & 255
+            let i = (usize)((y * w + x) * 4)
+            data[i] = (u8)(r * a // 255)
+            data[i + 1] = (u8)(g * a // 255)
+            data[i + 2] = (u8)(b * a // 255)
+            data[i + 3] = (u8)a
+
+## The deterministic premultiplied 24x20 pattern image with translucent pixels.
+func pattern_image() -> Pixmap:
+    var pixmap = Pixmap.new_(24, 20) else trap("pixmap")
+    let data = pixmap.data_mut()
+    for y: u32 in 0..<20:
+        for x: u32 in 0..<24:
+            var a: u32 = 255
+            if (x + y) % 7 == 0:
+                a = 90
+            elif (x * 3 + y) % 11 == 0:
+                a = 0
+            let r = (x * 11) & 255
+            let g = (y * 13) & 255
+            let b = ((x ^ y) * 9) & 255
+            let i = (usize)((y * 24 + x) * 4)
+            data[i] = (u8)(r * a // 255)
+            data[i + 1] = (u8)(g * a // 255)
+            data[i + 2] = (u8)(b * a // 255)
+            data[i + 3] = (u8)a
+    return pixmap
+
+let modes: BlendMode[29] = [
+    .clear, .source, .destination, .source_over, .destination_over, .source_in, .destination_in, .source_out, .destination_out, .source_atop,
+    .destination_atop, .xor, .plus, .modulate, .screen, .overlay, .darken, .lighten, .color_dodge, .color_burn,
+    .hard_light, .soft_light, .difference, .exclusion, .multiply, .hue, .saturation, .color, .luminosity,
+]
+
+## Every blend mode in a 6x5 grid of 22x22 cells: `paint` (its blend mode replaced) fills an
+## 18x18 rect in each, or a fractional one with anti-aliasing when `aa`.
+func blend_grid(t: Test*, paint0: const Paint*, aa: bool, image: str):
+    var pixmap = Pixmap.new_(132, 110) else trap("pixmap")
+    defer pixmap.release()
+    background(&pixmap)
+    var paint = *paint0
+    for i: u32 in 0..<29:
+        let x = (f32)(i % 6) * 22.0
+        let y = (f32)(i // 6) * 22.0
+        paint.blend_mode = modes[(usize)i]
+        paint.anti_alias = aa
+        var rect = Rect.from_xywh(x + 2.0, y + 2.0, 18.0, 18.0) else trap("rect")
+        if aa:
+            rect = Rect.from_xywh(x + 2.3, y + 2.6, 16.4, 15.7) else trap("rect")
+        pixmap.fill_rect(rect, &paint, Transform.identity(), none)
+    harness.expect_png(t, &pixmap, image)
+
+func two_stops() -> GradientStop[2]:
+    return [GradientStop.new_(0.0, rgba8(50, 127, 150, 200)), GradientStop.new_(1.0, rgba8(220, 140, 75, 180))]
+
+func three_stops() -> GradientStop[3]:
+    return [GradientStop.new_(0.0, rgba8(50, 127, 150, 200)), GradientStop.new_(0.5, rgba8(220, 140, 75, 180)), GradientStop.new_(1.0, rgba8(40, 180, 55, 160))]
+
+func uneven_stops() -> GradientStop[4]:
+    return [GradientStop.new_(0.1, rgba8(50, 127, 150, 200)), GradientStop.new_(0.3, rgba8(220, 140, 75, 180)), GradientStop.new_(0.3, rgba8(10, 20, 250, 255)), GradientStop.new_(0.85, rgba8(40, 180, 55, 160))]
+
+func opaque_stops() -> GradientStop[4]:
+    return [GradientStop.new_(0.0, rgba8(250, 10, 10, 255)), GradientStop.new_(0.3, rgba8(10, 250, 10, 255)), GradientStop.new_(0.6, rgba8(10, 10, 250, 255)), GradientStop.new_(1.0, rgba8(200, 200, 30, 255))]
+
+func many_stops() -> GradientStop[11]:
+    var stops: GradientStop[11] = ---
+    for i: u32 in 0..<11:
+        let pos = (f32)(i * i) / 100.0
+        stops[(usize)i] = GradientStop.new_(pos, rgba8((u8)((i * 50) & 255), (u8)((i * 90 + 30) & 255), (u8)((255 - i * 20) & 255), (u8)(120 + i * 13)))
+    return stops
+
+func linear(a: Point, b: Point, stops: const GradientStop[], mode: SpreadMode, ts: Transform) -> Shader:
+    return LinearGradient.new_(a, b, stops, mode, ts) else trap("linear")
+
+func radial(a: Point, ra: f32, b: Point, rb: f32, stops: const GradientStop[], mode: SpreadMode, ts: Transform) -> Shader:
+    return RadialGradient.new_(a, ra, b, rb, stops, mode, ts) else trap("radial")
+
+func sweep(c: Point, start: f32, end: f32, stops: const GradientStop[], mode: SpreadMode, ts: Transform) -> Shader:
+    return SweepGradient.new_(c, start, end, stops, mode, ts) else trap("sweep")
+
+func pt(x: f32, y: f32) -> Point:
+    return Point.from_xy(x, y)
+
+## A gradient filling a whole 120x100 pixmap (a non-AA rect) over the background. Takes
+## ownership of `shader`.
+func gradient_scene(t: Test*, shader: Shader, dither: bool, image: str):
+    var pixmap = Pixmap.new_(120, 100) else trap("pixmap")
+    defer pixmap.release()
+    background(&pixmap)
+    var paint = Paint()
+    defer paint.release()
+    paint.anti_alias = false
+    paint.dither = dither
+    paint.shader = shader
+    pixmap.fill_rect(Rect.from_xywh(0.0, 0.0, 120.0, 100.0) else trap("rect"), &paint, Transform.identity(), none)
+    harness.expect_png(t, &pixmap, image)
+
+func premul(shader0: Shader) -> Shader:
+    var shader = shader0
+    shader.interpolate_in_premul()
+    return shader
+
+# mark: Blend modes ===========================================================================
+
+func blend_solid(t: Test*):
+    var paint = Paint()
+    paint.set_color(rgba8(50, 127, 150, 200))
+    blend_grid(t, &paint, false, "skia/pipeline/blend-solid.png")
+
+func blend_solid_opaque(t: Test*):
+    var paint = Paint()
+    paint.set_color(rgba8(220, 140, 75, 255))
+    blend_grid(t, &paint, false, "skia/pipeline/blend-solid-opaque.png")
+
+func blend_solid_aa(t: Test*):
+    var paint = Paint()
+    paint.set_color(rgba8(50, 127, 150, 200))
+    blend_grid(t, &paint, true, "skia/pipeline/blend-solid-aa.png")
+
+func blend_gradient(t: Test*):
+    var paint = Paint()
+    defer paint.release()
+    paint.shader = linear(pt(0.0, 0.0), pt(132.0, 110.0), three_stops(), .repeat, Transform.identity())
+    blend_grid(t, &paint, false, "skia/pipeline/blend-gradient.png")
+
+func blend_gradient_opaque(t: Test*):
+    var paint = Paint()
+    defer paint.release()
+    paint.shader = linear(pt(0.0, 0.0), pt(40.0, 20.0), opaque_stops(), .reflect, Transform.identity())
+    blend_grid(t, &paint, false, "skia/pipeline/blend-gradient-opaque.png")
+
+func blend_gradient_aa(t: Test*):
+    var paint = Paint()
+    defer paint.release()
+    paint.shader = linear(pt(0.0, 0.0), pt(132.0, 110.0), three_stops(), .repeat, Transform.identity())
+    blend_grid(t, &paint, true, "skia/pipeline/blend-gradient-aa.png")
+
+func blend_gradient_dither(t: Test*):
+    var paint = Paint()
+    defer paint.release()
+    paint.dither = true
+    paint.shader = linear(pt(0.0, 0.0), pt(132.0, 110.0), three_stops(), .repeat, Transform.identity())
+    blend_grid(t, &paint, false, "skia/pipeline/blend-gradient-dither.png")
+
+# mark: Linear gradients ======================================================================
+
+func linear_two_pad(t: Test*):
+    gradient_scene(t, linear(pt(10.0, 20.0), pt(100.0, 70.0), two_stops(), .pad_, Transform.identity()), false, "skia/pipeline/linear-two-pad.png")
+
+func linear_two_pad_dither(t: Test*):
+    gradient_scene(t, linear(pt(10.0, 20.0), pt(100.0, 70.0), two_stops(), .pad_, Transform.identity()), true, "skia/pipeline/linear-two-pad-dither.png")
+
+func linear_two_repeat(t: Test*):
+    gradient_scene(t, linear(pt(10.0, 20.0), pt(40.0, 30.0), two_stops(), .repeat, Transform.identity()), false, "skia/pipeline/linear-two-repeat.png")
+
+func linear_two_reflect(t: Test*):
+    gradient_scene(t, linear(pt(10.0, 20.0), pt(40.0, 30.0), two_stops(), .reflect, Transform.identity()), false, "skia/pipeline/linear-two-reflect.png")
+
+func linear_three_pad(t: Test*):
+    gradient_scene(t, linear(pt(0.0, 0.0), pt(120.0, 100.0), three_stops(), .pad_, Transform.identity()), false, "skia/pipeline/linear-three-pad.png")
+
+func linear_three_reflect_dither(t: Test*):
+    gradient_scene(t, linear(pt(30.0, 0.0), pt(70.0, 30.0), three_stops(), .reflect, Transform.identity()), true, "skia/pipeline/linear-three-reflect-dither.png")
+
+func linear_uneven_pad(t: Test*):
+    gradient_scene(t, linear(pt(0.0, 50.0), pt(120.0, 50.0), uneven_stops(), .pad_, Transform.identity()), false, "skia/pipeline/linear-uneven-pad.png")
+
+func linear_uneven_repeat(t: Test*):
+    gradient_scene(t, linear(pt(5.0, 5.0), pt(45.0, 25.0), uneven_stops(), .repeat, Transform.identity()), false, "skia/pipeline/linear-uneven-repeat.png")
+
+func linear_uneven_repeat_dither(t: Test*):
+    gradient_scene(t, linear(pt(5.0, 5.0), pt(45.0, 25.0), uneven_stops(), .repeat, Transform.identity()), true, "skia/pipeline/linear-uneven-repeat-dither.png")
+
+func linear_many(t: Test*):
+    gradient_scene(t, linear(pt(0.0, 0.0), pt(120.0, 30.0), many_stops(), .reflect, Transform.identity()), false, "skia/pipeline/linear-many.png")
+
+func linear_opaque_rotated(t: Test*):
+    gradient_scene(t, linear(pt(0.0, 0.0), pt(60.0, 0.0), opaque_stops(), .repeat, Transform.from_row(0.8, 0.5, -0.4, 1.2, 30.0, 10.0)), false, "skia/pipeline/linear-opaque-rotated.png")
+
+func linear_scaled(t: Test*):
+    gradient_scene(t, linear(pt(0.0, 0.0), pt(10.0, 0.0), three_stops(), .reflect, Transform.from_row(3.0, 0.0, 0.0, 2.0, 7.5, 0.0)), false, "skia/pipeline/linear-scaled.png")
+
+func linear_premul(t: Test*):
+    gradient_scene(t, premul(linear(pt(10.0, 10.0), pt(110.0, 90.0), uneven_stops(), .pad_, Transform.identity())), false, "skia/pipeline/linear-premul.png")
+
+func linear_premul_two(t: Test*):
+    gradient_scene(t, premul(linear(pt(10.0, 10.0), pt(110.0, 90.0), two_stops(), .repeat, Transform.identity())), true, "skia/pipeline/linear-premul-two.png")
+
+# mark: Radial and two-point conical gradients ================================================
+
+func radial_pad(t: Test*):
+    gradient_scene(t, radial(pt(60.0, 50.0), 0.0, pt(60.0, 50.0), 45.0, three_stops(), .pad_, Transform.identity()), false, "skia/pipeline/radial-pad.png")
+
+func radial_repeat_dither(t: Test*):
+    gradient_scene(t, radial(pt(60.0, 50.0), 0.0, pt(60.0, 50.0), 17.0, uneven_stops(), .repeat, Transform.identity()), true, "skia/pipeline/radial-repeat-dither.png")
+
+func radial_scaled(t: Test*):
+    gradient_scene(t, radial(pt(20.0, 20.0), 0.0, pt(20.0, 20.0), 15.0, two_stops(), .reflect, Transform.from_row(1.5, 0.2, 0.0, 1.0, 10.0, 5.0)), false, "skia/pipeline/radial-scaled.png")
+
+func conical_concentric(t: Test*):
+    gradient_scene(t, radial(pt(60.0, 50.0), 10.0, pt(60.0, 50.0), 40.0, three_stops(), .repeat, Transform.identity()), false, "skia/pipeline/conical-concentric.png")
+
+func conical_well_behaved(t: Test*):
+    gradient_scene(t, radial(pt(50.0, 50.0), 0.0, pt(60.0, 50.0), 45.0, three_stops(), .pad_, Transform.identity()), false, "skia/pipeline/conical-well-behaved.png")
+
+func conical_greater(t: Test*):
+    gradient_scene(t, radial(pt(30.0, 40.0), 5.0, pt(80.0, 60.0), 20.0, three_stops(), .reflect, Transform.identity()), false, "skia/pipeline/conical-greater.png")
+
+func conical_smaller(t: Test*):
+    gradient_scene(t, radial(pt(30.0, 40.0), 30.0, pt(80.0, 60.0), 5.0, two_stops(), .pad_, Transform.identity()), true, "skia/pipeline/conical-smaller.png")
+
+func conical_strip(t: Test*):
+    gradient_scene(t, radial(pt(30.0, 50.0), 20.0, pt(90.0, 45.0), 20.0, uneven_stops(), .repeat, Transform.identity()), false, "skia/pipeline/conical-strip.png")
+
+func conical_focal_on_circle(t: Test*):
+    gradient_scene(t, radial(pt(40.0, 50.0), 0.0, pt(70.0, 50.0), 30.0, three_stops(), .pad_, Transform.identity()), false, "skia/pipeline/conical-focal-on-circle.png")
+
+# mark: Sweep gradients =======================================================================
+
+func sweep_full(t: Test*):
+    gradient_scene(t, sweep(pt(60.0, 50.0), 0.0, 360.0, three_stops(), .pad_, Transform.identity()), false, "skia/pipeline/sweep-full.png")
+
+func sweep_partial(t: Test*):
+    gradient_scene(t, sweep(pt(60.0, 50.0), 45.0, 270.0, uneven_stops(), .reflect, Transform.identity()), false, "skia/pipeline/sweep-partial.png")
+
+func sweep_start_zero(t: Test*):
+    gradient_scene(t, sweep(pt(60.0, 50.0), 0.0, 180.0, two_stops(), .repeat, Transform.identity()), false, "skia/pipeline/sweep-start-zero.png")
+
+func sweep_dither(t: Test*):
+    gradient_scene(t, sweep(pt(50.0, 40.0), 0.0, 360.0, many_stops(), .pad_, Transform.from_row(1.0, 0.3, -0.3, 1.0, 0.0, 0.0)), true, "skia/pipeline/sweep-dither.png")
+
+# mark: Patterns ==============================================================================
+
+## The pattern image filling a 120x100 pixmap over the background.
+func pattern_scene(t: Test*, mode: SpreadMode, quality: FilterQuality, blend: BlendMode, opacity: f32, ts: Transform, image: str):
+    var img = pattern_image()
+    defer img.release()
+    var pixmap = Pixmap.new_(120, 100) else trap("pixmap")
+    defer pixmap.release()
+    background(&pixmap)
+    var paint = Paint()
+    paint.anti_alias = false
+    paint.shader = Pattern.new_(img.as_ref(), mode, quality, opacity, ts)
+    paint.blend_mode = blend
+    pixmap.fill_rect(Rect.from_xywh(0.0, 0.0, 120.0, 100.0) else trap("rect"), &paint, Transform.identity(), none)
+    harness.expect_png(t, &pixmap, image)
+
+func rot() -> Transform:
+    return Transform.from_row(2.2, 0.9, -0.7, 1.9, 20.0, 3.0)
+
+func pattern_bicubic_pad(t: Test*):
+    pattern_scene(t, .pad_, .bicubic, .source_over, 1.0, rot(), "skia/pipeline/pattern-bicubic-pad.png")
+
+func pattern_bicubic_repeat(t: Test*):
+    pattern_scene(t, .repeat, .bicubic, .source_over, 1.0, rot(), "skia/pipeline/pattern-bicubic-repeat.png")
+
+func pattern_bicubic_reflect(t: Test*):
+    pattern_scene(t, .reflect, .bicubic, .source_over, 1.0, rot(), "skia/pipeline/pattern-bicubic-reflect.png")
+
+func pattern_bicubic_opacity(t: Test*):
+    pattern_scene(t, .repeat, .bicubic, .source_over, 0.6, Transform.from_row(3.0, 0.0, 0.0, 2.5, 1.0, 2.0), "skia/pipeline/pattern-bicubic-opacity.png")
+
+func pattern_bilinear_pad_src(t: Test*):
+    pattern_scene(t, .pad_, .bilinear, .source, 1.0, rot(), "skia/pipeline/pattern-bilinear-pad-src.png")
+
+func pattern_bilinear_repeat_multiply(t: Test*):
+    pattern_scene(t, .repeat, .bilinear, .multiply, 1.0, rot(), "skia/pipeline/pattern-bilinear-repeat-multiply.png")
+
+func pattern_bilinear_reflect_screen(t: Test*):
+    pattern_scene(t, .reflect, .bilinear, .screen, 0.7, rot(), "skia/pipeline/pattern-bilinear-reflect-screen.png")
+
+func pattern_nearest_repeat_src(t: Test*):
+    pattern_scene(t, .repeat, .nearest, .source, 1.0, rot(), "skia/pipeline/pattern-nearest-repeat-src.png")
+
+func pattern_nearest_reflect_xor(t: Test*):
+    pattern_scene(t, .reflect, .nearest, .xor, 1.0, Transform.from_row(2.0, 0.0, 0.0, 2.0, 3.0, 1.0), "skia/pipeline/pattern-nearest-reflect-xor.png")
+
+func pattern_nearest_pad_darken(t: Test*):
+    pattern_scene(t, .pad_, .nearest, .darken, 1.0, Transform.from_row(-1.5, 0.0, 0.0, 1.5, 80.0, 10.0), "skia/pipeline/pattern-nearest-pad-darken.png")
+
+# mark: Forced high precision =================================================================
+# Skia's gForceHighPrecisionRasterPipeline: every pipeline in high precision.
+
+func blend_solid_highp(t: Test*):
+    raster.set_force_highp_pipeline(true)
+    defer raster.set_force_highp_pipeline(false)
+    var paint = Paint()
+    paint.set_color(rgba8(50, 127, 150, 200))
+    blend_grid(t, &paint, false, "skia/pipeline/highp-blend-solid.png")
+
+func blend_solid_aa_highp(t: Test*):
+    raster.set_force_highp_pipeline(true)
+    defer raster.set_force_highp_pipeline(false)
+    var paint = Paint()
+    paint.set_color(rgba8(50, 127, 150, 200))
+    blend_grid(t, &paint, true, "skia/pipeline/highp-blend-solid-aa.png")
+
+func blend_gradient_highp(t: Test*):
+    raster.set_force_highp_pipeline(true)
+    defer raster.set_force_highp_pipeline(false)
+    var paint = Paint()
+    defer paint.release()
+    paint.shader = linear(pt(0.0, 0.0), pt(132.0, 110.0), three_stops(), .repeat, Transform.identity())
+    blend_grid(t, &paint, false, "skia/pipeline/highp-blend-gradient.png")
+
+func linear_uneven_pad_highp(t: Test*):
+    raster.set_force_highp_pipeline(true)
+    defer raster.set_force_highp_pipeline(false)
+    gradient_scene(t, linear(pt(0.0, 50.0), pt(120.0, 50.0), uneven_stops(), .pad_, Transform.identity()), false, "skia/pipeline/highp-linear-uneven-pad.png")
+
+func radial_pad_highp(t: Test*):
+    raster.set_force_highp_pipeline(true)
+    defer raster.set_force_highp_pipeline(false)
+    gradient_scene(t, radial(pt(60.0, 50.0), 0.0, pt(60.0, 50.0), 45.0, three_stops(), .pad_, Transform.identity()), false, "skia/pipeline/highp-radial-pad.png")
+
+func sweep_full_highp(t: Test*):
+    raster.set_force_highp_pipeline(true)
+    defer raster.set_force_highp_pipeline(false)
+    gradient_scene(t, sweep(pt(60.0, 50.0), 0.0, 360.0, three_stops(), .pad_, Transform.identity()), false, "skia/pipeline/highp-sweep-full.png")
+
+func pattern_bilinear_pad_src_highp(t: Test*):
+    raster.set_force_highp_pipeline(true)
+    defer raster.set_force_highp_pipeline(false)
+    pattern_scene(t, .pad_, .bilinear, .source, 1.0, rot(), "skia/pipeline/highp-pattern-bilinear-pad-src.png")
+
+# mark: tiny-skia's patterns without anti-aliasing ============================================
+# tiny-skia's pattern tests with the triangle filled without anti-aliasing.
+
+func ts_pattern(t: Test*, mode: SpreadMode, quality: FilterQuality, ts: Transform, image: str):
+    var tp = Paint()
+    tp.set_color(rgba8(50, 127, 150, 200))
+    tp.anti_alias = false
+    var pb = PathBuilder.new_()
+    defer pb.release()
+    pb.move_to(0.0, 20.0)
+    pb.line_to(20.0, 20.0)
+    pb.line_to(10.0, 0.0)
+    pb.close()
+    var tri = pb.finish() else trap("finish")
+    defer tri.release()
+    var triangle = Pixmap.new_(20, 20) else trap("pixmap")
+    defer triangle.release()
+    triangle.fill_path(&tri, &tp, FillRule.winding, Transform.identity(), none)
+
+    var paint = Paint()
+    paint.anti_alias = false
+    paint.shader = Pattern.new_(triangle.as_ref(), mode, quality, 1.0, ts)
+    var path = PathBuilder.from_rect(Rect.from_ltrb(10.0, 10.0, 190.0, 190.0) else trap("rect"))
+    defer path.release()
+    var pixmap = Pixmap.new_(200, 200) else trap("pixmap")
+    defer pixmap.release()
+    pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
+    harness.expect_png(t, &pixmap, image)
+
+func ts_pattern_pad_nearest(t: Test*):
+    ts_pattern(t, .pad_, .nearest, Transform.identity(), "skia/rp-ts/pattern-pad-nearest.png")
+
+func ts_pattern_repeat_nearest(t: Test*):
+    ts_pattern(t, .repeat, .nearest, Transform.identity(), "skia/rp-ts/pattern-repeat-nearest.png")
+
+func ts_pattern_reflect_nearest(t: Test*):
+    ts_pattern(t, .reflect, .nearest, Transform.identity(), "skia/rp-ts/pattern-reflect-nearest.png")
+
+func ts_pattern_pad_bicubic(t: Test*):
+    ts_pattern(t, .pad_, .bicubic, Transform.from_row(1.1, 0.3, 0.0, 1.4, 0.0, 0.0), "skia/rp-ts/pattern-pad-bicubic.png")
+
+func ts_pattern_repeat_bicubic(t: Test*):
+    ts_pattern(t, .repeat, .bicubic, Transform.from_row(1.1, 0.3, 0.0, 1.4, 0.0, 0.0), "skia/rp-ts/pattern-repeat-bicubic.png")
+
+func ts_pattern_reflect_bicubic(t: Test*):
+    ts_pattern(t, .reflect, .bicubic, Transform.from_row(1.1, 0.3, 0.0, 1.4, 0.0, 0.0), "skia/rp-ts/pattern-reflect-bicubic.png")
+
+func ts_pattern_filter_nearest(t: Test*):
+    ts_pattern(t, .repeat, .nearest, Transform.from_row(1.5, 0.0, -0.4, -0.8, 5.0, 1.0), "skia/rp-ts/pattern-filter-nearest.png")
+
+func ts_pattern_filter_bilinear(t: Test*):
+    ts_pattern(t, .repeat, .bilinear, Transform.from_row(1.5, 0.0, -0.4, -0.8, 5.0, 1.0), "skia/rp-ts/pattern-filter-bilinear.png")
+
+func ts_pattern_filter_bicubic(t: Test*):
+    ts_pattern(t, .repeat, .bicubic, Transform.from_row(1.5, 0.0, -0.4, -0.8, 5.0, 1.0), "skia/rp-ts/pattern-filter-bicubic.png")
+
+func ts_pattern_bilinear_pad_scaled(t: Test*):
+    ts_pattern(t, .pad_, .bilinear, Transform.from_row(4.3, 0.0, 0.0, 3.7, 12.25, 7.5), "skia/rp-ts/pattern-bilinear-pad-scaled.png")
+
+func ts_pattern_nearest_int_translate(t: Test*):
+    ts_pattern(t, .repeat, .bilinear, Transform.from_row(1.0, 0.0, 0.0, 1.0, 3.0, 5.0), "skia/rp-ts/pattern-nearest-int-translate.png")
+
+func ts_pattern_bicubic_identity(t: Test*):
+    ts_pattern(t, .reflect, .bicubic, Transform.identity(), "skia/rp-ts/pattern-bicubic-identity.png")
+
+pub let tests: TestCase[63] = [
+    TestCase(name = "skia_pipeline::blend_solid", run = blend_solid),
+    TestCase(name = "skia_pipeline::blend_solid_opaque", run = blend_solid_opaque),
+    TestCase(name = "skia_pipeline::blend_solid_aa", run = blend_solid_aa),
+    TestCase(name = "skia_pipeline::blend_gradient", run = blend_gradient),
+    TestCase(name = "skia_pipeline::blend_gradient_opaque", run = blend_gradient_opaque),
+    TestCase(name = "skia_pipeline::blend_gradient_aa", run = blend_gradient_aa),
+    TestCase(name = "skia_pipeline::blend_gradient_dither", run = blend_gradient_dither),
+    TestCase(name = "skia_pipeline::linear_two_pad", run = linear_two_pad),
+    TestCase(name = "skia_pipeline::linear_two_pad_dither", run = linear_two_pad_dither),
+    TestCase(name = "skia_pipeline::linear_two_repeat", run = linear_two_repeat),
+    TestCase(name = "skia_pipeline::linear_two_reflect", run = linear_two_reflect),
+    TestCase(name = "skia_pipeline::linear_three_pad", run = linear_three_pad),
+    TestCase(name = "skia_pipeline::linear_three_reflect_dither", run = linear_three_reflect_dither),
+    TestCase(name = "skia_pipeline::linear_uneven_pad", run = linear_uneven_pad),
+    TestCase(name = "skia_pipeline::linear_uneven_repeat", run = linear_uneven_repeat),
+    TestCase(name = "skia_pipeline::linear_uneven_repeat_dither", run = linear_uneven_repeat_dither),
+    TestCase(name = "skia_pipeline::linear_many", run = linear_many),
+    TestCase(name = "skia_pipeline::linear_opaque_rotated", run = linear_opaque_rotated),
+    TestCase(name = "skia_pipeline::linear_scaled", run = linear_scaled),
+    TestCase(name = "skia_pipeline::linear_premul", run = linear_premul),
+    TestCase(name = "skia_pipeline::linear_premul_two", run = linear_premul_two),
+    TestCase(name = "skia_pipeline::radial_pad", run = radial_pad),
+    TestCase(name = "skia_pipeline::radial_repeat_dither", run = radial_repeat_dither),
+    TestCase(name = "skia_pipeline::radial_scaled", run = radial_scaled),
+    TestCase(name = "skia_pipeline::conical_concentric", run = conical_concentric),
+    TestCase(name = "skia_pipeline::conical_well_behaved", run = conical_well_behaved),
+    TestCase(name = "skia_pipeline::conical_greater", run = conical_greater),
+    TestCase(name = "skia_pipeline::conical_smaller", run = conical_smaller),
+    TestCase(name = "skia_pipeline::conical_strip", run = conical_strip),
+    TestCase(name = "skia_pipeline::conical_focal_on_circle", run = conical_focal_on_circle),
+    TestCase(name = "skia_pipeline::sweep_full", run = sweep_full),
+    TestCase(name = "skia_pipeline::sweep_partial", run = sweep_partial),
+    TestCase(name = "skia_pipeline::sweep_start_zero", run = sweep_start_zero),
+    TestCase(name = "skia_pipeline::sweep_dither", run = sweep_dither),
+    TestCase(name = "skia_pipeline::pattern_bicubic_pad", run = pattern_bicubic_pad),
+    TestCase(name = "skia_pipeline::pattern_bicubic_repeat", run = pattern_bicubic_repeat),
+    TestCase(name = "skia_pipeline::pattern_bicubic_reflect", run = pattern_bicubic_reflect),
+    TestCase(name = "skia_pipeline::pattern_bicubic_opacity", run = pattern_bicubic_opacity),
+    TestCase(name = "skia_pipeline::pattern_bilinear_pad_src", run = pattern_bilinear_pad_src),
+    TestCase(name = "skia_pipeline::pattern_bilinear_repeat_multiply", run = pattern_bilinear_repeat_multiply),
+    TestCase(name = "skia_pipeline::pattern_bilinear_reflect_screen", run = pattern_bilinear_reflect_screen),
+    TestCase(name = "skia_pipeline::pattern_nearest_repeat_src", run = pattern_nearest_repeat_src),
+    TestCase(name = "skia_pipeline::pattern_nearest_reflect_xor", run = pattern_nearest_reflect_xor),
+    TestCase(name = "skia_pipeline::pattern_nearest_pad_darken", run = pattern_nearest_pad_darken),
+    TestCase(name = "skia_pipeline::blend_solid_highp", run = blend_solid_highp),
+    TestCase(name = "skia_pipeline::blend_solid_aa_highp", run = blend_solid_aa_highp),
+    TestCase(name = "skia_pipeline::blend_gradient_highp", run = blend_gradient_highp),
+    TestCase(name = "skia_pipeline::linear_uneven_pad_highp", run = linear_uneven_pad_highp),
+    TestCase(name = "skia_pipeline::radial_pad_highp", run = radial_pad_highp),
+    TestCase(name = "skia_pipeline::sweep_full_highp", run = sweep_full_highp),
+    TestCase(name = "skia_pipeline::pattern_bilinear_pad_src_highp", run = pattern_bilinear_pad_src_highp),
+    TestCase(name = "skia_pipeline::ts_pattern_pad_nearest", run = ts_pattern_pad_nearest),
+    TestCase(name = "skia_pipeline::ts_pattern_repeat_nearest", run = ts_pattern_repeat_nearest),
+    TestCase(name = "skia_pipeline::ts_pattern_reflect_nearest", run = ts_pattern_reflect_nearest),
+    TestCase(name = "skia_pipeline::ts_pattern_pad_bicubic", run = ts_pattern_pad_bicubic),
+    TestCase(name = "skia_pipeline::ts_pattern_repeat_bicubic", run = ts_pattern_repeat_bicubic),
+    TestCase(name = "skia_pipeline::ts_pattern_reflect_bicubic", run = ts_pattern_reflect_bicubic),
+    TestCase(name = "skia_pipeline::ts_pattern_filter_nearest", run = ts_pattern_filter_nearest),
+    TestCase(name = "skia_pipeline::ts_pattern_filter_bilinear", run = ts_pattern_filter_bilinear),
+    TestCase(name = "skia_pipeline::ts_pattern_filter_bicubic", run = ts_pattern_filter_bicubic),
+    TestCase(name = "skia_pipeline::ts_pattern_bilinear_pad_scaled", run = ts_pattern_bilinear_pad_scaled),
+    TestCase(name = "skia_pipeline::ts_pattern_nearest_int_translate", run = ts_pattern_nearest_int_translate),
+    TestCase(name = "skia_pipeline::ts_pattern_bicubic_identity", run = ts_pattern_bicubic_identity),
+]

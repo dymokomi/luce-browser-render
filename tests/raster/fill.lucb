@@ -186,7 +186,8 @@ func tiny_float_rect_aa(t: Test*):
         ColorU8.from_rgba(0, 0, 0, 0).premultiply(),
         ColorU8.from_rgba(0, 0, 0, 0).premultiply(),
         ColorU8.from_rgba(0, 0, 0, 0).premultiply(),
-        ColorU8.from_rgba(51, 128, 153, 60).premultiply(),
+        # Skia m144 (NEON div255 and 1/255 colors); tiny-skia expects (51, 128, 153, 60) demultiplied.
+        raster.PremultipliedColorU8.from_rgba(12, 30, 35, 60) else trap("color"),
         ColorU8.from_rgba(0, 0, 0, 0).premultiply(),
         ColorU8.from_rgba(0, 0, 0, 0).premultiply(),
         ColorU8.from_rgba(0, 0, 0, 0).premultiply(),
@@ -270,7 +271,7 @@ func open_polygon(t: Test*):
     defer pb.release()
     pb.move_to(75.160671, 88.756136)
     pb.line_to(24.797274, 88.734053)
-    pb.line_to( 9.255130, 40.828792)
+    pb.line_to(9.255130, 40.828792)
     pb.line_to(50.012955, 11.243795)
     pb.line_to(90.744819, 40.864522)
     var path = pb.finish() else trap("finish")
@@ -293,7 +294,7 @@ func closed_polygon(t: Test*):
     defer pb.release()
     pb.move_to(75.160671, 88.756136)
     pb.line_to(24.797274, 88.734053)
-    pb.line_to( 9.255130, 40.828792)
+    pb.line_to(9.255130, 40.828792)
     pb.line_to(50.012955, 11.243795)
     pb.line_to(90.744819, 40.864522)
     pb.close()
@@ -314,7 +315,7 @@ func winding_star(t: Test*):
 
     var pb = PathBuilder.new_()
     defer pb.release()
-    pb.move_to(50.0,  7.5)
+    pb.move_to(50.0, 7.5)
     pb.line_to(75.0, 87.5)
     pb.line_to(10.0, 37.5)
     pb.line_to(90.0, 37.5)
@@ -336,7 +337,7 @@ func even_odd_star(t: Test*):
 
     var pb = PathBuilder.new_()
     defer pb.release()
-    pb.move_to(50.0,  7.5)
+    pb.move_to(50.0, 7.5)
     pb.line_to(75.0, 87.5)
     pb.line_to(10.0, 37.5)
     pb.line_to(90.0, 37.5)
@@ -429,7 +430,7 @@ func fill_aa(t: Test*):
 
     var pb = PathBuilder.new_()
     defer pb.release()
-    pb.move_to(50.0,  7.5)
+    pb.move_to(50.0, 7.5)
     pb.line_to(75.0, 87.5)
     pb.line_to(10.0, 37.5)
     pb.line_to(90.0, 37.5)
@@ -595,7 +596,7 @@ func clear_aa(t: Test*):
     pixmap.fill(Color.from_rgba8(50, 127, 150, 200))
     var tmp_path1 = PathBuilder.from_circle(50.0, 50.0, 40.0) else trap("unwrap")
     defer tmp_path1.release()
-    pixmap.fill_path( &tmp_path1, &paint, FillRule.winding, Transform.identity(), none, )
+    pixmap.fill_path(&tmp_path1, &paint, FillRule.winding, Transform.identity(), none)
 
     harness.expect_png(t, &pixmap, "fill/clear-aa.png")
 
@@ -615,7 +616,7 @@ func line_curve(t: Test*):
     defer pixmap.release()
     pixmap.fill_path(&path, &paint, FillRule.winding, Transform.identity(), none)
 
-    # Must not panic.
+# Must not panic.
 
 func vertical_lines_merging_bug(t: Test*):
     # This path must not trigger edge_builder::combine_vertical,
@@ -650,7 +651,7 @@ func fill_rect(t: Test*):
 
     var pixmap = Pixmap.new_(100, 100) else trap("pixmap")
     defer pixmap.release()
-    pixmap.fill_rect( (Rect.from_xywh(20.3, 10.4, 50.5, 30.2) else trap("unwrap")), &paint, Transform.from_row(1.2, 0.3, -0.7, 0.8, 12.0, 15.3), none, )
+    pixmap.fill_rect((Rect.from_xywh(20.3, 10.4, 50.5, 30.2) else trap("unwrap")), &paint, Transform.from_row(1.2, 0.3, -0.7, 0.8, 12.0, 15.3), none)
 
     harness.expect_png(t, &pixmap, "canvas/fill-rect.png")
 

@@ -38,23 +38,21 @@ struct BasicEdgeBuilder:
 
     static func new_(clip_shift: i32) -> BasicEdgeBuilder:
         var b = BasicEdgeBuilder(clip_shift = clip_shift)
-        b.edges.reserve(64) # TODO: stack array + fallback
+        b.edges.reserve(64)  # TODO: stack array + fallback
         return b
 
     # Skia returns a linked list here, but it's a nightmare to use in Rust, so we're
     # mimicking it with Vec. The caller owns (and releases) the returned edges.
-    static func build_edges(path: const Path*, clip: const ShiftedIntRect*?, clip_shift: i32) -> Vec[Edge]?:
-        # If we're convex, then we need both edges, even if the right edge is past the clip.
-        # let can_cull_to_the_right = !path.isConvex();
-        let can_cull_to_the_right = false # TODO: this
-
+    ## `can_cull_to_the_right` is Skia's `!isKnownToBeConvex()`: if we're convex, then we
+    ## need both edges, even if the right edge is past the clip.
+    static func build_edges(path: const Path*, clip: const ShiftedIntRect*?, clip_shift: i32, can_cull_to_the_right: bool) -> Vec[Edge]?:
         var builder = BasicEdgeBuilder.new_(clip_shift)
         if not builder.build(path, clip, can_cull_to_the_right):
             # log::warn!("infinite or NaN segments detected during edges building")
             builder.edges.release()
             return none
 
-        if builder.edges.len < 2:
+        if builder.edges.len == 0:
             builder.edges.release()
             return none
 
@@ -80,6 +78,8 @@ struct BasicEdgeBuilder:
                             if not p0.is_finite() or not p1.is_finite() or not p2.is_finite() or not p3.is_finite():
                                 return false
                             self.push_cubic([p0, p1, p2, p3])
+                        _:
+                            trap("unreachable")
         else:
             var iter = edge_iter(path)
             while let edge = iter.next():
@@ -98,6 +98,14 @@ struct BasicEdgeBuilder:
                         let n = chop_cubic_at_y_extrema(points, mono_y)
                         for i in 0..=n:
                             self.push_cubic(mono_y[i * 3..])
+                    .conic_to(p0, p1, p2, weight):
+                        # SkAutoConicToQuads, within 1/4 pixel
+                        let quads = AutoConicToQuads.compute(p0, p1, p2, weight, 0.25)
+                        for q in 0..<quads.len:
+                            var mono_x: Point[5]
+                            let n = chop_quad_at_y_extrema(quads.quad(q), mono_x)
+                            for i in 0..=n:
+                                self.push_quad(mono_x[i * 2..])
 
         return true
 
@@ -164,17 +172,19 @@ func combine_vertical(edge: const LineEdge*, last: LineEdge*) -> Combine:
     return .no
 
 func edge_iter(path: const Path*) -> PathEdgeIter:
-    return PathEdgeIter(path = path, verb_index = 0, points_index = 0, move_to = Point.zero(), needs_close_line = false)
+    return PathEdgeIter(path = path, verb_index = 0, points_index = 0, weight_index = 0, move_to = Point.zero(), needs_close_line = false)
 
 enum PathEdge:
     line_to(p0: Point, p1: Point)
     quad_to(p0: Point, p1: Point, p2: Point)
     cubic_to(p0: Point, p1: Point, p2: Point, p3: Point)
+    conic_to(p0: Point, p1: Point, p2: Point, weight: f32)
 
 struct PathEdgeIter:
     let path: const Path*
     var verb_index: usize
     var points_index: usize
+    var weight_index: usize
     var move_to: Point
     var needs_close_line: bool
 
@@ -213,6 +223,12 @@ struct PathEdgeIter:
                     self.needs_close_line = true
                     let edge = PathEdge.quad_to(p0 = points[self.points_index - 1], p1 = points[self.points_index + 0], p2 = points[self.points_index + 1])
                     self.points_index += 2
+                    return edge
+                .conic:
+                    self.needs_close_line = true
+                    let edge = PathEdge.conic_to(p0 = points[self.points_index - 1], p1 = points[self.points_index + 0], p2 = points[self.points_index + 1], weight = self.path.weights.data[self.weight_index])
+                    self.points_index += 2
+                    self.weight_index += 1
                     return edge
                 .cubic:
                     self.needs_close_line = true

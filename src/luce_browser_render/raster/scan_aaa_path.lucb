@@ -1,0 +1,309 @@
+#==============================================================================================
+#
+#   scan_aaa_path - the analytic anti-aliasing path filler
+#
+#   DESCRIPTION:
+#       Port of the last part of Skia m144 src/core/SkScan_AAAPath.cpp: the edge list
+#       (sorted with SkTQSort, linked through indices with a head and a tail sentinel),
+#       aaa_walk_convex_edges (the fast walk for convex paths, with its "smooth jump" to
+#       integer y), aaa_walk_edges (the general walk over non-uniform scan lines at the
+#       edges' ends and intersections), aaa_fill_path and SkScan::AAAFillPath, which picks
+#       the additive blitter. Skia's default anti-aliased path filler; Skia m144 no longer
+#       has the 4x4 supersampling one tiny-skia ports.
+#
+#       Copyright (c) 2016 The Android Open Source Project
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+# mark: The edge list =========================================================================
+
+## An edge's sort key (compare_edges) and its index.
+struct EdgeSortKey:
+    var upper_y: i32
+    var x: i32
+    var dx: i32
+    var index: u32
+
+func edge_key_less(a: const EdgeSortKey*, b: const EdgeSortKey*) -> bool:
+    if a.upper_y != b.upper_y:
+        return a.upper_y < b.upper_y
+    if a.x != b.x:
+        return a.x < b.x
+    return a.dx < b.dx
+
+func aaa_remove_edge(edges: AnalyticEdge[], edge: u32):
+    let prev = edges[edge].prev
+    let next = edges[edge].next
+    edges[prev].next = next
+    edges[next].prev = prev
+
+func aaa_insert_edge_after(edges: AnalyticEdge[], edge: u32, after_me: u32):
+    edges[edge].prev = after_me
+    edges[edge].next = edges[after_me].next
+    edges[edges[after_me].next].prev = edge
+    edges[after_me].next = edge
+
+func aaa_backward_insert_edge_based_on_x(edges: AnalyticEdge[], edge: u32):
+    let x = edges[edge].x
+    var prev = edges[edge].prev
+    while edges[prev].prev != edge_nil and edges[prev].x > x:
+        prev = edges[prev].prev
+    if edges[prev].next != edge:
+        aaa_remove_edge(edges, edge)
+        aaa_insert_edge_after(edges, edge, prev)
+
+## Start from the right side, searching backwards for the point to begin the new edge list
+## insertion, marching forwards from here.
+func aaa_backward_insert_start(edges: AnalyticEdge[], prev0: u32, x: i32) -> u32:
+    var prev = prev0
+    while edges[prev].prev != edge_nil and edges[prev].x > x:
+        prev = edges[prev].prev
+    return prev
+
+func update_next_next_y(y: i32, next_y: i32, next_next_y: i32*):
+    if y > next_y and y < *next_next_y:
+        *next_next_y = y
+
+func check_intersection(edges: AnalyticEdge[], edge: u32, next_y: i32, next_next_y: i32*):
+    let prev = edges[edge].prev
+    if edges[prev].prev != edge_nil and edges[prev].x +% edges[prev].dx > edges[edge].x +% edges[edge].dx:
+        *next_next_y = next_y + (fixed_one >> analytic_default_accuracy)
+
+func check_intersection_fwd(edges: AnalyticEdge[], edge: u32, next_y: i32, next_next_y: i32*):
+    let next = edges[edge].next
+    if edges[next].next != edge_nil and edges[edge].x +% edges[edge].dx > edges[next].x +% edges[next].dx:
+        *next_next_y = next_y + (fixed_one >> analytic_default_accuracy)
+
+func aaa_insert_new_edges(edges: AnalyticEdge[], new_edge0: u32, y: i32, next_next_y: i32*):
+    var new_edge = new_edge0
+    if edges[new_edge].upper_y > y:
+        update_next_next_y(edges[new_edge].upper_y, y, next_next_y)
+        return
+    let prev = edges[new_edge].prev
+    if edges[prev].x <= edges[new_edge].x:
+        while edges[new_edge].upper_y <= y:
+            check_intersection(edges, new_edge, y, next_next_y)
+            update_next_next_y(edges[new_edge].lower_y, y, next_next_y)
+            new_edge = edges[new_edge].next
+        update_next_next_y(edges[new_edge].upper_y, y, next_next_y)
+        return
+    # find first x pos to insert
+    var start = aaa_backward_insert_start(edges, prev, edges[new_edge].x)
+    # insert the lot, fixing up the links as we go
+    while true:
+        let next = edges[new_edge].next
+        var already_linked = false
+        while true:
+            if edges[start].next == new_edge:
+                already_linked = true
+                break
+            let after = edges[start].next
+            if edges[after].x >= edges[new_edge].x:
+                break
+            start = after
+        if not already_linked:
+            aaa_remove_edge(edges, new_edge)
+            aaa_insert_edge_after(edges, new_edge, start)
+        check_intersection(edges, new_edge, y, next_next_y)
+        check_intersection_fwd(edges, new_edge, y, next_next_y)
+        update_next_next_y(edges[new_edge].lower_y, y, next_next_y)
+        start = new_edge
+        new_edge = next
+        if not (edges[new_edge].upper_y <= y):
+            break
+    update_next_next_y(edges[new_edge].upper_y, y, next_next_y)
+
+## Return true if prev.x, next.x are too close in the current pixel row.
+func edges_too_close(edges: AnalyticEdge[], prev: u32, next: u32, lower_y: i32) -> bool:
+    # When next.dx == 0, prev.x >= next.x - abs(next.dx) would be false even if prev.x and
+    # next.x are close and within one pixel (e.g., prev.x == 0.1, next.x == 0.9). Adding
+    # SLACK = 1 to the formula would guarantee it to be true if two edges prev and next are
+    # within one pixel.
+    let slack = fixed_one
+    # Note that even if the following test failed, the edges might still be very close to
+    # each other at some point within the current pixel row because of prev.dx and next.dx.
+    # However, to handle that case, we have to sacrafice more performance.
+    return next != edge_nil and prev != edge_nil and edges[next].upper_y < lower_y and edges[prev].x +% slack >= edges[next].x -% abs32(edges[next].dx)
+
+## This function exists for the case where the previous rite edge is removed because its
+## lower_y <= next_y.
+func edges_too_close_rite(prev_rite: i32, ul: i32, ll: i32) -> bool:
+    return prev_rite > fixed_floor_to_int(ul) or prev_rite > fixed_floor_to_int(ll)
+
+# mark: Smoothness ============================================================================
+
+## For an edge, we consider it smooth if the Dx doesn't change much, and Dy is large enough.
+## For curves that are updating, the Dx is not changing much if fQDx/fCDx and fQDy/fCDy are
+## relatively large compared to fQDDx/QCDDx and fQDDy/fCDDy.
+func is_smooth_enough_edge(edges: AnalyticEdge[], this_edge: u32, next_edge: u32) -> bool:
+    let e = &edges[this_edge]
+    if e.curve_count < 0:
+        let ddshift = e.curve_shift
+        return abs32(e.cdx) >> 1 >= abs32(e.cddx) >> ddshift and abs32(e.cdy) >> 1 >= abs32(e.cddy) >> ddshift and (e.cdy - (e.cddy >> ddshift)) >> e.cubic_dshift >= fixed_one  # current Dy is (fCDy - (fCDDy >> ddshift)) >> dshift
+    elif e.curve_count > 0:
+        return abs32(e.qdx) >> 1 >= abs32(e.qddx) and abs32(e.qdy) >> 1 >= abs32(e.qddy) and (e.qdy - e.qddy) >> e.curve_shift >= fixed_one  # current Dy is (fQDy - fQDDy) >> shift
+    # DDx should be small and Dy should be large
+    let n = &edges[next_edge]
+    return abs32(sat_sub32(n.dx, e.dx)) <= fixed_one and n.lower_y - n.upper_y >= fixed_one
+
+## Check if the left_e and rite_e are changing smoothly in terms of dx. If yes, we can later
+## skip the fractional y and directly jump to integer y.
+func is_smooth_enough(edges: AnalyticEdge[], left_e: u32, rite_e: u32, curr_e0: u32, stop_y: i32) -> bool:
+    var curr_e = curr_e0
+    if edges[curr_e].upper_y >= left_shift(stop_y, 16):
+        return false  # We're at the end so we won't skip anything
+    if edges[left_e].lower_y + fixed_one < edges[rite_e].lower_y:
+        return is_smooth_enough_edge(edges, left_e, curr_e)  # Only left_e is changing
+    elif edges[left_e].lower_y > edges[rite_e].lower_y + fixed_one:
+        return is_smooth_enough_edge(edges, rite_e, curr_e)  # Only rite_e is changing
+
+    # Now both edges are changing, find the second next edge
+    var next_curr_e = edges[curr_e].next
+    if edges[next_curr_e].upper_y >= stop_y << 16:  # Check if we're at the end
+        return false
+    # Ensure that curr_e is the next left edge and next_curr_e is the next right edge. Swap
+    # if not.
+    if edges[next_curr_e].upper_x < edges[curr_e].upper_x:
+        let t = curr_e
+        curr_e = next_curr_e
+        next_curr_e = t
+    return is_smooth_enough_edge(edges, left_e, curr_e) and is_smooth_enough_edge(edges, rite_e, next_curr_e)
+
+# mark: aaa_fill_path =========================================================================
+
+func aaa_fill_path(path: const Path*, convex: bool, clip_rect: IRect, blitter: AdditiveBlitter*, start_y0: i32, stop_y0: i32, path_contained_in_clip: bool, is_using_mask: bool, force_rle: bool, is_inverse: bool, fill_rule: FillRule):
+    var start_y = start_y0
+    var stop_y = stop_y0
+    var clip: IRect? = clip_rect
+    if path_contained_in_clip:
+        clip = none
+    var list = build_analytic_edges(path, clip, convex) else return
+    defer list.release()
+    let count = list.len
+
+    var rect = clip_rect
+    if count == 0:
+        if is_inverse:
+            # Since we are in inverse-fill, our caller has already drawn above our top
+            # (start_y) and will draw below our bottom (stop_y). Thus we need to restrict our
+            # drawing to the intersection of the clip and those two limits.
+            if rect.top < start_y:
+                rect.top = start_y
+            if rect.bottom > stop_y:
+                rect.bottom = stop_y
+            if not rect.is_empty():
+                blitter.real_blit_rect(rect.left, rect.top, rect.width(), rect.height())
+        return
+
+    # this returns the first and last edge after they're sorted into a dlink list
+    let keys = (alloc EdgeSortKey[count] in memory.heap) else trap("raster: out of memory")
+    defer free(keys) in memory.heap
+    for i in 0..<count:
+        let e = &list.data[i]
+        keys[i] = EdgeSortKey(upper_y = e.upper_y, x = e.x, dx = e.dx, index = (u32)i)
+    sk_tqsort(keys, edge_key_less)
+
+    let head = (u32)count
+    let tail = (u32)count + 1
+    list.push(new_analytic_edge())
+    list.push(new_analytic_edge())
+    let edges = list.view()
+    for i in 1..<count:
+        edges[keys[i - 1].index].next = keys[i].index
+        edges[keys[i].index].prev = keys[i - 1].index
+    let first = keys[0].index
+    let last = keys[count - 1].index
+
+    edges[head].prev = edge_nil
+    edges[head].next = first
+    edges[head].upper_y = fixed_min
+    edges[head].lower_y = fixed_min
+    edges[head].x = fixed_min
+    edges[head].dx = 0
+    edges[head].dy = fixed_max
+    edges[head].upper_x = fixed_min
+    edges[first].prev = head
+
+    edges[tail].prev = last
+    edges[tail].next = edge_nil
+    edges[tail].upper_y = fixed_max
+    edges[tail].lower_y = fixed_max
+    edges[tail].x = fixed_max
+    edges[tail].dx = 0
+    edges[tail].dy = fixed_max
+    edges[tail].upper_x = fixed_max
+    edges[last].next = tail
+
+    # now edge is the head of the sorted linklist
+
+    if not path_contained_in_clip and start_y < clip_rect.top:
+        start_y = clip_rect.top
+    if not path_contained_in_clip and stop_y > clip_rect.bottom:
+        stop_y = clip_rect.bottom
+
+    var left_bound = int_to_fixed(rect.left)
+    var right_bound = int_to_fixed(rect.right)
+    if is_using_mask:
+        # If we're using mask, then we have to limit the bound within the path bounds.
+        # Otherwise, the edge drift may access an invalid address inside the mask.
+        let ir = irect_round_out(path.bounds())
+        left_bound = left_bound if left_bound > int_to_fixed(ir.left) else int_to_fixed(ir.left)
+        right_bound = right_bound if right_bound < int_to_fixed(ir.right) else int_to_fixed(ir.right)
+
+    if not is_inverse and convex and count >= 2:
+        aaa_walk_convex_edges(edges, head, blitter, start_y, stop_y, left_bound, right_bound, is_using_mask)
+    else:
+        # We skip intersection computation if there are many points which probably already
+        # give us enough fractional scan lines.
+        let skip_intersect = (i64)path.points.len > (i64)((stop_y - start_y) * 2)
+
+        aaa_walk_edges(edges, head, tail, fill_rule, is_inverse, blitter, start_y, stop_y, left_bound, right_bound, is_using_mask, force_rle, skip_intersect)
+
+## SkScan::AAAFillPath: fills `path` (with its bounds rounded out, `ir`) through `blitter`,
+## clipped to `clip_bounds`. `force_rle` is set when an anti-aliased clip is involved.
+func aaa_fill_path_entry(path: const Path*, fill_rule: FillRule, is_inverse: bool, blitter: Blitter, ir: IRect, clip_bounds: IRect, force_rle: bool):
+    let contained_in_clip = clip_bounds.contains(ir)
+    let convex = not is_inverse and path_is_convex(path)
+
+    # The mask blitter (where we store intermediate alpha values directly in a mask, and
+    # then call the real blitter once in the end to blit the whole mask) is faster than the
+    # RLE blitter when the blit region is small enough (i.e., CanHandleRect(ir)). When
+    # is_inverse is true, the blit region is no longer the rectangle ir so we won't use the
+    # mask blitter. The caller may also use the force_rle flag to force not using the mask
+    # blitter. Also, when the path is a simple rect, preparing a mask and blitting it might
+    # have too much overhead. Hence we'll use blitFatAntiRect to avoid the mask and its
+    # overhead.
+    if AdditiveBlitter.can_handle_rect(ir) and not is_inverse and not force_rle:
+        # blitFatAntiRect is slower than the normal AAA flow without MaskAdditiveBlitter.
+        # Hence only tryBlitFatAntiRect when MaskAdditiveBlitter would have been used.
+        if not try_blit_fat_anti_rect(blitter, path, clip_bounds):
+            var additive = AdditiveBlitter.new_mask(blitter, ir, clip_bounds)
+            aaa_fill_path(path, convex, clip_bounds, &additive, ir.top, ir.bottom, contained_in_clip, true, force_rle, is_inverse, fill_rule)
+            additive.finish()
+    elif not is_inverse and convex:
+        # If the filling area is convex (i.e., path.isConvex && !isInverse), our simpler
+        # aaa_walk_convex_edges won't generate alphas above 255. Hence we don't need
+        # SafeRLEAdditiveBlitter (which is slow due to clamping). The basic RLE blitter
+        # RunBasedAdditiveBlitter would suffice.
+        var additive = AdditiveBlitter.new_rle(.run_based, blitter, ir, clip_bounds, is_inverse)
+        aaa_fill_path(path, convex, clip_bounds, &additive, ir.top, ir.bottom, contained_in_clip, false, force_rle, is_inverse, fill_rule)
+        additive.finish()
+    else:
+        # If the filling area might not be convex, the more involved aaa_walk_edges would be
+        # called and we have to clamp the alpha downto 255. The SafeRLEAdditiveBlitter does
+        # that at a cost of performance.
+        var additive = AdditiveBlitter.new_rle(.safe_rle, blitter, ir, clip_bounds, is_inverse)
+        aaa_fill_path(path, convex, clip_bounds, &additive, ir.top, ir.bottom, contained_in_clip, false, force_rle, is_inverse, fill_rule)
+        additive.finish()
+
+## Check if the path is a rect and fat enough after clipping; if so, blit it.
+func try_blit_fat_anti_rect(blitter: Blitter, path: const Path*, clip: IRect) -> bool:
+    let rect0 = path_is_rect_contour(path) else return false
+    let rect = rect0.intersect(clip.to_rect()) else return true  # The intersection is empty. Hence consider it done.
+    let bounds = irect_round_out(rect)
+    if bounds.width() < 3:
+        return false  # not fat
+    blit_fat_anti_rect(blitter, rect)
+    return true

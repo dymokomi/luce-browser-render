@@ -1,0 +1,234 @@
+#==============================================================================================
+#
+#   scan_raster_clip - the scan converters' entry points with a clip: SkRasterClip
+#
+#   DESCRIPTION:
+#       Port of the SkRasterClip entry points of Skia m144's scan converters:
+#       SkScan::AntiFillPath (src/core/SkScan_AntiPath.cpp), SkScan::FillPath
+#       (src/core/SkScan_Path.cpp), SkScan::AntiFillRect and FillRect
+#       (src/core/SkScan_Antihair.cpp, src/core/SkScan.cpp) and the hairline entry points
+#       (src/core/SkScan_Hairline.cpp), with SkScanClipper and SkAAClipBlitterWrapper. The
+#       clip is the device (pixmap) bounds, narrowed by an optional Mask: a rectangle or a
+#       region (the BW clips of SkRasterClip) or an anti-aliased clip, see blitter_clip.lucb.
+#       An anti-aliased clip forces the analytic filler into its run-length mode, as in
+#       Skia.
+#
+#       Copyright (c) 2006 The Android Open Source Project
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+# mark: RasterClip ============================================================================
+
+## SkRasterClip: what a draw is clipped to.
+struct RasterClip:
+    var kind: MaskClipKind
+    ## The bounds of the visible pixels (SkRasterClip::getBounds).
+    var bounds: IRect
+    var mask: const Mask*?
+
+    ## The clip of a `width` x `height` device, narrowed by `mask`.
+    static func new_(width: u32, height: u32, mask: const Mask*?) -> RasterClip:
+        let device = IRect.ltrb(0, 0, (i32)width, (i32)height)
+        let m = mask else return RasterClip(kind = .rect, bounds = device, mask = none)
+        let info = MaskClipInfo.of(m)
+        if info.kind == .empty:
+            return RasterClip(kind = .empty, bounds = IRect.ltrb(0, 0, 0, 0), mask = none)
+        let bounds = info.bounds.intersect(device) else return RasterClip(kind = .empty, bounds = IRect.ltrb(0, 0, 0, 0), mask = none)
+        return RasterClip(kind = info.kind, bounds = bounds, mask = m)
+
+    func is_empty() -> bool:
+        return self.kind == .empty
+
+    func is_bw() -> bool:
+        return self.kind != .aa
+
+    ## SkRasterClip::quickReject.
+    func quick_reject(r: IRect) -> bool:
+        return self.is_empty() or not self.bounds.intersects(r)
+
+## Storage for the blitters wrapped around a device blitter for a clip.
+struct ClipWrappers:
+    var rect: RectClipBlitter
+    var region: MaskRegionClipBlitter
+    var aa: MaskAAClipBlitter
+    var has_aa: bool
+
+    static func new_() -> ClipWrappers:
+        var w: ClipWrappers = ---
+        w.has_aa = false
+        return w
+
+    ## SkAAClipBlitterWrapper: `blitter` seen through the anti-aliased clip.
+    mutating func wrap_aa(blitter: Blitter, mask: const Mask*) -> Blitter:
+        self.aa = MaskAAClipBlitter.new_(blitter, mask)
+        self.has_aa = true
+        return &self.aa
+
+    ## SkScanClipper / SkBlitterClipper::apply for a BW clip: the wrapper `blitter` needs to
+    ## draw `ir` inside `clip`, none when `ir` is clipped out. `clip_rect_needed` reports
+    ## whether the clip's rectangle still clips (SkScanClipper::getClipRect != nullptr).
+    mutating func wrap_bw(blitter: Blitter, clip: const RasterClip*, ir: IRect, clip_rect_needed: bool*) -> Blitter?:
+        *clip_rect_needed = true
+        if not clip.bounds.intersects(ir):
+            return none
+        if clip.kind == .region:
+            let m = clip.mask else trap("unreachable")
+            self.region = MaskRegionClipBlitter(blitter = blitter, mask = m)
+            return &self.region
+        if clip.bounds.contains(ir):
+            *clip_rect_needed = false
+            return blitter
+        # only need a wrapper blitter if we're horizontally clipped
+        if clip.bounds.left > ir.left or clip.bounds.right < ir.right:
+            self.rect = RectClipBlitter(blitter = blitter, clip = clip.bounds)
+            return &self.rect
+        return blitter
+
+    mutating func release():
+        if self.has_aa:
+            self.aa.release()
+            self.has_aa = false
+
+# mark: AntiFillPath ==========================================================================
+
+## SkScan::AntiFillPath(path, SkRasterClip, blitter).
+func raster_anti_fill_path(path: const Path*, fill_rule: FillRule, clip: const RasterClip*, blitter: Blitter):
+    if clip.is_empty():
+        return
+    if clip.is_bw():
+        anti_fill_path_rgn(path, fill_rule, clip, blitter, false)
+    else:
+        var wrappers = ClipWrappers.new_()
+        defer wrappers.release()
+        let m = clip.mask else trap("unreachable")
+        let aa_blitter = wrappers.wrap_aa(blitter, m)
+        let rect_clip = RasterClip(kind = .rect, bounds = clip.bounds, mask = none)
+        anti_fill_path_rgn(path, fill_rule, &rect_clip, aa_blitter, true)  # SkAAClipBlitter can blitMask, why forceRLE?
+
+## SkScan::AntiFillPath(path, SkRegion, blitter, forceRLE) with a BW clip.
+func anti_fill_path_rgn(path: const Path*, fill_rule: FillRule, clip0: const RasterClip*, blitter0: Blitter, force_rle: bool):
+    # safeRoundOut: roundOut will pin huge floats to max/min int; intersect with a smaller
+    # huge rect, so the rect will not be considered empty for being too large.
+    let limit = i32_max >> 2  # SK_SUPERSAMPLE_SHIFT
+    let ir = irect_round_out(path.bounds()).intersect(IRect.ltrb(-limit, -limit, limit, limit)) else return
+
+    # If the intersection of the path bounds and the clip bounds will overflow 32767 when
+    # << by SHIFT, we can't supersample, so draw without antialiasing.
+    let clipped_ir = ir.intersect(clip0.bounds) else return
+    if rect_overflows_short_shift(clipped_ir, 2):
+        fill_path_rgn(path, fill_rule, clip0, blitter0)
+        return
+
+    # Our antialiasing can't handle a clip larger than 32767, so we restrict the clip to
+    # that limit here. (the runs[] uses int16_t for its index).
+    var clip = *clip0
+    let max_clip_coord: i32 = 32767
+    if clip.bounds.right > max_clip_coord or clip.bounds.bottom > max_clip_coord:
+        clip.bounds = clip.bounds.intersect(IRect.ltrb(0, 0, max_clip_coord, max_clip_coord)) else return
+
+    var wrappers = ClipWrappers.new_()
+    var clip_rect_needed = true
+    let blitter = wrappers.wrap_bw(blitter0, &clip, ir, &clip_rect_needed) else return  # clipped out
+
+    aaa_fill_path_entry(path, fill_rule, false, blitter, ir, clip.bounds, force_rle)
+
+func overflows_short_shift(value: i32, shift: i32) -> i32:
+    let s = 16 + shift
+    return (left_shift(value, s) >> s) - value
+
+## Would any of the coordinates of this rectangle not fit in a short, when left-shifted by
+## shift?
+func rect_overflows_short_shift(rect: IRect, shift: i32) -> bool:
+    return (overflows_short_shift(rect.left, shift) | overflows_short_shift(rect.right, shift) | overflows_short_shift(rect.top, shift) | overflows_short_shift(rect.bottom, shift)) != 0
+
+# mark: FillPath ==============================================================================
+
+## SkScan::FillPath(path, SkRasterClip, blitter).
+func raster_fill_path(path: const Path*, fill_rule: FillRule, clip: const RasterClip*, blitter: Blitter):
+    if clip.is_empty():
+        return
+    if clip.is_bw():
+        fill_path_rgn(path, fill_rule, clip, blitter)
+    else:
+        var wrappers = ClipWrappers.new_()
+        defer wrappers.release()
+        let m = clip.mask else trap("unreachable")
+        let aa_blitter = wrappers.wrap_aa(blitter, m)
+        let rect_clip = RasterClip(kind = .rect, bounds = clip.bounds, mask = none)
+        fill_path_rgn(path, fill_rule, &rect_clip, aa_blitter)
+
+## SkScan::FillPath(path, SkRegion, blitter).
+func fill_path_rgn(path: const Path*, fill_rule: FillRule, clip: const RasterClip*, blitter0: Blitter):
+    let ir0 = conservative_round_to_int(path.bounds()) else return
+    let ir = IRect.ltrb(ir0.left(), ir0.top(), ir0.right(), ir0.bottom())
+    if ir.is_empty():
+        return
+    var wrappers = ClipWrappers.new_()
+    var clip_rect_needed = true
+    let blitter = wrappers.wrap_bw(blitter0, clip, ir, &clip_rect_needed) else return
+    let clip_rect = clip.bounds.intersect(IRect.ltrb(0, 0, i32_max, i32_max)) else return
+    scan_fill_path_impl(path, fill_rule, clip_rect.to_screen(), ir.top, ir.bottom, not clip_rect_needed, blitter)
+
+# mark: Rects =================================================================================
+
+## SkScan::AntiFillRect(rect, SkRasterClip, blitter).
+func raster_anti_fill_rect(rect: Rect, clip: const RasterClip*, blitter0: Blitter):
+    if clip.is_empty():
+        return
+    var wrappers = ClipWrappers.new_()
+    defer wrappers.release()
+    var blitter = blitter0
+    if not clip.is_bw():
+        let m = clip.mask else trap("unreachable")
+        blitter = wrappers.wrap_aa(blitter0, m)
+    elif clip.kind == .region:
+        let m = clip.mask else trap("unreachable")
+        wrappers.region = MaskRegionClipBlitter(blitter = blitter0, mask = m)
+        blitter = &wrappers.region
+    # The rectangle, clipped to the clip's bounds (the float rect might overflow if we
+    # blindly converted it to an XRect).
+    let new_r = clip.bounds.to_rect().intersect(rect) else return
+    hairline_aa_fill_rect(new_r, clip.bounds.to_screen(), blitter)
+
+## SkScan::FillRect(rect, SkRasterClip, blitter): the rounded rectangle.
+func raster_fill_rect(rect: Rect, clip: const RasterClip*, blitter0: Blitter):
+    if clip.is_empty():
+        return
+    let r = irect_round(rect)
+    if r.is_empty():
+        return
+    var wrappers = ClipWrappers.new_()
+    defer wrappers.release()
+    var blitter = blitter0
+    if not clip.is_bw():
+        let m = clip.mask else trap("unreachable")
+        blitter = wrappers.wrap_aa(blitter0, m)
+    elif clip.kind == .region:
+        let m = clip.mask else trap("unreachable")
+        wrappers.region = MaskRegionClipBlitter(blitter = blitter0, mask = m)
+        blitter = &wrappers.region
+    let rr = r.intersect(clip.bounds) else return
+    blitter.blit_rect(rr.left, rr.top, rr.width(), rr.height())
+
+# mark: Hairlines =============================================================================
+
+## SkScan::AntiHairPath / HairPath (and the square and round cap variants) with a clip.
+func raster_hair_path(path: const Path*, line_cap: LineCap, anti_alias: bool, clip: const RasterClip*, blitter0: Blitter):
+    if clip.is_empty():
+        return
+    var wrappers = ClipWrappers.new_()
+    defer wrappers.release()
+    var blitter = blitter0
+    if not clip.is_bw():
+        let m = clip.mask else trap("unreachable")
+        blitter = wrappers.wrap_aa(blitter0, m)
+    elif clip.kind == .region:
+        let m = clip.mask else trap("unreachable")
+        wrappers.region = MaskRegionClipBlitter(blitter = blitter0, mask = m)
+        blitter = &wrappers.region
+    if anti_alias:
+        hairline_aa_stroke_path(path, line_cap, clip.bounds.to_screen(), blitter)
+    else:
+        hairline_stroke_path(path, line_cap, clip.bounds.to_screen(), blitter)

@@ -1,24 +1,39 @@
 #==============================================================================================
 #
-#   raster - the CPU rasterizer of luce-browser: a port of tiny-skia
+#   raster - the CPU rasterizer of luce-browser: tiny-skia made to paint as Skia m144
 #
 #   DESCRIPTION:
-#       A faithful port of tiny-skia 0.12.0 (linebender/tiny-skia at 5d47547) and its
-#       tiny-skia-path crate to luce-base: pixmaps and masks, premultiplied colors, paints
+#       A port of tiny-skia 0.12.0 (linebender/tiny-skia at 5d47547) and its
+#       tiny-skia-path crate to luce-base -- pixmaps and masks, premultiplied colors, paints
 #       and shaders (solid color, linear, radial and sweep gradients, patterns), every
 #       blend mode, the raster pipeline (lowp and highp stages), paths (builder, transforms,
-#       stroker, dasher, bezier math), the scan converters (hairlines, anti-aliased
-#       hairlines, non-AA and 4x4 supersampled anti-aliased path filling, exactly as Skia
-#       does) and clip masks. tiny-skia is itself a port of Skia's CPU raster core, so
-#       coverage, stroking, dashing, gradients and blending match Skia's, which Ladybird's
-#       reftests and screenshot tests are rendered with.
+#       stroker, dasher, bezier math), the scan converters and clip masks -- changed
+#       wherever Skia m144 (the libskia Ladybird 47c82b38d0 paints with) computes something
+#       else, so that every pixel is the one Ladybird's Skia backend produces on arm64:
 #
-#       The port keeps tiny-skia's algorithms, structure, constants, comments and names
-#       (snake_case; `Type::new` is `Type.new_`, since `new` is reserved). It follows
-#       tiny-skia's portable code path (the one it takes without the `simd` feature), so
-#       every result is bit-exact with tiny-skia; the reference images of tiny-skia's test
-#       suite are reproduced pixel for pixel (tests/raster). The design notes that apply
-#       to every fragment:
+#       - Anti-aliased filling is Skia's analytic AA (SkScan_AAAPath: analytic_edge*,
+#         scan_aaa_*), not 4x4 supersampling; non-AA filling sorts and walks edges as
+#         SkScan_Path does, with SkTQSort (tsort) and convexity (path_convexity).
+#       - Clips follow SkRasterClip (scan_raster_clip, blitter_clip): a Mask is a rect, a
+#         region or an SkAAClip, and Mask.fill_path builds it the way SkAAClip::setPath does.
+#       - Paths keep conics (SkConic, AutoConicToQuads) and convert them where Skia does.
+#         Chopping uses m144's SkChopCubicAt and the double-precision SkChopMonoCubicAt
+#         (cubics); anti-aliased hairlines are m144's (scan_antihair); the stroker keeps
+#         m144's tangent vectors and conic stroking (stroker_conics).
+#       - Drawing follows SkDraw (draw.lucb): the blitter is always SkRasterPipelineBlitter,
+#         as Ladybird's BGRA surfaces are not kN32 in this Skia build. The pipeline, its
+#         blitter and the shaders' stages compute what m144 computes on arm64 NEON: lowp's
+#         rounding div255, highp's fused mad and NEON min/max/rounding/reciprocal
+#         estimates, m144's lowp stage set, gradient stops and stages, image sampling (the
+#         NEON arithmetic is isolated in lowp's `div255`, `highp_mad` and wide.lucb's "NEON
+#         arithmetic"). x86 Skia rounds differently there and is not matched.
+#
+#       tests/raster checks tiny-skia's scenes, the pipeline scenes and Ladybird-style
+#       scenes against images rendered by Skia m144 itself. Fragments ported from Skia
+#       credit it in their header (see LICENSE-skia). Elsewhere the port keeps
+#       tiny-skia's structure, constants, comments and names (snake_case; `Type::new` is
+#       `Type.new_`, since `new` is reserved). The design notes that apply to every
+#       fragment:
 #
 #       - Rust's SIMD wrapper types become arrays of 16-byte Luce vectors: f32x8 is
 #         `F4[2]`, u16x16 is `U16x8[2]`, f32x16 is `F4[4]`, with the lane-wise operators
@@ -38,7 +53,8 @@
 #         wrapping operators.
 #       - Rust's f32::min/max ignore NaN: `fmin`/`fmax`. tiny-skia's "faster" min/max are
 #         `pmin`/`pmax`.
-#       - Bit-exactness needs IEEE f32 arithmetic without contraction: the native backend
+#       - Bit-exactness needs IEEE f32 arithmetic without contraction (Skia builds with
+#         -ffp-contract=off; where it fuses, the port calls math32.fma): the native backend
 #         gives it; the C backend (luce-base 0.23.0) fuses `a * b + c` into FMA, see
 #         .donors/luce-browser-tools/compiler-issues/c_backend_float_contraction.lucb.
 #       - The two crates and their Rust submodules share one Luce module, so free
@@ -49,7 +65,7 @@
 #       Copyright (c) 2011 Google Inc. All rights reserved.
 #       Copyright (c) 2020 Yevhenii Reizner All rights reserved.
 #       Copyright (c) 2026 the luce-browser authors.
-#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-tiny-skia)
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-tiny-skia, LICENSE-skia)
 #
 #==============================================================================================
 
@@ -144,57 +160,3 @@ struct Vec[T]:
             free(self.data) in memory.heap
         self.data = self.data[..<0]
         self.len = 0
-
-## A stable sort (Rust's `slice::sort_by`): `less(a, b)` answers whether `a` orders before
-## `b`. Equal elements keep their order. A merge sort over a scratch buffer.
-func stable_sort[T](items: T[], less: func(const T*, const T*) -> bool):
-    let n = items.length
-    if n < 2:
-        return
-    if n <= 20:
-        # insertion sort
-        for i in 1..<n:
-            let item = items[i]
-            var j = i
-            while j > 0 and less(&item, &items[j - 1]):
-                items[j] = items[j - 1]
-                j -= 1
-            items[j] = item
-        return
-    let scratch = (alloc T[n] in memory.heap) else trap("raster: out of memory")
-    defer free(scratch) in memory.heap
-    var width: usize = 1
-    var source = items
-    var target = scratch
-    while width < n:
-        var start: usize = 0
-        while start < n:
-            let middle = start + width if start + width < n else n
-            let end = start + 2 * width if start + 2 * width < n else n
-            var i = start
-            var j = middle
-            var k = start
-            while i < middle and j < end:
-                if less(&source[j], &source[i]):
-                    target[k] = source[j]
-                    j += 1
-                else:
-                    target[k] = source[i]
-                    i += 1
-                k += 1
-            while i < middle:
-                target[k] = source[i]
-                i += 1
-                k += 1
-            while j < end:
-                target[k] = source[j]
-                j += 1
-                k += 1
-            start = end
-        let swap = source
-        source = target
-        target = swap
-        width *= 2
-    if source.data != items.data:
-        for i in 0..<n:
-            items[i] = source[i]

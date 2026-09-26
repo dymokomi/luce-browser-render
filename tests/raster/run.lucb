@@ -4,8 +4,12 @@
 #
 #   DESCRIPTION:
 #       Runs tiny-skia's integration suite (tests/integration of tiny-skia 0.12.0, ported in
-#       the modules of this directory) against its reference images. `run` runs every
-#       test; `run NAME...` runs the named ones; `run --list` prints the names. The exit
+#       the modules of this directory), the pipeline scenes (skia_pipeline) and the
+#       Ladybird-style scenes (ladybird) against reference images rendered by Skia m144
+#       (where tiny-skia's own reference differs from Skia's, Skia's replaces it; gamma.png
+#       is the port's own, as Skia has no such color space mode). `run` runs every
+#       test; `run NAME...` runs the named ones; `run --list` prints the names;
+#       `run --save DIR [NAME...]` also writes every rendered image under DIR. The exit
 #       status is 1 when a test failed. Run it from the repository root (tests/run_raster.py
 #       builds and runs it).
 #
@@ -24,6 +28,8 @@ import pattern
 import pixmap
 import png
 import gamma
+import skia_pipeline
+import ladybird
 
 func run_case(case: harness.TestCase) -> bool:
     var t = harness.Test(name = case.name, failures = 0)
@@ -73,18 +79,30 @@ pub func main(arguments: str[]) -> i32:
     for case in gamma.tests:
         cases[count] = case
         count += 1
+    for case in skia_pipeline.tests:
+        cases[count] = case
+        count += 1
+    for case in ladybird.tests:
+        cases[count] = case
+        count += 1
 
     if arguments.length > 1 and arguments[1] == "--list":
         for case in cases[..<count]:
             print(case.name)
         return 0
 
+    # `--save DIR`: also write every rendered image under DIR.
+    var names = arguments[1..]
+    if names.length >= 2 and names[0] == "--save":
+        harness.save_dir = names[1]
+        names = names[2..]
+
     var passed: usize = 0
     var failed: usize = 0
     for case in cases[..<count]:
-        if arguments.length > 1:
+        if names.length > 0:
             var wanted = false
-            for name in arguments[1..]:
+            for name in names:
                 if name == case.name:
                     wanted = true
             if not wanted:

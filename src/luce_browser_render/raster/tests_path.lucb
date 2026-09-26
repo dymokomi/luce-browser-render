@@ -230,12 +230,13 @@ test "stroker cubic 1":
 # From skia/tests/StrokeTest.cpp
 test "stroker cubic 2":
     var pb = PathBuilder.new_()
-    pb.move_to(f32.bits(0x424c1086), f32.bits(0x44bcf0cb)) # 51.0161362, 1511.52478
+    pb.move_to(f32.bits(0x424c1086), f32.bits(0x44bcf0cb))  # 51.0161362, 1511.52478
     pb.cubic_to(
-        f32.bits(0x424c107c), f32.bits(0x44bcf0cb), # 51.0160980, 1511.52478
-        f32.bits(0x424c10c2), f32.bits(0x44bcf0cb), # 51.0163651, 1511.52478
-        f32.bits(0x424c1119), f32.bits(0x44bcf0ca), # 51.0166969, 1511.52466
+        f32.bits(0x424c107c), f32.bits(0x44bcf0cb), f32.bits(0x424c10c2), f32.bits(0x44bcf0cb), f32.bits(0x424c1119), f32.bits(0x44bcf0ca),
     )
+    # 51.0160980, 1511.52478
+    # 51.0163651, 1511.52478
+    # 51.0166969, 1511.52466
     var path = pb.finish() else trap("path")
     defer path.release()
     assert(stroke_is_some(&path, 0.394537568))
@@ -245,11 +246,11 @@ test "stroker cubic 2":
 test "stroker big":
     # Skia uses `kStrokeAndFill_Style` here, but we do not support it.
     var pb = PathBuilder.new_()
-    pb.move_to(f32.bits(0x46380000), f32.bits(0xc6380000)) # 11776, -11776
-    pb.line_to(f32.bits(0x46a00000), f32.bits(0xc6a00000)) # 20480, -20480
-    pb.line_to(f32.bits(0x468c0000), f32.bits(0xc68c0000)) # 17920, -17920
-    pb.line_to(f32.bits(0x46100000), f32.bits(0xc6100000)) # 9216, -9216
-    pb.line_to(f32.bits(0x46380000), f32.bits(0xc6380000)) # 11776, -11776
+    pb.move_to(f32.bits(0x46380000), f32.bits(0xc6380000))  # 11776, -11776
+    pb.line_to(f32.bits(0x46a00000), f32.bits(0xc6a00000))  # 20480, -20480
+    pb.line_to(f32.bits(0x468c0000), f32.bits(0xc68c0000))  # 17920, -17920
+    pb.line_to(f32.bits(0x46100000), f32.bits(0xc6100000))  # 9216, -9216
+    pb.line_to(f32.bits(0x46380000), f32.bits(0xc6380000))  # 11776, -11776
     pb.close()
     var path = pb.finish() else trap("path")
     defer path.release()

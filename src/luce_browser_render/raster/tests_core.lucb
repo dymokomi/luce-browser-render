@@ -41,6 +41,7 @@ test "pixels as bytes":
     expect_rgba(pixels[1], 10, 11, 12, 13)
 
 test "chop cubic at y extrema 1":
+    # The values Skia m144's SkChopCubicAtYExtrema computes (two chops at once).
     let src: Point[4] = [Point.from_xy(10.0, 20.0), Point.from_xy(67.0, 437.0), Point.from_xy(298.0, 213.0), Point.from_xy(401.0, 214.0)]
 
     var dst: Point[10]
@@ -50,11 +51,11 @@ test "chop cubic at y extrema 1":
     expect_point(dst[1], 37.508274, 221.24475)
     expect_point(dst[2], 105.541855, 273.19803)
     expect_point(dst[3], 180.15599, 273.19803)
-    expect_point(dst[4], 259.80502, 273.19803)
-    expect_point(dst[5], 346.9527, 213.99666)
-    expect_point(dst[6], 400.30844, 213.99666)
-    expect_point(dst[7], 400.53958, 213.99666)
-    expect_point(dst[8], 400.7701, 213.99777)
+    expect_point(dst[4], 259.805054, 273.198029)
+    expect_point(dst[5], 346.952728, 213.996658)
+    expect_point(dst[6], 400.308502, 213.996658)
+    expect_point(dst[7], 400.539642, 213.996658)
+    expect_point(dst[8], 400.770142, 213.997772)
     expect_point(dst[9], 401.0, 214.0)
 
 func expect_tile(r: ScreenIntRect?, x: u32, y: u32, w: u32, h: u32):
@@ -94,7 +95,9 @@ test "draw tiler rect":
 #
 # Skia has two kinds of a raster pipeline: high and low precision. "High" uses f32 and "low"
 # uses u16. And for basic operations we don't need f32 and u16 simply faster. But those
-# modes are not identical. They can produce slightly different results due rounding.
+# modes are not identical. They can produce slightly different results due rounding. The
+# expected values are Skia m144's (arm64), printed by the oracle's rp_unit_blend scene; modes
+# without a lowp stage run in highp in the lowp test too.
 
 func test_blend(mode: BlendMode, is_highp: bool, r: u8, g: u8, b: u8, a: u8):
     var pixmap = Pixmap.new_(1, 1) else trap("pixmap")
@@ -121,14 +124,13 @@ func test_blend(mode: BlendMode, is_highp: bool, r: u8, g: u8, b: u8, a: u8):
 
 test "blend lowp":
     test_blend(.clear, false, 0, 0, 0, 0)
-    # Source is a no-op
     test_blend(.destination, false, 39, 100, 118, 200)
-    test_blend(.source_over, false, 167, 129, 88, 239)
-    test_blend(.destination_over, false, 73, 122, 130, 239)
+    test_blend(.source_over, false, 166, 128, 88, 239)
+    test_blend(.destination_over, false, 72, 121, 129, 239)
     test_blend(.source_in, false, 122, 78, 42, 141)
     test_blend(.destination_in, false, 28, 71, 83, 141)
-    test_blend(.source_out, false, 34, 22, 12, 39)
-    test_blend(.destination_out, false, 12, 30, 35, 59)
+    test_blend(.source_out, false, 33, 21, 11, 39)
+    test_blend(.destination_out, false, 11, 29, 35, 59)
     test_blend(.source_atop, false, 133, 107, 76, 200)
     test_blend(.destination_atop, false, 61, 92, 95, 180)
     test_blend(.xor, false, 45, 51, 46, 98)
@@ -138,21 +140,20 @@ test "blend lowp":
     test_blend(.overlay, false, 92, 128, 106, 239)
     test_blend(.darken, false, 72, 121, 88, 239)
     test_blend(.lighten, false, 166, 128, 129, 239)
-    # ColorDodge in not available for lowp.
-    # ColorBurn in not available for lowp.
-    test_blend(.hard_light, false, 154, 128, 95, 239)
-    # SoftLight in not available for lowp.
+    test_blend(.color_dodge, false, 186, 192, 164, 239)
+    test_blend(.color_burn, false, 54, 63, 46, 239)
+    test_blend(.hard_light, false, 155, 128, 95, 239)
+    test_blend(.soft_light, false, 98, 124, 115, 239)
     test_blend(.difference, false, 138, 57, 87, 239)
     test_blend(.exclusion, false, 146, 121, 121, 239)
-    test_blend(.multiply, false, 69, 90, 71, 238)
-    # Hue in not available for lowp.
-    # Saturation in not available for lowp.
-    # Color in not available for lowp.
-    # Luminosity in not available for lowp.
+    test_blend(.multiply, false, 69, 90, 71, 239)
+    test_blend(.hue, false, 128, 103, 74, 239)
+    test_blend(.saturation, false, 59, 126, 140, 239)
+    test_blend(.color, false, 139, 100, 60, 239)
+    test_blend(.luminosity, false, 100, 149, 157, 239)
 
 test "blend highp":
     test_blend(.clear, true, 0, 0, 0, 0)
-    # Source is a no-op
     test_blend(.destination, true, 39, 100, 118, 200)
     test_blend(.source_over, true, 167, 128, 88, 239)
     test_blend(.destination_over, true, 72, 121, 129, 239)

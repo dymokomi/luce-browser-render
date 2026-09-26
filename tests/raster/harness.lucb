@@ -80,8 +80,32 @@ pub func save_png(pixmap: const raster.Pixmap*, path: c.str):
         files.write(path, encoded) catch failure:
             print(f"  cannot write the failure image: {failure.message}")
 
+## When not empty, every image a test renders is also written to `<save_dir>/<image>`
+## (`run --save DIR`), for comparing with Skia's.
+pub var save_dir: str
+
+func save_actual(pixmap: const raster.Pixmap*, image: str):
+    with memory.heap:
+        files.create_directory(path_buffer_str(save_dir)) catch:
+            recover ()
+    # the image's directories, if any, one level at a time
+    for i in 0..<image.bytes.length:
+        if image.bytes[i] == '/':
+            var dir_buffer: u8[512]
+            let dir = path_buffer(dir_buffer, f"{save_dir}/{(str)image.bytes[..<i]}")
+            with memory.heap:
+                files.create_directory(dir) catch:
+                    recover ()
+    var buffer: u8[512]
+    save_png(pixmap, path_buffer(buffer, f"{save_dir}/{image}"))
+
+func path_buffer_str(text: str) -> c.str:
+    return (c.str)text
+
 ## `assert_eq!(pixmap, Pixmap::load_png(image))`.
 pub func expect_png(t: Test*, pixmap: const raster.Pixmap*, image: str):
+    if save_dir.length > 0:
+        save_actual(pixmap, image)
     var expected = load_png(image)
     defer expected.release()
     if pixmap.equals(&expected):
@@ -170,6 +194,10 @@ func segment_equals(a: raster.PathSegment, b: raster.PathSegment) -> bool:
         .cubic_to(p1, p2, p):
             match b:
                 .cubic_to(q1, q2, q): return points_equal(p1, q1) and points_equal(p2, q2) and points_equal(p, q)
+                _: return false
+        .conic_to(p1, p, w):
+            match b:
+                .conic_to(q1, q, v): return points_equal(p1, q1) and points_equal(p, q) and w == v
                 _: return false
 
 ## `assert_eq!(path.segments().collect::<Vec<_>>(), expected)`.

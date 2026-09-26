@@ -1,0 +1,619 @@
+#==============================================================================================
+#
+#   analytic_edge - the edges of the analytic anti-aliasing scan converter
+#
+#   DESCRIPTION:
+#       Port of Skia m144 src/core/SkAnalyticEdge.h/.cpp: SkAnalyticEdge and its quadratic
+#       and cubic subclasses, which walk a path segment as a sequence of lines in SkFixed
+#       with y snapped to 1/4 pixel (kDefaultAccuracy), quick_inverse/quick_div and the
+#       SkFixed helpers of SkFixed.h the AAA code uses. The three classes are one struct
+#       (the `Type` the edge was built as is `edge_type`); Skia's fNext/fPrev pointers are
+#       indices into the edge list (edge_nil for none), see scan_aaa_path.lucb.
+#
+#       Copyright (c) 2006 The Android Open Source Project
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+# mark: SkFixed ===============================================================================
+# Skia's macros wrap on overflow (it computes them on sentinels such as SK_MaxS32), so these
+# use the wrapping operators.
+
+let fixed_one: i32 = 65536
+let fixed_half: i32 = 32768
+let fixed_max: i32 = 2147483647
+let fixed_min: i32 = -2147483648
+
+## SkIntToFixed.
+func int_to_fixed(n: i32) -> i32:
+    return (i32)((u32)n << 16)
+
+## SkFixedFloorToInt.
+func fixed_floor_to_int(x: i32) -> i32:
+    return x >> 16
+
+## SkFixedCeilToInt.
+func fixed_ceil_to_int(x: i32) -> i32:
+    return (x +% (fixed_one - 1)) >> 16
+
+## SkFixedRoundToInt.
+func fixed_round_to_int(x: i32) -> i32:
+    return (x +% fixed_half) >> 16
+
+## SkFixedFloorToFixed.
+func fixed_floor_to_fixed(x: i32) -> i32:
+    return (i32)((u32)x & 0xFFFF0000)
+
+## SkFixedCeilToFixed.
+func fixed_ceil_to_fixed(x: i32) -> i32:
+    return (i32)((u32)(x +% (fixed_one - 1)) & 0xFFFF0000)
+
+## SkFixedRoundToFixed.
+func fixed_round_to_fixed(x: i32) -> i32:
+    return (i32)((u32)(x +% fixed_half) & 0xFFFF0000)
+
+## SkFixedMul.
+func fixed_mul(a: i32, b: i32) -> i32:
+    return (i32)(((i64)a * (i64)b) >> 16)
+
+## SkFixedToFDot6.
+func fixed_to_fdot6(x: i32) -> i32:
+    return x >> 10
+
+## Sk32_sat_add.
+func sat_add32(a: i32, b: i32) -> i32:
+    return (i32)bound_i64((i64)i32_min, (i64)a + (i64)b, (i64)i32_max)
+
+## Sk32_sat_sub.
+func sat_sub32(a: i32, b: i32) -> i32:
+    return (i32)bound_i64((i64)i32_min, (i64)a - (i64)b, (i64)i32_max)
+
+## SkAbs32.
+func abs32(x: i32) -> i32:
+    return -%x if x < 0 else x
+
+# mark: quick_div =============================================================================
+
+func quick_inverse(x: i32) -> i32:
+    if x > 0:
+        return -quick_inverse_table[(usize)(inverse_table_size - x)]
+    return quick_inverse_table[(usize)(inverse_table_size + x)]
+
+func quick_div(a: i32, b: i32) -> i32:
+    let min_bits: i32 = 3  # abs(b) should be at least (1 << min_bits) for quick division
+    let max_bits: i32 = 31  # Number of bits available in signed int
+    # Given abs(b) <= (1 << min_bits), the inverse of abs(b) is at most 1 << (22 - min_bits)
+    # in SkFixed format. Hence abs(a) should be less than max_abs_a
+    let max_abs_a: i32 = 1 << (max_bits - (22 - min_bits))
+    let abs_a = abs32(a)
+    let abs_b = abs32(b)
+    if abs_b >= (1 << min_bits) and abs_b < inverse_table_size and abs_a < max_abs_a:
+        return (a * quick_inverse(b)) >> 6
+    return fdot6_div(a, b)
+
+# mark: SkAnalyticEdge ========================================================================
+
+## The index of no edge (Skia's nullptr).
+let edge_nil: u32 = 0xFFFFFFFF
+
+## The default accuracy for snapping: y is snapped to 1/4 pixel.
+let analytic_default_accuracy: i32 = 2
+
+## The type an analytic edge was built as.
+enum AnalyticEdgeType as u8:
+    line = 0
+    quad = 1
+    cubic = 2
+
+## SkAnalyticEdge with the fields of SkAnalyticQuadraticEdge and SkAnalyticCubicEdge.
+struct AnalyticEdge:
+    var next: u32
+    var prev: u32
+
+    var x: i32
+    var dx: i32
+    ## The x value when y = upper_y.
+    var upper_x: i32
+    ## The current y.
+    var y: i32
+    ## The upper bound of y (our edge is from y = upper_y to y = lower_y).
+    var upper_y: i32
+    ## The lower bound of y.
+    var lower_y: i32
+    ## abs(1/dx); may be fixed_max when dx is close to 0. Only used for trapezoids.
+    var dy: i32
+
+    ## Remembers the *initial* edge type.
+    var edge_type: AnalyticEdgeType
+    ## Only used by quads (+) and cubics (-).
+    var curve_count: i32
+    ## Applied to all Dx/DDx/DDDx except for cubic_dshift.
+    var curve_shift: i32
+    ## 1 (clockwise) or -1.
+    var winding: i32
+
+    # SkAnalyticQuadraticEdge
+    var qx: i32
+    var qy: i32
+    var qdx: i32
+    var qdy: i32
+    var qddx: i32
+    var qddy: i32
+    var qlast_x: i32
+    var qlast_y: i32
+    # snap y to integer points in the middle of the curve to accelerate AAA path filling
+    var snapped_x: i32
+    ## Also SkAnalyticCubicEdge's fSnappedY: make sure that y is increasing with smooth jump
+    ## and snapping.
+    var snapped_y: i32
+
+    # SkAnalyticCubicEdge
+    var cx: i32
+    var cy: i32
+    var cdx: i32
+    var cdy: i32
+    var cddx: i32
+    var cddy: i32
+    var cdddx: i32
+    var cdddy: i32
+    var clast_x: i32
+    var clast_y: i32
+    ## Applied to cdx and cdy.
+    var cubic_dshift: i32
+
+    static func snap_y(y: i32) -> i32:
+        let accuracy = analytic_default_accuracy
+        # This approach is safer than left shift, round, then right shift
+        return (i32)((((u32)y +% (u32)(fixed_one >> (accuracy + 1))) >> (u32)(16 - accuracy)) << (u32)(16 - accuracy))
+
+    ## Update x, y of this edge so y = new_y.
+    mutating func go_y(new_y: i32):
+        if new_y == self.y +% fixed_one:
+            self.x = self.x + self.dx
+            self.y = new_y
+        elif new_y != self.y:
+            # Drop lower digits as our alpha only has 8 bits (dx and y - upper_y may be
+            # greater than SK_Fixed1)
+            self.x = self.upper_x + fixed_mul(self.dx, new_y - self.upper_y)
+            self.y = new_y
+
+    mutating func go_y_shift(new_y: i32, y_shift: i32):
+        self.y = new_y
+        self.x += self.dx >> y_shift
+
+    ## SkAnalyticEdge::setLine.
+    mutating func set_line(p0: Point, p1: Point) -> bool:
+        # We must set X/Y using the same way (e.g., times 4, to FDot6, then to Fixed) as
+        # Quads/Cubics. Otherwise the order of the edge might be wrong due to precision
+        # limit.
+        let accuracy = analytic_default_accuracy
+        let multiplier = (f32)(1 << accuracy)
+        var x0 = fdot6_to_fdot16(fdot6_from_f32(p0.x * multiplier)) >> accuracy
+        var y0 = AnalyticEdge.snap_y(fdot6_to_fdot16(fdot6_from_f32(p0.y * multiplier)) >> accuracy)
+        var x1 = fdot6_to_fdot16(fdot6_from_f32(p1.x * multiplier)) >> accuracy
+        var y1 = AnalyticEdge.snap_y(fdot6_to_fdot16(fdot6_from_f32(p1.y * multiplier)) >> accuracy)
+
+        var winding: i32 = 1
+
+        if y0 > y1:
+            let tx = x0
+            x0 = x1
+            x1 = tx
+            let ty = y0
+            y0 = y1
+            y1 = ty
+            winding = -1
+
+        # are we a zero-height line?
+        let dy = fixed_to_fdot6(y1 - y0)
+        if dy == 0:
+            return false
+        let dx = fixed_to_fdot6(x1 - x0)
+        let slope = quick_div(dx, dy)
+        let abs_slope = abs32(slope)
+
+        self.x = x0
+        self.dx = slope
+        self.upper_x = x0
+        self.y = y0
+        self.upper_y = y0
+        self.lower_y = y1
+        if dx == 0 or slope == 0:
+            self.dy = fixed_max
+        elif abs_slope < inverse_table_size:
+            self.dy = quick_inverse(abs_slope)
+        else:
+            self.dy = abs32(quick_div(dy, dx))
+        self.edge_type = .line
+        self.curve_count = 0
+        self.winding = winding
+        self.curve_shift = 0
+
+        return true
+
+    ## SkAnalyticEdge::updateLine. The slope is computed by the caller: calling SkFixedDiv
+    ## twice here would be a bottleneck for small ovals.
+    mutating func update_line(x00: i32, y00: i32, x10: i32, y10: i32, slope: i32) -> bool:
+        var x0 = x00
+        var y0 = y00
+        var x1 = x10
+        var y1 = y10
+        # We don't chop at y extrema for cubics so the y is not guaranteed to be increasing
+        # for them. In that case, we have to swap x/y and negate the winding.
+        if y0 > y1:
+            let tx = x0
+            x0 = x1
+            x1 = tx
+            let ty = y0
+            y0 = y1
+            y1 = ty
+            self.winding = -self.winding
+
+        let dx = fixed_to_fdot6(x1 - x0)
+        let dy = fixed_to_fdot6(y1 - y0)
+
+        # are we a zero-height line?
+        if dy == 0:
+            return false
+
+        let abs_slope = abs32(fixed_to_fdot6(slope))
+        self.x = x0
+        self.dx = slope
+        self.upper_x = x0
+        self.y = y0
+        self.upper_y = y0
+        self.lower_y = y1
+        if dx == 0 or slope == 0:
+            self.dy = fixed_max
+        elif abs_slope < inverse_table_size:
+            self.dy = quick_inverse(abs_slope)
+        else:
+            self.dy = abs32(quick_div(dy, dx))
+
+        return true
+
+    ## Returns true if we're NOT done with this edge.
+    mutating func update(last_y: i32) -> bool:
+        if self.curve_count < 0:
+            return self.update_cubic()
+        elif self.curve_count > 0:
+            return self.update_quadratic()
+        return false
+
+    # mark: SkAnalyticQuadraticEdge ===============================================================
+
+    mutating func set_quadratic_without_update(pts: const Point[], shift0: i32) -> bool:
+        let scale = (f32)(1 << (shift0 + 6))
+        var x0 = (i32)(pts[0].x * scale)
+        var y0 = (i32)(pts[0].y * scale)
+        let x1 = (i32)(pts[1].x * scale)
+        let y1 = (i32)(pts[1].y * scale)
+        var x2 = (i32)(pts[2].x * scale)
+        var y2 = (i32)(pts[2].y * scale)
+
+        var winding: i32 = 1
+        if y0 > y2:
+            let tx = x0
+            x0 = x2
+            x2 = tx
+            let ty = y0
+            y0 = y2
+            y2 = ty
+            winding = -1
+
+        let top = fdot6_round(y0)
+        let bot = fdot6_round(y2)
+
+        # are we a zero-height quad (line)?
+        if top == bot:
+            return false
+
+        # compute number of steps needed (1 << shift)
+        let ddx = (left_shift(x1, 1) - x0 - x2) >> 2
+        let ddy = (left_shift(y1, 1) - y0 - y2) >> 2
+        # This is a little confusing: before this line, shift is the scale up factor for AA;
+        # after this line, shift is the fCurveShift.
+        var shift = diff_to_shift(ddx, ddy, shift0)
+        # need at least 1 subdivision for our bias trick
+        if shift == 0:
+            shift = 1
+        elif shift > max_coeff_shift:
+            shift = max_coeff_shift
+
+        self.winding = winding
+        self.edge_type = .quad
+        self.curve_count = 1 << shift
+
+        # We want to reformulate into polynomial form, to make it clear how we should
+        # forward-difference.
+        #
+        #   p0 (1 - t)^2 + p1 t(1 - t) + p2 t^2 ==> At^2 + Bt + C
+        #
+        #   A = p0 - 2p1 + p2
+        #   B = 2(p1 - p0)
+        #   C = p0
+        #
+        # Our caller must have constrained our inputs (p0..p2) to all fit into 16.16.
+        # However, as seen above, we sometimes compute values that can be larger (e.g.
+        # B = 2*(p1 - p0)). To guard against overflow, we will store A and B at 1/2 of their
+        # actual value, and just apply a 2x scale during application in updateQuadratic().
+        # Hence we store (shift - 1) in fCurveShift.
+        self.curve_shift = shift - 1
+
+        var a = fdot6_to_fixed_div2(x0 - x1 - x1 + x2)  # 1/2 the real value
+        var b = fdot6_to_fdot16(x1 - x0)  # 1/2 the real value
+
+        self.qx = fdot6_to_fdot16(x0)
+        self.qdx = b + (a >> shift)  # biased by shift
+        self.qddx = a >> (shift - 1)  # biased by shift
+
+        a = fdot6_to_fixed_div2(y0 - y1 - y1 + y2)  # 1/2 the real value
+        b = fdot6_to_fdot16(y1 - y0)  # 1/2 the real value
+
+        self.qy = fdot6_to_fdot16(y0)
+        self.qdy = b + (a >> shift)  # biased by shift
+        self.qddy = a >> (shift - 1)  # biased by shift
+
+        self.qlast_x = fdot6_to_fdot16(x2)
+        self.qlast_y = fdot6_to_fdot16(y2)
+
+        return true
+
+    ## SkAnalyticQuadraticEdge::setQuadratic.
+    mutating func set_quadratic(pts: const Point[]) -> bool:
+        if not self.set_quadratic_without_update(pts, analytic_default_accuracy):
+            return false
+        let acc = analytic_default_accuracy
+        self.qx >>= acc
+        self.qy >>= acc
+        self.qdx >>= acc
+        self.qdy >>= acc
+        self.qddx >>= acc
+        self.qddy >>= acc
+        self.qlast_x >>= acc
+        self.qlast_y >>= acc
+        self.qy = AnalyticEdge.snap_y(self.qy)
+        self.qlast_y = AnalyticEdge.snap_y(self.qlast_y)
+
+        self.edge_type = .quad
+
+        self.snapped_x = self.qx
+        self.snapped_y = self.qy
+
+        return self.update_quadratic()
+
+    ## SkAnalyticQuadraticEdge::updateQuadratic.
+    mutating func update_quadratic() -> bool:
+        var success = false  # initialize to fail!
+        var count = self.curve_count
+        var oldx = self.qx
+        var oldy = self.qy
+        var dx = self.qdx
+        var dy = self.qdy
+        var newx: i32 = 0
+        var newy: i32 = 0
+        var new_snapped_x: i32 = 0
+        var new_snapped_y: i32 = 0
+        let shift = self.curve_shift
+
+        while true:
+            var slope: i32 = 0
+            count -= 1
+            if count > 0:
+                newx = oldx + (dx >> shift)
+                newy = oldy + (dy >> shift)
+                # only snap when dy is large enough and dx/dy isn't too large
+                if abs32(dy >> shift) >= fixed_one * 2 and ((i64)abs32(dy) << 6) > (i64)abs32(dx):
+                    let diff_y = fixed_to_fdot6(newy - self.snapped_y)
+                    slope = quick_div(fixed_to_fdot6(newx - self.snapped_x), diff_y) if diff_y != 0 else fixed_max
+                    let rounded = fixed_round_to_fixed(newy)
+                    new_snapped_y = self.qlast_y if self.qlast_y < rounded else rounded
+                    new_snapped_x = newx - fixed_mul(slope, newy - new_snapped_y)
+                else:
+                    let snapped = AnalyticEdge.snap_y(newy)
+                    new_snapped_y = self.qlast_y if self.qlast_y < snapped else snapped
+                    new_snapped_x = newx
+                    let diff_y = fixed_to_fdot6(new_snapped_y - self.snapped_y)
+                    slope = quick_div(fixed_to_fdot6(newx - self.snapped_x), diff_y) if diff_y != 0 else fixed_max
+                dx += self.qddx
+                dy += self.qddy
+            # last segment
+            else:
+                newx = self.qlast_x
+                newy = self.qlast_y
+                new_snapped_y = newy
+                new_snapped_x = newx
+                let diff_y = fixed_to_fdot6(newy - self.snapped_y)
+                slope = quick_div(fixed_to_fdot6(newx - self.snapped_x), diff_y) if diff_y != 0 else fixed_max
+            if slope < fixed_max:
+                success = self.update_line(self.snapped_x, self.snapped_y, new_snapped_x, new_snapped_y, slope)
+            oldx = newx
+            oldy = newy
+            if not (count > 0 and not success):
+                break
+
+        self.qx = newx
+        self.qy = newy
+        self.qdx = dx
+        self.qdy = dy
+        self.snapped_x = new_snapped_x
+        self.snapped_y = new_snapped_y
+        self.curve_count = count
+        return success
+
+    ## SkAnalyticQuadraticEdge::keepContinuous: we use x as the starting x to ensure the
+    ## continuity. Without it, we may break the sorted edge list.
+    mutating func keep_continuous_quad():
+        self.snapped_x = self.x
+        self.snapped_y = self.y
+
+    # mark: SkAnalyticCubicEdge ===================================================================
+
+    ## SkAnalyticCubicEdge::setCubic.
+    mutating func set_cubic(pts: const Point[]) -> bool:
+        if not self.set_cubic_without_update(pts, analytic_default_accuracy):
+            return false
+
+        let acc = analytic_default_accuracy
+        self.cx >>= acc
+        self.cy >>= acc
+        self.cdx >>= acc
+        self.cdy >>= acc
+        self.cddx >>= acc
+        self.cddy >>= acc
+        self.cdddx >>= acc
+        self.cdddy >>= acc
+        self.clast_x >>= acc
+        self.clast_y >>= acc
+        self.cy = AnalyticEdge.snap_y(self.cy)
+        self.snapped_y = self.cy
+        self.clast_y = AnalyticEdge.snap_y(self.clast_y)
+
+        self.edge_type = .cubic
+
+        return self.update_cubic()
+
+    mutating func set_cubic_without_update(pts: const Point[], shift0: i32) -> bool:
+        let scale = (f32)(1 << (shift0 + 6))
+        var x0 = (i32)(pts[0].x * scale)
+        var y0 = (i32)(pts[0].y * scale)
+        var x1 = (i32)(pts[1].x * scale)
+        var y1 = (i32)(pts[1].y * scale)
+        var x2 = (i32)(pts[2].x * scale)
+        var y2 = (i32)(pts[2].y * scale)
+        var x3 = (i32)(pts[3].x * scale)
+        var y3 = (i32)(pts[3].y * scale)
+
+        var winding: i32 = 1
+        if y0 > y3:
+            var t = x0
+            x0 = x3
+            x3 = t
+            t = x1
+            x1 = x2
+            x2 = t
+            t = y0
+            y0 = y3
+            y3 = t
+            t = y1
+            y1 = y2
+            y2 = t
+            winding = -1
+
+        let top = fdot6_round(y0)
+        let bot = fdot6_round(y3)
+
+        # are we a zero-height cubic (line)?
+        if top == bot:
+            return false
+
+        # compute number of steps needed (1 << shift)
+        # Can't use (center of curve - center of baseline), since center-of-curve need not
+        # be the max delta from the baseline (it could even be coincident) so we try just
+        # looking at the two off-curve points
+        let ddx = cubic_delta_from_line(x0, x1, x2, x3)
+        let ddy = cubic_delta_from_line(y0, y1, y2, y3)
+        # add 1 (by observation)
+        var shift = diff_to_shift(ddx, ddy, 2) + 1
+        # need at least 1 subdivision for our bias trick
+        if shift > max_coeff_shift:
+            shift = max_coeff_shift
+
+        # Since our in coming data is initially shifted down by 10 (or 8 in antialias). That
+        # means the most we can shift up is 8. However, we compute coefficients with a 3*,
+        # so the safest upshift is really 6
+        var up_shift: i32 = 6  # largest safe value
+        var down_shift = shift + up_shift - 10
+        if down_shift < 0:
+            down_shift = 0
+            up_shift = 10 - shift
+
+        self.winding = winding
+        self.edge_type = .cubic
+        self.curve_count = left_shift(-1, shift)
+        self.curve_shift = shift
+        self.cubic_dshift = down_shift
+
+        var b = fdot6_up_shift(3 * (x1 - x0), up_shift)
+        var c = fdot6_up_shift(3 * (x0 - x1 - x1 + x2), up_shift)
+        var d = fdot6_up_shift(x3 + 3 * (x1 - x2) - x0, up_shift)
+
+        self.cx = fdot6_to_fdot16(x0)
+        self.cdx = b + (c >> shift) + (d >> (2 * shift))  # biased by shift
+        self.cddx = 2 * c + ((3 * d) >> (shift - 1))  # biased by 2*shift
+        self.cdddx = (3 * d) >> (shift - 1)  # biased by 2*shift
+
+        b = fdot6_up_shift(3 * (y1 - y0), up_shift)
+        c = fdot6_up_shift(3 * (y0 - y1 - y1 + y2), up_shift)
+        d = fdot6_up_shift(y3 + 3 * (y1 - y2) - y0, up_shift)
+
+        self.cy = fdot6_to_fdot16(y0)
+        self.cdy = b + (c >> shift) + (d >> (2 * shift))  # biased by shift
+        self.cddy = 2 * c + ((3 * d) >> (shift - 1))  # biased by 2*shift
+        self.cdddy = (3 * d) >> (shift - 1)  # biased by 2*shift
+
+        self.clast_x = fdot6_to_fdot16(x3)
+        self.clast_y = fdot6_to_fdot16(y3)
+
+        return true
+
+    ## SkAnalyticCubicEdge::updateCubic.
+    mutating func update_cubic() -> bool:
+        var success = false
+        var count = self.curve_count
+        var oldx = self.cx
+        var oldy = self.cy
+        var newx: i32 = 0
+        var newy: i32 = 0
+        let ddshift = self.curve_shift
+        let dshift = self.cubic_dshift
+
+        while true:
+            count += 1
+            if count < 0:
+                newx = oldx + (self.cdx >> dshift)
+                self.cdx += self.cddx >> ddshift
+                self.cddx += self.cdddx
+
+                newy = oldy + (self.cdy >> dshift)
+                self.cdy += self.cddy >> ddshift
+                self.cddy += self.cdddy
+            # last segment
+            else:
+                newx = self.clast_x
+                newy = self.clast_y
+
+            # we want to say SkASSERT(oldy <= newy), but our finite fixedpoint doesn't
+            # always achieve that, so we have to explicitly pin it here.
+            if newy < oldy:
+                newy = oldy
+
+            var new_snapped_y = AnalyticEdge.snap_y(newy)
+            # we want to SkASSERT(snappedNewY <= fCLastY), but our finite fixedpoint doesn't
+            # always achieve that, so we have to explicitly pin it here.
+            if self.clast_y < new_snapped_y:
+                new_snapped_y = self.clast_y
+                count = 0
+
+            var slope = fixed_max
+            if fixed_to_fdot6(new_snapped_y - self.snapped_y) != 0:
+                slope = fdot6_div(fixed_to_fdot6(newx - oldx), fixed_to_fdot6(new_snapped_y - self.snapped_y))
+
+            success = self.update_line(oldx, self.snapped_y, newx, new_snapped_y, slope)
+
+            oldx = newx
+            oldy = newy
+            self.snapped_y = new_snapped_y
+            if not (count < 0 and not success):
+                break
+
+        self.cx = newx
+        self.cy = newy
+        self.curve_count = count
+        return success
+
+    ## SkAnalyticCubicEdge::keepContinuous.
+    mutating func keep_continuous_cubic():
+        self.cx = self.x
+        self.snapped_y = self.y

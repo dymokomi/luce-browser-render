@@ -38,11 +38,11 @@ func cubic_stroke(s: PathStroker*, cubic: const Point[], quad_points: QuadConstr
                 return true
 
     if not math32.is_finite(quad_points.quad[2].x) or not math32.is_finite(quad_points.quad[2].x):
-        return false # just abort if projected quad isn't representable
+        return false  # just abort if projected quad isn't representable
 
     s.recursion_depth += 1
     if s.recursion_depth > recursive_limits[(usize)s.found_tangents]:
-        return false # just abort if projected quad isn't representable
+        return false  # just abort if projected quad isn't representable
 
     var half_quad = QuadConstruct.default()
     if not half_quad.init_with_start(quad_points):
@@ -176,7 +176,9 @@ func quad_stroke(s: PathStroker*, quad: const Point[], quad_points: QuadConstruc
 
     s.recursion_depth += 1
     if s.recursion_depth > recursive_limits[quad_recursive_limit]:
-        return false # just abort if projected quad isn't representable
+        # If we stop making progress, just emit a line and move on
+        add_degenerate_line(s, quad_points)
+        return true
 
     var half_quad = QuadConstruct.default()
     discard(half_quad.init_with_start(quad_points))
@@ -219,13 +221,12 @@ func set_ray_points(s: const PathStroker*, tp: Point, dxy: Point*, on_p: Point*,
     if not dxy.set_length(s.radius):
         *dxy = Point.from_xy(s.radius, 0.0)
 
-    let axis_flip = (f32)(i32)(i8)s.stroke_type # go opposite ways for outer, inner
+    let axis_flip = (f32)(i32)(i8)s.stroke_type  # go opposite ways for outer, inner
     on_p.x = tp.x + axis_flip * dxy.y
     on_p.y = tp.y - axis_flip * dxy.x
 
     if let t = tangent:
-        t.x = on_p.x + dxy.x
-        t.y = on_p.y + dxy.y
+        *t = *dxy
 
 # Given a quad and t, return the point on curve, its perpendicular, and the perpendicular
 # tangent.
@@ -283,8 +284,8 @@ func stroke_close_enough(s: const PathStroker*, stroke: Point[3], ray: Point[2],
 func intersect_ray(s: const PathStroker*, intersect_ray_type: IntersectRayType, quad_points: QuadConstruct*) -> ResultType:
     let start = quad_points.quad[0]
     let end = quad_points.quad[2]
-    let a_len = quad_points.tangent_start.sub(start)
-    let b_len = quad_points.tangent_end.sub(end)
+    let a_len = quad_points.tangent_start
+    let b_len = quad_points.tangent_end
 
     # Slopes match when denom goes to zero:
     #                   axLen / ayLen ==                   bxLen / byLen
@@ -305,8 +306,8 @@ func intersect_ray(s: const PathStroker*, intersect_ray_type: IntersectRayType, 
 
         # if the perpendicular distances from the quad points to the opposite tangent line
         # are small, a straight line is good enough
-        let dist1 = pt_to_line(start, end, quad_points.tangent_end)
-        let dist2 = pt_to_line(end, start, quad_points.tangent_start)
+        let dist1 = pt_to_tangent_line(start, end, quad_points.tangent_end)
+        let dist2 = pt_to_tangent_line(end, start, quad_points.tangent_start)
         if fmax(dist1, dist2) <= s.inv_res_scale_squared:
             return .degenerate
 
@@ -320,8 +321,7 @@ func intersect_ray(s: const PathStroker*, intersect_ray_type: IntersectRayType, 
         if intersect_ray_type == .ctrl_pt:
             # the intersection of the tangents need not be on the tangent segment
             # so 0 <= numer_a <= 1 is not necessarily true
-            quad_points.quad[1].x = start.x * (1.0 - numer_a) + quad_points.tangent_start.x * numer_a
-            quad_points.quad[1].y = start.y * (1.0 - numer_a) + quad_points.tangent_start.y * numer_a
+            quad_points.quad[1] = Point.from_xy(start.x + quad_points.tangent_start.x * numer_a, start.y + quad_points.tangent_start.y * numer_a)
 
         return .quad
 
@@ -339,15 +339,15 @@ func tangents_meet(s: const PathStroker*, cubic: const Point[], quad_points: Qua
 
 struct QuadConstruct:
     # The state of the quad stroke under construction.
-    var quad: Point[3]         # the stroked quad parallel to the original curve
-    var tangent_start: Point   # a point tangent to quad[0]
-    var tangent_end: Point     # a point tangent to quad[2]
-    var start_t: f32           # a segment of the original curve
+    var quad: Point[3]  # the stroked quad parallel to the original curve
+    var tangent_start: Point  # the tangent vector at quad[0]
+    var tangent_end: Point  # the tangent vector at quad[2]
+    var start_t: f32  # a segment of the original curve
     var mid_t: f32
     var end_t: f32
-    var start_set: bool        # state to share common points across structs
+    var start_set: bool  # state to share common points across structs
     var end_set: bool
-    var opposite_tangents: bool # set if coincident tangents have opposite directions
+    var opposite_tangents: bool  # set if coincident tangents have opposite directions
 
     static func default() -> QuadConstruct:
         var q: QuadConstruct

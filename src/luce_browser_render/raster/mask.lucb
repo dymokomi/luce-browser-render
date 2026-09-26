@@ -4,8 +4,11 @@
 #
 #   DESCRIPTION:
 #       Port of tiny-skia mask.rs: MaskType, Mask (owns its bytes; `release()` frees them),
-#       Mask.fill_path (almost a direct copy of PixmapMut::fill_path, rendering coverage
-#       into the mask), intersect_path, invert, clear, and SubMaskRef.
+#       Mask.fill_path, intersect_path, invert, clear, and SubMaskRef. A mask is what Skia
+#       holds as a clip (see blitter_clip.lucb), so filling a path into it follows Skia
+#       m144's SkAAClip::setPath and SkRegion::setPath (the analytic AA filler forced into
+#       its run-length mode, writing through MaskBuilderBlitter, the SkAAClip builder's
+#       blitter).
 #
 #==============================================================================================
 
@@ -126,78 +129,51 @@ pub struct Mask:
     ## Draws a filled path onto the mask. In terms of RGB (no alpha) image, draws a white
     ## path on top of black mask. Doesn't reset the existing mask content and draws the path
     ## on top of existing data. If the above behavior is undesired, `Mask.clear()` should
-    ## be called first. This method is intended to be used for simple cases. For more
-    ## complex masks prefer `Mask.from_pixmap`.
+    ## be called first. On a clear mask the result is the clip Skia's SkAAClip::setPath (or,
+    ## without anti-aliasing, SkRegion::setPath) makes of the path. For more complex masks
+    ## prefer `Mask.from_pixmap`.
     pub mutating func fill_path(path: const Path*, fill_rule: FillRule, anti_alias: bool, transform: Transform):
-        # Almost a direct copy of PixmapMut::fill_path
-        if transform.is_identity():
-            # This is sort of similar to SkDraw::drawPath
+        self.fill_path_clipped(path, fill_rule, anti_alias, transform, IRect.ltrb(0, 0, (i32)self.width(), (i32)self.height()))
 
-            # Skip empty paths and horizontal/vertical lines.
-            let path_bounds = path.bounds()
-            if is_nearly_zero(path_bounds.width()) or is_nearly_zero(path_bounds.height()):
-                # log::warn!("empty paths and horizontal/vertical lines cannot be filled")
-                return
-
-            if is_too_big_for_math(path):
-                # log::warn!("path coordinates are too big")
-                return
-
-            # TODO: ignore paths outside the pixmap
-
-            if let tiler0 = DrawTiler.new_(self.width(), self.height()):
-                var tiler = tiler0
-                var tiled = path.clone() # TODO: avoid cloning
-                defer tiled.release()
-
-                while let tile = tiler.next():
-                    let ts = Transform.from_translate(-(f32)tile.x(), -(f32)tile.y())
-                    if not tiled.transform(ts):
-                        # log::warn!("path transformation failed")
-                        return
-
-                    let clip_rect = tile.size().to_screen_int_rect(0, 0)
-                    if let subpix0 = self.subpixmap(tile.to_int_rect()):
-                        var subpix = subpix0
-                        if let blitter0 = RasterPipelineBlitter.new_mask(&subpix):
-                            var blitter = blitter0
-                            # We're ignoring "errors" here, because `fill_path` will return
-                            # `None` when rendering a tile that doesn't have a path on it.
-                            # Which is not an error in this case.
-                            if anti_alias:
-                                scan_aa_fill_path(&tiled, fill_rule, clip_rect, &blitter)
-                            else:
-                                scan_fill_path(&tiled, fill_rule, clip_rect, &blitter)
-                            blitter.release()
-
-                    let ts2 = Transform.from_translate((f32)tile.x(), (f32)tile.y())
-                    if not tiled.transform(ts2):
-                        return # technically unreachable
-            else:
-                let clip_rect = self.size_.to_screen_int_rect(0, 0)
-                var subpix = self.as_subpixmap()
-                var blitter = RasterPipelineBlitter.new_mask(&subpix) else return # nothing to do, all good
-                defer blitter.release()
-
-                if anti_alias:
-                    scan_aa_fill_path(path, fill_rule, clip_rect, &blitter)
-                else:
-                    scan_fill_path(path, fill_rule, clip_rect, &blitter)
-        else:
+    ## fill_path, with the path's coverage clipped to `clip` (the bounds of the clip the path
+    ## is set in).
+    mutating func fill_path_clipped(path: const Path*, fill_rule: FillRule, anti_alias: bool, transform: Transform, clip: IRect):
+        if not transform.is_identity():
             var transformed = path.clone()
             defer transformed.release()
             if not transformed.transform(transform):
                 # log::warn!("path transformation failed")
                 return
+            self.fill_path_clipped(&transformed, fill_rule, anti_alias, Transform.identity(), clip)
+            return
 
-            self.fill_path(&transformed, fill_rule, anti_alias, Transform.identity())
+        if is_too_big_for_math(path):
+            # log::warn!("path coordinates are too big")
+            return
+
+        # Since we assert that the BuilderBlitter will never blit outside the intersection of
+        # clip and ibounds, we create the builder with the snug bounds.
+        let bounds = irect_round_out(path.bounds()).intersect(clip) else return
+        var builder = MaskBuilderBlitter(mask = &self, bounds = bounds)
+        let rect_clip = RasterClip(kind = .rect, bounds = bounds, mask = none)
+        if anti_alias:
+            anti_fill_path_rgn(path, fill_rule, &rect_clip, &builder, true)
+        else:
+            fill_path_rgn(path, fill_rule, &rect_clip, &builder)
 
     ## Intersects the provided path with the current clipping path. A temporary mask with
-    ## the same size as the current one will be created.
+    ## the same size as the current one will be created. The coverages multiply, as
+    ## SkAAClip's intersection does.
     pub mutating func intersect_path(path: const Path*, fill_rule: FillRule, anti_alias: bool, transform: Transform):
         var submask = Mask.new_(self.width(), self.height()) else trap("unreachable")
         defer submask.release()
-        submask.fill_path(path, fill_rule, anti_alias, transform)
+        # The new path's coverage is computed within the current clip's bounds
+        # (SkRasterClip::op builds the path's clip with getBounds()).
+        let info = MaskClipInfo.of(&self)
+        var clip = IRect.ltrb(0, 0, (i32)self.width(), (i32)self.height())
+        if info.kind != .empty:
+            clip = info.bounds
+        submask.fill_path_clipped(path, fill_rule, anti_alias, transform, clip)
 
         for i in 0..<self.data_.length:
             self.data_[i] = premultiply_u8(self.data_[i], submask.data_[i])
@@ -228,3 +204,60 @@ struct SubMaskRef:
 
     func mask_ctx() -> MaskCtx:
         return MaskCtx(data = self.data, real_width = self.real_width)
+
+# mark: MaskBuilderBlitter ====================================================================
+
+## SkAAClip::Builder::Blitter: writes coverage into a mask, within `bounds` (the builder
+## trims the analytic filler's tiny spills past the path's bounds). The coverage is drawn
+## over the existing value (on a clear mask it is the coverage).
+struct MaskBuilderBlitter: Blitter:
+    var mask: Mask*
+    var bounds: IRect
+
+    mutating func put(x: i32, y: i32, alpha: u8):
+        if x < self.bounds.left or x >= self.bounds.right or y < self.bounds.top or y >= self.bounds.bottom:
+            return
+        let i = (usize)y * (usize)self.mask.width() + (usize)x
+        let old = (u32)self.mask.data_[i]
+        let a = (u32)alpha
+        self.mask.data_[i] = (u8)(a + mul_div255_round(old, 255 - a))
+
+    pub mutating func blit_h(x: i32, y: i32, width: i32):
+        for i in 0..<width:
+            self.put(x + i, y, 0xFF)
+
+    pub mutating func blit_anti_h(x: i32, y: i32, antialias: AlphaU8[], runs: AlphaRun[]):
+        var i: usize = 0
+        while runs[i] != 0:
+            let count = (usize)runs[i]
+            for j in 0..<count:
+                self.put(x + (i32)(i + j), y, antialias[i])
+            i += count
+
+    pub mutating func blit_v(x: i32, y: i32, height: i32, alpha: AlphaU8):
+        for i in 0..<height:
+            self.put(x, y + i, alpha)
+
+    pub mutating func blit_rect(x: i32, y: i32, width: i32, height: i32):
+        for yy in y..<y + height:
+            self.blit_h(x, yy, width)
+
+    pub mutating func blit_anti_rect(x0: i32, y: i32, width0: i32, height: i32, left_alpha: AlphaU8, right_alpha: AlphaU8):
+        # addAntiRectRun: no matter whether left_alpha is 0 or positive, [x, x+1] is the
+        # left-most column and [x+1, x+1+width] the rect with full alpha.
+        for row in y..<y + height:
+            if left_alpha > 0:
+                self.put(x0, row, left_alpha)
+            for i in 0..<width0:
+                self.put(x0 + 1 + i, row, 0xFF)
+            if right_alpha > 0:
+                self.put(x0 + 1 + width0, row, right_alpha)
+
+    pub mutating func blit_mask(mask: const BlitMask*, clip: IRect):
+        trap("raster: ---- did not expect to get called here")
+
+    pub mutating func blit_anti_h2(x: i32, y: i32, alpha0: AlphaU8, alpha1: AlphaU8):
+        blitter_default_blit_anti_h2(&self, x, y, alpha0, alpha1)
+
+    pub mutating func blit_anti_v2(x: i32, y: i32, alpha0: AlphaU8, alpha1: AlphaU8):
+        blitter_default_blit_anti_v2(&self, x, y, alpha0, alpha1)

@@ -3,10 +3,11 @@
 #   conic - conics: arcs as weighted quads, and their subdivision into quads
 #
 #   DESCRIPTION:
-#       Port of tiny-skia-path path_geometry.rs from `struct Conic` to the end: Conic
-#       (compute_quad_pow2, chop_into_quads_pow2, chop, build_unit_arc), subdivide,
-#       between and AutoConicToQuads. Paths have no conic verb; conics are converted to
-#       quads when they are added (PathBuilder.conic_to).
+#       Port of tiny-skia-path path_geometry.rs from `struct Conic` to the end (Conic,
+#       build_unit_arc, subdivide, between), with the conversion to quads brought up to Skia
+#       m144's SkGeometry.cpp: computeQuadPOW2 (up to 32 quads), chopIntoQuadsPOW2 and the
+#       non-legacy SkConic::chop, and SkAutoConicToQuads. Paths keep their conics; they
+#       become quads (within 1/4 pixel) where Skia converts them, in device space.
 #
 #==============================================================================================
 
@@ -23,40 +24,50 @@ struct Conic:
     static func zero() -> Conic:
         return Conic(points = [Point.zero(), Point.zero(), Point.zero()], weight = 0.0)
 
-    func compute_quad_pow2(tolerance: f32) -> u8?:
-        if tolerance < 0.0 or not math32.is_finite(tolerance):
-            return none
+    ## SkConic::computeQuadPOW2: how many times (as a power of 2) the conic must be halved
+    ## for its quads to be within `tolerance` ("High order approximation of conic sections
+    ## by quadratic splines", Michael Floater, 1993).
+    func compute_quad_pow2(tolerance: f32) -> u32:
+        if tolerance < 0.0 or not math32.is_finite(tolerance) or not self.points[0].is_finite() or not self.points[1].is_finite() or not self.points[2].is_finite() or bad_conic_w(self.weight):
+            return 0
 
-        if not self.points[0].is_finite() or not self.points[1].is_finite() or not self.points[2].is_finite():
-            return none
-
-        # Limit the number of suggested quads to approximate a conic
-        let max_conic_to_quad_pow2 = 4
-
-        # "High order approximation of conic sections by quadratic splines"
-        # by Michael Floater, 1993
         let a = self.weight - 1.0
         let k = a / (4.0 * (2.0 + a))
         let x = k * (self.points[0].x - 2.0 * self.points[1].x + self.points[2].x)
         let y = k * (self.points[0].y - 2.0 * self.points[1].y + self.points[2].y)
 
         var err = math32.sqrt(x * x + y * y)
-        var pow2: u8 = 0
-        for _i in 0..<max_conic_to_quad_pow2:
+        var pow2: u32 = 0
+        while pow2 < max_conic_to_quad_pow2:
             if err <= tolerance:
                 break
             err *= 0.25
             pow2 += 1
+        return pow2
 
-        # Unlike Skia, we always expect `pow2` to be at least 1.
-        # Otherwise it produces ugly results.
-        return pow2 if pow2 > 1 else 1
+    ## SkConic::chopIntoQuadsPOW2: chops this conic into N = 1 << pow2 quads, stored
+    ## continuously in points[] (1 + 2 * N of them). Answers N.
+    func chop_into_quads_pow2(pow20: u32, points: Point[]) -> usize:
+        var pow2 = pow20
+        if bad_conic_w(self.weight):
+            pow2 = 0
 
-    # Chop this conic into N quads, stored continuously in pts[], where
-    # N = 1 << pow2. The amount of storage needed is (1 + 2 * N)
-    func chop_into_quads_pow2(pow2: u8, points: Point[]) -> u8:
         points[0] = self.points[0]
-        discard(subdivide(&self, points[1..], pow2))
+        var done = false
+        if pow2 == max_conic_to_quad_pow2:  # If an extreme weight generates many quads ...
+            let pair = self.chop()
+            let d0 = pair.0
+            let d1 = pair.1
+            # check to see if the first chop generates a pair of lines
+            if equals_within_tolerance(d0.points[1], d0.points[2]) and equals_within_tolerance(d1.points[0], d1.points[1]):
+                points[1] = d0.points[1]  # set ctrl == end to make lines
+                points[2] = d0.points[1]
+                points[3] = d0.points[1]
+                points[4] = d1.points[2]
+                pow2 = 1
+                done = true
+        if not done:
+            discard(subdivide(&self, points[1..], (u8)pow2))
 
         let quad_count: usize = (usize)1 << (usize)pow2
         let pt_count = 2 * quad_count + 1
@@ -69,32 +80,128 @@ struct Conic:
             # first and last are already on the first/last pts of the hull.
             for i in 1..<pt_count - 1:
                 points[i] = self.points[1]
+        return quad_count
 
-        return (u8)1 << pow2
-
+    ## SkConic::chop (Skia m144's, not SK_SUPPORT_LEGACY_CONIC_CHOP): halves the conic.
     func chop() -> (Conic, Conic):
-        let scale = f32x2_splat(invert(1.0 + self.weight))
-        let new_w = subdivide_weight_value(self.weight)
+        # Observe that scale will always be smaller than 1 because weight > 0.
+        let scale = invert(1.0 + self.weight)
 
+        # The subdivided control points below are the sums of the following three terms.
+        # Because the terms are multiplied by something <1, and the resulting control points
+        # lie within the control points of the original then the terms and the sums below
+        # will not overflow. Note that weight * scale approaches 1 as weight becomes very
+        # large.
+        let t0 = self.points[0].to_f32x2() * f32x2_splat(scale)
+        let t1 = self.points[1].to_f32x2() * f32x2_splat(self.weight * scale)
+        let t2 = self.points[2].to_f32x2() * f32x2_splat(scale)
+
+        # Calculate the subdivided control points
+        let p1 = Point.from_f32x2(t0 + t1)
+        let p3 = Point.from_f32x2(t1 + t2)
+
+        # p2 = (t0 + 2*t1 + t2) / 2. Divide the terms by 2 before the sum to keep the sum for
+        # p2 from overflowing.
+        let p2 = Point.from_f32x2(f32x2_splat(0.5) * t0 + t1 + f32x2_splat(0.5) * t2)
+
+        let w = subdivide_weight_value(self.weight)
+        return (Conic(points = [self.points[0], p1, p2], weight = w), Conic(points = [p2, p3, self.points[2]], weight = w))
+
+    ## SkConic::evalAt: the point at `t` (SkConicCoeff: the rational quad's numerator over
+    ## its denominator).
+    func eval_at(t: f32) -> Point:
         let p0 = self.points[0].to_f32x2()
         let p1 = self.points[1].to_f32x2()
         let p2 = self.points[2].to_f32x2()
         let ww = f32x2_splat(self.weight)
 
-        let wp1 = ww * p1
-        let m = (p0 + times_2(wp1) + p2) * scale * f32x2_splat(0.5)
-        var m_pt = Point.from_f32x2(m)
-        if not m_pt.is_finite():
-            let w_d = (f64)self.weight
-            let w_2 = w_d * 2.0
-            let scale_half = 1.0 / (1.0 + w_d) * 0.5
-            m_pt.x = (f32)(((f64)self.points[0].x + w_2 * (f64)self.points[1].x + (f64)self.points[2].x) * scale_half)
-            m_pt.y = (f32)(((f64)self.points[0].y + w_2 * (f64)self.points[1].y + (f64)self.points[2].y) * scale_half)
+        let p1w = p1 * ww
+        let numer = QuadCoeff(a = p2 - times_2(p1w) + p0, b = times_2(p1w - p0), c = p0)
+        let one = f32x2_splat(1.0)
+        let denom_b = times_2(ww - one)
+        let denom = QuadCoeff(a = f32x2_splat(0.0) - denom_b, b = denom_b, c = one)
+        let tt = f32x2_splat(t)
+        return Point.from_f32x2(numer.eval(tt) / denom.eval(tt))
 
-        return (
-            Conic(points = [self.points[0], Point.from_f32x2((p0 + wp1) * scale), m_pt], weight = new_w),
-            Conic(points = [m_pt, Point.from_f32x2((wp1 + p2) * scale), self.points[2]], weight = new_w),
-        )
+    ## SkConic::evalTangentAt.
+    func eval_tangent_at(t: f32) -> Point:
+        # The derivative equation returns a zero tangent vector when t is 0 or 1, and the
+        # control point is equal to the end point. In this case, use the conic endpoints to
+        # compute the tangent.
+        if (t == 0.0 and points_equal(self.points[0], self.points[1])) or (t == 1.0 and points_equal(self.points[1], self.points[2])):
+            return Point.from_xy(self.points[2].x - self.points[0].x, self.points[2].y - self.points[0].y)
+        let p0 = self.points[0].to_f32x2()
+        let p1 = self.points[1].to_f32x2()
+        let p2 = self.points[2].to_f32x2()
+        let ww = f32x2_splat(self.weight)
+
+        let p20 = p2 - p0
+        let p10 = p1 - p0
+
+        let c = ww * p10
+        let a = ww * p20 - p20
+        let b = p20 - c - c
+
+        return Point.from_f32x2(QuadCoeff(a = a, b = b, c = c).eval(f32x2_splat(t)))
+
+    ## SkConic::chopAt(t, dst): the conic split at `t`, none if that is not finite.
+    func chop_at(t: f32) -> (Conic, Conic)?:
+        # ratquad_mapTo3D, p3d_interp and project_down
+        let w = self.weight
+        let x: f32[3] = [self.points[0].x * 1.0, self.points[1].x * w, self.points[2].x * 1.0]
+        let y: f32[3] = [self.points[0].y * 1.0, self.points[1].y * w, self.points[2].y * 1.0]
+        let z: f32[3] = [1.0, w, 1.0]
+        let x2 = p3d_interp(x, t)
+        let y2 = p3d_interp(y, t)
+        let z2 = p3d_interp(z, t)
+
+        let m = Point.from_xy(x2[1] / z2[1], y2[1] / z2[1])
+        # to put in "standard form", where w0 and w2 are both 1, we compute the new w1 as
+        # sqrt(w1*w1/w0*w2), or w1 /= sqrt(w0*w2). However, in our case, we know that for
+        # dst[0]: w0 == 1, and for dst[1], w2 == 1
+        let root = math32.sqrt(z2[1])
+        let d0 = Conic(points = [self.points[0], Point.from_xy(x2[0] / z2[0], y2[0] / z2[0]), m], weight = z2[0] / root)
+        let d1 = Conic(points = [m, Point.from_xy(x2[2] / z2[2], y2[2] / z2[2]), self.points[2]], weight = z2[2] / root)
+        for c in [d0, d1]:
+            for p in c.points:
+                if not p.is_finite():
+                    return none
+            if not math32.is_finite(c.weight):
+                return none
+        return (d0, d1)
+
+    ## SkConic::chopAt(t1, t2, dst): the part of the conic between t1 and t2.
+    func chop_between(t1: f32, t2: f32) -> Conic:
+        if t1 == 0.0 or t2 == 1.0:
+            if t1 == 0.0 and t2 == 1.0:
+                return self
+            if let pair = self.chop_at(t1 if t1 != 0.0 else t2):
+                return pair.1 if t1 != 0.0 else pair.0
+        # SkConicCoeff: the numerator and denominator quads.
+        let p0 = self.points[0].to_f32x2()
+        let p1 = self.points[1].to_f32x2()
+        let p2 = self.points[2].to_f32x2()
+        let ww = f32x2_splat(self.weight)
+        let p1w = p1 * ww
+        let numer = QuadCoeff(a = p2 - times_2(p1w) + p0, b = times_2(p1w - p0), c = p0)
+        let one = f32x2_splat(1.0)
+        let denom_b = times_2(ww - one)
+        let denom = QuadCoeff(a = f32x2_splat(0.0) - denom_b, b = denom_b, c = one)
+
+        let tt1 = f32x2_splat(t1)
+        let a_xy = numer.eval(tt1)
+        let a_zz = denom.eval(tt1)
+        let mid_tt = f32x2_splat((t1 + t2) / 2.0)
+        let d_xy = numer.eval(mid_tt)
+        let d_zz = denom.eval(mid_tt)
+        let tt2 = f32x2_splat(t2)
+        let c_xy = numer.eval(tt2)
+        let c_zz = denom.eval(tt2)
+        let half_v = f32x2_splat(0.5)
+        let b_xy = times_2(d_xy) - (a_xy + c_xy) * half_v
+        let b_zz = times_2(d_zz) - (a_zz + c_zz) * half_v
+        let ww2 = b_zz / f32x2_sqrt(a_zz * c_zz)
+        return Conic(points = [Point.from_f32x2(a_xy / a_zz), Point.from_f32x2(b_xy / b_zz), Point.from_f32x2(c_xy / c_zz)], weight = ww2[0])
 
     ## Writes the conics of the unit arc from `u_start` to `u_stop` into `dst` (5 slots) and
     ## answers how many (0 is Rust's `None`).
@@ -122,9 +229,9 @@ struct Conic:
         #
         var quadrant: usize = 0
         if y == 0.0:
-            quadrant = 2 # 180
+            quadrant = 2  # 180
         elif x == 0.0:
-            quadrant = 1 if y > 0.0 else 3 # 90 / 270
+            quadrant = 1 if y > 0.0 else 3  # 90 / 270
         else:
             if y < 0.0:
                 quadrant += 2
@@ -150,7 +257,7 @@ struct Conic:
 
         # Now compute any remaining (sub-90-degree) arc for the last conic
         let final_pt = Point.from_xy(x, y)
-        let last_q = quadrant_points[quadrant * 2] # will already be a unit-vector
+        let last_q = quadrant_points[quadrant * 2]  # will already be a unit-vector
         let dot = last_q.dot(final_pt)
 
         if dot < 1.0:
@@ -223,13 +330,58 @@ func subdivide(src: const Conic*, points0: Point[], level0: u8) -> Point[]:
 func between(a: f32, b: f32, c: f32) -> bool:
     return (a - b) * (c - b) <= 0.0
 
-struct AutoConicToQuads:
-    var points: Point[64]
-    var len: u8 # the number of quads
+## p3d_interp for one coordinate of the three homogeneous points.
+func p3d_interp(src: f32[3], t: f32) -> f32[3]:
+    let ab = src[0] + (src[1] - src[0]) * t
+    let bc = src[1] + (src[2] - src[1]) * t
+    return [ab, ab + (bc - ab) * t, bc]
 
-    static func compute(pt0: Point, pt1: Point, pt2: Point, weight: f32) -> AutoConicToQuads?:
+func f32x2_sqrt(v: F32x2) -> F32x2:
+    return [math32.sqrt(v[0]), math32.sqrt(v[1])]
+
+## conic_find_extrema: the t of the extremum of one coordinate (x or y, as src0..src2) of a
+## conic, if it has one.
+func conic_find_extrema(src0: f32, src1: f32, src2: f32, w: f32) -> f32?:
+    # conic_deriv_coeff
+    let p20 = src2 - src0
+    let p10 = src1 - src0
+    let wp10 = w * p10
+    let coeff0 = w * p20 - p20
+    let coeff1 = p20 - 2.0 * wp10
+    let coeff2 = wp10
+
+    var t_values: f32[3] = [0.0, 0.0, 0.0]
+    let roots = find_unit_quad_roots(coeff0, coeff1, coeff2, t_values)
+    if roots == 1:
+        return t_values[0]
+    return none
+
+## The most quads (as a power of 2) a conic is split into.
+let max_conic_to_quad_pow2: u32 = 5
+
+func bad_conic_w(w: f32) -> bool:
+    return w < 0.0 or not math32.is_finite(w)
+
+## SkPointPriv::EqualsWithinTolerance: the difference cannot be normalized.
+func equals_within_tolerance(p1: Point, p2: Point) -> bool:
+    let dx = p1.x - p2.x
+    let dy = p1.y - p2.y
+    return not (math32.is_finite(dx) and math32.is_finite(dy) and (dx != 0.0 or dy != 0.0))
+
+## SkAutoConicToQuads: the quads approximating a conic within a tolerance. Quad i is
+## points[2 * i ..= 2 * i + 2].
+struct AutoConicToQuads:
+    var points: Point[65]
+    ## The number of quads.
+    var len: usize
+
+    static func compute(pt0: Point, pt1: Point, pt2: Point, weight: f32, tolerance: f32) -> AutoConicToQuads:
         let conic = Conic.new_(pt0, pt1, pt2, weight)
-        let pow2 = conic.compute_quad_pow2(0.25) else return none
-        var result: AutoConicToQuads
+        let pow2 = conic.compute_quad_pow2(tolerance)
+        var result: AutoConicToQuads = ---
         result.len = conic.chop_into_quads_pow2(pow2, result.points)
         return result
+
+    ## Quad i's three points.
+    func quad(i: usize) -> const Point[]:
+        return self.points[2 * i..<2 * i + 3]

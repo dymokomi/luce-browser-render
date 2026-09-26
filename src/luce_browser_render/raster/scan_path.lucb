@@ -1,46 +1,17 @@
 #==============================================================================================
 #
-#   scan_path - the non-AA rectangle and path scan converters
+#   scan_path - the non-AA path scan converter
 #
 #   DESCRIPTION:
-#       Port of tiny-skia scan/mod.rs (fill_rect, fill_int_rect, fill_rect_aa) and
-#       scan/path.rs (fill_path, conservative rounding, fill_path_impl, and the active edge
-#       list walk of SkScan_Path.cpp: walk_edges, insert/remove/backward-insert of edges).
-#       `fill_path_impl` is shared with the supersampling converter (scan_path_aa.lucb),
-#       which calls it with a shift and its SuperBlitter.
+#       Port of tiny-skia scan/path.rs (conservative rounding, fill_path_impl, and the
+#       active edge list walk of SkScan_Path.cpp: walk_edges, insert/remove/backward-insert
+#       of edges), brought up to Skia m144's sk_fill_path: edges sorted with SkTQSort,
+#       edges culled to the right only for concave paths, and walk_simple_edges for convex
+#       ones. The entry point with a clip is raster_fill_path (scan_raster_clip.lucb).
 #
 #==============================================================================================
 
-# mark: scan/mod.rs ===========================================================================
-
-func scan_fill_rect(rect: Rect, clip: ScreenIntRect, blitter: Blitter):
-    if let r = rect.round():
-        fill_int_rect(r, clip, blitter)
-
-func fill_int_rect(rect0: IntRect, clip: ScreenIntRect, blitter: Blitter):
-    let rect1 = rect0.intersect(clip.to_int_rect()) else return # everything was clipped out
-    let rect = rect1.to_screen_int_rect() else return
-    var b = blitter
-    b.blit_rect(rect)
-
-func scan_fill_rect_aa(rect: Rect, clip: ScreenIntRect, blitter: Blitter):
-    hairline_aa_fill_rect(rect, clip, blitter)
-
 # mark: scan/path.rs ==========================================================================
-
-func scan_fill_path(path: const Path*, fill_rule: FillRule, clip: ScreenIntRect, blitter: Blitter):
-    let ir = conservative_round_to_int(path.bounds()) else return
-
-    var path_contained_in_clip = false
-    if let bounds = ir.to_screen_int_rect():
-        path_contained_in_clip = clip.contains(bounds)
-    else:
-        # If bounds cannot be converted into ScreenIntRect, the path is out of clip.
-        path_contained_in_clip = false
-
-    # TODO: SkScanClipper
-
-    fill_path_impl(path, fill_rule, clip, ir.y(), ir.bottom(), 0, path_contained_in_clip, blitter)
 
 # Conservative rounding function, which effectively nudges the int-rect to be slightly
 # larger than Rect::round() might have produced. This is a safety-net for the scan-converter,
@@ -80,65 +51,160 @@ func round_up_to_int(x: f32) -> i32:
     xx += conservative_round_bias
     return saturate_from64(math.floor(xx))
 
-func edge_less(a: const Edge*, b: const Edge*) -> bool:
-    var value_a = a.data.line.first_y
-    var value_b = b.data.line.first_y
+## compare_edges of SkScan_Path.cpp, on an edge's sort key.
+func basic_edge_key_less(a: const EdgeSortKey*, b: const EdgeSortKey*) -> bool:
+    if a.upper_y != b.upper_y:
+        return a.upper_y < b.upper_y
+    return a.x < b.x
 
-    if value_a == value_b:
-        value_a = a.data.line.x
-        value_b = b.data.line.x
-
-    return value_a < value_b
-
-func fill_path_impl(path: const Path*, fill_rule: FillRule, clip_rect: ScreenIntRect, start_y0: i32, stop_y0: i32, shift_edges_up: i32, path_contained_in_clip: bool, blitter: Blitter):
+## sk_fill_path: fills `path` between rows `start_y0` and `stop_y0`, clipped to `clip_rect`
+## unless the path is contained in it.
+func scan_fill_path_impl(path: const Path*, fill_rule: FillRule, clip_rect: ScreenIntRect, start_y0: i32, stop_y0: i32, path_contained_in_clip: bool, blitter: Blitter):
     var start_y = start_y0
     var stop_y = stop_y0
-    let shifted_clip = ShiftedIntRect.new_(clip_rect, shift_edges_up) else return
+    let shifted_clip = ShiftedIntRect.new_(clip_rect, 0) else return
+    let convex = path_is_convex(path)
 
     let clip: const ShiftedIntRect*? = none if path_contained_in_clip else &shifted_clip
-    var edges = BasicEdgeBuilder.build_edges(path, clip, shift_edges_up) else return # no edges to render, just return
+    var built = BasicEdgeBuilder.build_edges(path, clip, 0, not convex) else return  # no edges to render, just return
+    defer built.release()
+    let count = built.len
+
+    # SkTQSort, as Skia sorts its edge list (the sort is not stable).
+    let keys = (alloc EdgeSortKey[count] in memory.heap) else trap("raster: out of memory")
+    defer free(keys) in memory.heap
+    for i in 0..<count:
+        keys[i] = EdgeSortKey(upper_y = built.data[i].data.line.first_y, x = built.data[i].data.line.x, dx = 0, index = (u32)i)
+    sk_tqsort(keys, basic_edge_key_less)
+
+    # The sorted edges with a head (index 0) and a tail (index count + 1).
+    var edges: Vec[Edge]
     defer edges.release()
-
-    stable_sort(edges.view(), edge_less)
-
-    for i in 0..<edges.len:
-        # 0 will be set later, so start with 1.
-        edges.data[i].data.line.prev = (u32)i + 0
-        edges.data[i].data.line.next = (u32)i + 2
-
-    let edge_head_y = i32_min
-    let edge_tail_y = i32_max
-
+    edges.reserve(count + 2)
     var head_line: LineEdge
     head_line.prev = edge_none
     head_line.next = 1
     head_line.x = i32_min
-    head_line.first_y = edge_head_y
-    edges.insert(0, Edge.from_line(head_line))
-
+    head_line.first_y = i32_min
+    edges.push(Edge.from_line(head_line))
+    for i in 0..<count:
+        var e = built.data[(usize)keys[i].index]
+        e.data.line.prev = (u32)i
+        e.data.line.next = (u32)i + 2
+        edges.push(e)
     var tail_line: LineEdge
-    tail_line.prev = (u32)edges.len - 1
+    tail_line.prev = (u32)count
     tail_line.next = edge_none
-    tail_line.first_y = edge_tail_y
+    tail_line.first_y = i32_max
     edges.push(Edge.from_line(tail_line))
 
-    start_y <<= shift_edges_up
-    stop_y <<= shift_edges_up
-
-    let top = (i32)shifted_clip.shifted().y()
+    let top = (i32)clip_rect.y()
     if not path_contained_in_clip and start_y < top:
         start_y = top
 
-    let bottom = (i32)shifted_clip.shifted().bottom()
+    let bottom = (i32)clip_rect.bottom()
     if not path_contained_in_clip and stop_y > bottom:
         stop_y = bottom
 
     if start_y < 0 or stop_y < 0:
         return
 
-    # TODO: walk_simple_edges
+    # count >= 2 is required as the convex walker does not handle missing right edges
+    if convex and count >= 2:
+        walk_simple_edges(edges.view(), blitter, start_y, stop_y)
+    else:
+        walk_edges(fill_rule, (u32)start_y, (u32)stop_y, clip_rect.right(), edges.view(), blitter)
 
-    walk_edges(fill_rule, (u32)start_y, (u32)stop_y, shifted_clip.shifted().right(), edges.view(), blitter)
+## update_edge: returns true if we're NOT done with this edge.
+func update_edge(edge: Edge*, last_y: i32) -> bool:
+    if last_y != edge.data.line.last_y:
+        return true
+    match edge.kind:
+        .quadratic:
+            return edge.data.quad.curve_count > 0 and edge.data.quad.update()
+        .cubic:
+            return edge.data.cubic.curve_count < 0 and edge.data.cubic.update()
+        _:
+            return false
+
+## walk_simple_edges: needs Y to only change once (looser than convex in X).
+func walk_simple_edges(edges: Edge[], blitter0: Blitter, start_y: i32, stop_y: i32):
+    var blitter = blitter0
+    var left_e = (usize)edges[0].data.line.next
+    var rite_e = (usize)edges[left_e].data.line.next
+    var curr_e = (usize)edges[rite_e].data.line.next
+
+    # our edge choppers for curves can result in the initial edges not lining up, so we
+    # take the max.
+    let lt = edges[left_e].data.line.first_y
+    let rt = edges[rite_e].data.line.first_y
+    var local_top = lt if lt > rt else rt
+    if local_top < start_y:
+        return
+
+    while local_top < stop_y:
+        let lb = edges[left_e].data.line.last_y
+        let rb = edges[rite_e].data.line.last_y
+        var local_bot = lb if lb < rb else rb
+        if local_bot > stop_y - 1:
+            local_bot = stop_y - 1
+        if local_top > local_bot:
+            return
+
+        var left = edges[left_e].data.line.x
+        let d_left = edges[left_e].data.line.dx
+        var rite = edges[rite_e].data.line.x
+        let d_rite = edges[rite_e].data.line.dx
+        var count = local_bot - local_top
+
+        if d_left == 0 and d_rite == 0:
+            var l = fdot16_round_to_i32(left)
+            var r = fdot16_round_to_i32(rite)
+            if l > r:
+                let t = l
+                l = r
+                r = t
+            if l < r:
+                count += 1
+                blitter.blit_rect(l, local_top, r - l, count)
+            local_top = local_bot + 1
+        else:
+            while true:
+                var l = fdot16_round_to_i32(left)
+                var r = fdot16_round_to_i32(rite)
+                if l > r:
+                    let t = l
+                    l = r
+                    r = t
+                if l < r:
+                    blitter.blit_h(l, local_top, r - l)
+                # Either/both of these might overflow, since we perform this step even if
+                # (later) we determine that we are done with the edge, and so the computed
+                # left or rite edge will not be used (see update_edge).
+                left = left +% d_left
+                rite = rite +% d_rite
+                local_top += 1
+                count -= 1
+                if count < 0:
+                    break
+
+        edges[left_e].data.line.x = left
+        edges[rite_e].data.line.x = rite
+
+        if not update_edge(&edges[left_e], local_bot):
+            if edges[curr_e].data.line.first_y >= stop_y:
+                return  # we're done
+            left_e = curr_e
+            curr_e = (usize)edges[curr_e].data.line.next
+            if edges[left_e].data.line.first_y != local_top:
+                return
+        if not update_edge(&edges[rite_e], local_bot):
+            if edges[curr_e].data.line.first_y >= stop_y:
+                return  # we're done
+            rite_e = curr_e
+            curr_e = (usize)edges[curr_e].data.line.next
+            if edges[rite_e].data.line.first_y != local_top:
+                return
 
 # TODO: simplify!
 func walk_edges(fill_rule: FillRule, start_y: u32, stop_y: u32, right_clip: u32, edges: Edge[], blitter0: Blitter):
@@ -153,7 +219,7 @@ func walk_edges(fill_rule: FillRule, start_y: u32, stop_y: u32, right_clip: u32,
 
         var curr_idx = (usize)edges[0].data.line.next
         while edges[curr_idx].data.line.first_y <= (i32)curr_y:
-            let x = (u32)fdot16_round_to_i32(edges[curr_idx].data.line.x) # TODO: check
+            let x = (u32)fdot16_round_to_i32(edges[curr_idx].data.line.x)  # TODO: check
 
             if (w & winding_mask) == 0:
                 # we're starting interval
@@ -165,7 +231,7 @@ func walk_edges(fill_rule: FillRule, start_y: u32, stop_y: u32, right_clip: u32,
                 # we finished an interval
                 let width = x - left
                 if width != 0:
-                    blitter.blit_h(left, curr_y, width)
+                    blitter.blit_h((i32)left, (i32)curr_y, (i32)width)
 
             let next_idx = edges[curr_idx].data.line.next
             var new_x: FDot16
@@ -215,7 +281,7 @@ func walk_edges(fill_rule: FillRule, start_y: u32, stop_y: u32, right_clip: u32,
             # was our right-edge culled away?
             let width = right_clip - left
             if width != 0:
-                blitter.blit_h(left, curr_y, width)
+                blitter.blit_h((i32)left, (i32)curr_y, (i32)width)
 
         curr_y += 1
         if curr_y >= stop_y:

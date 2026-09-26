@@ -1,0 +1,111 @@
+#==============================================================================================
+#
+#   lowp_image - the image sampling stages of the low precision pipeline
+#
+#   DESCRIPTION:
+#       Port of Skia m144's lowp gather_8888 and bilerp_clamp_8888 (namespace lowp of
+#       src/opts/SkRasterPipeline_opts.h, as the NEON build computes them): nearest
+#       sampling with the gather context's clamp and round-down-at-integer snapping, and
+#       the fixed point bilinear filter of clamped 8888 images. The image is the pipeline's
+#       source pixmap.
+#
+#       Copyright (c) 2018 Google Inc. All rights reserved.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+## The smallest normal f32 (std::numeric_limits<float>::min()).
+let f32_min_positive: f32 = 1.17549435e-38
+
+## The pixel at `index` as u16 channels (from_8888).
+func lowp_pixel_at(pixels: const PremultipliedColorU8[], index: u32, r: U16x16*, g: U16x16*, b: U16x16*, a: U16x16*, lane: usize):
+    let c = pixels[(usize)index]
+    (*r)[lane >> 3][lane & 7] = (u16)c.red()
+    (*g)[lane >> 3][lane & 7] = (u16)c.green()
+    (*b)[lane >> 3][lane & 7] = (u16)c.blue()
+    (*a)[lane >> 3][lane & 7] = (u16)c.alpha()
+
+## ix_and_ptr of float coordinates: clamp to (0, limit) (lowp's min/max), snap integer
+## coordinates down when the context says so, truncate.
+func lowp_gather_index(ctx: const GatherCtx*, stride: u32, x0: f32, y0: f32) -> u32:
+    let w = f32.bits(ctx.width.bits() - 1)  # Exclusive -> inclusive.
+    let h = f32.bits(ctx.height.bits() - 1)
+    let xc = f32_min_positive if not (f32_min_positive < x0) else x0
+    let yc = f32_min_positive if not (f32_min_positive < y0) else y0
+    let x = xc if xc < w else w
+    let y = yc if yc < h else h
+    let xs = f32.bits(x.bits() -% ctx.round_down_at_integer)
+    let ys = f32.bits(y.bits() -% ctx.round_down_at_integer)
+    return (u32)f32_trunc_i32(ys) *% stride +% (u32)f32_trunc_i32(xs)
+
+func lowp_gather(p: LowpPipeline*):
+    let x = lowp_join(p.r, p.g)
+    let y = lowp_join(p.b, p.a)
+    let pixels = p.pixmap_src.pixels()
+    let stride = p.pixmap_src.width()
+    for l: usize in 0..<16:
+        let ix = lowp_gather_index(&p.ctx.gather, stride, x[l >> 2][l & 3], y[l >> 2][l & 3])
+        lowp_pixel_at(pixels, ix, &p.r, &p.g, &p.b, &p.a, l)
+
+    lowp_next_stage(p)
+
+## vqrdmulhq_s16: (2 * a * b + (1 << 15)) >> 16, saturated.
+func scaled_mult(a: i16, b: i16) -> i16:
+    let v = (2 * (i64)a * (i64)b + (1 << 15)) >> 16
+    return 32767 if v > 32767 else (i16)v
+
+## The lerp of two u8 values by tx (Q15), halved: see bilerp_clamp_8888.
+func bilerp_lerp_x(tx: i16, left: u16, right: u16) -> u16:
+    let width = (i16)(right -% left) << 7
+    let middle = (right +% left) << 7
+    # constrained_add: the sum is known to fit an unsigned 16-bit value.
+    let v2 = (u16)scaled_mult(tx, width) +% middle +% 1
+    return v2 >> 1
+
+func bilerp_lerp_y(ty: i16, top: u16, bottom: u16) -> u16:
+    let width = (i16)bottom -% (i16)top
+    let middle = bottom +% top
+    let blend = (u16)scaled_mult(ty, width) +% middle +% 0x80
+    return blend >> 8
+
+## ix_and_ptr of integer coordinates: clamp to the image.
+func lowp_clamp_index(pixmap: PixmapRef, x: i32, y: i32) -> u32:
+    let w = (i32)pixmap.width() - 1
+    let h = (i32)pixmap.height() - 1
+    let ax = 0 if x < 0 else (w if x > w else x)
+    let ay = 0 if y < 0 else (h if y > h else y)
+    return (u32)ay * pixmap.width() + (u32)ax
+
+## A specialized fused image shader for clamp-x, clamp-y, non-sRGB sampling, in fixed point.
+func lowp_bilerp_clamp_8888(p: LowpPipeline*):
+    let x = lowp_join(p.r, p.g)
+    let y = lowp_join(p.b, p.a)
+    let pixels = p.pixmap_src.pixels()
+    for l: usize in 0..<16:
+        # Quantize sample point and transform into lerp coordinates converting them to 16.16
+        # fixed point number.
+        let qx = f32_trunc_i32(math32.floor(65536.0 * x[l >> 2][l & 3] + 0.5)) -% 32768
+        let qy = f32_trunc_i32(math32.floor(65536.0 * y[l >> 2][l & 3] + 0.5)) -% 32768
+
+        # Calculate screen coordinates sx & sy by flooring qx and qy.
+        let sx = qx >> 16
+        let sy = qy >> 16
+
+        # tx and ty on the interval of [-1, 1) in Q15: {q} * 2 - 1, the {} done by the cast
+        # and the - 1 by the ^ 0x8000.
+        let tx = (i16)((qx ^ 0x8000) & 0xFFFF)
+        let ty = (i16)((qy ^ 0x8000) & 0xFFFF)
+
+        let tl = pixels[(usize)lowp_clamp_index(p.pixmap_src, sx, sy)]
+        let tr = pixels[(usize)lowp_clamp_index(p.pixmap_src, sx +% 1, sy)]
+        let bl = pixels[(usize)lowp_clamp_index(p.pixmap_src, sx, sy +% 1)]
+        let br = pixels[(usize)lowp_clamp_index(p.pixmap_src, sx +% 1, sy +% 1)]
+
+        let h = l >> 3
+        let k = l & 7
+        p.r[h][k] = bilerp_lerp_y(ty, bilerp_lerp_x(tx, (u16)tl.red(), (u16)tr.red()), bilerp_lerp_x(tx, (u16)bl.red(), (u16)br.red()))
+        p.g[h][k] = bilerp_lerp_y(ty, bilerp_lerp_x(tx, (u16)tl.green(), (u16)tr.green()), bilerp_lerp_x(tx, (u16)bl.green(), (u16)br.green()))
+        p.b[h][k] = bilerp_lerp_y(ty, bilerp_lerp_x(tx, (u16)tl.blue(), (u16)tr.blue()), bilerp_lerp_x(tx, (u16)bl.blue(), (u16)br.blue()))
+        p.a[h][k] = bilerp_lerp_y(ty, bilerp_lerp_x(tx, (u16)tl.alpha(), (u16)tr.alpha()), bilerp_lerp_x(tx, (u16)bl.alpha(), (u16)br.alpha()))
+
+    lowp_next_stage(p)

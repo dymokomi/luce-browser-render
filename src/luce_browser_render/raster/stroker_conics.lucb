@@ -1,0 +1,133 @@
+#==============================================================================================
+#
+#   stroker_conics - stroking conics
+#
+#   DESCRIPTION:
+#       Port of the conic half of Skia m144 src/core/SkStroke.cpp, which tiny-skia (whose
+#       paths have no conics) leaves out: SkPathStroker::conicTo, CheckConicLinear,
+#       conicPerpRay, conicQuadEnds, compareQuadConic and conicStroke. A conic's outline is
+#       approximated with quads within the stroker's tolerance, as for quads and cubics.
+#
+#       Copyright (c) 2008 The Android Open Source Project
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+## The index of the conic's limit in recursive_limits.
+let conic_recursive_limit: usize = 2
+
+## SkPathStroker::conicTo.
+func stroker_conic_to(s: PathStroker*, pt1: Point, pt2: Point, weight: f32):
+    let conic = Conic.new_(s.prev_pt, pt1, pt2, weight)
+    let (reduction, reduction_type) = check_conic_linear(&conic)
+    if reduction_type == .point:
+        # If the stroke consists of a moveTo followed by a degenerate curve, treat it as if it
+        # were followed by a zero-length line. Lines without length can have square and round
+        # end caps.
+        s.line_to(pt2, none)
+        return
+    if reduction_type == .line:
+        s.line_to(pt2, none)
+        return
+    if reduction_type == .degenerate:
+        s.line_to(reduction, none)
+        let save_joiner = s.joiner
+        s.joiner = round_joiner
+        s.line_to(pt2, none)
+        s.joiner = save_joiner
+        return
+
+    var normal_ab = Point.zero()
+    var unit_ab = Point.zero()
+    var normal_bc = Point.zero()
+    var unit_bc = Point.zero()
+    if not s.pre_join_to(pt1, false, &normal_ab, &unit_ab):
+        s.line_to(pt2, none)
+        return
+    var quad_points = QuadConstruct.default()
+    init_quad(s, .outer, 0.0, 1.0, &quad_points)
+    discard(conic_stroke(s, &conic, &quad_points))
+    init_quad(s, .inner, 0.0, 1.0, &quad_points)
+    discard(conic_stroke(s, &conic, &quad_points))
+    # setConicEndNormal: setQuadEndNormal on the conic's points
+    if not set_normal_unit_normal(conic.points[1], conic.points[2], s.res_scale, s.radius, &normal_bc, &unit_bc):
+        normal_bc = normal_ab
+        unit_bc = unit_ab
+    s.post_join_to(pt2, normal_bc, unit_bc)
+
+## SkPathStroker::CheckConicLinear.
+func check_conic_linear(conic: const Conic*) -> (Point, ReductionType):
+    let degenerate_ab = degenerate_vector(conic.points[1].sub(conic.points[0]))
+    let degenerate_bc = degenerate_vector(conic.points[2].sub(conic.points[1]))
+    if degenerate_ab and degenerate_bc:
+        return (Point.zero(), ReductionType.point)
+    if degenerate_ab or degenerate_bc:
+        return (Point.zero(), ReductionType.line)
+    if not quad_in_line(conic.points):
+        return (Point.zero(), ReductionType.quad)
+    # SkFindConicMaxCurvature would be a better solution, once we know how to implement it.
+    # Quad curvature is a reasonable substitute
+    let t = find_quad_max_curvature(conic.points)
+    if t == 0.0 or math32.is_nan(t):
+        return (Point.zero(), ReductionType.line)
+    return (conic.eval_at(t), ReductionType.degenerate)
+
+## SkPathStroker::conicPerpRay: given a conic and t, the point on the curve, its
+## perpendicular, and the perpendicular tangent.
+func conic_perp_ray(s: const PathStroker*, conic: const Conic*, t: f32, t_pt: Point*, on_pt: Point*, tangent: Point*?):
+    *t_pt = conic.eval_at(t)
+    var dxy = conic.eval_tangent_at(t)
+    if dxy.is_zero():
+        dxy = conic.points[2].sub(conic.points[0])
+    set_ray_points(s, *t_pt, &dxy, on_pt, tangent)
+
+## SkPathStroker::conicQuadEnds: given a conic and a t range, find the start and end if they
+## haven't been found already.
+func conic_quad_ends(s: const PathStroker*, conic: const Conic*, quad_points: QuadConstruct*):
+    if not quad_points.start_set:
+        var conic_start_pt = Point.zero()
+        conic_perp_ray(s, conic, quad_points.start_t, &conic_start_pt, &quad_points.quad[0], &quad_points.tangent_start)
+        quad_points.start_set = true
+    if not quad_points.end_set:
+        var conic_end_pt = Point.zero()
+        conic_perp_ray(s, conic, quad_points.end_t, &conic_end_pt, &quad_points.quad[2], &quad_points.tangent_end)
+        quad_points.end_set = true
+
+## SkPathStroker::compareQuadConic.
+func compare_quad_conic(s: const PathStroker*, conic: const Conic*, quad_points: QuadConstruct*) -> ResultType:
+    # get the quadratic approximation of the stroke
+    conic_quad_ends(s, conic, quad_points)
+    let result_type = intersect_ray(s, .ctrl_pt, quad_points)
+    if result_type != .quad:
+        return result_type
+    # project a ray from the curve to the stroke
+    var ray0 = Point.zero()  # points near midpoint on quad, midpoint on conic
+    var ray1 = Point.zero()
+    conic_perp_ray(s, conic, quad_points.mid_t, &ray1, &ray0, none)
+    return stroke_close_enough(s, quad_points.quad, [ray0, ray1], quad_points)
+
+## SkPathStroker::conicStroke.
+func conic_stroke(s: PathStroker*, conic: const Conic*, quad_points: QuadConstruct*) -> bool:
+    let result_type = compare_quad_conic(s, conic, quad_points)
+    if result_type == .quad:
+        let path: PathBuilder* = &s.outer if s.stroke_type == .outer else &s.inner
+        path.quad_to(quad_points.quad[1].x, quad_points.quad[1].y, quad_points.quad[2].x, quad_points.quad[2].y)
+        return true
+    if result_type == .degenerate:
+        add_degenerate_line(s, quad_points)
+        return true
+    s.recursion_depth += 1
+    if s.recursion_depth > recursive_limits[conic_recursive_limit]:
+        # If we stop making progress, just emit a line and move on
+        add_degenerate_line(s, quad_points)
+        return true
+    var half_quad = QuadConstruct.default()
+    discard(half_quad.init_with_start(quad_points))
+    if not conic_stroke(s, conic, &half_quad):
+        return false
+    discard(half_quad.init_with_end(quad_points))
+    if not conic_stroke(s, conic, &half_quad):
+        return false
+    s.recursion_depth -= 1
+    return true

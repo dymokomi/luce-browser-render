@@ -80,7 +80,7 @@ func hair_line_rgn(points: const Point[], clip: const ScreenIntRect*?, blitter0:
 
             while true:
                 if ix0 >= 0 and start_y >= 0 and start_y < max_y:
-                    blitter.blit_h((u32)ix0, (u32)(start_y >> 16), 1)
+                    blitter.blit_h(ix0, start_y >> 16, 1)
 
                 start_y += slope
                 ix0 += 1
@@ -109,7 +109,7 @@ func hair_line_rgn(points: const Point[], clip: const ScreenIntRect*?, blitter0:
 
             while true:
                 if start_x >= 0 and iy0 >= 0:
-                    blitter.blit_h((u32)(start_x >> 16), (u32)iy0, 1)
+                    blitter.blit_h(start_x >> 16, iy0, 1)
 
                 start_x += slope
                 iy0 += 1
@@ -152,52 +152,69 @@ func stroke_path_impl(path: const Path*, line_cap: LineCap, clip: ScreenIntRect,
     var last_pt = Point.zero()
 
     var iter = path.segments()
-    while let segment = iter.next():
+    while true:
+        # A segment starts at the path's previous point (Skia's srcPts[0]), not at last_pt,
+        # which a cap may have moved.
+        let start = iter.last_point
+        let segment = iter.next() else break
         let verb = iter.curr_verb()
         let next_verb = iter.next_verb()
-        var last_pt2: Point
+        var moved_start = start
         match segment:
             .move_to(p):
                 first_pt = p
                 last_pt = p
-                last_pt2 = p
+                moved_start = p
             .line_to(p):
-                var points: Point[2] = [last_pt, p]
+                var points: Point[2] = [start, p]
                 if line_cap != .butt:
                     extend_pts(line_cap, prev_verb, next_verb, points)
 
                 line_proc(points, clip_ptr, blitter)
-                last_pt = p
-                last_pt2 = points[0]
+                last_pt = points[1]
+                moved_start = points[0]
             .quad_to(p0, p1):
-                var points: Point[3] = [last_pt, p0, p1]
+                var points: Point[3] = [start, p0, p1]
                 if line_cap != .butt:
                     extend_pts(line_cap, prev_verb, next_verb, points)
 
                 hair_quad(points, clip_ptr, inset_clip, outset_clip, compute_quad_level(points), line_proc, blitter)
 
-                last_pt = p1
-                last_pt2 = points[0]
+                last_pt = points[2]
+                moved_start = points[0]
+            .conic_to(p0, p1, weight):
+                var points: Point[3] = [start, p0, p1]
+                if line_cap != .butt:
+                    extend_pts(line_cap, prev_verb, next_verb, points)
+
+                # how close should the quads be to the original conic?
+                let quads = AutoConicToQuads.compute(points[0], points[1], points[2], weight, 0.25)
+                for q in 0..<quads.len:
+                    let quad = quads.quad(q)
+                    hair_quad(quad, clip_ptr, inset_clip, outset_clip, compute_quad_level(quad), line_proc, blitter)
+
+                last_pt = points[2]
+                moved_start = points[0]
             .cubic_to(p0, p1, p2):
-                var points: Point[4] = [last_pt, p0, p1, p2]
+                var points: Point[4] = [start, p0, p1, p2]
                 if line_cap != .butt:
                     extend_pts(line_cap, prev_verb, next_verb, points)
 
                 hair_cubic(points, clip_ptr, inset_clip, outset_clip, line_proc, blitter)
 
-                last_pt = p2
-                last_pt2 = points[0]
+                last_pt = points[3]
+                moved_start = points[0]
             .close:
                 var points: Point[2] = [last_pt, first_pt]
                 if line_cap != .butt and prev_verb == .move:
                     # cap moveTo/close to match svg expectations for degenerate segments
                     extend_pts(line_cap, prev_verb, next_verb, points)
                 line_proc(points, clip_ptr, blitter)
-                last_pt2 = points[0]
+                moved_start = points[0]
 
         if line_cap != .butt:
-            if prev_verb == .move and (verb == .line or verb == .quad or verb == .cubic):
-                first_pt = last_pt2 # the curve moved the initial point, so close to it instead
+            if prev_verb == .move and (verb == .line or verb == .quad or verb == .conic or verb == .cubic):
+                first_pt = moved_start  # the curve moved the initial point, so close to it instead
 
             prev_verb = verb
 
@@ -223,7 +240,7 @@ func extend_pts(line_cap: LineCap, prev_verb: PathVerb, next_verb: PathVerb?, po
 
         if tangent.is_zero():
             tangent = Point.from_xy(1.0, 0.0)
-            controls = points.length - 1 # If all points are equal, move all but one.
+            controls = points.length - 1  # If all points are equal, move all but one.
         else:
             discard(tangent.normalize())
 
@@ -282,7 +299,7 @@ func hair_quad(points: const Point[], clip0: const ScreenIntRect*?, inset_clip: 
 
         let bounds = compute_nocheck_quad_bounds(points) else return
         if not geometric_overlap(outset_rect, bounds):
-            return # nothing to do
+            return  # nothing to do
         elif geometric_contains(inset_rect, bounds):
             clip = none
 
@@ -360,7 +377,7 @@ func hair_cubic(points: const Point[], clip0: const ScreenIntRect*?, inset_clip:
 
         let bounds = compute_nocheck_cubic_bounds(points) else return
         if not geometric_overlap(outset_rect, bounds):
-            return # noting to do
+            return  # noting to do
         elif geometric_contains(inset_rect, bounds):
             clip = none
 
@@ -419,7 +436,8 @@ func hair_cubic2(points: const Point[], clip: const ScreenIntRect*?, line_proc: 
     if all_finite:
         tmp[lines] = points[3]
         line_proc(tmp[..<lines + 1], clip, blitter)
-    # else some point(s) are non-finite, so don't draw
+
+# else some point(s) are non-finite, so don't draw
 
 func compute_cubic_segments(points: const Point[]) -> usize:
     let p0 = points[0].to_f32x2()

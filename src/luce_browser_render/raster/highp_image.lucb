@@ -1,0 +1,256 @@
+#==============================================================================================
+#
+#   highp_image - the image sampling stages of the high precision pipeline
+#
+#   DESCRIPTION:
+#       Port of Skia m144's highp image stages (src/opts/SkRasterPipeline_opts.h) as its
+#       NEON build computes them: the repeat and mirror tiling of image coordinates,
+#       gather_8888 (nearest, with round-down-at-integer snapping), the bilinear and
+#       bicubic samplers (Skia's chain of *_setup, per-tap setup, tiling, gather and
+#       accumulate stages, fused into one stage computing the same operations in the same
+#       order), and the fused clamped bilerp_clamp_8888 and bicubic_clamp_8888. The image
+#       is the pipeline's source pixmap.
+#
+#       Copyright (c) 2018 Google Inc. All rights reserved.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+# mark: Tiling ================================================================================
+# Tile x or y to [0,limit) == [0,limit - 1 ulp] (think, sampling from images). The gather
+# stages will hard clamp the output of these stages to [0,limit)... we just need to do the
+# basic repeat or mirroring.
+
+func exclusive_repeat(v: F8, ctx: const TileCtx*) -> F8:
+    return f8_sub(v, f8_mul(f8_vfloor(f8_mul(v, f8_splat(ctx.inv_scale))), f8_splat(ctx.scale)))
+
+func exclusive_mirror(v: F8, ctx: const TileCtx*) -> F8:
+    let limit = f8_splat(ctx.scale)
+    let inv_limit = f8_splat(ctx.inv_scale)
+    let two = f8_splat(2.0)
+
+    # This is "repeat" over the range 0..2*limit
+    let u = f8_sub(v, f8_mul(f8_mul(f8_vfloor(f8_mul(f8_mul(v, inv_limit), f8_splat(0.5))), two), limit))
+    # s will be 0 when moving forward (e.g. [0, limit)) and 1 when moving backward (e.g.
+    # [limit, 2*limit)).
+    let s = f8_vfloor(f8_mul(u, inv_limit))
+    # This is the mirror result.
+    let m = f8_sub(u, f8_mul(f8_mul(two, s), f8_sub(u, limit)))
+    # Apply a bias to m if moving backwards so that we snap consistently at exact integer
+    # coords in the logical infinite image. Note that all values that have a non-zero bias
+    # applied are > 0.
+    var bits = f8_to_bits(m)
+    for h: usize in 0..<2:
+        for l: usize in 0..<4:
+            bits[h][l] = bits[h][l] +% ctx.mirror_bias_dir *% (u32)f32_trunc_i32(s[h][l])
+    return f8_from_bits(bits)
+
+func highp_tile(v: F8, mode: SpreadMode, ctx: const TileCtx*) -> F8:
+    match mode:
+        .repeat: return exclusive_repeat(v, ctx)
+        .reflect: return exclusive_mirror(v, ctx)
+        _: return v  # Pad: the gather clamps.
+
+# repeat_x then repeat_y.
+func highp_repeat(p: HighpPipeline*):
+    p.r = exclusive_repeat(p.r, &p.ctx.limit_x)
+    p.g = exclusive_repeat(p.g, &p.ctx.limit_y)
+
+    highp_next_stage(p)
+
+# mirror_x then mirror_y.
+func highp_mirror(p: HighpPipeline*):
+    p.r = exclusive_mirror(p.r, &p.ctx.limit_x)
+    p.g = exclusive_mirror(p.g, &p.ctx.limit_y)
+
+    highp_next_stage(p)
+
+# mark: Gather ================================================================================
+
+## clamp_ex: clamp v to (0, limit).
+func clamp_ex(v: f32, limit: f32) -> f32:
+    return f32_vmin(f32_vmax(f32_min_positive, v), f32.bits(limit.bits() - 1))
+
+## ix_and_ptr: the index of the pixel at (x, y), clamped to the image; integer coordinates
+## snap left/up when the context says so (we use exclusive clamp so that our min value is > 0
+## because ULP subtraction using U32 would produce a NaN if applied to +0.f).
+func gather_index(ctx: const GatherCtx*, stride: u32, x0: f32, y0: f32) -> u32:
+    let x = f32.bits(clamp_ex(x0, ctx.width).bits() -% ctx.round_down_at_integer)
+    let y = f32.bits(clamp_ex(y0, ctx.height).bits() -% ctx.round_down_at_integer)
+    return (u32)f32_trunc_i32(y) *% stride +% (u32)f32_trunc_i32(x)
+
+## gather_8888 of 8 lanes into r, g, b, a.
+func gather_8888(pixmap: PixmapRef, ctx: const GatherCtx*, x: F8, y: F8, r: F8*, g: F8*, b: F8*, a: F8*):
+    let pixels = pixmap.pixels()
+    let stride = pixmap.width()
+    var gathered: PremultipliedColorU8[8] = ---
+    for i: usize in 0..<8:
+        gathered[i] = pixels[(usize)gather_index(ctx, stride, x[i >> 2][i & 3], y[i >> 2][i & 3])]
+    highp_load_8888(gathered, r, g, b, a)
+
+func highp_gather(p: HighpPipeline*):
+    gather_8888(p.pixmap_src, &p.ctx.gather, p.r, p.g, &p.r, &p.g, &p.b, &p.a)
+
+    highp_next_stage(p)
+
+# mark: Samplers ==============================================================================
+# Whether bilinear or bicubic, all sample points are at the same fractional offset (fx,fy).
+# They're either the 4 corners of a logical 1x1 pixel or the 16 corners of a 3x3 grid
+# surrounding (x,y) at (0.5,0.5) off-center.
+
+## One tap of a sampler: tile (x, y), gather, and accumulate its color scaled by
+## scalex * scaley into `acc` (Skia's accumulate: mad(scale, c, d)).
+func sampler_tap(p: HighpPipeline*, x0: F8, y0: F8, scalex: F8, scaley: F8, acc: Rgba8*):
+    let mode = p.ctx.sampler.spread_mode
+    let x = highp_tile(x0, mode, &p.ctx.limit_x)
+    let y = highp_tile(y0, mode, &p.ctx.limit_y)
+    var c = Rgba8(r = f8_splat(0.0), g = f8_splat(0.0), b = f8_splat(0.0), a = f8_splat(0.0))
+    gather_8888(p.pixmap_src, &p.ctx.gather, x, y, &c.r, &c.g, &c.b, &c.a)
+    let scale = f8_mul(scalex, scaley)
+    acc.r = highp_mad(scale, c.r, acc.r)
+    acc.g = highp_mad(scale, c.g, acc.g)
+    acc.b = highp_mad(scale, c.b, acc.b)
+    acc.a = highp_mad(scale, c.a, acc.a)
+
+# The r, g, b, a accumulators of the samplers (a struct is a workaround:
+# compiler-issues/c_backend_address_of_local_array).
+struct Rgba8:
+    var r: F8
+    var g: F8
+    var b: F8
+    var a: F8
+
+## bilinear_setup, then the (nx, ny), (px, ny), (nx, py), (px, py) taps, then move_dst_src.
+## In bilinear interpolation, the 4 pixels at +/- 0.5 offsets from the sample pixel center
+## are combined in direct proportion to their area overlapping that logical query pixel.
+func highp_bilinear(p: HighpPipeline*):
+    let cx = p.r
+    let cy = p.g
+    let half_ = f8_splat(0.5)
+    let one = f8_splat(1.0)
+    let fx = f8_sub(f8_add(cx, half_), f8_vfloor(f8_add(cx, half_)))
+    let fy = f8_sub(f8_add(cy, half_), f8_vfloor(f8_add(cy, half_)))
+    let xs: F8[2] = [f8_add(cx, f8_splat(-0.5)), f8_add(cx, half_)]
+    let ys: F8[2] = [f8_add(cy, f8_splat(-0.5)), f8_add(cy, half_)]
+    let wx: F8[2] = [f8_sub(one, fx), fx]
+    let wy: F8[2] = [f8_sub(one, fy), fy]
+
+    var acc = Rgba8(r = f8_splat(0.0), g = f8_splat(0.0), b = f8_splat(0.0), a = f8_splat(0.0))
+    for j: usize in 0..<2:
+        for i: usize in 0..<2:
+            sampler_tap(p, xs[i], ys[j], wx[i], wy[j], &acc)
+
+    p.r = acc.r
+    p.g = acc.g
+    p.b = acc.b
+    p.a = acc.a
+    p.dr = acc.r
+    p.dg = acc.g
+    p.db = acc.b
+    p.da = acc.a
+
+    highp_next_stage(p)
+
+## A cubic's weight polynomial at t: mad(t, mad(t, mad(t, D, C), B), A).
+func bicubic_wts(t: F8, a: f32, b: f32, c: f32, d: f32) -> F8:
+    return highp_mad(t, highp_mad(t, highp_mad(t, f8_splat(d), f8_splat(c)), f8_splat(b)), f8_splat(a))
+
+## The four weights of fractional offset t, from the resampler's column-major matrix.
+func bicubic_weights(t: F8, w: const f32[16]) -> F8[4]:
+    return [bicubic_wts(t, w[0], w[4], w[8], w[12]), bicubic_wts(t, w[1], w[5], w[9], w[13]), bicubic_wts(t, w[2], w[6], w[10], w[14]), bicubic_wts(t, w[3], w[7], w[11], w[15])]
+
+## bicubic_setup, the 16 taps at -1.5, -0.5, +0.5, +1.5 (y outer, x inner), then
+## move_dst_src. The 16 pixels are combined with a non-uniform cubic filter, with higher
+## values near the center.
+func highp_bicubic(p: HighpPipeline*):
+    let cx = p.r
+    let cy = p.g
+    let half_ = f8_splat(0.5)
+    let fx = f8_sub(f8_add(cx, half_), f8_vfloor(f8_add(cx, half_)))
+    let fy = f8_sub(f8_add(cy, half_), f8_vfloor(f8_add(cy, half_)))
+    let wx = bicubic_weights(fx, p.ctx.gather.weights)
+    let wy = bicubic_weights(fy, p.ctx.gather.weights)
+    let offsets: f32[4] = [-1.5, -0.5, 0.5, 1.5]
+
+    var acc = Rgba8(r = f8_splat(0.0), g = f8_splat(0.0), b = f8_splat(0.0), a = f8_splat(0.0))
+    for j: usize in 0..<4:
+        let y = f8_add(cy, f8_splat(offsets[j]))
+        for i: usize in 0..<4:
+            sampler_tap(p, f8_add(cx, f8_splat(offsets[i])), y, wx[i], wy[j], &acc)
+
+    p.r = acc.r
+    p.g = acc.g
+    p.b = acc.b
+    p.a = acc.a
+    p.dr = acc.r
+    p.dg = acc.g
+    p.db = acc.b
+    p.da = acc.a
+
+    highp_next_stage(p)
+
+# mark: Fused clamped samplers ================================================================
+
+## bilerp_clamp_large: a specialized fused image shader for clamp-x, clamp-y, non-sRGB
+## sampling (the color accumulates unfused).
+func highp_bilerp_clamp_8888(p: HighpPipeline*):
+    let cx = p.r
+    let cy = p.g
+    let half_ = f8_splat(0.5)
+    let one = f8_splat(1.0)
+    let fx = f8_sub(f8_add(cx, half_), f8_vfloor(f8_add(cx, half_)))
+    let fy = f8_sub(f8_add(cy, half_), f8_vfloor(f8_add(cy, half_)))
+
+    var acc = Rgba8(r = f8_splat(0.0), g = f8_splat(0.0), b = f8_splat(0.0), a = f8_splat(0.0))
+    let offsets: f32[2] = [-0.5, 0.5]
+    for py in offsets:
+        for px in offsets:
+            var c = Rgba8(r = f8_splat(0.0), g = f8_splat(0.0), b = f8_splat(0.0), a = f8_splat(0.0))
+            gather_8888(p.pixmap_src, &p.ctx.gather, f8_add(cx, f8_splat(px)), f8_add(cy, f8_splat(py)), &c.r, &c.g, &c.b, &c.a)
+            let sx = fx if px > 0.0 else f8_sub(one, fx)
+            let sy = fy if py > 0.0 else f8_sub(one, fy)
+            let area = f8_mul(sx, sy)
+            acc.r = f8_add(acc.r, f8_mul(c.r, area))
+            acc.g = f8_add(acc.g, f8_mul(c.g, area))
+            acc.b = f8_add(acc.b, f8_mul(c.b, area))
+            acc.a = f8_add(acc.a, f8_mul(c.a, area))
+
+    p.r = acc.r
+    p.g = acc.g
+    p.b = acc.b
+    p.a = acc.a
+
+    highp_next_stage(p)
+
+## A specialized fused image shader for clamp-x, clamp-y, non-sRGB bicubic sampling.
+func highp_bicubic_clamp_8888(p: HighpPipeline*):
+    let cx = p.r
+    let cy = p.g
+    let half_ = f8_splat(0.5)
+    let one = f8_splat(1.0)
+    let fx = f8_sub(f8_add(cx, half_), f8_vfloor(f8_add(cx, half_)))
+    let fy = f8_sub(f8_add(cy, half_), f8_vfloor(f8_add(cy, half_)))
+    let scaley = bicubic_weights(fy, p.ctx.gather.weights)
+    let scalex = bicubic_weights(fx, p.ctx.gather.weights)
+
+    var acc = Rgba8(r = f8_splat(0.0), g = f8_splat(0.0), b = f8_splat(0.0), a = f8_splat(0.0))
+    var sample_y = f8_sub(cy, f8_splat(1.5))
+    for yy: usize in 0..<4:
+        var sample_x = f8_sub(cx, f8_splat(1.5))
+        for xx: usize in 0..<4:
+            let scale = f8_mul(scalex[xx], scaley[yy])
+            var c = Rgba8(r = f8_splat(0.0), g = f8_splat(0.0), b = f8_splat(0.0), a = f8_splat(0.0))
+            gather_8888(p.pixmap_src, &p.ctx.gather, sample_x, sample_y, &c.r, &c.g, &c.b, &c.a)
+            acc.r = highp_mad(scale, c.r, acc.r)
+            acc.g = highp_mad(scale, c.g, acc.g)
+            acc.b = highp_mad(scale, c.b, acc.b)
+            acc.a = highp_mad(scale, c.a, acc.a)
+            sample_x = f8_add(sample_x, one)
+        sample_y = f8_add(sample_y, one)
+
+    p.r = acc.r
+    p.g = acc.g
+    p.b = acc.b
+    p.a = acc.a
+
+    highp_next_stage(p)
