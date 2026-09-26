@@ -29,12 +29,6 @@ func cpu_blur_box_width(sigma: f32) -> usize:
         return 4096
     return (usize)d
 
-## Blurs `pixmap`'s four channels by `sigma_x` horizontally and `sigma_y` vertically.
-func cpu_blur_pixmap(pixmap: raster.Pixmap*, sigma_x: f32, sigma_y: f32):
-    let width = (usize)pixmap.width()
-    let height = (usize)pixmap.height()
-    cpu_blur_bytes(pixmap.data_mut(), width, height, 4, sigma_x, sigma_y)
-
 ## Blurs a coverage mask by `sigma` in both directions.
 func cpu_blur_mask(mask: raster.Mask*, sigma: f32):
     let width = (usize)mask.width()

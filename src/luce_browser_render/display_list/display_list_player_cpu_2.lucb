@@ -31,7 +31,7 @@ func cpu_map_radius(transform: raster.Transform, radius: f32) -> f32:
 
 ## The anti-aliased device coverage of `path` in the current transform.
 func cpu_canvas_path_coverage(canvas: CpuCanvas*, path: const raster.Path*, fill_rule: raster.FillRule, anti_alias: bool) -> raster.Mask:
-    var mask = raster.Mask.new_(canvas.width, canvas.height) else trap("CpuCanvas: empty size")
+    var mask = raster.Mask.new_(cpu_canvas_target(canvas).width(), cpu_canvas_target(canvas).height()) else trap("CpuCanvas: empty size")
     mask.fill_path(path, fill_rule, anti_alias, cpu_canvas_transform(canvas))
     return mask
 
@@ -98,9 +98,13 @@ func display_list_player_cpu_paint_inner_box_shadow_impl(base: DisplayListPlayer
 ## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:38 Web::Painting::DisplayListPlayerSkia::paint_text_shadow (override).
 func display_list_player_cpu_paint_text_shadow_impl(base: DisplayListPlayer*, command: PaintTextShadow):
     let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
-    # SkImageFilters::Blur's sigma is in local coordinates; the layer is in device pixels.
-    let sigma = cpu_map_radius(cpu_canvas_transform(canvas), (f32)(command.blur_radius // 2))
-    cpu_canvas_save_layer(canvas, CpuLayerEffects(blur_sigma = sigma))
+    # SkImageFilters::Blur(blur_radius / 2, blur_radius / 2, nullptr), which answers no filter
+    # for a negative sigma.
+    let sigma = (f32)(command.blur_radius // 2)
+    var blur_filter: gfx.ImageFilter*? = none
+    if sigma >= 0.0:
+        blur_filter = new gfx.ImageFilter(node = .blur(sigma_x = sigma, sigma_y = sigma, input = none)) else trap("out of memory")
+    cpu_canvas_save_layer(canvas, CpuLayerEffects(filter = blur_filter))
     let text_location = int_point_to_float_point(command.text_rect.m_location)
     display_list_player_cpu_draw_glyph_run_impl(base, DrawGlyphRun(glyph_run = command.glyph_run, rect = command.text_rect,
                                                                    translation = gfx.FloatPoint(m_x = command.draw_location.m_x + text_location.m_x, m_y = command.draw_location.m_y + text_location.m_y),
@@ -422,7 +426,7 @@ func display_list_player_cpu_apply_backdrop_filter_impl(base: DisplayListPlayer*
     defer cpu_canvas_restore(canvas)
 
     if let backdrop_filter = command.backdrop_filter:
-        cpu_canvas_save_layer_with_backdrop(canvas, &backdrop_filter)
+        cpu_canvas_save_layer_with_backdrop(canvas, gfx.filter_impl(&backdrop_filter).filter)
         cpu_canvas_restore(canvas)
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:46 Web::Painting::DisplayListPlayerSkia::draw_rect (override).
@@ -530,7 +534,7 @@ func display_list_player_cpu_apply_effects_impl(base: DisplayListPlayer*, comman
         effects.plus_darker = command.compositing_and_blending_operator == gfx.CompositingAndBlendingOperator.plus_darker
 
     if let filter = command.filter:
-        effects.filter = filter
+        effects.filter = gfx.filter_impl(&filter).filter
 
     if let mask_kind = command.mask_kind:
         if mask_kind == gfx.MaskKind.luminance:

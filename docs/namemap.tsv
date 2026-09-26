@@ -1,4 +1,5 @@
 # C++ name	package	module	Luce name	file:line	kind
+(integration: FontData::create_from_resource(Core::Resource::load_from_filesystem(path)) for a file path.)	luce-browser-render	web_fonts	font_data_create_from_file	-	addition
 (r08: CSSPixels' operators as one-line methods: from_raw, from_int, from_f32, from_f64, raw_value, to_float, to_double, to_int, might_be_saturated, add, sub, mul, mul_fraction, div, div_fraction, neg, abs, cmp, lt, le, gt, ge, compare.)	luce-browser-render	gfx	CssPixels	-	addition
 (r08: `Color(NamedColor)` as an expression.)	luce-browser-render	gfx	color_new_named_color	-	addition
 (r08: `Color(r, g, b)` as an expression.)	luce-browser-render	gfx	color_new_u8_u8_u8	-	addition

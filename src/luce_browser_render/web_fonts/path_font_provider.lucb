@@ -76,6 +76,14 @@ func path_font_provider_read_file(path: c.str) -> ak.ByteBuffer?:
         ak.byte_buffer_try_append_span_u8(&buffer, chunk[0..<count]) else return none
     return buffer
 
+## The FontData of the file at `path` (a file system path), or none when it cannot be read:
+## `FontData::create_from_resource(Core::Resource::load_from_filesystem(path))`, the resource
+## read as load_all_fonts_from_uri reads it. (Integration addition: the display list's tests
+## load their fonts with it.)
+pub func font_data_create_from_file(path: str) -> FontData*?:
+    let bytes = path_font_provider_read_file(path_font_provider_c_string(path)) else return none
+    return font_data_create_from_byte_buffer(bytes)
+
 ## The provider the current walk loads into (nftw's callback has no context).
 local var path_font_provider_walk_target: PathFontProvider*?
 

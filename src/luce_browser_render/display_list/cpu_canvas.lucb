@@ -7,12 +7,13 @@
 #       DisplayListPlayerSkia: the part of SkCanvas's behavior that player relies on, built
 #       on the raster module (the tiny-skia port). A CpuCanvas has
 #
-#       - a stack of layers: the base layer is the surface's pixels; `save_layer` pushes a
-#         transparent layer of the same size that `restore` composites into the layer below
-#         with the layer's opacity, blend mode, luminance-to-alpha color filter, blur and
-#         image filter (SkCanvas::saveLayer with an SkPaint);
+#       - a stack of layers (cpu_canvas_layers.lucb): the base layer is the surface's
+#         pixels; `save_layer` pushes a transparent layer over the clip bounds (or what its
+#         image filter reads) that `restore` draws into the layer below with the layer's
+#         opacity, blend mode, luminance-to-alpha color filter and image filter
+#         (SkCanvas::saveLayer with an SkPaint);
 #       - a stack of states (SkCanvas's MCRec): the current transform, a 2D affine
-#         transform, and the clip, kept as its device bounds plus, when it is not exactly
+#         transform into the current layer's pixels, and the clip in those pixels, kept as its device bounds plus, when it is not exactly
 #         that rectangle, an 8-bit coverage mask (anti-aliased clips as Skia's raster
 #         backend has them). Clips only narrow; `restore` brings back the saved ones.
 #
@@ -27,26 +28,6 @@
 #==============================================================================================
 
 # mark: Types ==================================================================================
-
-## How a layer is composited into the layer below it when it is restored.
-struct CpuLayerEffects:
-    ## The layer's opacity, SkPaint::setAlphaf.
-    var opacity: f32 = 1.0
-    ## The blend mode, SkPaint::setBlender.
-    var blend_mode: raster.BlendMode = raster.BlendMode.source_over
-    ## SkLumaColorFilter: the layer's luminance becomes its alpha.
-    var luminance_to_alpha: bool = false
-    ## SkImageFilters::Blur with this sigma (0: none).
-    var blur_sigma: f32 = 0.0
-    ## An image filter from the display list (applied through `apply_gfx_filter`).
-    var filter: gfx.Filter?
-    ## The plus-darker operator (a runtime blender in the Skia player), composited by hand.
-    var plus_darker: bool = false
-
-## A layer: an offscreen pixmap of the canvas size and how it is composited.
-struct CpuLayer:
-    var pixmap: raster.Pixmap
-    var effects: CpuLayerEffects
 
 ## A saved state (SkCanvas's MCRec): the transform, the clip, and the layer drawn into.
 struct CpuCanvasState:
@@ -83,7 +64,7 @@ struct CpuCanvas:
 func cpu_canvas_create(width: u32, height: u32) -> CpuCanvas*:
     let canvas = new CpuCanvas(width = width, height = height) else trap("out of memory")
     let pixmap = raster.Pixmap.new_(width, height) else trap("CpuCanvas: empty size")
-    ak.vector_append_t(&canvas.layers, CpuLayer(pixmap = pixmap, effects = CpuLayerEffects()))
+    ak.vector_append_t(&canvas.layers, CpuLayer(pixmap = pixmap, effects = CpuLayerEffects(), left = 0, top = 0, layer_matrix = raster.Transform.identity(), layer_to_parent = raster.Transform.identity()))
     ak.vector_append_t(&canvas.states, CpuCanvasState(transform = raster.Transform.identity(), clip_empty = false,
                                                       clip_left = 0, clip_top = 0, clip_right = (i32)width, clip_bottom = (i32)height, has_clip_mask = false,
                                                       owns_clip_mask = false, layer_index = 0, pushes_layer = false))
@@ -126,111 +107,6 @@ func cpu_canvas_save(canvas: CpuCanvas*):
     state.pushes_layer = false
     ak.vector_append_t(&canvas.states, state)
 
-## SkCanvas::saveLayer(nullptr bounds, paint): a transparent layer, composited with `effects`
-## when restored.
-func cpu_canvas_save_layer(canvas: CpuCanvas*, effects: CpuLayerEffects):
-    let pixmap = raster.Pixmap.new_(canvas.width, canvas.height) else trap("CpuCanvas: empty size")
-    ak.vector_append_t(&canvas.layers, CpuLayer(pixmap = pixmap, effects = effects))
-    var state = *cpu_canvas_state(canvas)
-    state.owns_clip_mask = false
-    state.pushes_layer = true
-    state.layer_index = ak.vector_size(&canvas.layers) - 1
-    ak.vector_append_t(&canvas.states, state)
-
-## SkCanvas::saveLayer with a backdrop filter (SaveLayerRec's fBackdrop): the new layer starts
-## as the current layer's pixels passed through `filter`.
-func cpu_canvas_save_layer_with_backdrop(canvas: CpuCanvas*, filter: const gfx.Filter*):
-    let source = cpu_canvas_target(canvas).data()
-    var pixmap = raster.Pixmap.new_(canvas.width, canvas.height) else trap("CpuCanvas: empty size")
-    let target = pixmap.data_mut()
-    for i in 0..<target.length:
-        target[i] = source[i]
-    apply_gfx_filter(filter, &pixmap)
-    ak.vector_append_t(&canvas.layers, CpuLayer(pixmap = pixmap, effects = CpuLayerEffects()))
-    var state = *cpu_canvas_state(canvas)
-    state.owns_clip_mask = false
-    state.pushes_layer = true
-    state.layer_index = ak.vector_size(&canvas.layers) - 1
-    ak.vector_append_t(&canvas.states, state)
-
-## SkCanvas::restore: drops the current state; a layer is composited into the one below
-## through the restored clip.
-func cpu_canvas_restore(canvas: CpuCanvas*):
-    # SkCanvas ignores a restore with nothing saved.
-    if ak.vector_size(&canvas.states) <= 1:
-        return
-    var state = ak.vector_take_last(&canvas.states)
-    if state.owns_clip_mask:
-        state.clip_mask.release()
-    if not state.pushes_layer:
-        return
-
-    var layer = ak.vector_take_last(&canvas.layers)
-    defer layer.pixmap.release()
-    cpu_canvas_apply_layer_effects(canvas, &layer)
-    if cpu_canvas_state(canvas).clip_empty:
-        return
-    let mask = cpu_canvas_draw_mask(canvas)
-    if layer.effects.plus_darker:
-        cpu_composite_plus_darker(cpu_canvas_target(canvas), &layer.pixmap, cpu_clamp_unit(layer.effects.opacity), mask)
-        return
-    let paint = raster.PixmapPaint(opacity = cpu_clamp_unit(layer.effects.opacity), blend_mode = layer.effects.blend_mode, quality = raster.FilterQuality.nearest)
-    cpu_canvas_target(canvas).draw_pixmap(0, 0, layer.pixmap.as_ref(), &paint, raster.Transform.identity(), mask)
-
-## Composites `source` onto `target` with the Skia player's plus-darker blender,
-## `saturate(saturate(da + sa) - saturate(da - d) - saturate(sa - s))` per premultiplied
-## channel, after scaling the source by `opacity` and through `mask`.
-func cpu_composite_plus_darker(target: raster.Pixmap*, source: const raster.Pixmap*, opacity: f32, mask: const raster.Mask*?):
-    let dst = target.data_mut()
-    let src = source.data()
-    var i: usize = 0
-    while i + 3 < dst.length:
-        var coverage = opacity
-        if let m = mask:
-            coverage *= (f32)m.data()[i // 4] / 255.0
-        let sa = (f32)src[i + 3] / 255.0 * coverage
-        let da = (f32)dst[i + 3] / 255.0
-        var result: f32[4] = [0.0, 0.0, 0.0, 0.0]
-        for c in 0..<4usize:
-            let s = (f32)src[i + c] / 255.0 * coverage
-            let d = (f32)dst[i + c] / 255.0
-            result[c] = cpu_clamp_unit(cpu_clamp_unit(da + sa) - cpu_clamp_unit(da - d) - cpu_clamp_unit(sa - s))
-        for c in 0..<4usize:
-            dst[i + c] = cpu_unit_to_u8(result[c])
-        i += 4
-
-## Applies a restored layer's filters to its pixels before it is composited: the image
-## filter, then the blur, then the luminance color filter (the order SkPaint applies an
-## image filter and a color filter).
-func cpu_canvas_apply_layer_effects(canvas: CpuCanvas*, layer: CpuLayer*):
-    if let filter = layer.effects.filter:
-        apply_gfx_filter(&filter, &layer.pixmap)
-    if layer.effects.blur_sigma > 0.0:
-        cpu_blur_pixmap(&layer.pixmap, layer.effects.blur_sigma, layer.effects.blur_sigma)
-    if layer.effects.luminance_to_alpha:
-        cpu_luminance_to_alpha(&layer.pixmap)
-
-## SkLumaColorFilter: each pixel becomes (0, 0, 0, luma) with the luma of its unpremultiplied
-## color scaled by its alpha, as the raster module's luminance masks compute it.
-func cpu_luminance_to_alpha(pixmap: raster.Pixmap*):
-    let data = pixmap.data_mut()
-    var i: usize = 0
-    while i + 3 < data.length:
-        let a = (f32)data[i + 3] / 255.0
-        var r = (f32)data[i] / 255.0
-        var g = (f32)data[i + 1] / 255.0
-        var b = (f32)data[i + 2] / 255.0
-        if data[i + 3] != 0:
-            r /= a
-            g /= a
-            b /= a
-        let luma = r * 0.2126 + g * 0.7152 + b * 0.0722
-        data[i] = 0
-        data[i + 1] = 0
-        data[i + 2] = 0
-        data[i + 3] = (u8)math32.round(cpu_clamp_unit(luma * a) * 255.0)
-        i += 4
-
 # mark: Transform ==============================================================================
 
 ## SkCanvas::translate.
@@ -263,9 +139,11 @@ func cpu_canvas_is_clip_empty(canvas: CpuCanvas*) -> bool:
 func cpu_canvas_draw_mask(canvas: CpuCanvas*) -> const raster.Mask*?:
     let state = cpu_canvas_state(canvas)
     if not state.has_clip_mask:
-        if state.clip_left <= 0 and state.clip_top <= 0 and state.clip_right >= (i32)canvas.width and state.clip_bottom >= (i32)canvas.height:
+        let width = cpu_canvas_target(canvas).width()
+        let height = cpu_canvas_target(canvas).height()
+        if state.clip_left <= 0 and state.clip_top <= 0 and state.clip_right >= (i32)width and state.clip_bottom >= (i32)height:
             return none
-        var mask = raster.Mask.new_(canvas.width, canvas.height) else trap("CpuCanvas: empty size")
+        var mask = raster.Mask.new_(width, height) else trap("CpuCanvas: empty size")
         cpu_mask_fill_rect(&mask, state.clip_left, state.clip_top, state.clip_right, state.clip_bottom, 255)
         state.clip_mask = mask
         state.has_clip_mask = true
@@ -350,7 +228,7 @@ func cpu_canvas_clip_rect(canvas: CpuCanvas*, rect: raster.Rect, anti_alias: boo
 
 ## A copy of the current clip's coverage (its mask, or its bounds as a mask).
 func cpu_canvas_clip_mask_copy(canvas: CpuCanvas*) -> raster.Mask:
-    var mask = raster.Mask.new_(canvas.width, canvas.height) else trap("CpuCanvas: empty size")
+    var mask = raster.Mask.new_(cpu_canvas_target(canvas).width(), cpu_canvas_target(canvas).height()) else trap("CpuCanvas: empty size")
     let state = cpu_canvas_state(canvas)
     if state.has_clip_mask:
         let source = state.clip_mask.data()
@@ -367,7 +245,7 @@ func cpu_canvas_clip_path(canvas: CpuCanvas*, path: const raster.Path*, fill_rul
     if cpu_canvas_state(canvas).clip_empty:
         return
     let ts = cpu_canvas_state(canvas).transform
-    var shape = raster.Mask.new_(canvas.width, canvas.height) else trap("CpuCanvas: empty size")
+    var shape = raster.Mask.new_(cpu_canvas_target(canvas).width(), cpu_canvas_target(canvas).height()) else trap("CpuCanvas: empty size")
     shape.fill_path(path, fill_rule, anti_alias, ts)
     if difference:
         shape.invert()
@@ -452,7 +330,7 @@ func cpu_canvas_stroke_rect(canvas: CpuCanvas*, rect: raster.Rect, paint: const 
     let stroke = raster.Stroke(width = width)
     cpu_canvas_stroke_path(canvas, &path, paint, &stroke)
 
-## Fills the device-space coverage `coverage` (a canvas-sized mask) with `paint`, through the
+## Fills the device-space coverage `coverage` (a mask of the current layer's size) with `paint`, through the
 ## clip: how a blurred shape (Skia's mask filter) reaches the canvas.
 func cpu_canvas_fill_coverage(canvas: CpuCanvas*, coverage: raster.Mask*, paint: const raster.Paint*):
     if cpu_canvas_is_clip_empty(canvas):
@@ -462,7 +340,7 @@ func cpu_canvas_fill_coverage(canvas: CpuCanvas*, coverage: raster.Mask*, paint:
         let clip_data = clip.data()
         for i in 0..<data.length:
             data[i] = raster.premultiply_u8(data[i], clip_data[i])
-    let full = raster.Rect.from_ltrb(0.0, 0.0, (f32)canvas.width, (f32)canvas.height) else return
+    let full = raster.Rect.from_ltrb(0.0, 0.0, (f32)cpu_canvas_target(canvas).width(), (f32)cpu_canvas_target(canvas).height()) else return
     cpu_canvas_target(canvas).fill_rect(full, paint, raster.Transform.identity(), coverage)
 
 # mark: Helpers ================================================================================

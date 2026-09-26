@@ -84,11 +84,6 @@ func text_blob_path(glyph_run: const web_fonts.GlyphRun*) -> raster.Path?:
     builder.release()
     return result
 
-## Seam to region r10 (LibGfx/Filter, replacing SkiaUtils' `to_skia_image_filter`): runs
-## the image filter `filter` over `pixmap` in place.
-func apply_gfx_filter(filter: const gfx.Filter*, pixmap: raster.Pixmap*):
-    trap("unported: seam apply_gfx_filter (r10: gfx.Filter applied to a raster.Pixmap)")
-
 # mark: Construction and surfaces ==============================================================
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:20 Web::Painting::DisplayListPlayerSkia::DisplayListPlayerSkia.

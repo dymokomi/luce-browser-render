@@ -1,0 +1,364 @@
+#==============================================================================================
+#
+#   cpu_canvas_layers - the CPU canvas's layers: saveLayer, backdrops and restore
+#
+#   DESCRIPTION:
+#       New code for DisplayListPlayerCpu (DESIGN.md §7.3): SkCanvas::internalSaveLayer,
+#       internalDrawDeviceWithFilter and internalRestore (Skia m144, src/core/SkCanvas.cpp
+#       lines 571-1200) over the CpuCanvas of cpu_canvas.lucb.
+#
+#       A layer has its own pixel space ("layer space", skif's), bounded as Skia bounds it:
+#       the prior layer's clip bounds, or, when the layer has an image filter, the part of
+#       layer space the filter reads to produce those bounds (SkImageFilter_Base::
+#       getInputBounds), plus one transparent pixel of padding. Drawing into the layer is
+#       clipped to its bounds only; the prior clip applies when the layer is drawn back.
+#
+#       The layer matrix (skif::Mapping::decomposeCTM) maps local coordinates into layer
+#       space: the whole CTM when it is a scale and translation or the filter handles any
+#       matrix; otherwise only its scale, the rest (rotation, skew) being applied when the
+#       filtered layer is drawn back ("layer to parent", with bilinear sampling).
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+# mark: Types ==================================================================================
+
+## How a layer is composited into the layer below it when it is restored (SkCanvas::saveLayer's
+## SkPaint).
+struct CpuLayerEffects:
+    ## The layer's opacity, SkPaint::setAlphaf.
+    var opacity: f32 = 1.0
+    ## The blend mode, SkPaint::setBlender.
+    var blend_mode: raster.BlendMode = raster.BlendMode.source_over
+    ## SkLumaColorFilter: the layer's luminance becomes its alpha.
+    var luminance_to_alpha: bool = false
+    ## The image filter, SkPaint::setImageFilter (a gfx.Filter's graph, cpu_filter.lucb).
+    var filter: gfx.ImageFilter*? = none
+    ## The plus-darker operator (a runtime blender in the Skia player), composited by hand.
+    var plus_darker: bool = false
+
+## A layer: its pixels, how it is composited, and where it sits.
+struct CpuLayer:
+    var pixmap: raster.Pixmap
+    var effects: CpuLayerEffects
+    ## The layer's bounds in layer space start at (left, top): pixel (0, 0) of `pixmap`.
+    var left: i32
+    var top: i32
+    ## Local coordinates to layer space (skif::Mapping::layerMatrix()).
+    var layer_matrix: raster.Transform
+    ## Layer space to the pixels of the layer below (skif::Mapping::layerToDevice()).
+    var layer_to_parent: raster.Transform
+
+# mark: Geometry ===============================================================================
+
+## Whether `rect` is empty (SkIRect::isEmpty).
+func cpu_irect_is_empty(rect: CpuIRect) -> bool:
+    return rect.left >= rect.right or rect.top >= rect.bottom
+
+## The current clip's device bounds (SkDevice::devClipBounds); empty when the clip is.
+func cpu_canvas_clip_bounds(canvas: CpuCanvas*) -> CpuIRect:
+    let state = cpu_canvas_state(canvas)
+    if state.clip_empty:
+        return CpuIRect(left = 0, top = 0, right = 0, bottom = 0)
+    return CpuIRect(left = state.clip_left, top = state.clip_top, right = state.clip_right, bottom = state.clip_bottom)
+
+## skif::Mapping::map<SkIRect>: `rect` mapped by `matrix` and rounded out, keeping whole-pixel
+## precision for a scale and translation (double arithmetic, 1/1000 pixel of tolerance).
+func cpu_canvas_map_irect(matrix: raster.Transform, rect: CpuIRect) -> CpuIRect:
+    if cpu_irect_is_empty(rect):
+        return CpuIRect(left = 0, top = 0, right = 0, bottom = 0)
+    if matrix.kx == 0.0 and matrix.ky == 0.0:
+        let l = (f64)matrix.sx * (f64)rect.left + (f64)matrix.tx
+        let r = (f64)matrix.sx * (f64)rect.right + (f64)matrix.tx
+        let t = (f64)matrix.sy * (f64)rect.top + (f64)matrix.ty
+        let b = (f64)matrix.sy * (f64)rect.bottom + (f64)matrix.ty
+        let epsilon: f64 = 0.001
+        return CpuIRect(left = cpu_saturate_f64_to_i32(math.floor(cpu_min_f64(l, r) + epsilon)), top = cpu_saturate_f64_to_i32(math.floor(cpu_min_f64(t, b) + epsilon)),
+                        right = cpu_saturate_f64_to_i32(math.ceil(cpu_max_f64(l, r) - epsilon)), bottom = cpu_saturate_f64_to_i32(math.ceil(cpu_max_f64(t, b) - epsilon)))
+    # RoundOut(matrix.mapRect(SkRect::Make(rect))): the bounds of the four mapped corners.
+    var xs: f32[4]
+    var ys: f32[4]
+    let corners: f32[8] = [(f32)rect.left, (f32)rect.top, (f32)rect.right, (f32)rect.top, (f32)rect.right, (f32)rect.bottom, (f32)rect.left, (f32)rect.bottom]
+    for i in 0..<4usize:
+        var point = raster.Point.from_xy(corners[i * 2], corners[i * 2 + 1])
+        matrix.map_point(&point)
+        xs[i] = point.x
+        ys[i] = point.y
+    var min_x = xs[0]
+    var max_x = xs[0]
+    var min_y = ys[0]
+    var max_y = ys[0]
+    for i in 1..<4usize:
+        min_x = cpu_min_f32(min_x, xs[i])
+        max_x = cpu_max_f32(max_x, xs[i])
+        min_y = cpu_min_f32(min_y, ys[i])
+        max_y = cpu_max_f32(max_y, ys[i])
+    return CpuIRect(left = cpu_f32_to_i32(math32.floor(min_x)), top = cpu_f32_to_i32(math32.floor(min_y)), right = cpu_f32_to_i32(math32.ceil(max_x)), bottom = cpu_f32_to_i32(math32.ceil(max_y)))
+
+## skif::Mapping::decomposeCTM(ctm, capability): the layer matrix and the layer-to-parent
+## remainder, or none when the remainder cannot be inverted.
+func cpu_canvas_decompose_ctm(ctm: raster.Transform, capability: CpuFilterMatrixCapability) -> (raster.Transform, raster.Transform)?:
+    var layer = ctm
+    var remainder = raster.Transform.identity()
+    if capability == CpuFilterMatrixCapability.translate:
+        # Apply the entire CTM post-filtering.
+        layer = raster.Transform.identity()
+        remainder = ctm
+    elif not (ctm.kx == 0.0 and ctm.ky == 0.0) and capability != CpuFilterMatrixCapability.complex:
+        # decompose_transform: SkMatrix::decomposeScale's axis lengths, the rest after filtering.
+        let sx = math32.sqrt(ctm.sx * ctm.sx + ctm.ky * ctm.ky)
+        let sy = math32.sqrt(ctm.kx * ctm.kx + ctm.sy * ctm.sy)
+        if not (sx > 1.0 / 4096.0 and sy > 1.0 / 4096.0):
+            return none
+        layer = raster.Transform.from_scale(sx, sy)
+        remainder = ctm.pre_scale(1.0 / sx, 1.0 / sy)
+    if remainder.invert() == none:
+        return none
+    return (layer, remainder)
+
+# mark: Save ===================================================================================
+
+## SkCanvas::saveLayer(nullptr bounds, paint): a transparent layer, composited with `effects`
+## when restored.
+func cpu_canvas_save_layer(canvas: CpuCanvas*, effects: CpuLayerEffects):
+    # internalSave; nothing more when the layer would not draw.
+    cpu_canvas_save(canvas)
+    if cpu_canvas_is_clip_empty(canvas):
+        return
+    let capability = cpu_filter_ctm_capability(effects.filter) if effects.filter != none else CpuFilterMatrixCapability.complex
+    let decomposed = cpu_canvas_decompose_ctm(cpu_canvas_transform(canvas), capability)
+    if decomposed == none:
+        cpu_canvas_abort_layer(canvas)
+        return
+    let mapping = decomposed else trap("VERIFY_NOT_REACHED")
+    let layer_matrix = mapping.0
+    let layer_to_parent = mapping.1
+    let parent_to_layer = layer_to_parent.invert() else trap("VERIFY: an invertible remainder")
+    let base_bounds = cpu_canvas_map_irect(parent_to_layer, cpu_canvas_clip_bounds(canvas))
+
+    var bounds = base_bounds
+    var padded = false
+    if let filter = effects.filter:
+        bounds = cpu_filter_input_bounds(filter, layer_matrix, base_bounds)
+        if cpu_irect_is_empty(bounds):
+            # The filter reads no source: its output is drawn now, and the layer draws nothing.
+            let no_source = CpuFilterImage(pixmap = none, left = 0, top = 0)
+            var result = cpu_filter_evaluate(filter, layer_matrix, &no_source, CpuFilterSourceTile.decal, base_bounds, effects.opacity, effects.luminance_to_alpha)
+            cpu_canvas_draw_filter_result(canvas, &result, layer_to_parent, &effects)
+            cpu_filter_image_release(&result)
+            cpu_canvas_abort_layer(canvas)
+            return
+        # One transparent pixel of padding around the source.
+        bounds = CpuIRect(left = bounds.left - 1, top = bounds.top - 1, right = bounds.right + 1, bottom = bounds.bottom + 1)
+        padded = true
+    elif cpu_irect_is_empty(bounds):
+        cpu_canvas_abort_layer(canvas)
+        return
+
+    let pixmap = raster.Pixmap.new_((u32)(bounds.right - bounds.left), (u32)(bounds.bottom - bounds.top)) else trap("CpuCanvas: empty layer")
+    ak.vector_append_t(&canvas.layers, CpuLayer(pixmap = pixmap, effects = effects, left = bounds.left, top = bounds.top, layer_matrix = layer_matrix, layer_to_parent = layer_to_parent))
+    cpu_canvas_enter_layer(canvas, layer_matrix, bounds, padded)
+
+## The current (just saved) state becomes the first state of the last layer: the transform is
+## `layer_matrix` in the layer's pixels, and the clip is the layer's bounds (inset by the
+## padding).
+func cpu_canvas_enter_layer(canvas: CpuCanvas*, layer_matrix: raster.Transform, bounds: CpuIRect, padded: bool):
+    let state = cpu_canvas_state(canvas)
+    let inset: i32 = 1 if padded else 0
+    state.transform = layer_matrix.post_translate(-(f32)bounds.left, -(f32)bounds.top)
+    state.clip_empty = false
+    state.clip_left = inset
+    state.clip_top = inset
+    state.clip_right = bounds.right - bounds.left - inset
+    state.clip_bottom = bounds.bottom - bounds.top - inset
+    state.has_clip_mask = false
+    state.owns_clip_mask = false
+    state.layer_index = ak.vector_size(&canvas.layers) - 1
+    state.pushes_layer = true
+
+## The layer would not draw anything: nothing draws until the matching restore (Skia empties the
+## top device's clip).
+func cpu_canvas_abort_layer(canvas: CpuCanvas*):
+    cpu_canvas_state(canvas).clip_empty = true
+
+## SkCanvas::saveLayer with a backdrop filter (SaveLayerRec(nullptr, nullptr, filter, 0)): a
+## layer over the prior clip bounds whose initial content is the prior layer's pixels, sampled
+## with clamped edges, passed through `filter` (internalDrawDeviceWithFilter from the prior
+## device into the new one).
+func cpu_canvas_save_layer_with_backdrop(canvas: CpuCanvas*, filter: const gfx.ImageFilter*?):
+    cpu_canvas_save(canvas)
+    if cpu_canvas_is_clip_empty(canvas):
+        return
+    let ctm = cpu_canvas_transform(canvas)
+    let bounds = cpu_canvas_clip_bounds(canvas)
+    let parent = *cpu_canvas_target(canvas)
+    let width = bounds.right - bounds.left
+    let height = bounds.bottom - bounds.top
+    var pixmap = raster.Pixmap.new_((u32)width, (u32)height) else trap("CpuCanvas: empty layer")
+
+    # The new layer's matrix, then the backdrop filter's decomposition of it.
+    let layer_ctm = ctm.post_translate(-(f32)bounds.left, -(f32)bounds.top)
+    let capability = cpu_filter_ctm_capability(filter)
+    let whole = CpuIRect(left = 0, top = 0, right = width, bottom = height)
+    if let mapping = cpu_canvas_decompose_ctm(layer_ctm, capability):
+        # FIXME: When the decomposition leaves a rotation or skew, Skia resamples the prior
+        #        device into the filter's layer space (srcToLayer); the port filters in the new
+        #        layer's pixels with the whole CTM instead.
+        var filter_matrix = mapping.0
+        if not mapping.1.is_identity():
+            filter_matrix = layer_ctm
+        # The prior layer's pixel (x, y) is the new layer's (x - left, y - top).
+        let source = CpuFilterImage(pixmap = parent, left = -bounds.left, top = -bounds.top)
+        var result = cpu_filter_evaluate(filter, filter_matrix, &source, CpuFilterSourceTile.clamp, whole, 1.0, false)
+        if let image = result.pixmap:
+            let paint = raster.PixmapPaint()
+            pixmap.draw_pixmap(result.left, result.top, image.as_ref(), &paint, raster.Transform.identity(), none)
+        cpu_filter_image_release(&result)
+
+    let effects = CpuLayerEffects()
+    ak.vector_append_t(&canvas.layers, CpuLayer(pixmap = pixmap, effects = effects, left = bounds.left, top = bounds.top, layer_matrix = ctm, layer_to_parent = raster.Transform.identity()))
+    cpu_canvas_enter_layer(canvas, ctm, bounds, false)
+
+# mark: Restore ================================================================================
+
+## SkCanvas::restore: drops the current state; a layer is drawn into the layer below through
+## the restored clip, through its image filter when it has one.
+func cpu_canvas_restore(canvas: CpuCanvas*):
+    # SkCanvas ignores a restore with nothing saved.
+    if ak.vector_size(&canvas.states) <= 1:
+        return
+    var state = ak.vector_take_last(&canvas.states)
+    if state.owns_clip_mask:
+        state.clip_mask.release()
+    if not state.pushes_layer:
+        return
+
+    var layer = ak.vector_take_last(&canvas.layers)
+    defer layer.pixmap.release()
+    if cpu_canvas_state(canvas).clip_empty:
+        return
+    if let filter = layer.effects.filter:
+        let parent_to_layer = layer.layer_to_parent.invert() else trap("VERIFY: an invertible remainder")
+        let desired = cpu_canvas_map_irect(parent_to_layer, cpu_canvas_clip_bounds(canvas))
+        let source = CpuFilterImage(pixmap = layer.pixmap, left = layer.left, top = layer.top)
+        var result = cpu_filter_evaluate(filter, layer.layer_matrix, &source, CpuFilterSourceTile.decal, desired, layer.effects.opacity, layer.effects.luminance_to_alpha)
+        cpu_canvas_draw_filter_result(canvas, &result, layer.layer_to_parent, &layer.effects)
+        cpu_filter_image_release(&result)
+        return
+
+    # SkDevice::drawDevice: the layer's pixels with the paint's alpha, color filter and blender.
+    if layer.effects.luminance_to_alpha:
+        cpu_luminance_to_alpha(&layer.pixmap)
+    let mask = cpu_canvas_draw_mask(canvas)
+    if layer.effects.plus_darker:
+        cpu_composite_plus_darker(cpu_canvas_target(canvas), layer.left, layer.top, &layer.pixmap, cpu_clamp_unit(layer.effects.opacity), mask)
+        return
+    let paint = raster.PixmapPaint(opacity = cpu_clamp_unit(layer.effects.opacity), blend_mode = layer.effects.blend_mode, quality = raster.FilterQuality.nearest)
+    cpu_canvas_target(canvas).draw_pixmap(layer.left, layer.top, layer.pixmap.as_ref(), &paint, raster.Transform.identity(), mask)
+
+## FilterResult::draw into the current layer: `result` (in the restored layer's space) mapped by
+## `layer_to_parent`, with the layer paint's blender, through the clip. The paint's alpha and
+## color filter were applied by the evaluation.
+func cpu_canvas_draw_filter_result(canvas: CpuCanvas*, result: const CpuFilterImage*, layer_to_parent: raster.Transform, effects: const CpuLayerEffects*):
+    let image = result.pixmap else return
+    if cpu_canvas_is_clip_empty(canvas):
+        return
+    let mask = cpu_canvas_draw_mask(canvas)
+    let transform = layer_to_parent.pre_translate((f32)result.left, (f32)result.top)
+    let target = cpu_canvas_target(canvas)
+    if transform.is_identity() or transform.is_translate():
+        let x = math32.round(transform.tx)
+        let y = math32.round(transform.ty)
+        if x == transform.tx and y == transform.ty:
+            if effects.plus_darker:
+                cpu_composite_plus_darker(target, (i32)x, (i32)y, &image, 1.0, mask)
+                return
+            let paint = raster.PixmapPaint(opacity = 1.0, blend_mode = effects.blend_mode, quality = raster.FilterQuality.nearest)
+            target.draw_pixmap((i32)x, (i32)y, image.as_ref(), &paint, raster.Transform.identity(), mask)
+            return
+    # A transformed image: the anti-aliased rectangle of the image, sampled bilinearly.
+    let rect = raster.Rect.from_xywh(0.0, 0.0, (f32)image.width(), (f32)image.height()) else return
+    var outline = raster.PathBuilder.from_rect(rect)
+    defer outline.release()
+    var paint = raster.Paint(anti_alias = true, blend_mode = effects.blend_mode)
+    paint.shader = raster.Pattern.new_(image.as_ref(), raster.SpreadMode.pad_, raster.FilterQuality.bilinear, 1.0, raster.Transform.identity())
+    target.fill_path(&outline, &paint, raster.FillRule.winding, transform, mask)
+
+## Frees a filter result's pixels.
+func cpu_filter_image_release(image: CpuFilterImage*):
+    if let pixmap = image.pixmap:
+        var owned = pixmap
+        owned.release()
+    image.pixmap = none
+
+## Composites `source`, whose pixel (0, 0) goes to (x, y) of `target`, with the Skia player's
+## plus-darker blender, `saturate(saturate(da + sa) - saturate(da - d) - saturate(sa - s))` per
+## premultiplied channel, after scaling the source by `opacity` and through `mask` (the size of
+## `target`).
+func cpu_composite_plus_darker(target: raster.Pixmap*, x: i32, y: i32, source: const raster.Pixmap*, opacity: f32, mask: const raster.Mask*?):
+    let target_width = (i32)target.width()
+    let target_height = (i32)target.height()
+    let source_width = (i32)source.width()
+    let dst = target.data_mut()
+    let src = source.data()
+    for sy in 0..<(i32)source.height():
+        let ty = y + sy
+        if ty < 0 or ty >= target_height:
+            continue
+        for sx in 0..<source_width:
+            let tx = x + sx
+            if tx < 0 or tx >= target_width:
+                continue
+            let d_index = ((usize)ty * (usize)target_width + (usize)tx) * 4
+            let s_index = ((usize)sy * (usize)source_width + (usize)sx) * 4
+            var coverage = opacity
+            if let m = mask:
+                coverage *= (f32)m.data()[d_index // 4] / 255.0
+            let sa = (f32)src[s_index + 3] / 255.0 * coverage
+            let da = (f32)dst[d_index + 3] / 255.0
+            var result: f32[4] = [0.0, 0.0, 0.0, 0.0]
+            for c in 0..<4usize:
+                let s = (f32)src[s_index + c] / 255.0 * coverage
+                let d = (f32)dst[d_index + c] / 255.0
+                result[c] = cpu_clamp_unit(cpu_clamp_unit(da + sa) - cpu_clamp_unit(da - d) - cpu_clamp_unit(sa - s))
+            for c in 0..<4usize:
+                dst[d_index + c] = cpu_unit_to_u8(result[c])
+
+## SkLumaColorFilter: each pixel becomes (0, 0, 0, luma) with the luma of its unpremultiplied
+## color scaled by its alpha, as the raster module's luminance masks compute it.
+func cpu_luminance_to_alpha(pixmap: raster.Pixmap*):
+    let data = pixmap.data_mut()
+    var i: usize = 0
+    while i + 3 < data.length:
+        let a = (f32)data[i + 3] / 255.0
+        var r = (f32)data[i] / 255.0
+        var g = (f32)data[i + 1] / 255.0
+        var b = (f32)data[i + 2] / 255.0
+        if data[i + 3] != 0:
+            r /= a
+            g /= a
+            b /= a
+        let luma = r * 0.2126 + g * 0.7152 + b * 0.0722
+        data[i] = 0
+        data[i + 1] = 0
+        data[i + 2] = 0
+        data[i + 3] = (u8)math32.round(cpu_clamp_unit(luma * a) * 255.0)
+        i += 4
+
+## The smaller of two doubles.
+func cpu_min_f64(a: f64, b: f64) -> f64:
+    return b if b < a else a
+
+## The larger of two doubles.
+func cpu_max_f64(a: f64, b: f64) -> f64:
+    return b if b > a else a
+
+## sk_double_saturate2int.
+func cpu_saturate_f64_to_i32(value: f64) -> i32:
+    if not (value < 2147483520.0):
+        return 2147483520
+    if not (value > -2147483520.0):
+        return -2147483520
+    return (i32)value

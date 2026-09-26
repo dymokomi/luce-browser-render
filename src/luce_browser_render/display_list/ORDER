@@ -24,6 +24,7 @@ borders_data.lucb
 display_list.lucb
 display_list_command.lucb
 cpu_canvas.lucb
+cpu_canvas_layers.lucb
 cpu_blur.lucb
 cpu_color_space.lucb
 cpu_gradient.lucb
@@ -43,3 +44,5 @@ tests_display_list.lucb
 tests_cpu_canvas.lucb
 tests_cpu_gradient.lucb
 tests_scroll_and_paint_style.lucb
+tests_skia_reference_data_2.lucb
+tests_cpu_player_2.lucb
