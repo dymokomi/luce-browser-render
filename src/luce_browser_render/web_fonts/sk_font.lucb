@@ -76,7 +76,7 @@ pub func sk_font_get_metrics(font: const SkFont*) -> SkFontMetrics:
 ## The top of a glyph's box in pixels (getCBoxForLetter: the control box of the outline loaded
 ## at the size, yMax in 26.6 over 64), or none when the face has no such glyph.
 func sk_letter_box_top(face: const SfntFace*, letter: u32, size: f32) -> f32?:
-    let glyph = sfnt_face_glyph_for_code_point(face, letter)
+    let glyph = sfnt_face_ft_glyph_for_code_point(face, letter)
     if glyph == 0:
         return none
     let outline = sfnt_face_load_outline(face, glyph, sfnt_face_ft_scale(face, size)) else return none
@@ -198,7 +198,7 @@ pub func sk_font_measure_ascii(font: const SkFont*, text: const u8[]) -> f32:
     let typeface = font.typeface else return 0.0
     var width: f32 = 0.0
     for byte in text:
-        width += sk_font_glyph_advance(font, sfnt_face_glyph_for_code_point(typeface.face, (u32)byte))
+        width += sk_font_glyph_advance(font, sfnt_face_ft_glyph_for_code_point(typeface.face, (u32)byte))
     return width
 
 ## SkFont::getPath: the outline of `glyph` at the font's size.

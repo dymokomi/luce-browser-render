@@ -490,7 +490,7 @@ func sfnt_outline_decompose(outline: const SfntOutline*, sink: SkiaGeometrySink*
 
         sink_move(sink, v_start_x, v_start_y)
         var closed = false
-        while point - 1 < limit:
+        while point < limit + 1:
             point += 1
             tag = tags[point - 1]
             if tag == ft_curve_tag_on:
@@ -502,7 +502,7 @@ func sfnt_outline_decompose(outline: const SfntOutline*, sink: SkiaGeometrySink*
                 v_control_x = xs[point - 1]
                 v_control_y = ys[point - 1]
                 var done_conic = false
-                while point - 1 < limit:
+                while point < limit + 1:
                     point += 1
                     let conic_tag = tags[point - 1]
                     let vec_x = xs[point - 1]
@@ -531,7 +531,7 @@ func sfnt_outline_decompose(outline: const SfntOutline*, sink: SkiaGeometrySink*
             let vec1_y = ys[point - 3]
             let vec2_x = xs[point - 2]
             let vec2_y = ys[point - 2]
-            if point - 1 <= limit:
+            if point <= limit + 1:
                 sink_cubic(sink, vec1_x, vec1_y, vec2_x, vec2_y, xs[point - 1], ys[point - 1])
                 continue
             sink_cubic(sink, vec1_x, vec1_y, vec2_x, vec2_y, v_start_x, v_start_y)

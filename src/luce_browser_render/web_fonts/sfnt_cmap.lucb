@@ -4,8 +4,9 @@
 #
 #   DESCRIPTION:
 #       New code of the luce-browser port (DESIGN.md §7.1), replacing SkTypeface::unicharToGlyph
-#       (FreeType's FT_Get_Char_Index over the Unicode charmap) and hb_font_get_nominal_glyph.
-#       The subtable is chosen as HarfBuzz's OT::cmap::find_best_subtable chooses it (a symbol
+#       (FreeType's FT_Get_Char_Index over the Unicode charmap it selects) and
+#       hb_font_get_nominal_glyph, which can choose different subtables: HarfBuzz's is chosen
+#       as OT::cmap::find_best_subtable chooses it (a symbol
 #       subtable first, then the full-repertoire Unicode subtables, then the BMP ones; the Mac
 #       subtables HarfBuzz falls back to last are not read);
 #       formats 0, 4, 6, 10, 12 and 13 are read. A glyph id at or past the face's glyph count
@@ -13,10 +14,12 @@
 #
 #==============================================================================================
 
-## Chooses the Unicode subtable of the face's cmap (hb-ot-cmap-table.hh find_best_subtable).
+## Chooses the cmap subtables: HarfBuzz's (hb-ot-cmap-table.hh find_best_subtable) for
+## shaping, and FreeType's Unicode charmap (ftobjs.c find_unicode_charmap) for Skia.
 func sfnt_face_select_cmap(face: SfntFace*):
     let cmap = sfnt_face_table(face, sfnt_tag('c', 'm', 'a', 'p')) else return
     let base = (usize)(cmap.data - face.data.data)
+    face.ft_cmap_subtable = sfnt_cmap_find_freetype_unicode(cmap, base)
     # The symbol subtable first (HarfBuzz issue 1918), then the full Unicode repertoire, then
     # the BMP.
     let preferences: u32[9] = [0x00030000, 0x0003000A, 0x00000006, 0x00000004, 0x00030001, 0x00000003, 0x00000002, 0x00000001, 0x00000000]
@@ -27,6 +30,35 @@ func sfnt_face_select_cmap(face: SfntFace*):
             face.cmap_subtable = base + offset
             face.cmap_is_symbol = platform_id == 3 and encoding_id == 0
             return
+
+## find_unicode_charmap: the last UCS-4 charmap ((3,10) or (0,4)) of the table, else the last
+## Unicode one ((3,1) or any platform-0 encoding but variation sequences); none for a font
+## with only a symbol or legacy charmap, where FT_Get_Char_Index answers 0.
+func sfnt_cmap_find_freetype_unicode(cmap: const u8[], base: usize) -> usize?:
+    let count = (usize)sfnt_u16(cmap, 2)
+    var ucs2: usize? = none
+    var index = count
+    while index > 0:
+        index -= 1
+        let record = 4 + index * 8
+        if record + 8 > cmap.length:
+            continue
+        let platform_id = sfnt_u16(cmap, record)
+        let encoding_id = sfnt_u16(cmap, record + 2)
+        let offset = (usize)sfnt_u32(cmap, record + 4)
+        if offset >= cmap.length:
+            continue
+        let table_format = sfnt_u16(cmap, offset)
+        if not (table_format == 0 or table_format == 4 or table_format == 6 or table_format == 10 or table_format == 12 or table_format == 13):
+            continue
+        let is_unicode = (platform_id == 0 and encoding_id != 5) or (platform_id == 3 and (encoding_id == 1 or encoding_id == 10))
+        if not is_unicode:
+            continue
+        if (platform_id == 3 and encoding_id == 10) or (platform_id == 0 and encoding_id == 4):
+            return base + offset
+        if ucs2 == none:
+            ucs2 = base + offset
+    return ucs2
 
 ## The offset in `cmap` of the subtable for (platform, encoding), or none.
 func sfnt_cmap_find_subtable(cmap: const u8[], platform_id: u16, encoding_id: u16) -> usize?:
@@ -46,7 +78,17 @@ func sfnt_cmap_find_subtable(cmap: const u8[], platform_id: u16, encoding_id: u1
             return none
     return none
 
-## The glyph of `code_point` in the face's chosen cmap subtable, 0 when there is none.
+## FT_Get_Char_Index over FreeType's Unicode charmap: the glyph Skia's typeface answers
+## (unicharToGlyph), 0 when there is none.
+pub func sfnt_face_ft_glyph_for_code_point(face: const SfntFace*, code_point: u32) -> u32:
+    let offset = face.ft_cmap_subtable else return 0
+    let glyph = sfnt_cmap_lookup(face.data, offset, code_point)
+    if glyph >= (u32)face.num_glyphs:
+        return 0
+    return glyph
+
+## The glyph of `code_point` in HarfBuzz's cmap subtable (hb_font_get_nominal_glyph), 0 when
+## there is none.
 pub func sfnt_face_glyph_for_code_point(face: const SfntFace*, code_point: u32) -> u32:
     let offset = face.cmap_subtable else return 0
     var glyph = sfnt_cmap_lookup(face.data, offset, code_point)

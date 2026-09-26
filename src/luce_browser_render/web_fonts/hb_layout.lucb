@@ -126,13 +126,16 @@ func hb_set_glyph_classes(face: const SfntFace*, buffer: HbBufferT*):
         for index in 0..<infos.length:
             infos[index].glyph_class = gdef_glyph_class(face, infos[index].codepoint)
         return
+    for index in 0..<infos.length:
+        let is_mark = infos[index].is_nonspacing_mark and not infos[index].is_default_ignorable
+        infos[index].glyph_class = 3 if is_mark else 1
+
+## Whether `u` is a non-spacing mark (general category Mn).
+func hb_is_nonspacing_mark(u: u32) -> bool:
     if hb_nonspacing_mark_category == none:
         hb_nonspacing_mark_category = web_unicode.general_category_from_string(ak.sv("Mn"))
-    for index in 0..<infos.length:
-        var is_mark = false
-        if let mn = hb_nonspacing_mark_category:
-            is_mark = web_unicode.code_point_has_general_category(infos[index].character, mn) and not infos[index].is_default_ignorable
-        infos[index].glyph_class = 3 if is_mark else 1
+    let mn = hb_nonspacing_mark_category else return false
+    return web_unicode.code_point_has_general_category(u, mn)
 
 ## The class a substituted glyph takes: GDEF's, else `fallback`.
 func hb_class_for_substitute(face: const SfntFace*, glyph: u32, fallback: u8) -> u8:

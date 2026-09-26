@@ -130,14 +130,17 @@ pub struct SfntFace:
     pub var style_flags_bold: bool
     pub var style_flags_italic: bool
     pub var family_name: ak.FlyString
-    # cmap: the absolute offset of the chosen subtable and whether it is a symbol cmap
+    # cmap: the absolute offset of HarfBuzz's subtable and whether it is a symbol cmap, and of
+    # FreeType's Unicode charmap
     pub var cmap_subtable: usize?
     pub var cmap_is_symbol: bool
+    pub var ft_cmap_subtable: usize?
     # tables the rest of the module reads, as slices of `data` (empty when absent)
     pub var hmtx: const u8[]
     pub var loca: const u8[]
     pub var glyf: const u8[]
     pub var cff: const u8[]
+    pub var is_cff2: bool
     pub var gsub: const u8[]
     pub var gpos: const u8[]
     pub var gdef: const u8[]
@@ -204,6 +207,10 @@ pub func sfnt_face_create(data: const u8[], ttc_index: u32) -> SfntFace*!:
     face.glyf = sfnt_face_table(face, sfnt_tag('g', 'l', 'y', 'f')) else face.glyf
     face.loca = sfnt_face_table(face, sfnt_tag('l', 'o', 'c', 'a')) else face.loca
     face.cff = sfnt_face_table(face, sfnt_tag('C', 'F', 'F', ' ')) else face.cff
+    if face.cff.length == 0:
+        if let cff2 = sfnt_face_table(face, sfnt_tag('C', 'F', 'F', '2')):
+            face.cff = cff2
+            face.is_cff2 = true
     if face.glyf.length > 0 and face.loca.length > 0:
         face.outline_format = SfntOutlineFormat.true_type
     elif face.cff.length > 0:

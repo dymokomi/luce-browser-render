@@ -51,6 +51,11 @@ pub struct HbGlyphInfo:
     pub var space_fallback: u8
     pub var substituted: bool
     pub var ligated: bool
+    ## HarfBuzz's modified combining class of a mark (0 for anything else), recategorized
+    ## for positioning when fallback mark positioning applies.
+    pub var combining_class: u8
+    ## Whether the character is a non-spacing mark (general category Mn).
+    pub var is_nonspacing_mark: bool
 
 ## hb_glyph_position_t, in the font's scale (pixel size × 64 for Gfx::Font), with the
 ## attachment HarfBuzz keeps in its private var field while positioning.
@@ -350,6 +355,13 @@ pub func hb_shape(font: HbFontT*, buffer: HbBufferT*, features: const HbFeature[
     hb_set_unicode_props(buffer)
     hb_form_clusters(buffer)
     hb_normalize(font, buffer)
+    # Fallback mark positioning (a font without GPOS) recategorizes the non-spacing marks.
+    let fallback_mark_positioning = face.gpos.length == 0
+    if fallback_mark_positioning:
+        let infos = ak.vector_span(&buffer.infos)
+        for index in 0..<infos.length:
+            if infos[index].is_nonspacing_mark:
+                infos[index].combining_class = hb_recategorize_combining_class(infos[index].character, infos[index].combining_class)
     hb_set_glyph_classes(face, buffer)
     let plan = hb_layout_plan(face, buffer, features)
     hb_layout_substitute(face, font, &plan, buffer)
@@ -362,10 +374,20 @@ pub func hb_shape(font: HbFontT*, buffer: HbBufferT*, features: const HbFeature[
 func hb_set_unicode_props(buffer: HbBufferT*):
     let infos = ak.vector_span(&buffer.infos)
     for index in 0..<infos.length:
-        let u = infos[index].character
-        infos[index].is_default_ignorable = hb_is_default_ignorable(u)
-        infos[index].is_zwj = u == 0x200D
-        infos[index].is_zwnj = u == 0x200C
+        hb_info_set_unicode_props(&infos[index])
+
+## _hb_glyph_info_set_unicode_props for one character: default ignorable, joiner, the
+## modified combining class of a mark and whether it is non-spacing.
+func hb_info_set_unicode_props(info: HbGlyphInfo*):
+    let u = info.character
+    info.is_default_ignorable = hb_is_default_ignorable(u)
+    info.is_zwj = u == 0x200D
+    info.is_zwnj = u == 0x200C
+    info.combining_class = 0
+    info.is_nonspacing_mark = false
+    if web_unicode.code_point_has_mark_general_category(u):
+        info.combining_class = hb_modified_combining_class(u)
+        info.is_nonspacing_mark = hb_is_nonspacing_mark(u)
 
 ## hb_form_clusters (HB_BUFFER_CLUSTER_LEVEL_MONOTONE_GRAPHEMES): a continuation character
 ## (a mark, a joiner, an emoji modifier or tag) joins the cluster before it.
@@ -457,6 +479,9 @@ func hb_position(font: const HbFontT*, face: const SfntFace*, plan: const HbLayo
             positions[index].y_offset = 0
 
     hb_position_finish_offsets(buffer)
+
+    if face.gpos.length == 0:
+        hb_fallback_mark_position(font, buffer, adjust_offsets_when_zeroing)
 
 ## _hb_ot_shape_fallback_spaces (hb-ot-shape-fallback.cc).
 func hb_fallback_spaces(font: const HbFontT*, buffer: HbBufferT*):

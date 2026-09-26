@@ -121,7 +121,7 @@ pub func typeface_skia_populate_glyph_page(this: TypefaceSkia*, glyph_page: Type
     for i in 0..<typeface_skia_glyph_page_glyphs_per_page:
         let code_point = first_code_point + (u32)i
         # unicharToGlyph
-        glyph_page.glyph_ids[i] = (u16)sfnt_face_glyph_for_code_point(face, code_point)
+        glyph_page.glyph_ids[i] = (u16)sfnt_face_ft_glyph_for_code_point(face, code_point)
 
 ## Ported from Libraries/LibGfx/Font/TypefaceSkia.h:27 Gfx::TypefaceSkia::family (override).
 pub func typeface_skia_family_impl(base: Typeface*) -> ak.FlyString:
