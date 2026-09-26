@@ -7,8 +7,8 @@
 #       counts; kept outside the repository): anti-aliased and non-AA fills through the lowp
 #       and highp pipelines, gradients, strokes, dashes, hairlines and transformed pattern
 #       sampling, on a 1000x1000 pixmap. Prints microseconds per call and a checksum of the
-#       pixels (equal to tiny-skia's). Build: luce-base build tests/raster/bench.lucb -o
-#       build/raster_bench
+#       pixels (526857878 since the raster paints as Skia m144; tiny-skia's is 527449494).
+#       Build: luce-base build tests/raster/bench.lucb -o build/raster_bench
 #
 #==============================================================================================
 
