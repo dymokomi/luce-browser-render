@@ -36,16 +36,27 @@ func expect_color(actual: Color, expected: u32, what: str):
 ## Checks a float against the bits the C++ computed.
 func expect_f32_bits(actual: f32, expected: u32, what: str):
     let bits = actual.bits()
-    if bits != expected:
+    if not within_libm_ulps((u64)bits, (u64)expected):
         print(f"{what}: got {hex(bits)} ({actual}), expected {hex(expected)}")
-    assert(bits == expected)
+    assert(within_libm_ulps((u64)bits, (u64)expected))
 
 ## Checks a double against the bits the C++ computed.
 func expect_f64_bits(actual: f64, expected: u64, what: str):
     let bits = actual.bits()
-    if bits != expected:
+    if not within_libm_ulps(bits, expected):
         print(f"{what}: got {hex(bits)} ({actual}), expected {hex(expected)}")
-    assert(bits == expected)
+    assert(within_libm_ulps(bits, expected))
+
+## How many units in the last place a result may differ from the expected bits. The expected
+## values were printed on macOS, and the color conversions call the C library's cbrt, atan2,
+## sin and cos, whose last bits differ between C libraries (the donor built on Linux differs
+## from them the same way), so only macOS compares exactly.
+let libm_ulps: u64 = 0 if os.macos else 4
+
+## Whether two floats' bit patterns (of one width, same sign) are at most libm_ulps apart.
+func within_libm_ulps(bits: u64, expected: u64) -> bool:
+    let distance = bits - expected if bits >= expected else expected - bits
+    return distance <= libm_ulps
 
 # mark: TestColor.cpp ===========================================================================
 

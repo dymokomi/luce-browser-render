@@ -26,9 +26,12 @@ func expect_components(actual: ColorComponents, expected: u32[4], what: str):
         got[i] = component.bits()
     let alpha = color_components_alpha(&actual)
     got[3] = alpha.bits()
-    if got != expected:
+    var close = true
+    for i: usize in 0..<4:
+        close = close and within_libm_ulps((u64)got[i], (u64)expected[i])
+    if not close:
         print(f"{what}: got {hex(got[0])} {hex(got[1])} {hex(got[2])} {hex(got[3])}, expected {hex(expected[0])} {hex(expected[1])} {hex(expected[2])} {hex(expected[3])}")
-    assert(got == expected)
+    assert(close)
 
 # mark: HSV, HSL, YUV and Oklab ==================================================================
 

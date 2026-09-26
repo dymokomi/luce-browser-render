@@ -18,5 +18,6 @@ import luce
 import math
 import math32
 import memory
+import os
 import c as libc
 import luce_browser_render.raster as raster
