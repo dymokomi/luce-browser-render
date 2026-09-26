@@ -1,0 +1,374 @@
+#==============================================================================================
+#
+#   rect_int_1 - Gfx::Rect<int> (IntRect, DevicePixelRect): construction to orientation
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Rect.h (lines 19-347) for T = int. The skeleton names
+#       Gfx::Rect<int> `DevicePixelRect` (DevicePixels is int in this port), so these are the
+#       `device_pixel_rect_*` functions; rect_int_2.lucb has the rest of the class. The class
+#       template is instantiated per type (DESIGN.md §2.8): rect_float_* and rect_css_pixels_*
+#       hold the other instantiations, function for function.
+#
+#       Member templates over a second type U are instantiated for the types phase 1 uses: the
+#       constructors from `Point<U>`/`Size<U>` and from `Rect<U>` are the `to_type_*` functions
+#       of the other instantiations; `contains(Container)` and `intersects(Container)` take a
+#       span of rects. As in C++, int overflow is not defined: it traps here.
+#
+#==============================================================================================
+
+# mark: Construction and access =================================================================
+
+## Ported from Libraries/LibGfx/Rect.h:24 Gfx::Rect::Rect<T> for DevicePixelRect.
+pub func device_pixel_rect_construct_i32(this: DevicePixelRect*, x: i32, y: i32, width: i32, height: i32):
+    this.m_location = IntPoint(x, y)
+    this.m_size = IntSize(width, height)
+
+## Ported from Libraries/LibGfx/Rect.h:31 Gfx::Rect::Rect<T>(U x, U y, U width, U height) for DevicePixelRect, with U = float.
+pub func device_pixel_rect_construct_f32(this: DevicePixelRect*, x: f32, y: f32, width: f32, height: f32):
+    int_point_construct_f32(&this.m_location, x, y)
+    int_size_construct_f32(&this.m_size, width, height)
+
+## Ported from Libraries/LibGfx/Rect.h:37 Gfx::Rect::Rect<T> for DevicePixelRect.
+pub func device_pixel_rect_construct_int_point(this: DevicePixelRect*, location: IntPoint, size: IntSize):
+    this.m_location = location
+    this.m_size = size
+
+## Ported from Libraries/LibGfx/Rect.h:57 Gfx::Rect::x for DevicePixelRect.
+pub func device_pixel_rect_x(this: const DevicePixelRect*) -> i32:
+    return int_point_x(&this.m_location)
+
+## Ported from Libraries/LibGfx/Rect.h:58 Gfx::Rect::y for DevicePixelRect.
+pub func device_pixel_rect_y(this: const DevicePixelRect*) -> i32:
+    return int_point_y(&this.m_location)
+
+## Ported from Libraries/LibGfx/Rect.h:59 Gfx::Rect::width for DevicePixelRect.
+pub func device_pixel_rect_width(this: const DevicePixelRect*) -> i32:
+    return int_size_width(&this.m_size)
+
+## Ported from Libraries/LibGfx/Rect.h:60 Gfx::Rect::height for DevicePixelRect.
+pub func device_pixel_rect_height(this: const DevicePixelRect*) -> i32:
+    return int_size_height(&this.m_size)
+
+## Ported from Libraries/LibGfx/Rect.h:62 Gfx::Rect::set_x for DevicePixelRect.
+pub func device_pixel_rect_set_x(this: DevicePixelRect*, x: i32):
+    int_point_set_x(&this.m_location, x)
+
+## Ported from Libraries/LibGfx/Rect.h:63 Gfx::Rect::set_y for DevicePixelRect.
+pub func device_pixel_rect_set_y(this: DevicePixelRect*, y: i32):
+    int_point_set_y(&this.m_location, y)
+
+## Ported from Libraries/LibGfx/Rect.h:64 Gfx::Rect::set_width for DevicePixelRect.
+pub func device_pixel_rect_set_width(this: DevicePixelRect*, width: i32):
+    int_size_set_width(&this.m_size, width)
+
+## Ported from Libraries/LibGfx/Rect.h:65 Gfx::Rect::set_height for DevicePixelRect.
+pub func device_pixel_rect_set_height(this: DevicePixelRect*, height: i32):
+    int_size_set_height(&this.m_size, height)
+
+## Ported from Libraries/LibGfx/Rect.h:67 Gfx::Rect::location for DevicePixelRect.
+pub func device_pixel_rect_location(this: const DevicePixelRect*) -> IntPoint:
+    return this.m_location
+
+## Ported from Libraries/LibGfx/Rect.h:68 Gfx::Rect::size for DevicePixelRect.
+pub func device_pixel_rect_size(this: const DevicePixelRect*) -> IntSize:
+    return this.m_size
+
+## Ported from Libraries/LibGfx/Rect.h:70 Gfx::Rect::is_empty for DevicePixelRect.
+pub func device_pixel_rect_is_empty(this: const DevicePixelRect*) -> bool:
+    return device_pixel_rect_width(this) <= 0 or device_pixel_rect_height(this) <= 0
+
+# mark: Translation and scaling =================================================================
+
+## Ported from Libraries/LibGfx/Rect.h:72 Gfx::Rect::translate_by for DevicePixelRect.
+pub func device_pixel_rect_translate_by_i32_i32(this: DevicePixelRect*, dx: i32, dy: i32):
+    int_point_translate_by_i32_i32(&this.m_location, dx, dy)
+
+## Ported from Libraries/LibGfx/Rect.h:73 Gfx::Rect::translate_by for DevicePixelRect.
+pub func device_pixel_rect_translate_by_i32(this: DevicePixelRect*, dboth: i32):
+    int_point_translate_by_i32(&this.m_location, dboth)
+
+## Ported from Libraries/LibGfx/Rect.h:74 Gfx::Rect::translate_by for DevicePixelRect.
+pub func device_pixel_rect_translate_by_int_point(this: DevicePixelRect*, delta: IntPoint):
+    int_point_translate_by_int_point(&this.m_location, delta)
+
+## Ported from Libraries/LibGfx/Rect.h:76 Gfx::Rect::scale_by for DevicePixelRect.
+pub func device_pixel_rect_scale_by_i32_i32(this: DevicePixelRect*, dx: i32, dy: i32):
+    int_point_scale_by_i32_i32(&this.m_location, dx, dy)
+    int_size_scale_by_i32_i32(&this.m_size, dx, dy)
+
+## Ported from Libraries/LibGfx/Rect.h:81 Gfx::Rect::scale_by for DevicePixelRect.
+pub func device_pixel_rect_scale_by_i32(this: DevicePixelRect*, dboth: i32):
+    device_pixel_rect_scale_by_i32_i32(this, dboth, dboth)
+
+## Ported from Libraries/LibGfx/Rect.h:82 Gfx::Rect::scale_by for DevicePixelRect.
+pub func device_pixel_rect_scale_by_int_point(this: DevicePixelRect*, delta: IntPoint):
+    device_pixel_rect_scale_by_i32_i32(this, int_point_x(&delta), int_point_y(&delta))
+
+## Ported from Libraries/LibGfx/Rect.h:84 Gfx::Rect::center for DevicePixelRect.
+pub func device_pixel_rect_center(this: const DevicePixelRect*) -> IntPoint:
+    return IntPoint(device_pixel_rect_x(this) + device_pixel_rect_width(this) // 2, device_pixel_rect_y(this) + device_pixel_rect_height(this) // 2)
+
+## Ported from Libraries/LibGfx/Rect.h:89 Gfx::Rect::set_location for DevicePixelRect.
+pub func device_pixel_rect_set_location(this: DevicePixelRect*, location: IntPoint):
+    this.m_location = location
+
+## Ported from Libraries/LibGfx/Rect.h:94 Gfx::Rect::set_size for DevicePixelRect.
+pub func device_pixel_rect_set_size_int_size(this: DevicePixelRect*, size: IntSize):
+    this.m_size = size
+
+## Ported from Libraries/LibGfx/Rect.h:99 Gfx::Rect::set_size for DevicePixelRect.
+pub func device_pixel_rect_set_size_i32(this: DevicePixelRect*, width: i32, height: i32):
+    int_size_set_width(&this.m_size, width)
+    int_size_set_height(&this.m_size, height)
+
+# mark: Inflating and shrinking =================================================================
+
+## Ported from Libraries/LibGfx/Rect.h:105 Gfx::Rect::inflate for DevicePixelRect.
+pub func device_pixel_rect_inflate_i32_i32(this: DevicePixelRect*, w: i32, h: i32):
+    device_pixel_rect_set_x(this, device_pixel_rect_x(this) - w // 2)
+    device_pixel_rect_set_width(this, device_pixel_rect_width(this) + w)
+    device_pixel_rect_set_y(this, device_pixel_rect_y(this) - h // 2)
+    device_pixel_rect_set_height(this, device_pixel_rect_height(this) + h)
+
+## Ported from Libraries/LibGfx/Rect.h:113 Gfx::Rect::inflate for DevicePixelRect.
+pub func device_pixel_rect_inflate_i32_i32_i32(this: DevicePixelRect*, top: i32, right: i32, bottom: i32, left: i32):
+    device_pixel_rect_set_x(this, device_pixel_rect_x(this) - left)
+    device_pixel_rect_set_width(this, device_pixel_rect_width(this) + left + right)
+    device_pixel_rect_set_y(this, device_pixel_rect_y(this) - top)
+    device_pixel_rect_set_height(this, device_pixel_rect_height(this) + top + bottom)
+
+## Ported from Libraries/LibGfx/Rect.h:121 Gfx::Rect::inflate for DevicePixelRect.
+pub func device_pixel_rect_inflate_int_size(this: DevicePixelRect*, size: IntSize):
+    device_pixel_rect_set_x(this, device_pixel_rect_x(this) - int_size_width(&size) // 2)
+    device_pixel_rect_set_width(this, device_pixel_rect_width(this) + int_size_width(&size))
+    device_pixel_rect_set_y(this, device_pixel_rect_y(this) - int_size_height(&size) // 2)
+    device_pixel_rect_set_height(this, device_pixel_rect_height(this) + int_size_height(&size))
+
+## Ported from Libraries/LibGfx/Rect.h:129 Gfx::Rect::shrink for DevicePixelRect.
+pub func device_pixel_rect_shrink_i32_i32(this: DevicePixelRect*, w: i32, h: i32):
+    device_pixel_rect_set_x(this, device_pixel_rect_x(this) + w // 2)
+    device_pixel_rect_set_width(this, device_pixel_rect_width(this) - w)
+    device_pixel_rect_set_y(this, device_pixel_rect_y(this) + h // 2)
+    device_pixel_rect_set_height(this, device_pixel_rect_height(this) - h)
+
+## Ported from Libraries/LibGfx/Rect.h:137 Gfx::Rect::shrink for DevicePixelRect.
+pub func device_pixel_rect_shrink_i32_i32_i32(this: DevicePixelRect*, top: i32, right: i32, bottom: i32, left: i32):
+    device_pixel_rect_set_x(this, device_pixel_rect_x(this) + left)
+    device_pixel_rect_set_width(this, device_pixel_rect_width(this) - (left + right))
+    device_pixel_rect_set_y(this, device_pixel_rect_y(this) + top)
+    device_pixel_rect_set_height(this, device_pixel_rect_height(this) - (top + bottom))
+
+## Ported from Libraries/LibGfx/Rect.h:145 Gfx::Rect::shrink for DevicePixelRect.
+pub func device_pixel_rect_shrink_int_size(this: DevicePixelRect*, size: IntSize):
+    device_pixel_rect_set_x(this, device_pixel_rect_x(this) + int_size_width(&size) // 2)
+    device_pixel_rect_set_width(this, device_pixel_rect_width(this) - int_size_width(&size))
+    device_pixel_rect_set_y(this, device_pixel_rect_y(this) + int_size_height(&size) // 2)
+    device_pixel_rect_set_height(this, device_pixel_rect_height(this) - int_size_height(&size))
+
+## Ported from Libraries/LibGfx/Rect.h:153 Gfx::Rect::translated for DevicePixelRect.
+pub func device_pixel_rect_translated_i32_i32(this: const DevicePixelRect*, dx: i32, dy: i32) -> DevicePixelRect:
+    var rect = *this
+    device_pixel_rect_translate_by_i32_i32(&rect, dx, dy)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:160 Gfx::Rect::translated for DevicePixelRect.
+pub func device_pixel_rect_translated_i32(this: const DevicePixelRect*, dboth: i32) -> DevicePixelRect:
+    var rect = *this
+    device_pixel_rect_translate_by_i32(&rect, dboth)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:167 Gfx::Rect::translated for DevicePixelRect.
+pub func device_pixel_rect_translated_int_point(this: const DevicePixelRect*, delta: IntPoint) -> DevicePixelRect:
+    var rect = *this
+    device_pixel_rect_translate_by_int_point(&rect, delta)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:174 Gfx::Rect::scaled for DevicePixelRect.
+pub func device_pixel_rect_scaled_i32(this: const DevicePixelRect*, dboth: i32) -> DevicePixelRect:
+    var rect = *this
+    device_pixel_rect_scale_by_i32(&rect, dboth)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:181 Gfx::Rect::scaled for DevicePixelRect.
+pub func device_pixel_rect_scaled_i32_i32(this: const DevicePixelRect*, sx: i32, sy: i32) -> DevicePixelRect:
+    var rect = *this
+    device_pixel_rect_scale_by_i32_i32(&rect, sx, sy)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:188 Gfx::Rect::scaled for DevicePixelRect.
+pub func device_pixel_rect_scaled_int_point(this: const DevicePixelRect*, s: IntPoint) -> DevicePixelRect:
+    var rect = *this
+    device_pixel_rect_scale_by_int_point(&rect, s)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:195 Gfx::Rect::shrunken for DevicePixelRect.
+pub func device_pixel_rect_shrunken_i32_i32(this: const DevicePixelRect*, w: i32, h: i32) -> DevicePixelRect:
+    var rect = *this
+    device_pixel_rect_shrink_i32_i32(&rect, w, h)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:202 Gfx::Rect::shrunken for DevicePixelRect.
+pub func device_pixel_rect_shrunken_i32_i32_i32(this: const DevicePixelRect*, top: i32, right: i32, bottom: i32, left: i32) -> DevicePixelRect:
+    var rect = *this
+    device_pixel_rect_shrink_i32_i32_i32(&rect, top, right, bottom, left)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:209 Gfx::Rect::shrunken for DevicePixelRect.
+pub func device_pixel_rect_shrunken_int_size(this: const DevicePixelRect*, size: IntSize) -> DevicePixelRect:
+    var rect = *this
+    device_pixel_rect_shrink_int_size(&rect, size)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:216 Gfx::Rect::inflated for DevicePixelRect.
+pub func device_pixel_rect_inflated_i32_i32(this: const DevicePixelRect*, w: i32, h: i32) -> DevicePixelRect:
+    var rect = *this
+    device_pixel_rect_inflate_i32_i32(&rect, w, h)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:223 Gfx::Rect::inflated for DevicePixelRect.
+pub func device_pixel_rect_inflated_i32_i32_i32(this: const DevicePixelRect*, top: i32, right: i32, bottom: i32, left: i32) -> DevicePixelRect:
+    var rect = *this
+    device_pixel_rect_inflate_i32_i32_i32(&rect, top, right, bottom, left)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:230 Gfx::Rect::inflated for DevicePixelRect.
+pub func device_pixel_rect_inflated_int_size(this: const DevicePixelRect*, size: IntSize) -> DevicePixelRect:
+    var rect = *this
+    device_pixel_rect_inflate_int_size(&rect, size)
+    return rect
+
+# mark: Taking slices ===========================================================================
+
+## Ported from Libraries/LibGfx/Rect.h:237 Gfx::Rect::take_from_right for DevicePixelRect.
+pub func device_pixel_rect_take_from_right(this: DevicePixelRect*, w: i32) -> DevicePixelRect:
+    var w_ = w
+    if w_ > device_pixel_rect_width(this):
+        w_ = device_pixel_rect_width(this)
+    var rect = *this
+    device_pixel_rect_set_width(this, device_pixel_rect_width(this) - w_)
+    device_pixel_rect_set_x(&rect, device_pixel_rect_x(this) + device_pixel_rect_width(this))
+    device_pixel_rect_set_width(&rect, w_)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:248 Gfx::Rect::take_from_left for DevicePixelRect.
+pub func device_pixel_rect_take_from_left(this: DevicePixelRect*, w: i32) -> DevicePixelRect:
+    var w_ = w
+    if w_ > device_pixel_rect_width(this):
+        w_ = device_pixel_rect_width(this)
+    var rect = *this
+    device_pixel_rect_set_x(this, device_pixel_rect_x(this) + w_)
+    device_pixel_rect_set_width(this, device_pixel_rect_width(this) - w_)
+    device_pixel_rect_set_width(&rect, w_)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:259 Gfx::Rect::take_from_top for DevicePixelRect.
+pub func device_pixel_rect_take_from_top(this: DevicePixelRect*, h: i32) -> DevicePixelRect:
+    var h_ = h
+    if h_ > device_pixel_rect_height(this):
+        h_ = device_pixel_rect_height(this)
+    var rect = *this
+    device_pixel_rect_set_y(this, device_pixel_rect_y(this) + h_)
+    device_pixel_rect_set_height(this, device_pixel_rect_height(this) - h_)
+    device_pixel_rect_set_height(&rect, h_)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:270 Gfx::Rect::take_from_bottom for DevicePixelRect.
+pub func device_pixel_rect_take_from_bottom(this: DevicePixelRect*, h: i32) -> DevicePixelRect:
+    var h_ = h
+    if h_ > device_pixel_rect_height(this):
+        h_ = device_pixel_rect_height(this)
+    var rect = *this
+    device_pixel_rect_set_height(this, device_pixel_rect_height(this) - h_)
+    device_pixel_rect_set_y(&rect, device_pixel_rect_y(this) + device_pixel_rect_height(this))
+    device_pixel_rect_set_height(&rect, h_)
+    return rect
+
+# mark: Containment =============================================================================
+
+## Ported from Libraries/LibGfx/Rect.h:281 Gfx::Rect::contains_vertically for DevicePixelRect.
+pub func device_pixel_rect_contains_vertically(this: const DevicePixelRect*, y: i32) -> bool:
+    return y >= device_pixel_rect_top(this) and y < device_pixel_rect_bottom(this)
+
+## Ported from Libraries/LibGfx/Rect.h:286 Gfx::Rect::contains_horizontally for DevicePixelRect.
+pub func device_pixel_rect_contains_horizontally(this: const DevicePixelRect*, x: i32) -> bool:
+    return x >= device_pixel_rect_left(this) and x < device_pixel_rect_right(this)
+
+## Ported from Libraries/LibGfx/Rect.h:291 Gfx::Rect::contains for DevicePixelRect.
+pub func device_pixel_rect_contains_i32(this: const DevicePixelRect*, x: i32, y: i32) -> bool:
+    return device_pixel_rect_contains_horizontally(this, x) and device_pixel_rect_contains_vertically(this, y)
+
+## Ported from Libraries/LibGfx/Rect.h:296 Gfx::Rect::contains for DevicePixelRect.
+pub func device_pixel_rect_contains_int_point(this: const DevicePixelRect*, point: IntPoint) -> bool:
+    return device_pixel_rect_contains_i32(this, int_point_x(&point), int_point_y(&point))
+
+## Ported from Libraries/LibGfx/Rect.h:301 Gfx::Rect::contains for DevicePixelRect.
+pub func device_pixel_rect_contains_device_pixel_rect(this: const DevicePixelRect*, other: DevicePixelRect) -> bool:
+    return (device_pixel_rect_left(this) <= device_pixel_rect_left(&other)
+        and device_pixel_rect_right(this) >= device_pixel_rect_right(&other)
+        and device_pixel_rect_top(this) <= device_pixel_rect_top(&other)
+        and device_pixel_rect_bottom(this) >= device_pixel_rect_bottom(&other))
+
+## Ported from Libraries/LibGfx/Rect.h:310 Gfx::Rect::contains<Container> for DevicePixelRect.
+pub func device_pixel_rect_contains_t_container(this: const DevicePixelRect*, others: const DevicePixelRect[]) -> bool:
+    var have_any = false
+    for other in others:
+        if not device_pixel_rect_contains_device_pixel_rect(this, other):
+            return false
+        have_any = true
+    return have_any
+
+# mark: Orientation =============================================================================
+
+## Ported from Libraries/LibGfx/Rect.h:321 Gfx::Rect::primary_offset_for_orientation for DevicePixelRect.
+pub func device_pixel_rect_primary_offset_for_orientation(this: const DevicePixelRect*, orientation: Orientation) -> i32:
+    return int_point_primary_offset_for_orientation(&this.m_location, orientation)
+
+## Ported from Libraries/LibGfx/Rect.h:322 Gfx::Rect::set_primary_offset_for_orientation for DevicePixelRect.
+pub func device_pixel_rect_set_primary_offset_for_orientation(this: DevicePixelRect*, orientation: Orientation, value: i32):
+    int_point_set_primary_offset_for_orientation(&this.m_location, orientation, value)
+
+## Ported from Libraries/LibGfx/Rect.h:323 Gfx::Rect::secondary_offset_for_orientation for DevicePixelRect.
+pub func device_pixel_rect_secondary_offset_for_orientation(this: const DevicePixelRect*, orientation: Orientation) -> i32:
+    return int_point_secondary_offset_for_orientation(&this.m_location, orientation)
+
+## Ported from Libraries/LibGfx/Rect.h:324 Gfx::Rect::set_secondary_offset_for_orientation for DevicePixelRect.
+pub func device_pixel_rect_set_secondary_offset_for_orientation(this: DevicePixelRect*, orientation: Orientation, value: i32):
+    int_point_set_secondary_offset_for_orientation(&this.m_location, orientation, value)
+
+## Ported from Libraries/LibGfx/Rect.h:325 Gfx::Rect::translate_primary_offset_for_orientation for DevicePixelRect.
+pub func device_pixel_rect_translate_primary_offset_for_orientation(this: DevicePixelRect*, orientation: Orientation, delta: i32):
+    int_point_set_primary_offset_for_orientation(&this.m_location, orientation, int_point_primary_offset_for_orientation(&this.m_location, orientation) + delta)
+
+## Ported from Libraries/LibGfx/Rect.h:326 Gfx::Rect::translate_secondary_offset_for_orientation for DevicePixelRect.
+pub func device_pixel_rect_translate_secondary_offset_for_orientation(this: DevicePixelRect*, orientation: Orientation, delta: i32):
+    int_point_set_secondary_offset_for_orientation(&this.m_location, orientation, int_point_secondary_offset_for_orientation(&this.m_location, orientation) + delta)
+
+## Ported from Libraries/LibGfx/Rect.h:328 Gfx::Rect::primary_size_for_orientation for DevicePixelRect.
+pub func device_pixel_rect_primary_size_for_orientation(this: const DevicePixelRect*, orientation: Orientation) -> i32:
+    return int_size_primary_size_for_orientation(&this.m_size, orientation)
+
+## Ported from Libraries/LibGfx/Rect.h:329 Gfx::Rect::secondary_size_for_orientation for DevicePixelRect.
+pub func device_pixel_rect_secondary_size_for_orientation(this: const DevicePixelRect*, orientation: Orientation) -> i32:
+    return int_size_secondary_size_for_orientation(&this.m_size, orientation)
+
+## Ported from Libraries/LibGfx/Rect.h:330 Gfx::Rect::set_primary_size_for_orientation for DevicePixelRect.
+pub func device_pixel_rect_set_primary_size_for_orientation(this: DevicePixelRect*, orientation: Orientation, value: i32):
+    int_size_set_primary_size_for_orientation(&this.m_size, orientation, value)
+
+## Ported from Libraries/LibGfx/Rect.h:331 Gfx::Rect::set_secondary_size_for_orientation for DevicePixelRect.
+pub func device_pixel_rect_set_secondary_size_for_orientation(this: DevicePixelRect*, orientation: Orientation, value: i32):
+    int_size_set_secondary_size_for_orientation(&this.m_size, orientation, value)
+
+## Ported from Libraries/LibGfx/Rect.h:333 Gfx::Rect::inflate_primary_for_orientation for DevicePixelRect.
+pub func device_pixel_rect_inflate_primary_for_orientation(this: DevicePixelRect*, orientation: Orientation, before: i32, after: i32):
+    if orientation == Orientation.horizontal:
+        device_pixel_rect_inflate_i32_i32_i32(this, 0, after, 0, before)
+    else:
+        device_pixel_rect_inflate_i32_i32_i32(this, before, 0, after, 0)
+
+## Ported from Libraries/LibGfx/Rect.h:341 Gfx::Rect::inflate_secondary_for_orientation for DevicePixelRect.
+pub func device_pixel_rect_inflate_secondary_for_orientation(this: DevicePixelRect*, orientation: Orientation, before: i32, after: i32):
+    if orientation == Orientation.horizontal:
+        device_pixel_rect_inflate_i32_i32_i32(this, before, 0, after, 0)
+    else:
+        device_pixel_rect_inflate_i32_i32_i32(this, 0, after, 0, before)

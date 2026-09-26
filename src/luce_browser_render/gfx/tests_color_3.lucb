@@ -1,0 +1,536 @@
+#==============================================================================================
+#
+#   tests_color_3 - tests of Color's strings and parsing, TextAlignment and Cursor
+#
+#   DESCRIPTION:
+#       Tests pinned to the C++ for serialize_a_srgb_value (every alpha), to_string and its
+#       variants, from_string (hex, rgb(), rgba(), keywords and named colors) and
+#       from_utf16_string; TextAlignment's classification and string conversion; and
+#       standard_cursor_to_string. ImageCursor::operator== is not tested: it reads
+#       ShareableBitmap::bitmap, which region r10 ports.
+#       The expected values were printed by a C++ program built against the donor's LibGfx
+#       (Build/release, clang -ffp-contract=off as the donor builds) and are compared exactly:
+#       colors by value, floats by their bits.
+#
+#       Each test's body is a noinline function the test block calls, so that the test
+#       runner's `main` does not inline every body (# workaround:
+#       compiler-issues/ranges_facts_cubic).
+#
+#==============================================================================================
+
+# mark: Helpers =================================================================================
+
+## Checks a String's text, printing both on a mismatch.
+func expect_string(actual: const ak.String*, expected: str, what: str):
+    let view = ak.string_bytes_as_string_view(actual)
+    if not ak.string_view_equals(&view, expected):
+        print(f"{what}: got {ak.string_view_text(view)}, expected {expected}")
+    assert(ak.string_view_equals(&view, expected))
+
+## Checks an optional color against the C++ result (none, or a BGRA8888 value).
+func expect_optional_color(actual: Color?, expected: u32?, what: str):
+    if let color = actual:
+        if let value = expected:
+            if color_value(&color) != value:
+                print(f"{what}: got {hex(color_value(&color))}, expected {hex(value)}")
+            assert(color_value(&color) == value)
+        else:
+            print(f"{what}: got {hex(color_value(&color))}, expected none")
+            assert(false)
+    elif let value = expected:
+        print(f"{what}: got none, expected {hex(value)}")
+        assert(false)
+
+## Whether a StringView spells `text`.
+func string_view_is(view: ak.StringView, text: str) -> bool:
+    return ak.string_view_equals(&view, text)
+
+## Whether a NUL-terminated C string (a `char const*`) spells `text`.
+func c_string_equals(characters: const u8*?, text: str) -> bool:
+    let pointer = characters else return false
+    for i in 0..<text.length:
+        if pointer[i] != text.bytes[i]:
+            return false
+    return pointer[text.length] == 0
+
+# mark: Serialization ===========================================================================
+
+## serialize_a_srgb_value of Color(0, 0, 0, alpha) for every alpha, as the C++ prints it.
+let alpha_serializations: str[256] = [
+    "rgba(0, 0, 0, 0)",
+    "rgba(0, 0, 0, 0.004)",
+    "rgba(0, 0, 0, 0.008)",
+    "rgba(0, 0, 0, 0.01)",
+    "rgba(0, 0, 0, 0.016)",
+    "rgba(0, 0, 0, 0.02)",
+    "rgba(0, 0, 0, 0.024)",
+    "rgba(0, 0, 0, 0.027)",
+    "rgba(0, 0, 0, 0.03)",
+    "rgba(0, 0, 0, 0.035)",
+    "rgba(0, 0, 0, 0.04)",
+    "rgba(0, 0, 0, 0.043)",
+    "rgba(0, 0, 0, 0.047)",
+    "rgba(0, 0, 0, 0.05)",
+    "rgba(0, 0, 0, 0.055)",
+    "rgba(0, 0, 0, 0.06)",
+    "rgba(0, 0, 0, 0.063)",
+    "rgba(0, 0, 0, 0.067)",
+    "rgba(0, 0, 0, 0.07)",
+    "rgba(0, 0, 0, 0.075)",
+    "rgba(0, 0, 0, 0.08)",
+    "rgba(0, 0, 0, 0.082)",
+    "rgba(0, 0, 0, 0.086)",
+    "rgba(0, 0, 0, 0.09)",
+    "rgba(0, 0, 0, 0.094)",
+    "rgba(0, 0, 0, 0.098)",
+    "rgba(0, 0, 0, 0.1)",
+    "rgba(0, 0, 0, 0.106)",
+    "rgba(0, 0, 0, 0.11)",
+    "rgba(0, 0, 0, 0.114)",
+    "rgba(0, 0, 0, 0.118)",
+    "rgba(0, 0, 0, 0.12)",
+    "rgba(0, 0, 0, 0.125)",
+    "rgba(0, 0, 0, 0.13)",
+    "rgba(0, 0, 0, 0.133)",
+    "rgba(0, 0, 0, 0.137)",
+    "rgba(0, 0, 0, 0.14)",
+    "rgba(0, 0, 0, 0.145)",
+    "rgba(0, 0, 0, 0.15)",
+    "rgba(0, 0, 0, 0.153)",
+    "rgba(0, 0, 0, 0.157)",
+    "rgba(0, 0, 0, 0.16)",
+    "rgba(0, 0, 0, 0.165)",
+    "rgba(0, 0, 0, 0.17)",
+    "rgba(0, 0, 0, 0.173)",
+    "rgba(0, 0, 0, 0.176)",
+    "rgba(0, 0, 0, 0.18)",
+    "rgba(0, 0, 0, 0.184)",
+    "rgba(0, 0, 0, 0.19)",
+    "rgba(0, 0, 0, 0.192)",
+    "rgba(0, 0, 0, 0.196)",
+    "rgba(0, 0, 0, 0.2)",
+    "rgba(0, 0, 0, 0.204)",
+    "rgba(0, 0, 0, 0.208)",
+    "rgba(0, 0, 0, 0.21)",
+    "rgba(0, 0, 0, 0.216)",
+    "rgba(0, 0, 0, 0.22)",
+    "rgba(0, 0, 0, 0.224)",
+    "rgba(0, 0, 0, 0.227)",
+    "rgba(0, 0, 0, 0.23)",
+    "rgba(0, 0, 0, 0.235)",
+    "rgba(0, 0, 0, 0.24)",
+    "rgba(0, 0, 0, 0.243)",
+    "rgba(0, 0, 0, 0.247)",
+    "rgba(0, 0, 0, 0.25)",
+    "rgba(0, 0, 0, 0.255)",
+    "rgba(0, 0, 0, 0.26)",
+    "rgba(0, 0, 0, 0.263)",
+    "rgba(0, 0, 0, 0.267)",
+    "rgba(0, 0, 0, 0.27)",
+    "rgba(0, 0, 0, 0.275)",
+    "rgba(0, 0, 0, 0.28)",
+    "rgba(0, 0, 0, 0.282)",
+    "rgba(0, 0, 0, 0.286)",
+    "rgba(0, 0, 0, 0.29)",
+    "rgba(0, 0, 0, 0.294)",
+    "rgba(0, 0, 0, 0.298)",
+    "rgba(0, 0, 0, 0.3)",
+    "rgba(0, 0, 0, 0.306)",
+    "rgba(0, 0, 0, 0.31)",
+    "rgba(0, 0, 0, 0.314)",
+    "rgba(0, 0, 0, 0.318)",
+    "rgba(0, 0, 0, 0.32)",
+    "rgba(0, 0, 0, 0.325)",
+    "rgba(0, 0, 0, 0.33)",
+    "rgba(0, 0, 0, 0.333)",
+    "rgba(0, 0, 0, 0.337)",
+    "rgba(0, 0, 0, 0.34)",
+    "rgba(0, 0, 0, 0.345)",
+    "rgba(0, 0, 0, 0.35)",
+    "rgba(0, 0, 0, 0.353)",
+    "rgba(0, 0, 0, 0.357)",
+    "rgba(0, 0, 0, 0.36)",
+    "rgba(0, 0, 0, 0.365)",
+    "rgba(0, 0, 0, 0.37)",
+    "rgba(0, 0, 0, 0.373)",
+    "rgba(0, 0, 0, 0.376)",
+    "rgba(0, 0, 0, 0.38)",
+    "rgba(0, 0, 0, 0.384)",
+    "rgba(0, 0, 0, 0.39)",
+    "rgba(0, 0, 0, 0.392)",
+    "rgba(0, 0, 0, 0.396)",
+    "rgba(0, 0, 0, 0.4)",
+    "rgba(0, 0, 0, 0.404)",
+    "rgba(0, 0, 0, 0.408)",
+    "rgba(0, 0, 0, 0.41)",
+    "rgba(0, 0, 0, 0.416)",
+    "rgba(0, 0, 0, 0.42)",
+    "rgba(0, 0, 0, 0.424)",
+    "rgba(0, 0, 0, 0.427)",
+    "rgba(0, 0, 0, 0.43)",
+    "rgba(0, 0, 0, 0.435)",
+    "rgba(0, 0, 0, 0.44)",
+    "rgba(0, 0, 0, 0.443)",
+    "rgba(0, 0, 0, 0.447)",
+    "rgba(0, 0, 0, 0.45)",
+    "rgba(0, 0, 0, 0.455)",
+    "rgba(0, 0, 0, 0.46)",
+    "rgba(0, 0, 0, 0.463)",
+    "rgba(0, 0, 0, 0.467)",
+    "rgba(0, 0, 0, 0.47)",
+    "rgba(0, 0, 0, 0.475)",
+    "rgba(0, 0, 0, 0.48)",
+    "rgba(0, 0, 0, 0.482)",
+    "rgba(0, 0, 0, 0.486)",
+    "rgba(0, 0, 0, 0.49)",
+    "rgba(0, 0, 0, 0.494)",
+    "rgba(0, 0, 0, 0.498)",
+    "rgba(0, 0, 0, 0.5)",
+    "rgba(0, 0, 0, 0.506)",
+    "rgba(0, 0, 0, 0.51)",
+    "rgba(0, 0, 0, 0.514)",
+    "rgba(0, 0, 0, 0.518)",
+    "rgba(0, 0, 0, 0.52)",
+    "rgba(0, 0, 0, 0.525)",
+    "rgba(0, 0, 0, 0.53)",
+    "rgba(0, 0, 0, 0.533)",
+    "rgba(0, 0, 0, 0.537)",
+    "rgba(0, 0, 0, 0.54)",
+    "rgba(0, 0, 0, 0.545)",
+    "rgba(0, 0, 0, 0.55)",
+    "rgba(0, 0, 0, 0.553)",
+    "rgba(0, 0, 0, 0.557)",
+    "rgba(0, 0, 0, 0.56)",
+    "rgba(0, 0, 0, 0.565)",
+    "rgba(0, 0, 0, 0.57)",
+    "rgba(0, 0, 0, 0.573)",
+    "rgba(0, 0, 0, 0.576)",
+    "rgba(0, 0, 0, 0.58)",
+    "rgba(0, 0, 0, 0.584)",
+    "rgba(0, 0, 0, 0.59)",
+    "rgba(0, 0, 0, 0.592)",
+    "rgba(0, 0, 0, 0.596)",
+    "rgba(0, 0, 0, 0.6)",
+    "rgba(0, 0, 0, 0.604)",
+    "rgba(0, 0, 0, 0.608)",
+    "rgba(0, 0, 0, 0.61)",
+    "rgba(0, 0, 0, 0.616)",
+    "rgba(0, 0, 0, 0.62)",
+    "rgba(0, 0, 0, 0.624)",
+    "rgba(0, 0, 0, 0.627)",
+    "rgba(0, 0, 0, 0.63)",
+    "rgba(0, 0, 0, 0.635)",
+    "rgba(0, 0, 0, 0.64)",
+    "rgba(0, 0, 0, 0.643)",
+    "rgba(0, 0, 0, 0.647)",
+    "rgba(0, 0, 0, 0.65)",
+    "rgba(0, 0, 0, 0.655)",
+    "rgba(0, 0, 0, 0.66)",
+    "rgba(0, 0, 0, 0.663)",
+    "rgba(0, 0, 0, 0.667)",
+    "rgba(0, 0, 0, 0.67)",
+    "rgba(0, 0, 0, 0.675)",
+    "rgba(0, 0, 0, 0.68)",
+    "rgba(0, 0, 0, 0.682)",
+    "rgba(0, 0, 0, 0.686)",
+    "rgba(0, 0, 0, 0.69)",
+    "rgba(0, 0, 0, 0.694)",
+    "rgba(0, 0, 0, 0.698)",
+    "rgba(0, 0, 0, 0.7)",
+    "rgba(0, 0, 0, 0.706)",
+    "rgba(0, 0, 0, 0.71)",
+    "rgba(0, 0, 0, 0.714)",
+    "rgba(0, 0, 0, 0.718)",
+    "rgba(0, 0, 0, 0.72)",
+    "rgba(0, 0, 0, 0.725)",
+    "rgba(0, 0, 0, 0.73)",
+    "rgba(0, 0, 0, 0.733)",
+    "rgba(0, 0, 0, 0.737)",
+    "rgba(0, 0, 0, 0.74)",
+    "rgba(0, 0, 0, 0.745)",
+    "rgba(0, 0, 0, 0.75)",
+    "rgba(0, 0, 0, 0.753)",
+    "rgba(0, 0, 0, 0.757)",
+    "rgba(0, 0, 0, 0.76)",
+    "rgba(0, 0, 0, 0.765)",
+    "rgba(0, 0, 0, 0.77)",
+    "rgba(0, 0, 0, 0.773)",
+    "rgba(0, 0, 0, 0.776)",
+    "rgba(0, 0, 0, 0.78)",
+    "rgba(0, 0, 0, 0.784)",
+    "rgba(0, 0, 0, 0.79)",
+    "rgba(0, 0, 0, 0.792)",
+    "rgba(0, 0, 0, 0.796)",
+    "rgba(0, 0, 0, 0.8)",
+    "rgba(0, 0, 0, 0.804)",
+    "rgba(0, 0, 0, 0.808)",
+    "rgba(0, 0, 0, 0.81)",
+    "rgba(0, 0, 0, 0.816)",
+    "rgba(0, 0, 0, 0.82)",
+    "rgba(0, 0, 0, 0.824)",
+    "rgba(0, 0, 0, 0.827)",
+    "rgba(0, 0, 0, 0.83)",
+    "rgba(0, 0, 0, 0.835)",
+    "rgba(0, 0, 0, 0.84)",
+    "rgba(0, 0, 0, 0.843)",
+    "rgba(0, 0, 0, 0.847)",
+    "rgba(0, 0, 0, 0.85)",
+    "rgba(0, 0, 0, 0.855)",
+    "rgba(0, 0, 0, 0.86)",
+    "rgba(0, 0, 0, 0.863)",
+    "rgba(0, 0, 0, 0.867)",
+    "rgba(0, 0, 0, 0.87)",
+    "rgba(0, 0, 0, 0.875)",
+    "rgba(0, 0, 0, 0.88)",
+    "rgba(0, 0, 0, 0.882)",
+    "rgba(0, 0, 0, 0.886)",
+    "rgba(0, 0, 0, 0.89)",
+    "rgba(0, 0, 0, 0.894)",
+    "rgba(0, 0, 0, 0.898)",
+    "rgba(0, 0, 0, 0.9)",
+    "rgba(0, 0, 0, 0.906)",
+    "rgba(0, 0, 0, 0.91)",
+    "rgba(0, 0, 0, 0.914)",
+    "rgba(0, 0, 0, 0.918)",
+    "rgba(0, 0, 0, 0.92)",
+    "rgba(0, 0, 0, 0.925)",
+    "rgba(0, 0, 0, 0.93)",
+    "rgba(0, 0, 0, 0.933)",
+    "rgba(0, 0, 0, 0.937)",
+    "rgba(0, 0, 0, 0.94)",
+    "rgba(0, 0, 0, 0.945)",
+    "rgba(0, 0, 0, 0.95)",
+    "rgba(0, 0, 0, 0.953)",
+    "rgba(0, 0, 0, 0.957)",
+    "rgba(0, 0, 0, 0.96)",
+    "rgba(0, 0, 0, 0.965)",
+    "rgba(0, 0, 0, 0.97)",
+    "rgba(0, 0, 0, 0.973)",
+    "rgba(0, 0, 0, 0.976)",
+    "rgba(0, 0, 0, 0.98)",
+    "rgba(0, 0, 0, 0.984)",
+    "rgba(0, 0, 0, 0.99)",
+    "rgba(0, 0, 0, 0.992)",
+    "rgba(0, 0, 0, 0.996)",
+    "rgb(0, 0, 0)",
+]
+
+test "serialize_a_srgb_value of every alpha":
+    test_serialize_a_srgb_value_of_every_alpha()
+
+noinline func test_serialize_a_srgb_value_of_every_alpha():
+    var alpha: u32 = 0
+    while alpha < 256:
+        let color = color_new_u8_u8_u8_u8(0, 0, 0, (u8)alpha)
+        let serialized = color_serialize_a_srgb_value(&color)
+        expect_string(&serialized, alpha_serializations[alpha], "serialize_a_srgb_value")
+        alpha += 1
+
+test "to_string":
+    test_to_string()
+
+noinline func test_to_string():
+    let color0 = color_new_u8_u8_u8_u8(10, 200, 255, 0)
+    let serialized0 = color_serialize_a_srgb_value(&color0)
+    expect_string(&serialized0, "rgba(10, 200, 255, 0)", "serialize 0")
+    let html0 = color_to_string(&color0, ColorHtmlCompatibleSerialization.yes)
+    expect_string(&html0, "rgba(10, 200, 255, 0)", "to_string_html 0")
+    let plain0 = color_to_string(&color0)
+    expect_string(&plain0, "rgba(10, 200, 255, 0)", "to_string 0")
+    let color1 = color_new_u8_u8_u8_u8(10, 200, 255, 1)
+    let serialized1 = color_serialize_a_srgb_value(&color1)
+    expect_string(&serialized1, "rgba(10, 200, 255, 0.004)", "serialize 1")
+    let html1 = color_to_string(&color1, ColorHtmlCompatibleSerialization.yes)
+    expect_string(&html1, "rgba(10, 200, 255, 0.004)", "to_string_html 1")
+    let plain1 = color_to_string(&color1)
+    expect_string(&plain1, "rgba(10, 200, 255, 0.004)", "to_string 1")
+    let color2 = color_new_u8_u8_u8_u8(10, 200, 255, 2)
+    let serialized2 = color_serialize_a_srgb_value(&color2)
+    expect_string(&serialized2, "rgba(10, 200, 255, 0.008)", "serialize 2")
+    let html2 = color_to_string(&color2, ColorHtmlCompatibleSerialization.yes)
+    expect_string(&html2, "rgba(10, 200, 255, 0.008)", "to_string_html 2")
+    let plain2 = color_to_string(&color2)
+    expect_string(&plain2, "rgba(10, 200, 255, 0.008)", "to_string 2")
+    let color51 = color_new_u8_u8_u8_u8(10, 200, 255, 51)
+    let serialized51 = color_serialize_a_srgb_value(&color51)
+    expect_string(&serialized51, "rgba(10, 200, 255, 0.2)", "serialize 51")
+    let html51 = color_to_string(&color51, ColorHtmlCompatibleSerialization.yes)
+    expect_string(&html51, "rgba(10, 200, 255, 0.2)", "to_string_html 51")
+    let plain51 = color_to_string(&color51)
+    expect_string(&plain51, "rgba(10, 200, 255, 0.2)", "to_string 51")
+    let color100 = color_new_u8_u8_u8_u8(10, 200, 255, 100)
+    let serialized100 = color_serialize_a_srgb_value(&color100)
+    expect_string(&serialized100, "rgba(10, 200, 255, 0.392)", "serialize 100")
+    let html100 = color_to_string(&color100, ColorHtmlCompatibleSerialization.yes)
+    expect_string(&html100, "rgba(10, 200, 255, 0.392)", "to_string_html 100")
+    let plain100 = color_to_string(&color100)
+    expect_string(&plain100, "rgba(10, 200, 255, 0.392)", "to_string 100")
+    let color127 = color_new_u8_u8_u8_u8(10, 200, 255, 127)
+    let serialized127 = color_serialize_a_srgb_value(&color127)
+    expect_string(&serialized127, "rgba(10, 200, 255, 0.498)", "serialize 127")
+    let html127 = color_to_string(&color127, ColorHtmlCompatibleSerialization.yes)
+    expect_string(&html127, "rgba(10, 200, 255, 0.498)", "to_string_html 127")
+    let plain127 = color_to_string(&color127)
+    expect_string(&plain127, "rgba(10, 200, 255, 0.498)", "to_string 127")
+    let color128 = color_new_u8_u8_u8_u8(10, 200, 255, 128)
+    let serialized128 = color_serialize_a_srgb_value(&color128)
+    expect_string(&serialized128, "rgba(10, 200, 255, 0.5)", "serialize 128")
+    let html128 = color_to_string(&color128, ColorHtmlCompatibleSerialization.yes)
+    expect_string(&html128, "rgba(10, 200, 255, 0.5)", "to_string_html 128")
+    let plain128 = color_to_string(&color128)
+    expect_string(&plain128, "rgba(10, 200, 255, 0.5)", "to_string 128")
+    let color191 = color_new_u8_u8_u8_u8(10, 200, 255, 191)
+    let serialized191 = color_serialize_a_srgb_value(&color191)
+    expect_string(&serialized191, "rgba(10, 200, 255, 0.75)", "serialize 191")
+    let html191 = color_to_string(&color191, ColorHtmlCompatibleSerialization.yes)
+    expect_string(&html191, "rgba(10, 200, 255, 0.75)", "to_string_html 191")
+    let plain191 = color_to_string(&color191)
+    expect_string(&plain191, "rgba(10, 200, 255, 0.75)", "to_string 191")
+    let color254 = color_new_u8_u8_u8_u8(10, 200, 255, 254)
+    let serialized254 = color_serialize_a_srgb_value(&color254)
+    expect_string(&serialized254, "rgba(10, 200, 255, 0.996)", "serialize 254")
+    let html254 = color_to_string(&color254, ColorHtmlCompatibleSerialization.yes)
+    expect_string(&html254, "rgba(10, 200, 255, 0.996)", "to_string_html 254")
+    let plain254 = color_to_string(&color254)
+    expect_string(&plain254, "rgba(10, 200, 255, 0.996)", "to_string 254")
+    let color255 = color_new_u8_u8_u8_u8(10, 200, 255, 255)
+    let serialized255 = color_serialize_a_srgb_value(&color255)
+    expect_string(&serialized255, "rgb(10, 200, 255)", "serialize 255")
+    let html255 = color_to_string(&color255, ColorHtmlCompatibleSerialization.yes)
+    expect_string(&html255, "#0ac8ff", "to_string_html 255")
+    let plain255 = color_to_string(&color255)
+    expect_string(&plain255, "rgb(10, 200, 255)", "to_string 255")
+    var builder = ak.string_builder_new()
+    ak.string_builder_append(&builder, "color: ")
+    color_serialize_a_srgb_value_string_builder(&color51, &builder)
+    let built = ak.string_builder_to_string_without_validation(&builder)
+    expect_string(&built, "color: rgba(10, 200, 255, 0.2)", "serialize into a builder")
+
+test "string variants":
+    test_string_variants()
+
+noinline func test_string_variants():
+    let color = color_new_u8_u8_u8_u8(1, 171, 255, 3)
+    let without_alpha = color_to_string_without_alpha(&color)
+    expect_string(&without_alpha, "#01abff", "to_string_without_alpha")
+    let utf16 = color_to_utf16_string_without_alpha(&color)
+    assert(ak.utf16_string_base_eq_string_view(&utf16.utf16_string_base, ak.sv("#01abff")))
+    let byte_string = color_to_byte_string(&color)
+    assert(string_view_is(ak.byte_string_view(&byte_string), "rgba(1, 171, 255, 0.01)"))
+    let byte_string_without_alpha = color_to_byte_string_without_alpha(&color)
+    assert(string_view_is(ak.byte_string_view(&byte_string_without_alpha), "#01abff"))
+
+# mark: Parsing =================================================================================
+
+test "from_string":
+    test_from_string()
+
+noinline func test_from_string():
+    expect_optional_color(color_from_string(ak.sv("#abc")), 0xffaabbcc, "from_string [#abc]")
+    expect_optional_color(color_from_string(ak.sv("#ABCD")), 0xddaabbcc, "from_string [#ABCD]")
+    expect_optional_color(color_from_string(ak.sv("#aabbcc")), 0xffaabbcc, "from_string [#aabbcc]")
+    expect_optional_color(color_from_string(ak.sv("#aabbccdd")), 0xddaabbcc, "from_string [#aabbccdd]")
+    expect_optional_color(color_from_string(ak.sv("#abx")), none, "from_string [#abx]")
+    expect_optional_color(color_from_string(ak.sv("#12345")), none, "from_string [#12345]")
+    expect_optional_color(color_from_string(ak.sv("#")), none, "from_string [#]")
+    expect_optional_color(color_from_string(ak.sv("#1234567")), none, "from_string [#1234567]")
+    expect_optional_color(color_from_string(ak.sv("#12345g")), none, "from_string [#12345g]")
+    expect_optional_color(color_from_string(ak.sv("rgb(1, 2, 3)")), 0xff010203, "from_string [rgb(1, 2, 3)]")
+    expect_optional_color(color_from_string(ak.sv("RGB(300,-5, 2.5)")), 0xffff0002, "from_string [RGB(300,-5, 2.5)]")
+    expect_optional_color(color_from_string(ak.sv("rgb(1.5,2.5,3.5)")), 0xff020204, "from_string [rgb(1.5,2.5,3.5)]")
+    expect_optional_color(color_from_string(ak.sv("rgb(1,2)")), none, "from_string [rgb(1,2)]")
+    expect_optional_color(color_from_string(ak.sv("rgb(a,2,3)")), none, "from_string [rgb(a,2,3)]")
+    expect_optional_color(color_from_string(ak.sv("rgba(1,2,3,0.5)")), 0x7f010203, "from_string [rgba(1,2,3,0.5)]")
+    expect_optional_color(color_from_string(ak.sv("rgba(1,2,3,2)")), none, "from_string [rgba(1,2,3,2)]")
+    expect_optional_color(color_from_string(ak.sv("rgba(1,2,3,abc)")), 0x00010203, "from_string [rgba(1,2,3,abc)]")
+    expect_optional_color(color_from_string(ak.sv("rgba(1,2,3, 1)")), 0xff010203, "from_string [rgba(1,2,3, 1)]")
+    expect_optional_color(color_from_string(ak.sv("rgba( 4 , 5 , 6 , 0.25xyz)")), 0x3f040506, "from_string [rgba( 4 , 5 , 6 , 0.25xyz)]")
+    expect_optional_color(color_from_string(ak.sv("rgba(1,2,3)")), none, "from_string [rgba(1,2,3)]")
+    expect_optional_color(color_from_string(ak.sv("transparent")), 0x00000000, "from_string [transparent]")
+    expect_optional_color(color_from_string(ak.sv("TRANSPARENT")), 0x00000000, "from_string [TRANSPARENT]")
+    expect_optional_color(color_from_string(ak.sv("RebeccaPurple")), 0xff663399, "from_string [RebeccaPurple]")
+    expect_optional_color(color_from_string(ak.sv("gray")), 0xff808080, "from_string [gray]")
+    expect_optional_color(color_from_string(ak.sv("grey")), 0xff808080, "from_string [grey]")
+    expect_optional_color(color_from_string(ak.sv("lightgoldenrodyellow")), 0xfffafad2, "from_string [lightgoldenrodyellow]")
+    expect_optional_color(color_from_string(ak.sv("notacolor")), none, "from_string [notacolor]")
+    expect_optional_color(color_from_string(ak.sv("")), none, "from_string []")
+    expect_optional_color(color_from_string(ak.sv("Rgb(9,8,7)")), 0xff090807, "from_string [Rgb(9,8,7)]")
+    expect_optional_color(color_from_string(ak.sv("rgb(1,2,3")), none, "from_string [rgb(1,2,3]")
+    expect_optional_color(color_from_string(ak.sv("orange")), 0xffffa500, "from_string [orange]")
+    expect_optional_color(color_from_string(ak.sv("aqua")), 0xff00ffff, "from_string [aqua]")
+    expect_optional_color(color_from_string(ak.sv("cyan")), 0xff00ffff, "from_string [cyan]")
+    expect_optional_color(color_from_utf16_string(ak.utf16_sv("#102030")), 0xff102030, "from_utf16_string")
+    expect_optional_color(color_from_named_css_color_string(ak.sv("Silver")), 0xffc0c0c0, "named Silver")
+    expect_optional_color(color_from_named_css_color_string(ak.sv("")), none, "named empty")
+
+# mark: TextAlignment and Cursor ================================================================
+
+test "text alignment":
+    test_text_alignment()
+
+noinline func test_text_alignment():
+    assert(text_alignment_from_string(ak.sv("Center")) == TextAlignment.center)
+    assert(c_string_equals(to_string(TextAlignment.center), "Center"))
+    assert(text_alignment_from_string(ak.sv("CenterLeft")) == TextAlignment.center_left)
+    assert(c_string_equals(to_string(TextAlignment.center_left), "CenterLeft"))
+    assert(text_alignment_from_string(ak.sv("CenterRight")) == TextAlignment.center_right)
+    assert(c_string_equals(to_string(TextAlignment.center_right), "CenterRight"))
+    assert(text_alignment_from_string(ak.sv("TopCenter")) == TextAlignment.top_center)
+    assert(c_string_equals(to_string(TextAlignment.top_center), "TopCenter"))
+    assert(text_alignment_from_string(ak.sv("TopLeft")) == TextAlignment.top_left)
+    assert(c_string_equals(to_string(TextAlignment.top_left), "TopLeft"))
+    assert(text_alignment_from_string(ak.sv("TopRight")) == TextAlignment.top_right)
+    assert(c_string_equals(to_string(TextAlignment.top_right), "TopRight"))
+    assert(text_alignment_from_string(ak.sv("BottomCenter")) == TextAlignment.bottom_center)
+    assert(c_string_equals(to_string(TextAlignment.bottom_center), "BottomCenter"))
+    assert(text_alignment_from_string(ak.sv("BottomLeft")) == TextAlignment.bottom_left)
+    assert(c_string_equals(to_string(TextAlignment.bottom_left), "BottomLeft"))
+    assert(text_alignment_from_string(ak.sv("BottomRight")) == TextAlignment.bottom_right)
+    assert(c_string_equals(to_string(TextAlignment.bottom_right), "BottomRight"))
+    assert(text_alignment_from_string(ak.sv("bottomright")) == none)
+    assert(text_alignment_from_string(ak.sv("")) == none)
+    assert(to_string((TextAlignment)9) == none)
+    assert(is_right_text_alignment(TextAlignment.center) == false)
+    assert(is_vertically_centered_text_alignment(TextAlignment.center) == true)
+    assert(is_right_text_alignment(TextAlignment.center_left) == false)
+    assert(is_vertically_centered_text_alignment(TextAlignment.center_left) == true)
+    assert(is_right_text_alignment(TextAlignment.center_right) == true)
+    assert(is_vertically_centered_text_alignment(TextAlignment.center_right) == true)
+    assert(is_right_text_alignment(TextAlignment.top_center) == false)
+    assert(is_vertically_centered_text_alignment(TextAlignment.top_center) == false)
+    assert(is_right_text_alignment(TextAlignment.top_left) == false)
+    assert(is_vertically_centered_text_alignment(TextAlignment.top_left) == false)
+    assert(is_right_text_alignment(TextAlignment.top_right) == true)
+    assert(is_vertically_centered_text_alignment(TextAlignment.top_right) == false)
+    assert(is_right_text_alignment(TextAlignment.bottom_center) == false)
+    assert(is_vertically_centered_text_alignment(TextAlignment.bottom_center) == false)
+    assert(is_right_text_alignment(TextAlignment.bottom_left) == false)
+    assert(is_vertically_centered_text_alignment(TextAlignment.bottom_left) == false)
+    assert(is_right_text_alignment(TextAlignment.bottom_right) == true)
+    assert(is_vertically_centered_text_alignment(TextAlignment.bottom_right) == false)
+
+test "standard_cursor_to_string":
+    test_standard_cursor_to_string()
+
+noinline func test_standard_cursor_to_string():
+    assert(string_view_is(standard_cursor_to_string((StandardCursor)0), "None"))
+    assert(string_view_is(standard_cursor_to_string((StandardCursor)1), "Hidden"))
+    assert(string_view_is(standard_cursor_to_string((StandardCursor)2), "Arrow"))
+    assert(string_view_is(standard_cursor_to_string((StandardCursor)3), "Crosshair"))
+    assert(string_view_is(standard_cursor_to_string((StandardCursor)4), "IBeam"))
+    assert(string_view_is(standard_cursor_to_string((StandardCursor)5), "ResizeHorizontal"))
+    assert(string_view_is(standard_cursor_to_string((StandardCursor)6), "ResizeVertical"))
+    assert(string_view_is(standard_cursor_to_string((StandardCursor)7), "ResizeDiagonalTLBR"))
+    assert(string_view_is(standard_cursor_to_string((StandardCursor)8), "ResizeDiagonalBLTR"))
+    assert(string_view_is(standard_cursor_to_string((StandardCursor)9), "ResizeColumn"))
+    assert(string_view_is(standard_cursor_to_string((StandardCursor)10), "ResizeRow"))
+    assert(string_view_is(standard_cursor_to_string((StandardCursor)11), "Hand"))
+    assert(string_view_is(standard_cursor_to_string((StandardCursor)12), "Help"))
+    assert(string_view_is(standard_cursor_to_string((StandardCursor)13), "OpenHand"))
+    assert(string_view_is(standard_cursor_to_string((StandardCursor)14), "Drag"))
+    assert(string_view_is(standard_cursor_to_string((StandardCursor)15), "DragCopy"))
+    assert(string_view_is(standard_cursor_to_string((StandardCursor)16), "Move"))
+    assert(string_view_is(standard_cursor_to_string((StandardCursor)17), "Wait"))
+    assert(string_view_is(standard_cursor_to_string((StandardCursor)18), "Disallowed"))
+    assert(string_view_is(standard_cursor_to_string((StandardCursor)19), "Eyedropper"))
+    assert(string_view_is(standard_cursor_to_string((StandardCursor)20), "Zoom"))

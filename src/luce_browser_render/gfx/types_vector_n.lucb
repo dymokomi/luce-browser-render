@@ -1,0 +1,19 @@
+#==============================================================================================
+#
+#   types_vector_n - declarations of Libraries/LibGfx/VectorN.h (Vector3, Vector4)
+#
+#   DESCRIPTION:
+#       Gfx::VectorN<N, T> holds `AK::Array<T, N> m_data`. The skeleton did not instantiate it
+#       (its users, CSS transform interpolation, are phase 4); region r08 declares by hand the
+#       two instantiations Matrix4x4.h's helpers take, FloatVector3 and FloatVector4
+#       (Libraries/LibGfx/Vector3.h, Vector4.h). Their methods are not ported yet.
+#
+#==============================================================================================
+
+## Gfx::VectorN<3, float> (Libraries/LibGfx/VectorN.h:32), FloatVector3.
+pub struct FloatVector3:
+    pub var m_data: f32[3]
+
+## Gfx::VectorN<4, float> (Libraries/LibGfx/VectorN.h:32), FloatVector4.
+pub struct FloatVector4:
+    pub var m_data: f32[4]

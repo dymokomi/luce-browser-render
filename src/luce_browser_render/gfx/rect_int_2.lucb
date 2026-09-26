@@ -1,0 +1,233 @@
+#==============================================================================================
+#
+#   rect_int_2 - Gfx::Rect<int> (IntRect, DevicePixelRect): edges to conversions
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Rect.h (lines 349-593) and Rect.cpp (lines 14-18) for T = int:
+#       edges, intersection and union, corners and centering, conversions. rect_int_1.lucb has
+#       the first half of the class.
+#
+#==============================================================================================
+
+# mark: Edges ===================================================================================
+
+## Ported from Libraries/LibGfx/Rect.h:349 Gfx::Rect::first_edge_for_orientation for DevicePixelRect.
+pub func device_pixel_rect_first_edge_for_orientation(this: const DevicePixelRect*, orientation: Orientation) -> i32:
+    if orientation == Orientation.vertical:
+        return device_pixel_rect_top(this)
+    return device_pixel_rect_left(this)
+
+## Ported from Libraries/LibGfx/Rect.h:356 Gfx::Rect::last_edge_for_orientation for DevicePixelRect.
+pub func device_pixel_rect_last_edge_for_orientation(this: const DevicePixelRect*, orientation: Orientation) -> i32:
+    if orientation == Orientation.vertical:
+        return device_pixel_rect_bottom(this)
+    return device_pixel_rect_right(this)
+
+## Ported from Libraries/LibGfx/Rect.h:363 Gfx::Rect::left for DevicePixelRect.
+pub func device_pixel_rect_left(this: const DevicePixelRect*) -> i32:
+    return device_pixel_rect_x(this)
+
+## Ported from Libraries/LibGfx/Rect.h:364 Gfx::Rect::right for DevicePixelRect.
+pub func device_pixel_rect_right(this: const DevicePixelRect*) -> i32:
+    return device_pixel_rect_x(this) + device_pixel_rect_width(this)
+
+## Ported from Libraries/LibGfx/Rect.h:365 Gfx::Rect::top for DevicePixelRect.
+pub func device_pixel_rect_top(this: const DevicePixelRect*) -> i32:
+    return device_pixel_rect_y(this)
+
+## Ported from Libraries/LibGfx/Rect.h:366 Gfx::Rect::bottom for DevicePixelRect.
+pub func device_pixel_rect_bottom(this: const DevicePixelRect*) -> i32:
+    return device_pixel_rect_y(this) + device_pixel_rect_height(this)
+
+## Ported from Libraries/LibGfx/Rect.h:368 Gfx::Rect::set_left for DevicePixelRect.
+pub func device_pixel_rect_set_left(this: DevicePixelRect*, left: i32):
+    device_pixel_rect_set_x(this, left)
+
+## Ported from Libraries/LibGfx/Rect.h:369 Gfx::Rect::set_top for DevicePixelRect.
+pub func device_pixel_rect_set_top(this: DevicePixelRect*, top: i32):
+    device_pixel_rect_set_y(this, top)
+
+## Ported from Libraries/LibGfx/Rect.h:370 Gfx::Rect::set_right for DevicePixelRect.
+pub func device_pixel_rect_set_right(this: DevicePixelRect*, right: i32):
+    device_pixel_rect_set_width(this, right - device_pixel_rect_x(this))
+
+## Ported from Libraries/LibGfx/Rect.h:371 Gfx::Rect::set_bottom for DevicePixelRect.
+pub func device_pixel_rect_set_bottom(this: DevicePixelRect*, bottom: i32):
+    device_pixel_rect_set_height(this, bottom - device_pixel_rect_y(this))
+
+## Ported from Libraries/LibGfx/Rect.h:373 Gfx::Rect::set_right_without_resize for DevicePixelRect.
+pub func device_pixel_rect_set_right_without_resize(this: DevicePixelRect*, new_right: i32):
+    let delta = new_right - device_pixel_rect_right(this)
+    device_pixel_rect_translate_by_i32_i32(this, delta, 0)
+
+## Ported from Libraries/LibGfx/Rect.h:379 Gfx::Rect::set_bottom_without_resize for DevicePixelRect.
+pub func device_pixel_rect_set_bottom_without_resize(this: DevicePixelRect*, new_bottom: i32):
+    let delta = new_bottom - device_pixel_rect_bottom(this)
+    device_pixel_rect_translate_by_i32_i32(this, 0, delta)
+
+# mark: Intersection ============================================================================
+
+## Ported from Libraries/LibGfx/Rect.h:385 Gfx::Rect::intersects_vertically for DevicePixelRect.
+pub func device_pixel_rect_intersects_vertically(this: const DevicePixelRect*, other: DevicePixelRect) -> bool:
+    return device_pixel_rect_top(this) < device_pixel_rect_bottom(&other) and device_pixel_rect_top(&other) < device_pixel_rect_bottom(this)
+
+## Ported from Libraries/LibGfx/Rect.h:390 Gfx::Rect::intersects_horizontally for DevicePixelRect.
+pub func device_pixel_rect_intersects_horizontally(this: const DevicePixelRect*, other: DevicePixelRect) -> bool:
+    return device_pixel_rect_left(this) < device_pixel_rect_right(&other) and device_pixel_rect_left(&other) < device_pixel_rect_right(this)
+
+## Ported from Libraries/LibGfx/Rect.h:395 Gfx::Rect::intersects for DevicePixelRect.
+pub func device_pixel_rect_intersects_device_pixel_rect(this: const DevicePixelRect*, other: DevicePixelRect) -> bool:
+    return (device_pixel_rect_left(this) < device_pixel_rect_right(&other)
+        and device_pixel_rect_left(&other) < device_pixel_rect_right(this)
+        and device_pixel_rect_top(this) < device_pixel_rect_bottom(&other)
+        and device_pixel_rect_top(&other) < device_pixel_rect_bottom(this))
+
+## Ported from Libraries/LibGfx/Rect.h:403 Gfx::Rect::edge_adjacent_intersects for DevicePixelRect.
+pub func device_pixel_rect_edge_adjacent_intersects(this: const DevicePixelRect*, other: DevicePixelRect) -> bool:
+    return (ak.max[i32](device_pixel_rect_left(this), device_pixel_rect_left(&other)) <= ak.min[i32](device_pixel_rect_right(this), device_pixel_rect_right(&other))
+        and ak.max[i32](device_pixel_rect_top(this), device_pixel_rect_top(&other)) <= ak.min[i32](device_pixel_rect_bottom(this), device_pixel_rect_bottom(&other)))
+
+## Ported from Libraries/LibGfx/Rect.h:410 Gfx::Rect::intersects<Container> for DevicePixelRect.
+pub func device_pixel_rect_intersects_t_container(this: const DevicePixelRect*, others: const DevicePixelRect[]) -> bool:
+    for other in others:
+        if device_pixel_rect_intersects_device_pixel_rect(this, other):
+            return true
+    return false
+
+## Ported from Libraries/LibGfx/Rect.h:420 Gfx::Rect::operator== for DevicePixelRect (U = int).
+pub func device_pixel_rect_eq(this: const DevicePixelRect*, other: DevicePixelRect) -> bool:
+    return int_point_eq(&this.m_location, other.m_location) and int_size_eq(&this.m_size, other.m_size)
+
+## Ported from Libraries/LibGfx/Rect.h:425 Gfx::Rect::operator* for DevicePixelRect.
+pub func device_pixel_rect_mul(this: const DevicePixelRect*, factor: i32) -> DevicePixelRect:
+    return DevicePixelRect(int_point_mul(&this.m_location, factor), int_size_mul(&this.m_size, factor))
+
+## Ported from Libraries/LibGfx/Rect.h:427 Gfx::Rect::operator*= for DevicePixelRect.
+pub func device_pixel_rect_mul_assign(this: DevicePixelRect*, factor: i32) -> DevicePixelRect*:
+    discard(int_point_mul_assign(&this.m_location, factor))
+    discard(int_size_mul_assign(&this.m_size, factor))
+    return this
+
+## Ported from Libraries/LibGfx/Rect.h:434 Gfx::Rect::intersect for DevicePixelRect.
+pub func device_pixel_rect_intersect(this: DevicePixelRect*, other: DevicePixelRect):
+    let l = ak.max[i32](device_pixel_rect_left(this), device_pixel_rect_left(&other))
+    let r = ak.min[i32](device_pixel_rect_right(this), device_pixel_rect_right(&other))
+    let t = ak.max[i32](device_pixel_rect_top(this), device_pixel_rect_top(&other))
+    let b = ak.min[i32](device_pixel_rect_bottom(this), device_pixel_rect_bottom(&other))
+
+    if l > r or t > b:
+        this.m_location = IntPoint(0, 0)
+        this.m_size = IntSize(0, 0)
+        return
+
+    device_pixel_rect_set_x(this, l)
+    device_pixel_rect_set_y(this, t)
+    device_pixel_rect_set_right(this, r)
+    device_pixel_rect_set_bottom(this, b)
+
+## Ported from Libraries/LibGfx/Rect.h:453 Gfx::Rect::from_two_points for DevicePixelRect.
+pub func device_pixel_rect_from_two_points(a: IntPoint, b: IntPoint) -> DevicePixelRect:
+    return DevicePixelRect(
+        IntPoint(ak.min[i32](int_point_x(&a), int_point_x(&b)), ak.min[i32](int_point_y(&a), int_point_y(&b))),
+        IntSize(ak.abs_i32(int_point_x(&a) - int_point_x(&b)), ak.abs_i32(int_point_y(&a) - int_point_y(&b))),
+    )
+
+## Ported from Libraries/LibGfx/Rect.h:458 Gfx::Rect::intersection for DevicePixelRect.
+pub func device_pixel_rect_intersection(a: DevicePixelRect, b: DevicePixelRect) -> DevicePixelRect:
+    var r = a
+    device_pixel_rect_intersect(&r, b)
+    return r
+
+## Ported from Libraries/LibGfx/Rect.h:465 Gfx::Rect::intersected for DevicePixelRect.
+pub func device_pixel_rect_intersected(this: const DevicePixelRect*, other: DevicePixelRect) -> DevicePixelRect:
+    return device_pixel_rect_intersection(*this, other)
+
+# mark: Union ===================================================================================
+
+## Ported from Libraries/LibGfx/Rect.h:470 Gfx::Rect::unite for DevicePixelRect.
+pub func device_pixel_rect_unite(this: DevicePixelRect*, other: DevicePixelRect):
+    if device_pixel_rect_is_empty(this):
+        *this = other
+        return
+    if device_pixel_rect_is_empty(&other):
+        return
+    device_pixel_rect_unite_horizontally(this, other)
+    device_pixel_rect_unite_vertically(this, other)
+
+## Ported from Libraries/LibGfx/Rect.h:482 Gfx::Rect::unite_horizontally for DevicePixelRect.
+pub func device_pixel_rect_unite_horizontally(this: DevicePixelRect*, other: DevicePixelRect):
+    let new_left = ak.min[i32](device_pixel_rect_left(this), device_pixel_rect_left(&other))
+    let new_right = ak.max[i32](device_pixel_rect_right(this), device_pixel_rect_right(&other))
+    device_pixel_rect_set_left(this, new_left)
+    device_pixel_rect_set_right(this, new_right)
+
+## Ported from Libraries/LibGfx/Rect.h:490 Gfx::Rect::unite_vertically for DevicePixelRect.
+pub func device_pixel_rect_unite_vertically(this: DevicePixelRect*, other: DevicePixelRect):
+    let new_top = ak.min[i32](device_pixel_rect_top(this), device_pixel_rect_top(&other))
+    let new_bottom = ak.max[i32](device_pixel_rect_bottom(this), device_pixel_rect_bottom(&other))
+    device_pixel_rect_set_top(this, new_top)
+    device_pixel_rect_set_bottom(this, new_bottom)
+
+## Ported from Libraries/LibGfx/Rect.h:498 Gfx::Rect::united for DevicePixelRect.
+pub func device_pixel_rect_united(this: const DevicePixelRect*, other: DevicePixelRect) -> DevicePixelRect:
+    var rect = *this
+    device_pixel_rect_unite(&rect, other)
+    return rect
+
+# mark: Corners and centering ===================================================================
+
+## Ported from Libraries/LibGfx/Rect.h:505 Gfx::Rect::top_left for DevicePixelRect.
+pub func device_pixel_rect_top_left(this: const DevicePixelRect*) -> IntPoint:
+    return IntPoint(device_pixel_rect_left(this), device_pixel_rect_top(this))
+
+## Ported from Libraries/LibGfx/Rect.h:506 Gfx::Rect::top_right for DevicePixelRect.
+pub func device_pixel_rect_top_right(this: const DevicePixelRect*) -> IntPoint:
+    return IntPoint(device_pixel_rect_right(this), device_pixel_rect_top(this))
+
+## Ported from Libraries/LibGfx/Rect.h:507 Gfx::Rect::bottom_left for DevicePixelRect.
+pub func device_pixel_rect_bottom_left(this: const DevicePixelRect*) -> IntPoint:
+    return IntPoint(device_pixel_rect_left(this), device_pixel_rect_bottom(this))
+
+## Ported from Libraries/LibGfx/Rect.h:508 Gfx::Rect::bottom_right for DevicePixelRect.
+pub func device_pixel_rect_bottom_right(this: const DevicePixelRect*) -> IntPoint:
+    return IntPoint(device_pixel_rect_right(this), device_pixel_rect_bottom(this))
+
+## Ported from Libraries/LibGfx/Rect.h:510 Gfx::Rect::centered_within for DevicePixelRect.
+pub func device_pixel_rect_centered_within(this: const DevicePixelRect*, other: DevicePixelRect) -> DevicePixelRect:
+    var rect = *this
+    device_pixel_rect_center_horizontally_within(&rect, other)
+    device_pixel_rect_center_vertically_within(&rect, other)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:518 Gfx::Rect::center_horizontally_within for DevicePixelRect.
+pub func device_pixel_rect_center_horizontally_within(this: DevicePixelRect*, other: DevicePixelRect):
+    let center = device_pixel_rect_center(&other)
+    device_pixel_rect_set_x(this, int_point_x(&center) - device_pixel_rect_width(this) // 2)
+
+## Ported from Libraries/LibGfx/Rect.h:523 Gfx::Rect::center_vertically_within for DevicePixelRect.
+pub func device_pixel_rect_center_vertically_within(this: DevicePixelRect*, other: DevicePixelRect):
+    let center = device_pixel_rect_center(&other)
+    device_pixel_rect_set_y(this, int_point_y(&center) - device_pixel_rect_height(this) // 2)
+
+# mark: Conversions =============================================================================
+
+## Ported from Libraries/LibGfx/Rect.h:530 Gfx::Rect::to_type<float> for DevicePixelRect (and the
+## converting constructors Rect<float>(IntRect) and Rect<float>(IntPoint, IntSize), Rect.h:44-51).
+pub func device_pixel_rect_to_type_f32(this: const DevicePixelRect*) -> FloatRect:
+    return FloatRect(int_point_to_type_f32(&this.m_location), int_size_to_type_f32(&this.m_size))
+
+## Ported from Libraries/LibGfx/Rect.h:530 Gfx::Rect::to_type<CSSPixels> for DevicePixelRect (and the
+## converting constructors Rect<CSSPixels>(IntRect) and Rect<CSSPixels>(IntPoint, IntSize), Rect.h:44-51).
+pub func device_pixel_rect_to_type_css_pixels(this: const DevicePixelRect*) -> CssPixelRect:
+    return CssPixelRect(int_point_to_type_css_pixels(&this.m_location), int_size_to_type_css_pixels(&this.m_size))
+
+## Ported from Libraries/LibGfx/Rect.cpp:15 Gfx::Rect::to_byte_string for DevicePixelRect.
+pub func device_pixel_rect_to_byte_string(this: const DevicePixelRect*) -> ak.ByteString:
+    let arguments = [
+        ak.arg_i64(device_pixel_rect_x(this)),
+        ak.arg_i64(device_pixel_rect_y(this)),
+        ak.arg_i64(device_pixel_rect_width(this)),
+        ak.arg_i64(device_pixel_rect_height(this)),
+    ]
+    var params = ak.type_erased_format_params_create(arguments)
+    return ak.byte_string_vformatted(ak.sv("[{},{} {}x{}]"), &params)

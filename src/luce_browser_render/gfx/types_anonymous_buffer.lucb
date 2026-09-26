@@ -8,8 +8,24 @@
 #       (DESIGN.md §4.4). Regenerate rather than edit, except to fill a field the generator
 #       could not map.
 #
+#       Fixed by hand (r08): the struct was opaque; PaletteImpl keeps its SystemTheme in
+#       one, so AnonymousBuffer's `RefPtr<AnonymousBufferImpl>` and the impl's fields
+#       (AnonymousBuffer.h lines 19-77) are declared here. anonymous_buffer.lucb ports the
+#       members Palette uses.
+#
 #==============================================================================================
 
-## Core::AnonymousBuffer (Libraries/LibCore/AnonymousBuffer.h:38): opaque in this phase (not in the phase-1 closure).
+# mark: AnonymousBufferImpl =====================================================================
+
+## Core::AnonymousBufferImpl (Libraries/LibCore/AnonymousBuffer.h:19).
+pub struct CoreAnonymousBufferImpl:
+    pub var m_fd: i32 = -1
+    pub var m_size: usize
+    pub var m_data: void*?
+
+# mark: AnonymousBuffer =========================================================================
+
+## Core::AnonymousBuffer (Libraries/LibCore/AnonymousBuffer.h:38). A zero value is the default
+## (invalid) buffer.
 pub struct CoreAnonymousBuffer:
-    pub var opaque_: u8
+    pub var m_impl: CoreAnonymousBufferImpl*?

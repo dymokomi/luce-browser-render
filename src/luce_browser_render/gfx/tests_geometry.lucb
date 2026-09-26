@@ -1,0 +1,1151 @@
+#==============================================================================================
+#
+#   tests_geometry - Point, Size and Rect of every instantiation, pinned to the donor
+#
+#   DESCRIPTION:
+#       Values computed by the donor's LibGfx Point/Size/Rect templates (Ladybird 47c82b38d0,
+#       compiled locally) for the cases Tests/LibGfx/TestRect.cpp does not cover. Floats are
+#       compared by their bits, CSSPixels by their raw fixed-point values (1px = 64). The
+#       helpers (`test_irect`, `test_crect`, ...) are in tests_rect.lucb.
+#
+#       Each test's body is a noinline function the test block calls, so that the test
+#       runner's `main` does not inline every body (# workaround:
+#       compiler-issues/ranges_facts_cubic).
+#
+#==============================================================================================
+
+test "geometry: int_point_distance_from":
+    test_geometry_int_point_distance_from()
+
+# C++:  IntPoint(3, 4).distance_from({ 0, 0 })
+noinline func test_geometry_int_point_distance_from():
+    let a = IntPoint(3, 4)
+    assert((int_point_distance_from(&a, IntPoint(0, 0))).bits() == 0x40a00000)  # 5
+
+test "geometry: int_point_distance_from_self":
+    test_geometry_int_point_distance_from_self()
+
+# C++:  IntPoint(3, 4).distance_from({ 3, 4 })
+noinline func test_geometry_int_point_distance_from_self():
+    let a = IntPoint(3, 4)
+    assert((int_point_distance_from(&a, IntPoint(3, 4))).bits() == 0x0)  # 0
+
+test "geometry: float_point_distance_from":
+    test_geometry_float_point_distance_from()
+
+# C++:  FloatPoint(0.5f, 1.25f).distance_from({ -2.0f, 7.0f })
+noinline func test_geometry_float_point_distance_from():
+    let a = FloatPoint(0.5, 1.25)
+    assert((float_point_distance_from(&a, FloatPoint(-2.0, 7.0))).bits() == 0x40c8a394)  # 6.26996803
+
+test "geometry: int_point_pixels_moved":
+    test_geometry_int_point_pixels_moved()
+
+# C++:  IntPoint(1, 2).pixels_moved({ -5, 10 })
+noinline func test_geometry_int_point_pixels_moved():
+    let a = IntPoint(1, 2)
+    assert((i64)(int_point_pixels_moved(&a, IntPoint(-5, 10))) == 8)
+
+test "geometry: int_point_absolute_relative_distance_to":
+    test_geometry_int_point_absolute_relative_distance_to()
+
+# C++: auto p = IntPoint(1, 2).absolute_relative_distance_to({ -5, 10 }); p.x(); p.y()
+noinline func test_geometry_int_point_absolute_relative_distance_to():
+    let a = IntPoint(1, 2)
+    let p = int_point_absolute_relative_distance_to(&a, IntPoint(-5, 10))
+    assert((i64)(int_point_x(&p)) == 6)
+    assert((i64)(int_point_y(&p)) == 8)
+
+test "geometry: int_point_end_point_for_aspect_ratio":
+    test_geometry_int_point_end_point_for_aspect_ratio()
+
+# C++: p.x(); p.y()
+noinline func test_geometry_int_point_end_point_for_aspect_ratio():
+    let a = IntPoint(0, 0)
+    let p = int_point_end_point_for_aspect_ratio(&a, IntPoint(10, -3), 2.0)
+    assert((i64)(int_point_x(&p)) == 10)
+    assert((i64)(int_point_y(&p)) == -5)
+
+test "geometry: int_point_end_point_for_aspect_ratio_tall":
+    test_geometry_int_point_end_point_for_aspect_ratio_tall()
+
+# C++: p.x(); p.y()
+noinline func test_geometry_int_point_end_point_for_aspect_ratio_tall():
+    let a = IntPoint(5, 5)
+    let p = int_point_end_point_for_aspect_ratio(&a, IntPoint(4, 20), 0.75)
+    assert((i64)(int_point_x(&p)) == -6)
+    assert((i64)(int_point_y(&p)) == 20)
+
+test "geometry: float_point_end_point_for_aspect_ratio":
+    test_geometry_float_point_end_point_for_aspect_ratio()
+
+# C++: fb(p.x()); fb(p.y())
+noinline func test_geometry_float_point_end_point_for_aspect_ratio():
+    let a = FloatPoint(1.0, 1.0)
+    let p = float_point_end_point_for_aspect_ratio(&a, FloatPoint(-4.0, 7.0), 1.5)
+    assert((i64)(float_point_x(&p).bits()) == 3238002688)
+    assert((i64)(float_point_y(&p).bits()) == 1088421888)
+
+test "geometry: int_point_constrained":
+    test_geometry_int_point_constrained()
+
+# C++: auto p = IntPoint(100, -5).constrained(IntRect { 0, 0, 10, 10 }); p.x(); p.y()
+noinline func test_geometry_int_point_constrained():
+    let a = IntPoint(100, -5)
+    let p = int_point_constrained(&a, test_irect(0, 0, 10, 10))
+    assert((i64)(int_point_x(&p)) == 9)
+    assert((i64)(int_point_y(&p)) == 0)
+
+test "geometry: float_point_constrained":
+    test_geometry_float_point_constrained()
+
+# C++: fb(p.x()); fb(p.y())
+noinline func test_geometry_float_point_constrained():
+    let a = FloatPoint(100.0, -5.0)
+    let p = float_point_constrained(&a, test_frect(0.0, 0.0, 10.5, 10.0))
+    assert((i64)(float_point_x(&p).bits()) == 1092091904)
+    assert((i64)(float_point_y(&p).bits()) == 0)
+
+test "geometry: float_point_to_rounded":
+    test_geometry_float_point_to_rounded()
+
+# C++: auto p = FloatPoint(1.5f, -2.5f).to_rounded<int>(); p.x(); p.y()
+noinline func test_geometry_float_point_to_rounded():
+    let a = FloatPoint(1.5, -2.5)
+    let p = float_point_to_rounded_i32(&a)
+    assert((i64)(int_point_x(&p)) == 2)
+    assert((i64)(int_point_y(&p)) == -3)
+
+test "geometry: float_point_to_rounded_below_half":
+    test_geometry_float_point_to_rounded_below_half()
+
+# C++: auto p = FloatPoint(0.49999997f, -0.49999997f).to_rounded<int>(); p.x(); p.y()
+noinline func test_geometry_float_point_to_rounded_below_half():
+    let a = FloatPoint(0.49999997, -0.49999997)
+    let p = float_point_to_rounded_i32(&a)
+    assert((i64)(int_point_x(&p)) == 0)
+    assert((i64)(int_point_y(&p)) == 0)
+
+test "geometry: float_point_to_ceiled":
+    test_geometry_float_point_to_ceiled()
+
+# C++: auto p = FloatPoint(1.1f, -1.1f).to_ceiled<int>(); p.x(); p.y()
+noinline func test_geometry_float_point_to_ceiled():
+    let a = FloatPoint(1.1, -1.1)
+    let p = float_point_to_ceiled_i32(&a)
+    assert((i64)(int_point_x(&p)) == 2)
+    assert((i64)(int_point_y(&p)) == -1)
+
+test "geometry: float_point_to_floored":
+    test_geometry_float_point_to_floored()
+
+# C++: auto p = FloatPoint(1.1f, -1.1f).to_floored<int>(); p.x(); p.y()
+noinline func test_geometry_float_point_to_floored():
+    let a = FloatPoint(1.1, -1.1)
+    let p = float_point_to_floored_i32(&a)
+    assert((i64)(int_point_x(&p)) == 1)
+    assert((i64)(int_point_y(&p)) == -2)
+
+test "geometry: float_point_to_type_int":
+    test_geometry_float_point_to_type_int()
+
+# C++: auto p = FloatPoint(-1.9f, 2.9f).to_type<int>(); p.x(); p.y()
+noinline func test_geometry_float_point_to_type_int():
+    let a = FloatPoint(-1.9, 2.9)
+    let p = float_point_to_type_i32(&a)
+    assert((i64)(int_point_x(&p)) == -1)
+    assert((i64)(int_point_y(&p)) == 2)
+
+test "geometry: float_point_to_type_css_pixels":
+    test_geometry_float_point_to_type_css_pixels()
+
+# C++: p.x().raw_value(); p.y().raw_value()
+noinline func test_geometry_float_point_to_type_css_pixels():
+    let a = FloatPoint(0.3, -0.3)
+    let p = float_point_to_type_css_pixels(&a)
+    assert((i64)(css_pixel_point_x(&p).raw_value()) == 19)
+    assert((i64)(css_pixel_point_y(&p).raw_value()) == -19)
+
+test "geometry: css_point_to_type_int":
+    test_geometry_css_point_to_type_int()
+
+# C++: p.x(); p.y()
+noinline func test_geometry_css_point_to_type_int():
+    let a = test_cpoint(1.75, -1.75)
+    let p = css_pixel_point_to_type_i32(&a)
+    assert((i64)(int_point_x(&p)) == 1)
+    assert((i64)(int_point_y(&p)) == -1)
+
+test "geometry: css_point_to_type_float":
+    test_geometry_css_point_to_type_float()
+
+# C++: fb(p.x()); fb(p.y())
+noinline func test_geometry_css_point_to_type_float():
+    let a = test_cpoint(1.75, -0.015625)
+    let p = css_pixel_point_to_type_f32(&a)
+    assert((i64)(float_point_x(&p).bits()) == 1071644672)
+    assert((i64)(float_point_y(&p).bits()) == 3162505216)
+
+test "geometry: int_point_to_type_css_pixels":
+    test_geometry_int_point_to_type_css_pixels()
+
+# C++: p.x().raw_value(); p.y().raw_value()
+noinline func test_geometry_int_point_to_type_css_pixels():
+    let a = IntPoint(3, -3)
+    let p = int_point_to_type_css_pixels(&a)
+    assert((i64)(css_pixel_point_x(&p).raw_value()) == 192)
+    assert((i64)(css_pixel_point_y(&p).raw_value()) == -192)
+
+test "geometry: int_point_to_type_float":
+    test_geometry_int_point_to_type_float()
+
+# C++: auto p = IntPoint(16777217, -3).to_type<float>(); fb(p.x()); fb(p.y())
+noinline func test_geometry_int_point_to_type_float():
+    let a = IntPoint(16777217, -3)
+    let p = int_point_to_type_f32(&a)
+    assert((i64)(float_point_x(&p).bits()) == 1266679808)
+    assert((i64)(float_point_y(&p).bits()) == 3225419776)
+
+test "geometry: int_point_to_byte_string":
+    test_geometry_int_point_to_byte_string()
+
+# C++:  IntPoint(-3, 42).to_byte_string()
+noinline func test_geometry_int_point_to_byte_string():
+    let a = IntPoint(-3, 42)
+    let text = int_point_to_byte_string(&a)
+    assert(ak.byte_string_eq_string_view(&text, ak.sv("[-3,42]")))
+
+test "geometry: float_point_to_byte_string":
+    test_geometry_float_point_to_byte_string()
+
+# C++:  FloatPoint(1.5f, -0.25f).to_byte_string()
+noinline func test_geometry_float_point_to_byte_string():
+    let a = FloatPoint(1.5, -0.25)
+    let text = float_point_to_byte_string(&a)
+    assert(ak.byte_string_eq_string_view(&text, ak.sv("[1.5,-0.25]")))
+
+test "geometry: float_point_to_byte_string_tenth":
+    test_geometry_float_point_to_byte_string_tenth()
+
+# C++:  FloatPoint(0.1f, 100.0f).to_byte_string()
+noinline func test_geometry_float_point_to_byte_string_tenth():
+    let a = FloatPoint(0.1, 100.0)
+    let text = float_point_to_byte_string(&a)
+    assert(ak.byte_string_eq_string_view(&text, ak.sv("[0.1,100]")))
+
+test "geometry: int_point_hash":
+    test_geometry_int_point_hash()
+
+# C++:  Traits<IntPoint>::hash(IntPoint(1, 2))
+noinline func test_geometry_int_point_hash():
+    let a = IntPoint(1, 2)
+    assert((i64)(int_point_hash(&a)) == 2801639925)
+
+test "geometry: float_point_hash":
+    test_geometry_float_point_hash()
+
+# C++:  Traits<FloatPoint>::hash(FloatPoint(1.5f, 2.0f))
+noinline func test_geometry_float_point_hash():
+    let a = FloatPoint(1.5, 2.0)
+    assert((i64)(float_point_hash(&a)) == 3858695035)
+
+test "geometry: css_point_hash":
+    test_geometry_css_point_hash()
+
+# C++:  Traits<CSSPixelPoint>::hash(CSSPixelPoint(1, 2))
+noinline func test_geometry_css_point_hash():
+    let a = CssPixelPoint(css_pixels_from_int(1), css_pixels_from_int(2))
+    assert((i64)(css_pixel_point_hash(&a)) == 112251058)
+
+test "geometry: linear_interpolate":
+    test_geometry_linear_interpolate()
+
+# C++: fb(p.x()); fb(p.y())
+noinline func test_geometry_linear_interpolate():
+    let p = linear_interpolate(FloatPoint(0.0, 0.0), FloatPoint(10.0, -4.0), 0.3)
+    assert((i64)(float_point_x(&p).bits()) == 1077936128)
+    assert((i64)(float_point_y(&p).bits()) == 3214514586)
+
+test "geometry: quadratic_interpolate":
+    test_geometry_quadratic_interpolate()
+
+# C++: fb(p.x()); fb(p.y())
+noinline func test_geometry_quadratic_interpolate():
+    let p = quadratic_interpolate(FloatPoint(0.0, 0.0), FloatPoint(10.0, 0.0), FloatPoint(5.0, 10.0), 0.3)
+    assert((i64)(float_point_x(&p).bits()) == 1077936128)
+    assert((i64)(float_point_y(&p).bits()) == 1082549862)
+
+test "geometry: cubic_interpolate":
+    test_geometry_cubic_interpolate()
+
+# C++: fb(p.x()); fb(p.y())
+noinline func test_geometry_cubic_interpolate():
+    let p = cubic_interpolate(FloatPoint(0.0, 0.0), FloatPoint(10.0, 0.0), FloatPoint(2.0, 10.0), FloatPoint(8.0, -10.0), 0.7)
+    assert((i64)(float_point_x(&p).bits()) == 1088656770)
+    assert((i64)(float_point_y(&p).bits()) == 3223700111)
+
+test "geometry: css_point_div":
+    test_geometry_css_point_div()
+
+# C++: p.x().raw_value(); p.y().raw_value()
+noinline func test_geometry_css_point_div():
+    let a = CssPixelPoint(css_pixels_from_int(10), css_pixels_from_int(-20))
+    let p = css_pixel_point_div(&a, css_pixels_from_int(3))
+    assert((i64)(css_pixel_point_x(&p).raw_value()) == 213)
+    assert((i64)(css_pixel_point_y(&p).raw_value()) == -426)
+
+test "geometry: css_point_div_assign":
+    test_geometry_css_point_div_assign()
+
+# C++: p.x().raw_value(); p.y().raw_value()
+noinline func test_geometry_css_point_div_assign():
+    var p = CssPixelPoint(css_pixels_from_int(10), css_pixels_from_int(-20))
+    discard(css_pixel_point_div_assign(&p, css_pixels_from_int(3)))
+    assert((i64)(css_pixel_point_x(&p).raw_value()) == 1920)
+    assert((i64)(css_pixel_point_y(&p).raw_value()) == -3840)
+
+test "geometry: int_point_div":
+    test_geometry_int_point_div()
+
+# C++: auto p = IntPoint(-7, 7) / 2; p.x(); p.y()
+noinline func test_geometry_int_point_div():
+    let a = IntPoint(-7, 7)
+    let p = int_point_div(&a, 2)
+    assert((i64)(int_point_x(&p)) == -3)
+    assert((i64)(int_point_y(&p)) == 3)
+
+test "geometry: css_point_translated_scaled":
+    test_geometry_css_point_translated_scaled()
+
+# C++: p.x().raw_value(); p.y().raw_value()
+noinline func test_geometry_css_point_translated_scaled():
+    let a = test_cpoint(1.5, 2.0)
+    let b = css_pixel_point_translated_css_pixels(&a, test_px(0.25))
+    let p = css_pixel_point_scaled_css_pixels_css_pixels(&b, test_px(1.5), test_px(-2.0))
+    assert((i64)(css_pixel_point_x(&p).raw_value()) == 168)
+    assert((i64)(css_pixel_point_y(&p).raw_value()) == -288)
+
+test "geometry: css_point_moved":
+    test_geometry_css_point_moved()
+
+# C++: p.x().raw_value(); p.y().raw_value()
+noinline func test_geometry_css_point_moved():
+    let a = CssPixelPoint(css_pixels_from_int(1), css_pixels_from_int(1))
+    let b = css_pixel_point_moved_left(&a, test_px(0.5))
+    let p = css_pixel_point_moved_down(&b, test_px(3.0))
+    assert((i64)(css_pixel_point_x(&p).raw_value()) == 32)
+    assert((i64)(css_pixel_point_y(&p).raw_value()) == 256)
+
+test "geometry: css_point_is_zero":
+    test_geometry_css_point_is_zero()
+
+# C++:  CSSPixelPoint(CSSPixels::from_raw(0), CSSPixels::from_raw(1)).is_zero()
+noinline func test_geometry_css_point_is_zero():
+    let a = CssPixelPoint(css_pixels_from_raw(0), css_pixels_from_raw(1))
+    assert((css_pixel_point_is_zero(&a)) == false)
+
+test "geometry: css_point_neg_sub":
+    test_geometry_css_point_neg_sub()
+
+# C++: p.x().raw_value(); p.y().raw_value()
+noinline func test_geometry_css_point_neg_sub():
+    let a = CssPixelPoint(css_pixels_from_int(1), css_pixels_from_int(2))
+    let b = css_pixel_point_sub(&a, test_cpoint(0.5, 5.0))
+    let p = css_pixel_point_neg(&b)
+    assert((i64)(css_pixel_point_x(&p).raw_value()) == -32)
+    assert((i64)(css_pixel_point_y(&p).raw_value()) == 192)
+
+test "geometry: float_point_secondary_offset":
+    test_geometry_float_point_secondary_offset()
+
+# C++:  FloatPoint(1.5f, 2.5f).secondary_offset_for_orientation(Orientation::Vertical)
+noinline func test_geometry_float_point_secondary_offset():
+    let a = FloatPoint(1.5, 2.5)
+    assert((float_point_secondary_offset_for_orientation(&a, Orientation.vertical)).bits() == 0x3fc00000)  # 1.5
+
+test "geometry: int_size_match_aspect_ratio_vertical":
+    test_geometry_int_size_match_aspect_ratio_vertical()
+
+# C++: s.width(); s.height()
+noinline func test_geometry_int_size_match_aspect_ratio_vertical():
+    let a = IntSize(10, 5)
+    let s = int_size_match_aspect_ratio(&a, 3.0, Orientation.vertical)
+    assert((i64)(int_size_width(&s)) == 15)
+    assert((i64)(int_size_height(&s)) == 5)
+
+test "geometry: int_size_match_aspect_ratio_horizontal":
+    test_geometry_int_size_match_aspect_ratio_horizontal()
+
+# C++: s.width(); s.height()
+noinline func test_geometry_int_size_match_aspect_ratio_horizontal():
+    let a = IntSize(10, 5)
+    let s = int_size_match_aspect_ratio(&a, 3.0, Orientation.horizontal)
+    assert((i64)(int_size_width(&s)) == 10)
+    assert((i64)(int_size_height(&s)) == 3)
+
+test "geometry: int_size_aspect_ratio":
+    test_geometry_int_size_aspect_ratio()
+
+# C++:  IntSize(10, 3).aspect_ratio()
+noinline func test_geometry_int_size_aspect_ratio():
+    let a = IntSize(10, 3)
+    assert((int_size_aspect_ratio(&a)).bits() == 0x40555555)  # 3.33333325
+
+test "geometry: float_size_to_rounded":
+    test_geometry_float_size_to_rounded()
+
+# C++: auto s = FloatSize(2.5f, 3.5f).to_rounded<int>(); s.width(); s.height()
+noinline func test_geometry_float_size_to_rounded():
+    let a = FloatSize(2.5, 3.5)
+    let s = float_size_to_rounded_i32(&a)
+    assert((i64)(int_size_width(&s)) == 2)
+    assert((i64)(int_size_height(&s)) == 4)
+
+test "geometry: float_size_to_rounded_negative":
+    test_geometry_float_size_to_rounded_negative()
+
+# C++: auto s = FloatSize(-2.5f, -3.7f).to_rounded<int>(); s.width(); s.height()
+noinline func test_geometry_float_size_to_rounded_negative():
+    let a = FloatSize(-2.5, -3.7)
+    let s = float_size_to_rounded_i32(&a)
+    assert((i64)(int_size_width(&s)) == -2)
+    assert((i64)(int_size_height(&s)) == -4)
+
+test "geometry: int_size_to_byte_string":
+    test_geometry_int_size_to_byte_string()
+
+# C++:  IntSize(640, -480).to_byte_string()
+noinline func test_geometry_int_size_to_byte_string():
+    let a = IntSize(640, -480)
+    let text = int_size_to_byte_string(&a)
+    assert(ak.byte_string_eq_string_view(&text, ak.sv("[640x-480]")))
+
+test "geometry: float_size_to_byte_string":
+    test_geometry_float_size_to_byte_string()
+
+# C++:  FloatSize(0.5f, 1e-7f).to_byte_string()
+noinline func test_geometry_float_size_to_byte_string():
+    let a = FloatSize(0.5, 1e-7)
+    let text = float_size_to_byte_string(&a)
+    assert(ak.byte_string_eq_string_view(&text, ak.sv("[0.5x1e-7]")))
+
+test "geometry: css_size_is_empty_zero":
+    test_geometry_css_size_is_empty_zero()
+
+# C++:  CSSPixelSize(0, 5).is_empty()
+noinline func test_geometry_css_size_is_empty_zero():
+    let a = CssPixelSize(css_pixels_from_int(0), css_pixels_from_int(5))
+    assert((css_pixel_size_is_empty(&a)) == true)
+
+test "geometry: css_size_is_empty_tiny":
+    test_geometry_css_size_is_empty_tiny()
+
+# C++:  CSSPixelSize(CSSPixels::from_raw(1), 1).is_empty()
+noinline func test_geometry_css_size_is_empty_tiny():
+    let a = CssPixelSize(css_pixels_from_raw(1), css_pixels_from_int(1))
+    assert((css_pixel_size_is_empty(&a)) == false)
+
+test "geometry: css_size_aspect_ratio":
+    test_geometry_css_size_aspect_ratio()
+
+# C++:  CSSPixelSize(3, 7).aspect_ratio()
+noinline func test_geometry_css_size_aspect_ratio():
+    let a = CssPixelSize(css_pixels_from_int(3), css_pixels_from_int(7))
+    assert((css_pixel_size_aspect_ratio(&a)).bits() == 0x3edb6db7)  # 0.428571433
+
+test "geometry: css_size_match_aspect_ratio":
+    test_geometry_css_size_match_aspect_ratio()
+
+# C++: s.width().raw_value(); s.height().raw_value()
+noinline func test_geometry_css_size_match_aspect_ratio():
+    let a = CssPixelSize(css_pixels_from_int(10), css_pixels_from_int(5))
+    let s = css_pixel_size_match_aspect_ratio(&a, 1.3, Orientation.horizontal)
+    assert((i64)(css_pixel_size_width(&s).raw_value()) == 640)
+    assert((i64)(css_pixel_size_height(&s).raw_value()) == 492)
+
+test "geometry: css_size_area":
+    test_geometry_css_size_area()
+
+# C++:  CSSPixelSize(CSSPixels(1.5), CSSPixels(2.25)).area().raw_value()
+noinline func test_geometry_css_size_area():
+    let a = CssPixelSize(test_px(1.5), test_px(2.25))
+    assert((i64)(css_pixel_size_area(&a).raw_value()) == 216)
+
+test "geometry: css_size_contains":
+    test_geometry_css_size_contains()
+
+# C++:  CSSPixelSize(3, 3).contains(CSSPixelSize(CSSPixels(3), CSSPixels(3.1)))
+noinline func test_geometry_css_size_contains():
+    let a = CssPixelSize(css_pixels_from_int(3), css_pixels_from_int(3))
+    assert((css_pixel_size_contains(&a, CssPixelSize(test_px(3.0), test_px(3.1)))) == false)
+
+test "geometry: u32_size_to_type_css_pixels":
+    test_geometry_u32_size_to_type_css_pixels()
+
+# C++: s.width().raw_value(); s.height().raw_value()
+noinline func test_geometry_u32_size_to_type_css_pixels():
+    let a = SizeOfU32(4000000000, 7)
+    let s = size_of_u32_to_type_css_pixels(&a)
+    assert((i64)(css_pixel_size_width(&s).raw_value()) == 2147483647)
+    assert((i64)(css_pixel_size_height(&s).raw_value()) == 448)
+
+test "geometry: u32_size_area_wraps":
+    test_geometry_u32_size_area_wraps()
+
+# C++:  Size<u32>(70000u, 70000u).area()
+noinline func test_geometry_u32_size_area_wraps():
+    let a = SizeOfU32(70000, 70000)
+    assert((i64)(size_of_u32_area(&a)) == 605032704)
+
+test "geometry: u32_size_is_empty":
+    test_geometry_u32_size_is_empty()
+
+# C++:  Size<u32>(0u, 7u).is_empty()
+noinline func test_geometry_u32_size_is_empty():
+    let a = SizeOfU32(0, 7)
+    assert((size_of_u32_is_empty(&a)) == true)
+
+test "geometry: int_size_hash":
+    test_geometry_int_size_hash()
+
+# C++:  Traits<IntSize>::hash(IntSize(640, 480))
+noinline func test_geometry_int_size_hash():
+    var traits: IntSizeTraits
+    let a = IntSize(640, 480)
+    assert((i64)(traits.hash_of(&a)) == 1187269338)
+
+test "geometry: float_size_hash":
+    test_geometry_float_size_hash()
+
+# C++:  Traits<FloatSize>::hash(FloatSize(0.5f, -1.0f))
+noinline func test_geometry_float_size_hash():
+    let a = FloatSize(0.5, -1.0)
+    assert((i64)(float_size_hash(&a)) == 230046903)
+
+test "geometry: int_size_is_empty_negative":
+    test_geometry_int_size_is_empty_negative()
+
+# C++:  IntSize(-1, 5).is_empty()
+noinline func test_geometry_int_size_is_empty_negative():
+    let a = IntSize(-1, 5)
+    assert((int_size_is_empty(&a)) == true)
+
+test "geometry: float_size_scaled":
+    test_geometry_float_size_scaled()
+
+# C++: fb(s.width()); fb(s.height())
+noinline func test_geometry_float_size_scaled():
+    let a = FloatSize(1.5, 2.0)
+    let s = float_size_scaled_float_point(&a, FloatPoint(2.0, 0.1))
+    assert((i64)(float_size_width(&s).bits()) == 1077936128)
+    assert((i64)(float_size_height(&s).bits()) == 1045220557)
+
+test "geometry: css_size_to_type_int":
+    test_geometry_css_size_to_type_int()
+
+# C++: s.width(); s.height()
+noinline func test_geometry_css_size_to_type_int():
+    let a = CssPixelSize(test_px(2.9), test_px(-2.9))
+    let s = css_pixel_size_to_type_i32(&a)
+    assert((i64)(int_size_width(&s)) == 2)
+    assert((i64)(int_size_height(&s)) == -2)
+
+test "geometry: int_rect_center":
+    test_geometry_int_rect_center()
+
+# C++: auto p = IntRect { 0, 0, 5, 7 }.center(); p.x(); p.y()
+noinline func test_geometry_int_rect_center():
+    let r = test_irect(0, 0, 5, 7)
+    let p = device_pixel_rect_center(&r)
+    assert((i64)(int_point_x(&p)) == 2)
+    assert((i64)(int_point_y(&p)) == 3)
+
+test "geometry: int_rect_center_negative":
+    test_geometry_int_rect_center_negative()
+
+# C++: auto p = IntRect { -5, -5, -5, 7 }.center(); p.x(); p.y()
+noinline func test_geometry_int_rect_center_negative():
+    let r = test_irect(-5, -5, -5, 7)
+    let p = device_pixel_rect_center(&r)
+    assert((i64)(int_point_x(&p)) == -7)
+    assert((i64)(int_point_y(&p)) == -2)
+
+test "geometry: css_rect_center":
+    test_geometry_css_rect_center()
+
+# C++: auto p = crect(0, 0, 1, 1).center(); p.x().raw_value(); p.y().raw_value()
+noinline func test_geometry_css_rect_center():
+    let r = test_crect(0.0, 0.0, 1.0, 1.0)
+    let p = css_pixel_rect_center(&r)
+    assert((i64)(css_pixel_point_x(&p).raw_value()) == 32)
+    assert((i64)(css_pixel_point_y(&p).raw_value()) == 32)
+
+test "geometry: css_rect_center_odd_raw":
+    test_geometry_css_rect_center_odd_raw()
+
+# C++: p.x().raw_value(); p.y().raw_value()
+noinline func test_geometry_css_rect_center_odd_raw():
+    let r = CssPixelRect(CssPixelPoint(css_pixels_from_int(0), css_pixels_from_int(0)), CssPixelSize(css_pixels_from_raw(3), css_pixels_from_raw(-3)))
+    let p = css_pixel_rect_center(&r)
+    assert((i64)(css_pixel_point_x(&p).raw_value()) == 1)
+    assert((i64)(css_pixel_point_y(&p).raw_value()) == -1)
+
+test "geometry: float_rect_center":
+    test_geometry_float_rect_center()
+
+# C++: auto p = FloatRect { 0.5f, 0, 5, 7.25f }.center(); fb(p.x()); fb(p.y())
+noinline func test_geometry_float_rect_center():
+    let r = test_frect(0.5, 0.0, 5.0, 7.25)
+    let p = float_rect_center(&r)
+    assert((i64)(float_point_x(&p).bits()) == 1077936128)
+    assert((i64)(float_point_y(&p).bits()) == 1080557568)
+
+test "geometry: int_rect_inflate":
+    test_geometry_int_rect_inflate()
+
+# C++: r.x(); r.y(); r.width(); r.height()
+noinline func test_geometry_int_rect_inflate():
+    var r = test_irect(10, 10, 10, 10)
+    device_pixel_rect_inflate_i32_i32(&r, 3, 5)
+    assert((i64)(device_pixel_rect_x(&r)) == 9)
+    assert((i64)(device_pixel_rect_y(&r)) == 8)
+    assert((i64)(device_pixel_rect_width(&r)) == 13)
+    assert((i64)(device_pixel_rect_height(&r)) == 15)
+
+test "geometry: int_rect_inflate_negative_odd":
+    test_geometry_int_rect_inflate_negative_odd()
+
+# C++: r.x(); r.y(); r.width(); r.height()
+noinline func test_geometry_int_rect_inflate_negative_odd():
+    var r = test_irect(10, 10, 10, 10)
+    device_pixel_rect_inflate_i32_i32(&r, -3, -5)
+    assert((i64)(device_pixel_rect_x(&r)) == 11)
+    assert((i64)(device_pixel_rect_y(&r)) == 12)
+    assert((i64)(device_pixel_rect_width(&r)) == 7)
+    assert((i64)(device_pixel_rect_height(&r)) == 5)
+
+test "geometry: int_rect_shrink_edges":
+    test_geometry_int_rect_shrink_edges()
+
+# C++: r.x(); r.y(); r.width(); r.height()
+noinline func test_geometry_int_rect_shrink_edges():
+    var r = test_irect(10, 10, 10, 10)
+    device_pixel_rect_shrink_i32_i32_i32(&r, 1, 2, 3, 4)
+    assert((i64)(device_pixel_rect_x(&r)) == 14)
+    assert((i64)(device_pixel_rect_y(&r)) == 11)
+    assert((i64)(device_pixel_rect_width(&r)) == 4)
+    assert((i64)(device_pixel_rect_height(&r)) == 6)
+
+test "geometry: int_rect_inflate_edges":
+    test_geometry_int_rect_inflate_edges()
+
+# C++: r.x(); r.y(); r.width(); r.height()
+noinline func test_geometry_int_rect_inflate_edges():
+    var r = test_irect(10, 10, 10, 10)
+    device_pixel_rect_inflate_i32_i32_i32(&r, 1, 2, 3, 4)
+    assert((i64)(device_pixel_rect_x(&r)) == 6)
+    assert((i64)(device_pixel_rect_y(&r)) == 9)
+    assert((i64)(device_pixel_rect_width(&r)) == 16)
+    assert((i64)(device_pixel_rect_height(&r)) == 14)
+
+test "geometry: int_rect_shrink_size":
+    test_geometry_int_rect_shrink_size()
+
+# C++: r.x(); r.y(); r.width(); r.height()
+noinline func test_geometry_int_rect_shrink_size():
+    var r = test_irect(10, 10, 10, 10)
+    device_pixel_rect_shrink_int_size(&r, IntSize(5, 3))
+    assert((i64)(device_pixel_rect_x(&r)) == 12)
+    assert((i64)(device_pixel_rect_y(&r)) == 11)
+    assert((i64)(device_pixel_rect_width(&r)) == 5)
+    assert((i64)(device_pixel_rect_height(&r)) == 7)
+
+test "geometry: css_rect_inflate":
+    test_geometry_css_rect_inflate()
+
+# C++: r.x().raw_value(); r.y().raw_value(); r.width().raw_value(); r.height().raw_value()
+noinline func test_geometry_css_rect_inflate():
+    var r = test_crect(1.0, 1.0, 2.0, 2.0)
+    css_pixel_rect_inflate_css_pixels_css_pixels(&r, css_pixels_from_raw(3), css_pixels_from_raw(5))
+    assert((i64)(css_pixel_rect_x(&r).raw_value()) == 63)
+    assert((i64)(css_pixel_rect_y(&r).raw_value()) == 62)
+    assert((i64)(css_pixel_rect_width(&r).raw_value()) == 131)
+    assert((i64)(css_pixel_rect_height(&r).raw_value()) == 133)
+
+test "geometry: css_rect_shrink_size":
+    test_geometry_css_rect_shrink_size()
+
+# C++: r.x().raw_value(); r.y().raw_value(); r.width().raw_value(); r.height().raw_value()
+noinline func test_geometry_css_rect_shrink_size():
+    var r = test_crect(1.0, 1.0, 2.0, 2.0)
+    css_pixel_rect_shrink_css_pixel_size(&r, CssPixelSize(css_pixels_from_raw(-3), css_pixels_from_raw(7)))
+    assert((i64)(css_pixel_rect_x(&r).raw_value()) == 63)
+    assert((i64)(css_pixel_rect_y(&r).raw_value()) == 67)
+    assert((i64)(css_pixel_rect_width(&r).raw_value()) == 131)
+    assert((i64)(css_pixel_rect_height(&r).raw_value()) == 121)
+
+test "geometry: css_rect_shrunken_edges":
+    test_geometry_css_rect_shrunken_edges()
+
+# C++: r.x().raw_value(); r.y().raw_value(); r.width().raw_value(); r.height().raw_value()
+noinline func test_geometry_css_rect_shrunken_edges():
+    let a = test_crect(1.0, 1.0, 2.0, 2.0)
+    let r = css_pixel_rect_shrunken_css_pixels_css_pixels_css_pixels(&a, test_px(0.25), test_px(0.5), test_px(0.75), test_px(1.0))
+    assert((i64)(css_pixel_rect_x(&r).raw_value()) == 128)
+    assert((i64)(css_pixel_rect_y(&r).raw_value()) == 80)
+    assert((i64)(css_pixel_rect_width(&r).raw_value()) == 32)
+    assert((i64)(css_pixel_rect_height(&r).raw_value()) == 64)
+
+test "geometry: float_rect_inflate":
+    test_geometry_float_rect_inflate()
+
+# C++: fb(r.x()); fb(r.y()); fb(r.width()); fb(r.height())
+noinline func test_geometry_float_rect_inflate():
+    var r = test_frect(1.0, 1.0, 2.0, 2.0)
+    float_rect_inflate_f32_f32(&r, 3.0, 5.0)
+    assert((i64)(float_rect_x(&r).bits()) == 3204448256)
+    assert((i64)(float_rect_y(&r).bits()) == 3217031168)
+    assert((i64)(float_rect_width(&r).bits()) == 1084227584)
+    assert((i64)(float_rect_height(&r).bits()) == 1088421888)
+
+test "geometry: int_rect_take_from_right":
+    test_geometry_int_rect_take_from_right()
+
+# C++: r.x(); r.width(); t.x(); t.width()
+noinline func test_geometry_int_rect_take_from_right():
+    var r = test_irect(0, 0, 10, 10)
+    let t = device_pixel_rect_take_from_right(&r, 4)
+    assert((i64)(device_pixel_rect_x(&r)) == 0)
+    assert((i64)(device_pixel_rect_width(&r)) == 6)
+    assert((i64)(device_pixel_rect_x(&t)) == 6)
+    assert((i64)(device_pixel_rect_width(&t)) == 4)
+
+test "geometry: int_rect_take_from_left_clamped":
+    test_geometry_int_rect_take_from_left_clamped()
+
+# C++: r.x(); r.width(); t.x(); t.width()
+noinline func test_geometry_int_rect_take_from_left_clamped():
+    var r = test_irect(0, 0, 10, 10)
+    let t = device_pixel_rect_take_from_left(&r, 40)
+    assert((i64)(device_pixel_rect_x(&r)) == 10)
+    assert((i64)(device_pixel_rect_width(&r)) == 0)
+    assert((i64)(device_pixel_rect_x(&t)) == 0)
+    assert((i64)(device_pixel_rect_width(&t)) == 10)
+
+test "geometry: int_rect_take_from_top":
+    test_geometry_int_rect_take_from_top()
+
+# C++: r.y(); r.height(); t.y(); t.height()
+noinline func test_geometry_int_rect_take_from_top():
+    var r = test_irect(0, 0, 10, 10)
+    let t = device_pixel_rect_take_from_top(&r, 3)
+    assert((i64)(device_pixel_rect_y(&r)) == 3)
+    assert((i64)(device_pixel_rect_height(&r)) == 7)
+    assert((i64)(device_pixel_rect_y(&t)) == 0)
+    assert((i64)(device_pixel_rect_height(&t)) == 3)
+
+test "geometry: css_rect_take_from_bottom":
+    test_geometry_css_rect_take_from_bottom()
+
+# C++: r.y().raw_value(); r.height().raw_value(); t.y().raw_value(); t.height().raw_value()
+noinline func test_geometry_css_rect_take_from_bottom():
+    var r = test_crect(0.0, 0.0, 10.0, 10.0)
+    let t = css_pixel_rect_take_from_bottom(&r, test_px(2.5))
+    assert((i64)(css_pixel_rect_y(&r).raw_value()) == 0)
+    assert((i64)(css_pixel_rect_height(&r).raw_value()) == 480)
+    assert((i64)(css_pixel_rect_y(&t).raw_value()) == 480)
+    assert((i64)(css_pixel_rect_height(&t).raw_value()) == 160)
+
+test "geometry: int_rect_intersect_disjoint":
+    test_geometry_int_rect_intersect_disjoint()
+
+# C++: r.x(); r.y(); r.width(); r.height()
+noinline func test_geometry_int_rect_intersect_disjoint():
+    var r = test_irect(0, 0, 10, 10)
+    device_pixel_rect_intersect(&r, test_irect(20, 20, 5, 5))
+    assert((i64)(device_pixel_rect_x(&r)) == 0)
+    assert((i64)(device_pixel_rect_y(&r)) == 0)
+    assert((i64)(device_pixel_rect_width(&r)) == 0)
+    assert((i64)(device_pixel_rect_height(&r)) == 0)
+
+test "geometry: int_rect_intersected":
+    test_geometry_int_rect_intersected()
+
+# C++: r.x(); r.y(); r.width(); r.height()
+noinline func test_geometry_int_rect_intersected():
+    let a = test_irect(0, 0, 10, 10)
+    let r = device_pixel_rect_intersected(&a, test_irect(5, -5, 10, 10))
+    assert((i64)(device_pixel_rect_x(&r)) == 5)
+    assert((i64)(device_pixel_rect_y(&r)) == 0)
+    assert((i64)(device_pixel_rect_width(&r)) == 5)
+    assert((i64)(device_pixel_rect_height(&r)) == 5)
+
+test "geometry: css_rect_intersected":
+    test_geometry_css_rect_intersected()
+
+# C++: r.x().raw_value(); r.y().raw_value(); r.width().raw_value(); r.height().raw_value()
+noinline func test_geometry_css_rect_intersected():
+    let a = test_crect(0.0, 0.0, 10.0, 10.0)
+    let r = css_pixel_rect_intersected(&a, test_crect(5.5, -5.0, 10.0, 10.25))
+    assert((i64)(css_pixel_rect_x(&r).raw_value()) == 352)
+    assert((i64)(css_pixel_rect_y(&r).raw_value()) == 0)
+    assert((i64)(css_pixel_rect_width(&r).raw_value()) == 288)
+    assert((i64)(css_pixel_rect_height(&r).raw_value()) == 336)
+
+test "geometry: float_rect_intersected_touching":
+    test_geometry_float_rect_intersected_touching()
+
+# C++: fb(r.x()); fb(r.y()); fb(r.width()); fb(r.height())
+noinline func test_geometry_float_rect_intersected_touching():
+    let a = test_frect(0.0, 0.0, 10.0, 10.0)
+    let r = float_rect_intersected(&a, test_frect(10.0, 0.0, 10.0, 10.0))
+    assert((i64)(float_rect_x(&r).bits()) == 1092616192)
+    assert((i64)(float_rect_y(&r).bits()) == 0)
+    assert((i64)(float_rect_width(&r).bits()) == 0)
+    assert((i64)(float_rect_height(&r).bits()) == 1092616192)
+
+test "geometry: int_rect_edge_adjacent_intersects":
+    test_geometry_int_rect_edge_adjacent_intersects()
+
+# C++:  IntRect { 0, 0, 10, 10 }.edge_adjacent_intersects({ 10, 10, 5, 5 })
+noinline func test_geometry_int_rect_edge_adjacent_intersects():
+    let a = test_irect(0, 0, 10, 10)
+    assert((device_pixel_rect_edge_adjacent_intersects(&a, test_irect(10, 10, 5, 5))) == true)
+
+test "geometry: int_rect_intersects_adjacent":
+    test_geometry_int_rect_intersects_adjacent()
+
+# C++:  IntRect { 0, 0, 10, 10 }.intersects(IntRect { 10, 0, 5, 5 })
+noinline func test_geometry_int_rect_intersects_adjacent():
+    let a = test_irect(0, 0, 10, 10)
+    assert((device_pixel_rect_intersects_device_pixel_rect(&a, test_irect(10, 0, 5, 5))) == false)
+
+test "geometry: css_rect_edge_adjacent_intersects":
+    test_geometry_css_rect_edge_adjacent_intersects()
+
+# C++:  crect(0, 0, 10, 10).edge_adjacent_intersects(crect(10.015625, 0, 5, 5))
+noinline func test_geometry_css_rect_edge_adjacent_intersects():
+    let a = test_crect(0.0, 0.0, 10.0, 10.0)
+    assert((css_pixel_rect_edge_adjacent_intersects(&a, test_crect(10.015625, 0.0, 5.0, 5.0))) == false)
+
+test "geometry: int_rect_unite_empty":
+    test_geometry_int_rect_unite_empty()
+
+# C++: r.x(); r.y(); r.width(); r.height()
+noinline func test_geometry_int_rect_unite_empty():
+    var r = test_irect(0, 0, 0, 10)
+    device_pixel_rect_unite(&r, test_irect(5, 5, 2, 2))
+    assert((i64)(device_pixel_rect_x(&r)) == 5)
+    assert((i64)(device_pixel_rect_y(&r)) == 5)
+    assert((i64)(device_pixel_rect_width(&r)) == 2)
+    assert((i64)(device_pixel_rect_height(&r)) == 2)
+
+test "geometry: css_rect_united":
+    test_geometry_css_rect_united()
+
+# C++: r.x().raw_value(); r.y().raw_value(); r.width().raw_value(); r.height().raw_value()
+noinline func test_geometry_css_rect_united():
+    let a = test_crect(0.0, 0.0, 1.0, 1.0)
+    let r = css_pixel_rect_united(&a, test_crect(-0.5, 2.0, 1.0, 1.0))
+    assert((i64)(css_pixel_rect_x(&r).raw_value()) == -32)
+    assert((i64)(css_pixel_rect_y(&r).raw_value()) == 0)
+    assert((i64)(css_pixel_rect_width(&r).raw_value()) == 96)
+    assert((i64)(css_pixel_rect_height(&r).raw_value()) == 192)
+
+test "geometry: int_rect_from_two_points":
+    test_geometry_int_rect_from_two_points()
+
+# C++: r.x(); r.y(); r.width(); r.height()
+noinline func test_geometry_int_rect_from_two_points():
+    let r = device_pixel_rect_from_two_points(IntPoint(5, -2), IntPoint(-1, 7))
+    assert((i64)(device_pixel_rect_x(&r)) == -1)
+    assert((i64)(device_pixel_rect_y(&r)) == -2)
+    assert((i64)(device_pixel_rect_width(&r)) == 6)
+    assert((i64)(device_pixel_rect_height(&r)) == 9)
+
+test "geometry: float_rect_from_two_points":
+    test_geometry_float_rect_from_two_points()
+
+# C++: fb(r.x()); fb(r.y()); fb(r.width()); fb(r.height())
+noinline func test_geometry_float_rect_from_two_points():
+    let r = float_rect_from_two_points(FloatPoint(5.5, -2.0), FloatPoint(-1.0, 7.25))
+    assert((i64)(float_rect_x(&r).bits()) == 3212836864)
+    assert((i64)(float_rect_y(&r).bits()) == 3221225472)
+    assert((i64)(float_rect_width(&r).bits()) == 1087373312)
+    assert((i64)(float_rect_height(&r).bits()) == 1091829760)
+
+test "geometry: int_rect_centered_within":
+    test_geometry_int_rect_centered_within()
+
+# C++: r.x(); r.y(); r.width(); r.height()
+noinline func test_geometry_int_rect_centered_within():
+    let a = test_irect(0, 0, 3, 3)
+    let r = device_pixel_rect_centered_within(&a, test_irect(10, 10, 10, 10))
+    assert((i64)(device_pixel_rect_x(&r)) == 14)
+    assert((i64)(device_pixel_rect_y(&r)) == 14)
+    assert((i64)(device_pixel_rect_width(&r)) == 3)
+    assert((i64)(device_pixel_rect_height(&r)) == 3)
+
+test "geometry: css_rect_centered_within":
+    test_geometry_css_rect_centered_within()
+
+# C++: r.x().raw_value(); r.y().raw_value(); r.width().raw_value(); r.height().raw_value()
+noinline func test_geometry_css_rect_centered_within():
+    let a = test_crect(0.0, 0.0, 3.0, 3.0)
+    let r = css_pixel_rect_centered_within(&a, test_crect(10.0, 10.0, 10.0, 10.015625))
+    assert((i64)(css_pixel_rect_x(&r).raw_value()) == 864)
+    assert((i64)(css_pixel_rect_y(&r).raw_value()) == 864)
+    assert((i64)(css_pixel_rect_width(&r).raw_value()) == 192)
+    assert((i64)(css_pixel_rect_height(&r).raw_value()) == 192)
+
+test "geometry: enclosing_int_rect":
+    test_geometry_enclosing_int_rect()
+
+# C++: r.x(); r.y(); r.width(); r.height()
+noinline func test_geometry_enclosing_int_rect():
+    let r = enclosing_int_rect(test_frect(0.5, -0.5, 2.2, 2.2))
+    assert((i64)(device_pixel_rect_x(&r)) == 0)
+    assert((i64)(device_pixel_rect_y(&r)) == -1)
+    assert((i64)(device_pixel_rect_width(&r)) == 3)
+    assert((i64)(device_pixel_rect_height(&r)) == 3)
+
+test "geometry: float_rect_to_rounded":
+    test_geometry_float_rect_to_rounded()
+
+# C++: r.x(); r.y(); r.width(); r.height()
+noinline func test_geometry_float_rect_to_rounded():
+    let a = test_frect(1.5, 2.5, -0.5, 3.49)
+    let r = float_rect_to_rounded_i32(&a)
+    assert((i64)(device_pixel_rect_x(&r)) == 2)
+    assert((i64)(device_pixel_rect_y(&r)) == 2)
+    assert((i64)(device_pixel_rect_width(&r)) == 0)
+    assert((i64)(device_pixel_rect_height(&r)) == 3)
+
+test "geometry: int_rect_to_byte_string":
+    test_geometry_int_rect_to_byte_string()
+
+# C++:  IntRect { -1, 2, 30, 40 }.to_byte_string()
+noinline func test_geometry_int_rect_to_byte_string():
+    let a = test_irect(-1, 2, 30, 40)
+    let text = device_pixel_rect_to_byte_string(&a)
+    assert(ak.byte_string_eq_string_view(&text, ak.sv("[-1,2 30x40]")))
+
+test "geometry: float_rect_to_byte_string":
+    test_geometry_float_rect_to_byte_string()
+
+# C++:  FloatRect { -1.5f, 2, 30.125f, 0.3f }.to_byte_string()
+noinline func test_geometry_float_rect_to_byte_string():
+    let a = test_frect(-1.5, 2.0, 30.125, 0.3)
+    let text = float_rect_to_byte_string(&a)
+    assert(ak.byte_string_eq_string_view(&text, ak.sv("[-1.5,2 30.125x0.3]")))
+
+test "geometry: int_rect_to_type_css_pixels":
+    test_geometry_int_rect_to_type_css_pixels()
+
+# C++: r.x().raw_value(); r.y().raw_value(); r.width().raw_value(); r.height().raw_value()
+noinline func test_geometry_int_rect_to_type_css_pixels():
+    let a = test_irect(-1, 2, 30, 40)
+    let r = device_pixel_rect_to_type_css_pixels(&a)
+    assert((i64)(css_pixel_rect_x(&r).raw_value()) == -64)
+    assert((i64)(css_pixel_rect_y(&r).raw_value()) == 128)
+    assert((i64)(css_pixel_rect_width(&r).raw_value()) == 1920)
+    assert((i64)(css_pixel_rect_height(&r).raw_value()) == 2560)
+
+test "geometry: float_rect_to_type_css_pixels":
+    test_geometry_float_rect_to_type_css_pixels()
+
+# C++: r.x().raw_value(); r.y().raw_value(); r.width().raw_value(); r.height().raw_value()
+noinline func test_geometry_float_rect_to_type_css_pixels():
+    let a = test_frect(-1.3, 2.6, 0.01, 40.0)
+    let r = float_rect_to_type_css_pixels(&a)
+    assert((i64)(css_pixel_rect_x(&r).raw_value()) == -83)
+    assert((i64)(css_pixel_rect_y(&r).raw_value()) == 166)
+    assert((i64)(css_pixel_rect_width(&r).raw_value()) == 1)
+    assert((i64)(css_pixel_rect_height(&r).raw_value()) == 2560)
+
+test "geometry: css_rect_to_type_int":
+    test_geometry_css_rect_to_type_int()
+
+# C++: r.x(); r.y(); r.width(); r.height()
+noinline func test_geometry_css_rect_to_type_int():
+    let a = test_crect(-1.3, 2.6, 0.01, 40.9)
+    let r = css_pixel_rect_to_type_i32(&a)
+    assert((i64)(device_pixel_rect_x(&r)) == -1)
+    assert((i64)(device_pixel_rect_y(&r)) == 2)
+    assert((i64)(device_pixel_rect_width(&r)) == 0)
+    assert((i64)(device_pixel_rect_height(&r)) == 40)
+
+test "geometry: css_rect_to_type_float":
+    test_geometry_css_rect_to_type_float()
+
+# C++: fb(r.x()); fb(r.y()); fb(r.width()); fb(r.height())
+noinline func test_geometry_css_rect_to_type_float():
+    let a = test_crect(-1.3, 2.6, 0.01, 40.9)
+    let r = css_pixel_rect_to_type_f32(&a)
+    assert((i64)(float_rect_x(&r).bits()) == 3215327232)
+    assert((i64)(float_rect_y(&r).bits()) == 1076232192)
+    assert((i64)(float_rect_width(&r).bits()) == 1015021568)
+    assert((i64)(float_rect_height(&r).bits()) == 1109630976)
+
+test "geometry: float_rect_to_type_int":
+    test_geometry_float_rect_to_type_int()
+
+# C++: r.x(); r.y(); r.width(); r.height()
+noinline func test_geometry_float_rect_to_type_int():
+    let a = test_frect(-1.3, 2.6, 0.01, 40.9)
+    let r = float_rect_to_type_i32(&a)
+    assert((i64)(device_pixel_rect_x(&r)) == -1)
+    assert((i64)(device_pixel_rect_y(&r)) == 2)
+    assert((i64)(device_pixel_rect_width(&r)) == 0)
+    assert((i64)(device_pixel_rect_height(&r)) == 40)
+
+test "geometry: int_rect_to_type_float":
+    test_geometry_int_rect_to_type_float()
+
+# C++: fb(r.x()); fb(r.y()); fb(r.width()); fb(r.height())
+noinline func test_geometry_int_rect_to_type_float():
+    let a = test_irect(-1, 2, 30, 40)
+    let r = device_pixel_rect_to_type_f32(&a)
+    assert((i64)(float_rect_x(&r).bits()) == 3212836864)
+    assert((i64)(float_rect_y(&r).bits()) == 1073741824)
+    assert((i64)(float_rect_width(&r).bits()) == 1106247680)
+    assert((i64)(float_rect_height(&r).bits()) == 1109393408)
+
+test "geometry: int_rect_set_right_without_resize":
+    test_geometry_int_rect_set_right_without_resize()
+
+# C++: r.x(); r.y(); r.width(); r.height()
+noinline func test_geometry_int_rect_set_right_without_resize():
+    var r = test_irect(1, 2, 3, 4)
+    device_pixel_rect_set_right_without_resize(&r, 10)
+    device_pixel_rect_set_bottom_without_resize(&r, -2)
+    assert((i64)(device_pixel_rect_x(&r)) == 7)
+    assert((i64)(device_pixel_rect_y(&r)) == -6)
+    assert((i64)(device_pixel_rect_width(&r)) == 3)
+    assert((i64)(device_pixel_rect_height(&r)) == 4)
+
+test "geometry: css_rect_set_right_bottom":
+    test_geometry_css_rect_set_right_bottom()
+
+# C++: r.x().raw_value(); r.y().raw_value(); r.width().raw_value(); r.height().raw_value()
+noinline func test_geometry_css_rect_set_right_bottom():
+    var r = test_crect(1.0, 2.0, 3.0, 4.0)
+    css_pixel_rect_set_right(&r, test_px(0.5))
+    css_pixel_rect_set_bottom(&r, test_px(10.0))
+    assert((i64)(css_pixel_rect_x(&r).raw_value()) == 64)
+    assert((i64)(css_pixel_rect_y(&r).raw_value()) == 128)
+    assert((i64)(css_pixel_rect_width(&r).raw_value()) == -32)
+    assert((i64)(css_pixel_rect_height(&r).raw_value()) == 512)
+
+test "geometry: int_rect_inflate_primary_horizontal":
+    test_geometry_int_rect_inflate_primary_horizontal()
+
+# C++: r.x(); r.y(); r.width(); r.height()
+noinline func test_geometry_int_rect_inflate_primary_horizontal():
+    var r = test_irect(10, 10, 10, 10)
+    device_pixel_rect_inflate_primary_for_orientation(&r, Orientation.horizontal, 2, 3)
+    assert((i64)(device_pixel_rect_x(&r)) == 8)
+    assert((i64)(device_pixel_rect_y(&r)) == 10)
+    assert((i64)(device_pixel_rect_width(&r)) == 15)
+    assert((i64)(device_pixel_rect_height(&r)) == 10)
+
+test "geometry: int_rect_inflate_secondary_horizontal":
+    test_geometry_int_rect_inflate_secondary_horizontal()
+
+# C++: r.x(); r.y(); r.width(); r.height()
+noinline func test_geometry_int_rect_inflate_secondary_horizontal():
+    var r = test_irect(10, 10, 10, 10)
+    device_pixel_rect_inflate_secondary_for_orientation(&r, Orientation.horizontal, 2, 3)
+    assert((i64)(device_pixel_rect_x(&r)) == 10)
+    assert((i64)(device_pixel_rect_y(&r)) == 8)
+    assert((i64)(device_pixel_rect_width(&r)) == 10)
+    assert((i64)(device_pixel_rect_height(&r)) == 15)
+
+test "geometry: css_rect_translate_primary_vertical":
+    test_geometry_css_rect_translate_primary_vertical()
+
+# C++: r.x().raw_value(); r.y().raw_value(); r.width().raw_value(); r.height().raw_value()
+noinline func test_geometry_css_rect_translate_primary_vertical():
+    var r = test_crect(1.0, 2.0, 3.0, 4.0)
+    css_pixel_rect_translate_primary_offset_for_orientation(&r, Orientation.vertical, test_px(0.5))
+    css_pixel_rect_set_secondary_size_for_orientation(&r, Orientation.vertical, test_px(9.0))
+    assert((i64)(css_pixel_rect_x(&r).raw_value()) == 64)
+    assert((i64)(css_pixel_rect_y(&r).raw_value()) == 160)
+    assert((i64)(css_pixel_rect_width(&r).raw_value()) == 576)
+    assert((i64)(css_pixel_rect_height(&r).raw_value()) == 256)
+
+test "geometry: float_rect_last_edge_vertical":
+    test_geometry_float_rect_last_edge_vertical()
+
+# C++:  FloatRect { 1, 2, 3, 4.5f }.last_edge_for_orientation(Orientation::Vertical)
+noinline func test_geometry_float_rect_last_edge_vertical():
+    let a = test_frect(1.0, 2.0, 3.0, 4.5)
+    assert((float_rect_last_edge_for_orientation(&a, Orientation.vertical)).bits() == 0x40d00000)  # 6.5
+
+test "geometry: css_rect_contains_point":
+    test_geometry_css_rect_contains_point()
+
+# C++: crect(0, 0, 1, 1).contains(CSSPixelPoint(CSSPixels::from_raw(63), CSSPixels::from_raw(0)))
+noinline func test_geometry_css_rect_contains_point():
+    let a = test_crect(0.0, 0.0, 1.0, 1.0)
+    assert((css_pixel_rect_contains_css_pixel_point(&a, CssPixelPoint(css_pixels_from_raw(63), css_pixels_from_raw(0)))) == true)
+
+test "geometry: css_rect_contains_right_edge":
+    test_geometry_css_rect_contains_right_edge()
+
+# C++:  crect(0, 0, 1, 1).contains(CSSPixels(1), CSSPixels(0))
+noinline func test_geometry_css_rect_contains_right_edge():
+    let a = test_crect(0.0, 0.0, 1.0, 1.0)
+    assert((css_pixel_rect_contains_css_pixels(&a, test_px(1.0), test_px(0.0))) == false)
+
+test "geometry: css_rect_is_empty":
+    test_geometry_css_rect_is_empty()
+
+# C++:  crect(0, 0, 1, -0.015625).is_empty()
+noinline func test_geometry_css_rect_is_empty():
+    let a = test_crect(0.0, 0.0, 1.0, -0.015625)
+    assert((css_pixel_rect_is_empty(&a)) == true)
+
+test "geometry: int_rect_mul":
+    test_geometry_int_rect_mul()
+
+# C++: auto r = IntRect { 1, -2, 3, 4 } * 3; r.x(); r.y(); r.width(); r.height()
+noinline func test_geometry_int_rect_mul():
+    let a = test_irect(1, -2, 3, 4)
+    let r = device_pixel_rect_mul(&a, 3)
+    assert((i64)(device_pixel_rect_x(&r)) == 3)
+    assert((i64)(device_pixel_rect_y(&r)) == -6)
+    assert((i64)(device_pixel_rect_width(&r)) == 9)
+    assert((i64)(device_pixel_rect_height(&r)) == 12)
+
+test "geometry: css_rect_mul_assign":
+    test_geometry_css_rect_mul_assign()
+
+# C++: r.x().raw_value(); r.y().raw_value(); r.width().raw_value(); r.height().raw_value()
+noinline func test_geometry_css_rect_mul_assign():
+    var r = test_crect(1.0, -2.0, 3.0, 4.0)
+    discard(css_pixel_rect_mul_assign(&r, test_px(1.5)))
+    assert((i64)(css_pixel_rect_x(&r).raw_value()) == 96)
+    assert((i64)(css_pixel_rect_y(&r).raw_value()) == -192)
+    assert((i64)(css_pixel_rect_width(&r).raw_value()) == 288)
+    assert((i64)(css_pixel_rect_height(&r).raw_value()) == 384)
+
+test "geometry: float_rect_scaled":
+    test_geometry_float_rect_scaled()
+
+# C++: fb(r.x()); fb(r.y()); fb(r.width()); fb(r.height())
+noinline func test_geometry_float_rect_scaled():
+    let a = test_frect(1.0, -2.0, 3.0, 4.0)
+    let r = float_rect_scaled_f32_f32(&a, 0.1, 3.0)
+    assert((i64)(float_rect_x(&r).bits()) == 1036831949)
+    assert((i64)(float_rect_y(&r).bits()) == 3233808384)
+    assert((i64)(float_rect_width(&r).bits()) == 1050253722)
+    assert((i64)(float_rect_height(&r).bits()) == 1094713344)
+
+test "geometry: css_rect_eq":
+    test_geometry_css_rect_eq()
+
+# C++:  crect(1, 2, 3, 4) == CSSPixelRect(CSSPixelPoint(1, 2), CSSPixelSize(3, 4))
+noinline func test_geometry_css_rect_eq():
+    let a = test_crect(1.0, 2.0, 3.0, 4.0)
+    assert((css_pixel_rect_eq(&a, CssPixelRect(CssPixelPoint(css_pixels_from_int(1), css_pixels_from_int(2)), CssPixelSize(css_pixels_from_int(3), css_pixels_from_int(4))))) == true)

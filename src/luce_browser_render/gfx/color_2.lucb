@@ -1,0 +1,226 @@
+#==============================================================================================
+#
+#   color_2 - Color: contrast, filters, HSV, and the named and branded colors
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Color.h (lines 332-611): contrast_ratio, grayscale and
+#       sepia, opacity, darkening and lightening, saturation, inversion, xor, equality,
+#       HSV conversion, the suggested foreground, the private BGRA8888 constructor, the
+#       NamedColor constructor and branded_color. Color.cpp's out-of-line members are in
+#       color_3 and color_named.
+#
+#==============================================================================================
+
+# mark: Contrast and filters ====================================================================
+
+## Ported from Libraries/LibGfx/Color.h:332 Gfx::Color::contrast_ratio.
+pub func color_contrast_ratio(this: Color*, other: Color) -> f32:
+    let l1 = color_luminosity(this)
+    let l2 = color_luminosity(&other)
+    let darkest = (f64)ak.min(l1, l2) / 255.0
+    let brightest = (f64)ak.max(l1, l2) / 255.0
+    return (f32)((brightest + 0.05) / (darkest + 0.05))
+
+## Ported from Libraries/LibGfx/Color.h:341 Gfx::Color::to_grayscale.
+pub func color_to_grayscale(this: const Color*) -> Color:
+    let gray = color_luminosity(this)
+    return color_new_u8_u8_u8_u8(gray, gray, gray, color_alpha(this))
+
+## Ported from Libraries/LibGfx/Color.h:347 Gfx::Color::sepia.
+pub func color_sepia(this: const Color*, amount: f32 = 1.0) -> Color:
+    let blend_factor = 1.0 - amount
+
+    let r1 = 0.393 + 0.607 * blend_factor
+    let r2 = 0.769 - 0.769 * blend_factor
+    let r3 = 0.189 - 0.189 * blend_factor
+
+    let g1 = 0.349 - 0.349 * blend_factor
+    let g2 = 0.686 + 0.314 * blend_factor
+    let g3 = 0.168 - 0.168 * blend_factor
+
+    let b1 = 0.272 - 0.272 * blend_factor
+    let b2 = 0.534 - 0.534 * blend_factor
+    let b3 = 0.131 + 0.869 * blend_factor
+
+    let r = (f32)color_red(this)
+    let g = (f32)color_green(this)
+    let b = (f32)color_blue(this)
+
+    return color_new_u8_u8_u8_u8(
+        (u8)ak.clamp(lroundf(r * r1 + g * r2 + b * r3), (i64)0, (i64)255),
+        (u8)ak.clamp(lroundf(r * g1 + g * g2 + b * g3), (i64)0, (i64)255),
+        (u8)ak.clamp(lroundf(r * b1 + g * b2 + b * b3), (i64)0, (i64)255),
+        color_alpha(this),
+    )
+
+## Ported from Libraries/LibGfx/Color.h:374 Gfx::Color::with_opacity.
+pub func color_with_opacity(this: const Color*, opacity: f32) -> Color:
+    assert(opacity >= 0.0 and opacity <= 1.0)
+    # round() here is libm's roundf (the float overload).
+    return color_with_alpha(this, (u8)math32.round((f32)color_alpha(this) * opacity))
+
+## Ported from Libraries/LibGfx/Color.h:380 Gfx::Color::darkened.
+pub func color_darkened(this: const Color*, amount: f32 = 0.5) -> Color:
+    # C++ narrows each float product to u8 (toward zero).
+    return color_new_u8_u8_u8_u8(
+        (u8)((f32)color_red(this) * amount),
+        (u8)((f32)color_green(this) * amount),
+        (u8)((f32)color_blue(this) * amount),
+        color_alpha(this),
+    )
+
+## Ported from Libraries/LibGfx/Color.h:385 Gfx::Color::lightened.
+pub func color_lightened(this: const Color*, amount: f32 = 1.2) -> Color:
+    return color_new_u8_u8_u8_u8(
+        (u8)ak.min((i32)255, (i32)((f32)color_red(this) * amount)),
+        (u8)ak.min((i32)255, (i32)((f32)color_green(this) * amount)),
+        (u8)ak.min((i32)255, (i32)((f32)color_blue(this) * amount)),
+        color_alpha(this),
+    )
+
+## Ported from Libraries/LibGfx/Color.h:393 Gfx::Color::saturated_to.
+pub func color_saturated_to(this: const Color*, saturation: f32) -> Color:
+    let hsv = color_to_hsv(this)
+    let alpha = color_alpha(this)
+    var color = color_from_hsv_f64(hsv.hue, (f64)saturation, hsv.value)
+    color_set_alpha(&color, alpha)
+    return color
+
+## Ported from Libraries/LibGfx/Color.h:402 Gfx::Color::inverted.
+pub func color_inverted(this: const Color*) -> Color:
+    return color_new_u8_u8_u8_u8(~color_red(this), ~color_green(this), ~color_blue(this), color_alpha(this))
+
+## Ported from Libraries/LibGfx/Color.h:407 Gfx::Color::xored.
+pub func color_xored(this: const Color*, other: Color) -> Color:
+    return color_new_u32(((other.m_value ^ this.m_value) & 0x00ffffff) | (this.m_value & 0xff000000))
+
+## Ported from Libraries/LibGfx/Color.h:412 Gfx::Color::value.
+pub func color_value(this: const Color*) -> u32:
+    return this.m_value
+
+## Ported from Libraries/LibGfx/Color.h:414 Gfx::Color::operator==.
+pub func color_eq(this: const Color*, other: Color) -> bool:
+    return this.m_value == other.m_value
+
+# mark: HSV =====================================================================================
+
+## Ported from Libraries/LibGfx/Color.h:437 Gfx::Color::to_hsv.
+pub func color_to_hsv(this: const Color*) -> Hsv:
+    let hsv = srgb_to_hsv(color_components_new(
+        (f32)color_red(this) / 255.0,
+        (f32)color_green(this) / 255.0,
+        (f32)color_blue(this) / 255.0,
+    ))
+
+    assert(color_components_at_const(&hsv, 0) >= 0.0 and color_components_at_const(&hsv, 0) < 360.0)
+    assert(color_components_at_const(&hsv, 1) >= 0.0 and color_components_at_const(&hsv, 1) <= 1.0)
+    assert(color_components_at_const(&hsv, 2) >= 0.0 and color_components_at_const(&hsv, 2) <= 1.0)
+
+    return Hsv(
+        hue = (f64)color_components_at_const(&hsv, 0),
+        saturation = (f64)color_components_at_const(&hsv, 1),
+        value = (f64)color_components_at_const(&hsv, 2),
+    )
+
+## Ported from Libraries/LibGfx/Color.h:448 Gfx::Color::from_hsv.
+pub func color_from_hsv_f64(hue: f64, saturation: f64, value: f64) -> Color:
+    return color_from_hsv_hsv(Hsv(hue = hue, saturation = saturation, value = value))
+
+## Ported from Libraries/LibGfx/Color.h:453 Gfx::Color::from_hsv.
+pub func color_from_hsv_hsv(hsv: Hsv) -> Color:
+    assert(hsv.hue >= 0.0 and hsv.hue < 360.0)
+    assert(hsv.saturation >= 0.0 and hsv.saturation <= 1.0)
+    assert(hsv.value >= 0.0 and hsv.value <= 1.0)
+
+    let srgb = hsv_to_srgb(color_components_new((f32)hsv.hue, (f32)hsv.saturation, (f32)hsv.value))
+    # round() of a float is libm's roundf.
+    let out_r = (u8)math32.round(color_components_at_const(&srgb, 0) * 255.0)
+    let out_g = (u8)math32.round(color_components_at_const(&srgb, 1) * 255.0)
+    let out_b = (u8)math32.round(color_components_at_const(&srgb, 2) * 255.0)
+    return color_new_u8_u8_u8(out_r, out_g, out_b)
+
+## Ported from Libraries/LibGfx/Color.h:466 Gfx::Color::suggested_foreground_color.
+pub func color_suggested_foreground_color(this: const Color*) -> Color:
+    return color_new_named_color(ColorNamedColor.white) if color_luminosity(this) < 128 else color_new_named_color(ColorNamedColor.black)
+
+## Ported from Libraries/LibGfx/Color.h:472 Gfx::Color::Color.
+pub func color_construct_u32(this: Color*, argb: u32):
+    this.m_value = argb
+
+# mark: Named and branded colors ================================================================
+
+## Ported from Libraries/LibGfx/Color.h:480 Gfx::Color::Color.
+pub func color_construct_color_named_color(this: Color*, named: ColorNamedColor):
+    if named == ColorNamedColor.transparent:
+        this.m_value = 0
+        return
+
+    # struct { u8 r; u8 g; u8 b; } rgb;
+    var rgb: (u8, u8, u8) = (0, 0, 0)
+
+    match named:
+        .black: rgb = (0, 0, 0)
+        .white: rgb = (255, 255, 255)
+        .red: rgb = (255, 0, 0)
+        .green: rgb = (0, 255, 0)
+        .cyan: rgb = (0, 255, 255)
+        .dark_cyan: rgb = (0, 127, 127)
+        .mid_cyan: rgb = (0, 192, 192)
+        .blue: rgb = (0, 0, 255)
+        .yellow: rgb = (255, 255, 0)
+        .magenta: rgb = (255, 0, 255)
+        .dark_gray: rgb = (64, 64, 64)
+        .mid_gray: rgb = (127, 127, 127)
+        .light_gray: rgb = (192, 192, 192)
+        .mid_green: rgb = (0, 192, 0)
+        .mid_blue: rgb = (0, 0, 192)
+        .mid_red: rgb = (192, 0, 0)
+        .mid_magenta: rgb = (192, 0, 192)
+        .dark_green: rgb = (0, 128, 0)
+        .dark_blue: rgb = (0, 0, 128)
+        .dark_red: rgb = (128, 0, 0)
+        .warm_gray: rgb = (212, 208, 200)
+        .light_blue: rgb = (173, 216, 230)
+        _: trap("VERIFY_NOT_REACHED")
+
+    this.m_value = 0xff000000 | ((u32)rgb.0 << 16) | ((u32)rgb.1 << 8) | (u32)rgb.2
+
+## Ported from Libraries/LibGfx/Color.h:568 Gfx::Color::branded_color.
+pub func color_branded_color(color: ColorBrandedColor) -> Color:
+    match color:
+        .indigo10: return color_from_bgrx(0xa5a6f2)
+        .indigo20: return color_from_bgrx(0x8a88eb)
+        .indigo30: return color_from_bgrx(0x6851d6)
+        .indigo40: return color_from_bgrx(0x553fc4)
+        .indigo50: return color_from_bgrx(0x4d37b8)
+        .indigo60: return color_from_bgrx(0x3c28a1)
+        .indigo80: return color_from_bgrx(0x301f82)
+        .indigo100: return color_from_bgrx(0x2a1373)
+        .indigo300: return color_from_bgrx(0x260f73)
+        .indigo500: return color_from_bgrx(0x1d0c59)
+        .indigo900: return color_from_bgrx(0x190c4a)
+
+        .violet10: return color_from_bgrx(0xe0d4ff)
+        .violet20: return color_from_bgrx(0xcab5ff)
+        .violet30: return color_from_bgrx(0xc3abff)
+        .violet40: return color_from_bgrx(0xb496ff)
+        .violet50: return color_from_bgrx(0xab8ef5)
+        .violet60: return color_from_bgrx(0x9d7cf2)
+        .violet80: return color_from_bgrx(0x936fed)
+        .violet100: return color_from_bgrx(0x8a64e5)
+        .violet300: return color_from_bgrx(0x8257e6)
+        .violet500: return color_from_bgrx(0x7a4ce6)
+        .violet900: return color_from_bgrx(0x6a39db)
+
+        .slate_blue10: return color_from_bgrx(0xcbe0f7)
+        .slate_blue20: return color_from_bgrx(0xc1d9f5)
+        .slate_blue30: return color_from_bgrx(0xb6d2f2)
+        .slate_blue40: return color_from_bgrx(0xa8c8ed)
+        .slate_blue50: return color_from_bgrx(0x97bce6)
+        .slate_blue60: return color_from_bgrx(0x86add9)
+        .slate_blue80: return color_from_bgrx(0x77a1d1)
+        .slate_blue100: return color_from_bgrx(0x6d98cc)
+        .slate_blue300: return color_from_bgrx(0x5c8ecc)
+        .slate_blue500: return color_from_bgrx(0x5484bf)
+        .slate_blue900: return color_from_bgrx(0x4872a3)
+        _: trap("VERIFY_NOT_REACHED")

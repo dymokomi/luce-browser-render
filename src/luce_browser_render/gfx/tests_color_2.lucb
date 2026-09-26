@@ -1,0 +1,292 @@
+#==============================================================================================
+#
+#   tests_color_2 - tests of Color's color-space factories and of ColorConversion
+#
+#   DESCRIPTION:
+#       Tests pinned to the C++ for HSV, HSL, YUV and Oklab on Color, the factories from linear
+#       sRGB, Display P3, A98 RGB, ProPhoto RGB, Rec. 2020, Lab and XYZ, and every ColorConversion
+#       function on three inputs (one in gamut, two out of it).
+#       The expected values were printed by a C++ program built against the donor's LibGfx
+#       (Build/release, clang -ffp-contract=off as the donor builds) and are compared exactly:
+#       colors by value, floats by their bits.
+#
+#       Each test's body is a noinline function the test block calls, so that the test
+#       runner's `main` does not inline every body (# workaround:
+#       compiler-issues/ranges_facts_cubic).
+#
+#==============================================================================================
+
+# mark: Helpers =================================================================================
+
+## Checks every component and the alpha of `actual` against the bits the C++ computed.
+func expect_components(actual: ColorComponents, expected: u32[4], what: str):
+    var got: u32[4] = [0, 0, 0, 0]
+    for i: usize in 0..<3:
+        let component = color_components_at_const(&actual, i)
+        got[i] = component.bits()
+    let alpha = color_components_alpha(&actual)
+    got[3] = alpha.bits()
+    if got != expected:
+        print(f"{what}: got {hex(got[0])} {hex(got[1])} {hex(got[2])} {hex(got[3])}, expected {hex(expected[0])} {hex(expected[1])} {hex(expected[2])} {hex(expected[3])}")
+    assert(got == expected)
+
+# mark: HSV, HSL, YUV and Oklab ==================================================================
+
+test "hsv and hsl":
+    test_hsv_and_hsl()
+
+noinline func test_hsv_and_hsl():
+    let a = color_new_u8_u8_u8_u8(200, 100, 50, 128)
+    let b = color_new_u8_u8_u8_u8(10, 20, 30, 200)
+    let op = color_new_u8_u8_u8_u8(12, 34, 56, 255)
+    let hsv0_color = a
+    let hsv0 = color_to_hsv(&hsv0_color)
+    expect_f64_bits(hsv0.hue, 0x4034000000000000, "to_hsv 0 hue")
+    expect_f64_bits(hsv0.saturation, 0x3fe8000000000000, "to_hsv 0 saturation")
+    expect_f64_bits(hsv0.value, 0x3fe9191920000000, "to_hsv 0 value")
+    let hsv1_color = b
+    let hsv1 = color_to_hsv(&hsv1_color)
+    expect_f64_bits(hsv1.hue, 0x406a400000000000, "to_hsv 1 hue")
+    expect_f64_bits(hsv1.saturation, 0x3fe5555540000000, "to_hsv 1 saturation")
+    expect_f64_bits(hsv1.value, 0x3fbe1e1e20000000, "to_hsv 1 value")
+    let hsv2_color = op
+    let hsv2 = color_to_hsv(&hsv2_color)
+    expect_f64_bits(hsv2.hue, 0x406a400000000000, "to_hsv 2 hue")
+    expect_f64_bits(hsv2.saturation, 0x3fe9249260000000, "to_hsv 2 saturation")
+    expect_f64_bits(hsv2.value, 0x3fcc1c1c20000000, "to_hsv 2 value")
+    let hsv3_color = color_new_u8_u8_u8(255, 0, 0)
+    let hsv3 = color_to_hsv(&hsv3_color)
+    expect_f64_bits(hsv3.hue, 0x0000000000000000, "to_hsv 3 hue")
+    expect_f64_bits(hsv3.saturation, 0x3ff0000000000000, "to_hsv 3 saturation")
+    expect_f64_bits(hsv3.value, 0x3ff0000000000000, "to_hsv 3 value")
+    let hsv4_color = color_new_u8_u8_u8(0, 255, 128)
+    let hsv4 = color_to_hsv(&hsv4_color)
+    expect_f64_bits(hsv4.hue, 0x4062c3c3c0000000, "to_hsv 4 hue")
+    expect_f64_bits(hsv4.saturation, 0x3ff0000000000000, "to_hsv 4 saturation")
+    expect_f64_bits(hsv4.value, 0x3ff0000000000000, "to_hsv 4 value")
+    let hsv5_color = color_new_u8_u8_u8(128, 128, 128)
+    let hsv5 = color_to_hsv(&hsv5_color)
+    expect_f64_bits(hsv5.hue, 0x0000000000000000, "to_hsv 5 hue")
+    expect_f64_bits(hsv5.saturation, 0x0000000000000000, "to_hsv 5 saturation")
+    expect_f64_bits(hsv5.value, 0x3fe0101020000000, "to_hsv 5 value")
+    let hsv6_color = color_new_u8_u8_u8(0, 0, 0)
+    let hsv6 = color_to_hsv(&hsv6_color)
+    expect_f64_bits(hsv6.hue, 0x0000000000000000, "to_hsv 6 hue")
+    expect_f64_bits(hsv6.saturation, 0x0000000000000000, "to_hsv 6 saturation")
+    expect_f64_bits(hsv6.value, 0x0000000000000000, "to_hsv 6 value")
+    let hsv7_color = color_new_u8_u8_u8(255, 0, 254)
+    let hsv7 = color_to_hsv(&hsv7_color)
+    expect_f64_bits(hsv7.hue, 0x4072c3c3c0000000, "to_hsv 7 hue")
+    expect_f64_bits(hsv7.saturation, 0x3ff0000000000000, "to_hsv 7 saturation")
+    expect_f64_bits(hsv7.value, 0x3ff0000000000000, "to_hsv 7 value")
+    expect_color(color_from_hsv_f64(359.9, 0.5, 0.25), 0xff402020, "from_hsv_1")
+    expect_color(color_from_hsv_hsv(Hsv(hue = 200.0, saturation = 1.0, value = 1.0)), 0xff00aaff, "from_hsv_2")
+    expect_color(color_from_hsv_f64(0.0, 0.0, 0.5), 0xff808080, "from_hsv_3")
+    expect_color(color_from_hsla(210.0, 0.6, 0.4, 0.5), 0x802966a3, "from_hsla")
+    expect_color(color_from_hsla(-30.0, 2.0, -1.0, 3.0), 0xff000000, "from_hsla_clamped")
+
+test "yuv and oklab":
+    test_yuv_and_oklab()
+
+noinline func test_yuv_and_oklab():
+    let a = color_new_u8_u8_u8_u8(200, 100, 50, 128)
+    let yuv = color_to_yuv(&a)
+    expect_f32_bits(yuv.y, 0x3ef95fc6, "yuv_y")
+    expect_f32_bits(yuv.u, 0xbe12e56e, "yuv_u")
+    expect_f32_bits(yuv.v, 0x3e85797f, "yuv_v")
+    expect_color(color_from_yuv_yuv(yuv), 0xffc86331, "from_yuv")
+    expect_color(color_from_yuv_f32(0.5, 0.1, -0.1), 0xff6284b3, "from_yuv_2")
+    var mutable_a = a
+    let oklab = color_to_oklab(&mutable_a)
+    expect_f32_bits(oklab.L, 0x3f1d2477, "oklab_L")
+    expect_f32_bits(oklab.a, 0x3dcdb90c, "oklab_a")
+    expect_f32_bits(oklab.b, 0x3dce51f0, "oklab_b")
+    let premultiplied = color_to_premultiplied_oklab(&mutable_a)
+    expect_f32_bits(premultiplied.L, 0x3e9dc239, "poklab_L")
+    expect_f32_bits(premultiplied.a, 0x3d4e8794, "poklab_a")
+    expect_f32_bits(premultiplied.b, 0x3d4f2111, "poklab_b")
+    expect_color(color_from_oklab(0.7, 0.1, -0.05, 0.5), 0x80c883bc, "from_oklab")
+    expect_color(color_from_oklab(1.2, 0.4, 0.4), 0xffff0000, "from_oklab_out")
+
+test "color-space factories":
+    test_color_space_factories()
+
+noinline func test_color_space_factories():
+    expect_color(color_from_a98rgb(0.3, 0.6, 0.9), 0xff009ae9, "from_a98rgb")
+    expect_color(color_from_display_p3(0.3, 0.6, 0.9, 0.5), 0x80249bec, "from_display_p3")
+    expect_color(color_from_linear_display_p3(0.3, 0.6, 0.9), 0xff84cdf8, "from_linear_display_p3")
+    expect_color(color_from_pro_photo_rgb(0.3, 0.6, 0.01), 0xff00b500, "from_pro_photo_rgb")
+    expect_color(color_from_rec2020(0.3, 0.6, 0.01), 0xff00aa00, "from_rec2020")
+    expect_color(color_from_lab(50.0, 20.0, -30.0), 0xff856caa, "from_lab")
+    expect_color(color_from_lab(5.0, 1.0, -80.0), 0xff001a83, "from_lab_dark")
+    expect_color(color_from_xyz50(0.2, 0.3, 0.4), 0xff00a8bd, "from_xyz50")
+    expect_color(color_from_xyz65(0.2, 0.3, 0.4), 0xff00a7a4, "from_xyz65")
+    expect_color(color_from_linear_srgb_2(0.002, 0.5, 1.2, 0.7), 0xb307bcff, "from_linear_srgb")
+
+# mark: ColorConversion ========================================================================
+
+test "color conversions of input 0":
+    test_color_conversions_0()
+
+noinline func test_color_conversions_0():
+    let input = color_components_new(0.2, 0.5, 0.8, 0.9)
+    expect_components(srgb_to_linear_srgb(input), [0x3d0798dd, 0x3e5b2d9b, 0x3f1a946f, 0x3f666666], "srgb_to_linear_srgb 0")
+    expect_components(linear_srgb_to_srgb(input), [0x3ef81436, 0x3f3c405b, 0x3f68055c, 0x3f666666], "linear_srgb_to_srgb 0")
+    expect_components(hsl_to_srgb(input), [0x3f666666, 0x3f335ee5, 0x3f333334, 0x3f666666], "hsl_to_srgb 0")
+    expect_components(srgb_to_hsv(input), [0x43520000, 0x3f400000, 0x3f4ccccd, 0x3f666666], "srgb_to_hsv 0")
+    expect_components(yuv_to_srgb(input), [0x3f800000, 0x00000000, 0x3f800000, 0x3f666666], "yuv_to_srgb 0")
+    expect_components(srgb_to_yuv(input), [0x3ee39581, 0x3e3377c1, 0xbe5b929e, 0x3f666666], "srgb_to_yuv 0")
+    expect_components(oklab_to_linear_srgb(input), [0x3f195706, 0xbb2c5880, 0xbf941582, 0x3f666666], "oklab_to_linear_srgb 0")
+    expect_components(linear_srgb_to_oklab(input), [0x3f4452b6, 0xbd3d86a0, 0xbd9fbc40, 0x3f666666], "linear_srgb_to_oklab 0")
+    expect_components(linear_display_p3_to_xyz65(input), [0x3ec7068e, 0x3ee9020b, 0x3f5b9306, 0x3f666666], "linear_display_p3_to_xyz65 0")
+    expect_components(display_p3_to_linear_display_p3(input), [0x3d0798dd, 0x3e5b2d9b, 0x3f1a946f, 0x3f666666], "display_p3_to_linear_display_p3 0")
+    expect_components(a98rgb_to_xyz65(input), [0x3e3082d3, 0x3e43ed2e, 0x3f1f8001, 0x3f666666], "a98rgb_to_xyz65 0")
+    expect_components(pro_photo_rgb_to_xyz50(input), [0x3dd4a336, 0x3e61ab3d, 0x3f0d5add, 0x3f666666], "pro_photo_rgb_to_xyz50 0")
+    expect_components(rec2020_to_xyz65(input), [0x3e395a5c, 0x3e6a1d64, 0x3f2fb462, 0x3f666666], "rec2020_to_xyz65 0")
+    expect_components(xyz50_to_linear_srgb(input), [0xbf130b94, 0x3f4a03ed, 0x3f83195b, 0x3f666666], "xyz50_to_linear_srgb 0")
+    expect_components(xyz65_to_linear_srgb(input), [0xbf04f680, 0x3f470253, 0x3f413503, 0x3f666666], "xyz65_to_linear_srgb 0")
+    expect_components(lab_to_xyz50(input), [0x39b0dcf8, 0x39682aa4, 0xb97cdc52, 0x3f666666], "lab_to_xyz50 0")
+    expect_components(linear_srgb_to_xyz65(input), [0x3ecfb202, 0x3eea6d69, 0x3f52ea69, 0x3f666666], "linear_srgb_to_xyz65 0")
+    expect_components(xyz65_to_xyz50(input), [0x3e393f51, 0x3ef99778, 0x3f1b700b, 0x3f666666], "xyz65_to_xyz50 0")
+    expect_components(xyz50_to_xyz65(input), [0x3e6bad32, 0x3f0422de, 0x3f873b73, 0x3f666666], "xyz50_to_xyz65 0")
+    expect_components(xyz65_to_oklab(input), [0x3f41ecf8, 0xbe9c835d, 0xbd8007e8, 0x3f666666], "xyz65_to_oklab 0")
+    expect_components(oklab_to_xyz65(input), [0x3d18ae78, 0x3d2be577, 0xbf8b5110, 0x3f666666], "oklab_to_xyz65 0")
+    expect_components(oklab_to_oklch(input), [0x3e4ccccd, 0x3f71828a, 0x4267fa7d, 0x3f666666], "oklab_to_oklch 0")
+    expect_components(oklch_to_oklab(input), [0x3e4ccccd, 0x3efff99d, 0x3be4c1a2, 0x3f666666], "oklch_to_oklab 0")
+    expect_components(xyz50_to_lab(input), [0x42982376, 0xc2c9c43d, 0xc21cd7a3, 0x3f666666], "xyz50_to_lab 0")
+    expect_components(lab_to_lch(input), [0x3e4ccccd, 0x3f71828a, 0x4267fa7d, 0x3f666666], "lab_to_lch 0")
+    expect_components(lch_to_lab(input), [0x3e4ccccd, 0x3efff99d, 0x3be4c1a2, 0x3f666666], "lch_to_lab 0")
+    expect_components(srgb_to_hsl(input), [0x43520000, 0x3f19999a, 0x3f000000, 0x3f666666], "srgb_to_hsl 0")
+    expect_components(srgb_to_hwb(input), [0x43520000, 0x3e4ccccd, 0x3e4ccccc, 0x3f666666], "srgb_to_hwb 0")
+    expect_components(hwb_to_srgb(input), [0x3ec4ec4f, 0x3ec4ec4f, 0x3ec4ec4f, 0x3f666666], "hwb_to_srgb 0")
+    expect_components(linear_display_p3_to_display_p3(input), [0x3ef81436, 0x3f3c405b, 0x3f68055c, 0x3f666666], "linear_display_p3_to_display_p3 0")
+    expect_components(xyz65_to_linear_display_p3(input), [0xbe940ceb, 0x3f3bfd50, 0x3f3c0e21, 0x3f666666], "xyz65_to_linear_display_p3 0")
+    expect_components(a98_rgb_to_linear_a98_rgb(input), [0x3cedcb6c, 0x3e5efb4e, 0x3f1cb753, 0x3f666666], "a98_rgb_to_linear_a98_rgb 0")
+    expect_components(linear_a98_rgb_to_a98_rgb(input), [0x3ef649c2, 0x3f3acae4, 0x3f674c9f, 0x3f666666], "linear_a98_rgb_to_a98_rgb 0")
+    expect_components(linear_a98_rgb_to_xyz65(input), [0x3eb7a6fc, 0x3edde480, 0x3f557546, 0x3f666666], "linear_a98_rgb_to_xyz65 0")
+    expect_components(xyz65_to_linear_a98_rgb(input), [0xbe1bbd24, 0x3f470251, 0x3f417220, 0x3f666666], "xyz65_to_linear_a98_rgb 0")
+    expect_components(prophoto_rgb_to_linear_prophoto_rgb(input), [0x3d620e0f, 0x3e93088c, 0x3f2b514e, 0x3f666666], "prophoto_rgb_to_linear_prophoto_rgb 0")
+    expect_components(linear_prophoto_rgb_to_prophoto_rgb(input), [0x3ed16384, 0x3f2e2e5e, 0x3f6226ff, 0x3f666666], "linear_prophoto_rgb_to_prophoto_rgb 0")
+    expect_components(linear_prophoto_rgb_to_xyz50(input), [0x3e812343, 0x3ed3c3f8, 0x3f28fb3f, 0x3f666666], "linear_prophoto_rgb_to_xyz50 0")
+    expect_components(xyz50_to_linear_prophoto_rgb(input), [0x3dcdc5a0, 0x3f295f86, 0x3f783602, 0x3f666666], "xyz50_to_linear_prophoto_rgb 0")
+    expect_components(rec2020_to_linear_rec2020(input), [0x3cac21d3, 0x3e420300, 0x3f15d988, 0x3f666666], "rec2020_to_linear_rec2020 0")
+    expect_components(linear_rec2020_to_rec2020(input), [0x3f02eb3f, 0x3f3fc887, 0x3f694562, 0x3f666666], "linear_rec2020_to_rec2020 0")
+    expect_components(linear_rec2020_to_xyz65(input), [0x3eab6b8b, 0x3ee0c20b, 0x3f5ce210, 0x3f666666], "linear_rec2020_to_xyz65 0")
+    expect_components(xyz65_to_linear_rec2020(input), [0xbd185d20, 0x3f300138, 0x3f3c5f0b, 0x3f666666], "xyz65_to_linear_rec2020 0")
+
+test "color conversions of input 1":
+    test_color_conversions_1()
+
+noinline func test_color_conversions_1():
+    let input = color_components_new(-0.3, 0.01, 1.5)
+    expect_components(srgb_to_linear_srgb(input), [0xbd95fe51, 0x3a4ae5d8, 0x402260c1, 0x3f800000], "srgb_to_linear_srgb 1")
+    expect_components(linear_srgb_to_srgb(input), [0xbf1575fb, 0x3dcc7fa3, 0x3f98dac7, 0x3f800000], "linear_srgb_to_srgb 1")
+    expect_components(hsl_to_srgb(input), [0x3fbf5c29, 0x3fc0a3d7, 0x3fc0a234, 0x3f800000], "hsl_to_srgb 1")
+    expect_components(srgb_to_hsv(input), [0x4365aaab, 0x3f999999, 0x3fc00000, 0x3f800000], "srgb_to_hsv 1")
+    expect_components(yuv_to_srgb(input), [0x3f800000, 0x00000000, 0x00000000, 0x3f800000], "yuv_to_srgb 1")
+    expect_components(srgb_to_yuv(input), [0x3db28630, 0x3f324f7a, 0xbeadd93f, 0x3f800000], "srgb_to_yuv 1")
+    expect_components(oklab_to_linear_srgb(input), [0xc0187d5e, 0x406a766d, 0xc198cdb6, 0x3f800000], "oklab_to_linear_srgb 1")
+    expect_components(linear_srgb_to_oklab(input), [0x3e981014, 0xbfb19e87, 0xbedac95c, 0x3f800000], "linear_srgb_to_oklab 1")
+    expect_components(linear_display_p3_to_xyz65(input), [0x3e1db525, 0x3d6a1bc4, 0x3fc87ebc, 0x3f800000], "linear_display_p3_to_xyz65 1")
+    expect_components(display_p3_to_linear_display_p3(input), [0xbd95fe51, 0x3a4ae5d8, 0x402260c1, 0x3f800000], "display_p3_to_linear_display_p3 1")
+    expect_components(a98rgb_to_xyz65(input), [0x3ed62df2, 0x3e26881d, 0x401aa3cb, 0x3f800000], "a98rgb_to_xyz65 1")
+    expect_components(pro_photo_rgb_to_xyz50(input), [0xbcd6d3bc, 0xbd0485ab, 0x3fdb1ee1, 0x3f800000], "pro_photo_rgb_to_xyz50 1")
+    expect_components(rec2020_to_xyz65(input), [0x3ea4b846, 0x3de1cb75, 0x401c35d2, 0x3f800000], "rec2020_to_xyz65 1")
+    expect_components(xyz50_to_linear_srgb(input), [0xbfd8a0d0, 0x3eb9d69e, 0x40056394, 0x3f800000], "xyz50_to_linear_srgb 1")
+    expect_components(xyz65_to_linear_srgb(input), [0xbfde2788, 0x3ebe6524, 0x3fc88a96, 0x3f800000], "xyz65_to_linear_srgb 1")
+    expect_components(lab_to_xyz50(input), [0xb9a69bf7, 0xb9ae1ffc, 0xba8c144e, 0x3f800000], "lab_to_xyz50 1")
+    expect_components(linear_srgb_to_xyz65(input), [0x3e1a3198, 0x3d538d56, 0x3fb5e995, 0x3f800000], "linear_srgb_to_xyz65 1")
+    expect_components(xyz65_to_xyz50(input), [0xbec76464, 0xbcc97ae8, 0x3f90bbec, 0x3f800000], "xyz65_to_xyz50 1")
+    expect_components(xyz50_to_xyz65(input), [0xbe449779, 0x3d4d8263, 0x3ffeee5f, 0x3f800000], "xyz50_to_xyz65 1")
+    expect_components(xyz65_to_oklab(input), [0x3e0b03fc, 0xbffca4f4, 0xbf0426e6, 0x3f800000], "xyz65_to_oklab 1")
+    expect_components(oklab_to_xyz65(input), [0xc047ab88, 0x3f3c053d, 0xc18e1ead, 0x3f800000], "oklab_to_xyz65 1")
+    expect_components(oklab_to_oklch(input), [0xbe99999a, 0x3fc00117, 0x42b33c6e, 0x3f800000], "oklab_to_oklch 1")
+    expect_components(oklch_to_oklab(input), [0xbe99999a, 0x3c23c8ab, 0x39893e1b, 0x3f800000], "oklch_to_oklab 1")
+    expect_components(xyz50_to_lab(input), [0x410fdcf2, 0xc49c41f1, 0xc3490167, 0x3f800000], "xyz50_to_lab 1")
+    expect_components(lab_to_lch(input), [0xbe99999a, 0x3fc00117, 0x42b33c6e, 0x3f800000], "lab_to_lch 1")
+    expect_components(lch_to_lab(input), [0xbe99999a, 0x3c23c8ab, 0x39893e1b, 0x3f800000], "lch_to_lab 1")
+    expect_components(srgb_to_hsl(input), [0x4365aaab, 0x40100000, 0x3f19999a, 0x3f800000], "srgb_to_hsl 1")
+    expect_components(srgb_to_hwb(input), [0x4365aaab, 0xbe99999a, 0xbf000000, 0x3f800000], "srgb_to_hwb 1")
+    expect_components(hwb_to_srgb(input), [0x3bd901b2, 0x3bd901b2, 0x3bd901b2, 0x3f800000], "hwb_to_srgb 1")
+    expect_components(linear_display_p3_to_display_p3(input), [0xbf1575fb, 0x3dcc7fa3, 0x3f98dac7, 0x3f800000], "linear_display_p3_to_display_p3 1")
+    expect_components(xyz65_to_linear_display_p3(input), [0xbfae434f, 0x3e9a93ff, 0x3fb63f73, 0x3f800000], "xyz65_to_linear_display_p3 1")
+    expect_components(a98_rgb_to_linear_a98_rgb(input), [0xbd91032f, 0x38279480, 0x401c1d4e, 0x3f800000], "a98_rgb_to_linear_a98_rgb 1")
+    expect_components(linear_a98_rgb_to_a98_rgb(input), [0xbf141358, 0x3dfc4ca1, 0x3f99ea25, 0x3f800000], "linear_a98_rgb_to_a98_rgb 1")
+    expect_components(linear_a98_rgb_to_xyz65(input), [0x3de3bbb0, 0x3cf5d1f0, 0x3fbd63a8, 0x3f800000], "linear_a98_rgb_to_xyz65 1")
+    expect_components(xyz65_to_linear_a98_rgb(input), [0xbf91d11c, 0x3ebe6522, 0x3fc23eef, 0x3f800000], "xyz65_to_linear_a98_rgb 1")
+    expect_components(prophoto_rgb_to_linear_prophoto_rgb(input), [0xbdea80bf, 0x3a23d70a, 0x4004c896, 0x3f800000], "prophoto_rgb_to_linear_prophoto_rgb 1")
+    expect_components(linear_prophoto_rgb_to_prophoto_rgb(input), [0xbf032520, 0x3d9e91b7, 0x3fa056b7, 0x3f800000], "linear_prophoto_rgb_to_prophoto_rgb 1")
+    expect_components(linear_prophoto_rgb_to_xyz50(input), [0xbe438a1f, 0xbda22375, 0x3f9e6b8a, 0x3f800000], "linear_prophoto_rgb_to_xyz50 1")
+    expect_components(xyz50_to_linear_prophoto_rgb(input), [0xbef74857, 0x3e564852, 0x3fe8b2a2, 0x3f800000], "xyz50_to_linear_prophoto_rgb 1")
+    expect_components(rec2020_to_linear_rec2020(input), [0xbd63bf02, 0x3784f352, 0x40295afa, 0x3f800000], "rec2020_to_linear_rec2020 1")
+    expect_components(linear_rec2020_to_rec2020(input), [0xbf1b03d9, 0x3e164d7a, 0x3f978f11, 0x3f800000], "linear_rec2020_to_rec2020 1")
+    expect_components(linear_rec2020_to_xyz65(input), [0x3d826ac6, 0x3c8aa10c, 0x3fcbbebd, 0x3f800000], "linear_rec2020_to_xyz65 1")
+    expect_components(xyz65_to_linear_rec2020(input), [0xbf660ac0, 0x3e759425, 0x3fb426d5, 0x3f800000], "xyz65_to_linear_rec2020 1")
+
+test "color conversions of input 2":
+    test_color_conversions_2()
+
+noinline func test_color_conversions_2():
+    let input = color_components_new(0.5, -0.2, 0.1, 0.4)
+    expect_components(srgb_to_linear_srgb(input), [0x3e5b2d9b, 0xbd0798dd, 0x3c2436c9, 0x3ecccccd], "srgb_to_linear_srgb 2")
+    expect_components(linear_srgb_to_srgb(input), [0x3f3c405b, 0xbef81436, 0x3eb2c90f, 0x3ecccccd], "linear_srgb_to_srgb 2")
+    expect_components(hsl_to_srgb(input), [0x3da3d70a, 0x3df513cd, 0x3df5c290, 0x3ecccccd], "hsl_to_srgb 2")
+    expect_components(srgb_to_hsv(input), [0x43a72492, 0x3fb33333, 0x3f000000, 0x3ecccccd], "srgb_to_hsv 2")
+    expect_components(yuv_to_srgb(input), [0x3f1d30c0, 0x3f054cf0, 0x3dc12b18, 0x3ecccccd], "yuv_to_srgb 2")
+    expect_components(srgb_to_yuv(input), [0x3d322d0c, 0x3ce42f22, 0x3eccfabd, 0x3ecccccd], "srgb_to_yuv 2")
+    expect_components(oklab_to_linear_srgb(input), [0xbdad8a99, 0x3e678325, 0x3b841620, 0x3ecccccd], "oklab_to_linear_srgb 2")
+    expect_components(linear_srgb_to_oklab(input), [0xbded7ebc, 0x3fe004c6, 0xbefee416, 0x3ecccccd], "linear_srgb_to_oklab 2")
+    expect_components(linear_display_p3_to_xyz65(input), [0x3e570357, 0xbc828348, 0x3dc35245, 0x3ecccccd], "linear_display_p3_to_xyz65 2")
+    expect_components(display_p3_to_linear_display_p3(input), [0x3e5b2d9b, 0xbd0798dd, 0x3c2436c9, 0x3ecccccd], "display_p3_to_linear_display_p3 2")
+    expect_components(a98rgb_to_xyz65(input), [0x3df89428, 0x3d409141, 0x3c257c77, 0x3ecccccd], "a98rgb_to_xyz65 2")
+    expect_components(pro_photo_rgb_to_xyz50(input), [0x3e637740, 0x3d31f1e7, 0x3c564107, 0x3ecccccd], "pro_photo_rgb_to_xyz50 2")
+    expect_components(rec2020_to_xyz65(input), [0x3e251191, 0x3d02c119, 0x3cb6b26e, 0x3ecccccd], "rec2020_to_xyz65 2")
+    expect_components(xyz50_to_linear_srgb(input), [0x3febb595, 0xbf5e8ab5, 0x3e63a5a0, 0x3ecccccd], "xyz50_to_linear_srgb 2")
+    expect_components(xyz65_to_linear_srgb(input), [0x3ff06599, 0xbf5b0c8a, 0x3e327db2, 0x3ecccccd], "xyz65_to_linear_srgb 2")
+    expect_components(lab_to_xyz50(input), [0x39fde03f, 0x3a111aa7, 0x39d3acfb, 0x3ecccccd], "lab_to_xyz50 2")
+    expect_components(linear_srgb_to_xyz65(input), [0x3e1c645e, 0xbcf19f7c, 0x3da5a43e, 0x3ecccccd], "linear_srgb_to_xyz65 2")
+    expect_components(xyz65_to_xyz50(input), [0x3f03acda, 0xbe3d6b7e, 0x3d8a5a35, 0x3ecccccd], "xyz65_to_xyz50 2")
+    expect_components(xyz50_to_xyz65(input), [0x3efa3493, 0xbe5b37bd, 0x3e12bbf6, 0x3ecccccd], "xyz50_to_xyz65 2")
+    expect_components(xyz65_to_oklab(input), [0xbe95db3c, 0x4035bea5, 0xbf2cfa00, 0x3ecccccd], "xyz65_to_oklab 2")
+    expect_components(oklab_to_xyz65(input), [0x3d3efc9c, 0x3e136ae0, 0x3ceebad4, 0x3ecccccd], "oklab_to_xyz65 2")
+    expect_components(oklab_to_oklch(input), [0x3f000000, 0x3e64f92f, 0x43196f59, 0x3ecccccd], "oklab_to_oklch 2")
+    expect_components(oklch_to_oklab(input), [0x3f000000, 0xbe4cccb8, 0xb9b702ce, 0x3ecccccd], "oklch_to_oklab 2")
+    expect_components(xyz50_to_lab(input), [0xc334a8c5, 0x448aedac, 0xc3bf6f71, 0x3ecccccd], "xyz50_to_lab 2")
+    expect_components(lab_to_lch(input), [0x3f000000, 0x3e64f92f, 0x43196f59, 0x3ecccccd], "lab_to_lch 2")
+    expect_components(lch_to_lab(input), [0x3f000000, 0xbe4cccb8, 0xb9b702ce, 0x3ecccccd], "lch_to_lab 2")
+    expect_components(srgb_to_hsl(input), [0x43a72492, 0x40155555, 0x3e19999a, 0x3ecccccd], "srgb_to_hsl 2")
+    expect_components(srgb_to_hwb(input), [0x43a72492, 0xbe4ccccd, 0x3f000000, 0x3ecccccd], "srgb_to_hwb 2")
+    expect_components(hwb_to_srgb(input), [0x3f666667, 0xbe4369da, 0xbe4ccccd, 0x3ecccccd], "hwb_to_srgb 2")
+    expect_components(linear_display_p3_to_display_p3(input), [0x3f3c405b, 0xbef81436, 0x3eb2c90f, 0x3ecccccd], "linear_display_p3_to_display_p3 2")
+    expect_components(xyz65_to_linear_display_p3(input), [0x3fb245c4, 0xbf43d176, 0x3e03f02a, 0x3ecccccd], "xyz65_to_linear_display_p3 2")
+    expect_components(a98_rgb_to_linear_a98_rgb(input), [0x3e5efb4e, 0xbcedcb6c, 0x3bcf1fd7, 0x3ecccccd], "a98_rgb_to_linear_a98_rgb 2")
+    expect_components(linear_a98_rgb_to_a98_rgb(input), [0x3f3acae4, 0xbef649c2, 0x3eb3b4c9, 0x3ecccccd], "linear_a98_rgb_to_a98_rgb 2")
+    expect_components(linear_a98_rgb_to_xyz65(input), [0x3e8a4370, 0x3cfbbb3c, 0x3dc9c07c, 0x3ecccccd], "linear_a98_rgb_to_xyz65 2")
+    expect_components(xyz65_to_linear_a98_rgb(input), [0x3f8cadea, 0xbf5b0c86, 0x3e0713f8, 0x3ecccccd], "xyz65_to_linear_a98_rgb 2")
+    expect_components(prophoto_rgb_to_linear_prophoto_rgb(input), [0x3e93088c, 0xbd620e0f, 0x3c81d59f, 0x3ecccccd], "prophoto_rgb_to_linear_prophoto_rgb 2")
+    expect_components(linear_prophoto_rgb_to_prophoto_rgb(input), [0x3f2e2e5e, 0xbed16384, 0x3e8e7790, 0x3ecccccd], "linear_prophoto_rgb_to_prophoto_rgb 2")
+    expect_components(linear_prophoto_rgb_to_xyz50(input), [0x3ebffd9f, 0x3adc1dca, 0x3da8fb3f, 0x3ecccccd], "linear_prophoto_rgb_to_xyz50 2")
+    expect_components(xyz50_to_linear_prophoto_rgb(input), [0x3f380a12, 0xbf12685f, 0x3df83602, 0x3ecccccd], "xyz50_to_linear_prophoto_rgb 2")
+    expect_components(rec2020_to_linear_rec2020(input), [0x3e420300, 0xbcac21d3, 0x3b8273a7, 0x3ecccccd], "rec2020_to_linear_rec2020 2")
+    expect_components(linear_rec2020_to_rec2020(input), [0x3f3fc887, 0xbf02eb3f, 0x3ec42822, 0x3ecccccd], "linear_rec2020_to_rec2020 2")
+    expect_components(linear_rec2020_to_xyz65(input), [0x3e9ce632, 0x3adc498c, 0x3dcdca8a, 0x3ecccccd], "linear_rec2020_to_xyz65 2")
+    expect_components(xyz65_to_linear_rec2020(input), [0x3f67749d, 0xbf27b21d, 0x3de48658, 0x3ecccccd], "xyz65_to_linear_rec2020 2")
+
+test "color conversion edge cases":
+    test_color_conversion_edge_cases()
+
+noinline func test_color_conversion_edge_cases():
+    expect_components(hsv_to_srgb(color_components_new(300.0, 0.5, 0.8)), [0x3f4ccccd, 0x3ecccccd, 0x3f4ccccd, 0x3f800000], "hsv_to_srgb 300")
+    expect_components(hsl_to_srgb(color_components_new(725.0, 1.5, 0.3, 2.0)), [0x3f400000, 0xbd999988, 0xbe19999a, 0x3f800000], "hsl_to_srgb big")
+    expect_components(lab_to_xyz50(color_components_new(90.0, -10.0, 40.0)), [0x3f304354, 0x3f43562b, 0x3e99a315, 0x3f800000], "lab_to_xyz50 bright")
+    expect_components(color_to_srgb(color_new_u8_u8_u8_u8(200, 100, 50, 128)), [0x3f48c8c9, 0x3ec8c8c9, 0x3e48c8c9, 0x3f008081], "color_to_srgb")
+    expect_color(srgb_to_color(color_components_new(-0.3, 0.01, 1.5)), 0xff0003ff, "srgb_to_color")
+    expect_components(hwb_to_srgb(color_components_new(10.0, 0.7, 0.6)), [0x3f09d89e, 0x3f09d89e, 0x3f09d89e, 0x3f800000], "hwb_to_srgb gray")
+    expect_components(srgb_to_hsl(color_components_new(1.2, -0.1, 0.3)), [0x43aac4ec, 0x3fb8e38f, 0x3f0ccccd, 0x3f800000], "srgb_to_hsl neg")
+    var components: ColorComponents
+    color_components_init_fields(&components)
+    assert(color_components_at_const(&components, 0) == 0.0 and color_components_alpha(&components) == 1.0)
+    let first = color_components_at(&components, 1)
+    *first = 0.25
+    color_components_set_alpha(&components, 0.5)
+    assert(color_components_at_const(&components, 1) == 0.25 and color_components_alpha(&components) == 0.5)

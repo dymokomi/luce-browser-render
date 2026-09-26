@@ -1,0 +1,183 @@
+#==============================================================================================
+#
+#   color_named - Color: the named CSS colors
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Color.cpp (lines 181-352): Color::from_named_css_color_string
+#       and its table of the CSS named colors (a generated-style table, exempt from the
+#       fragment size rule). The C++ table is a constexpr local array; here it is a module
+#       constant.
+#
+#==============================================================================================
+
+## The `WebColor` struct local to Color::from_named_css_color_string (Color.cpp:186).
+struct WebColor:
+    var color: u32  # BGRA8888
+    var name: str
+
+## The `web_colors` array of Color::from_named_css_color_string (Color.cpp:191).
+let web_colors: WebColor[148] = [
+    # CSS Level 1
+    WebColor(color = 0x000000, name = "black"),
+    WebColor(color = 0xc0c0c0, name = "silver"),
+    WebColor(color = 0x808080, name = "gray"),
+    WebColor(color = 0xffffff, name = "white"),
+    WebColor(color = 0x800000, name = "maroon"),
+    WebColor(color = 0xff0000, name = "red"),
+    WebColor(color = 0x800080, name = "purple"),
+    WebColor(color = 0xff00ff, name = "fuchsia"),
+    WebColor(color = 0x008000, name = "green"),
+    WebColor(color = 0x00ff00, name = "lime"),
+    WebColor(color = 0x808000, name = "olive"),
+    WebColor(color = 0xffff00, name = "yellow"),
+    WebColor(color = 0x000080, name = "navy"),
+    WebColor(color = 0x0000ff, name = "blue"),
+    WebColor(color = 0x008080, name = "teal"),
+    WebColor(color = 0x00ffff, name = "aqua"),
+    # CSS Level 2 (Revision 1)
+    WebColor(color = 0xffa500, name = "orange"),
+    # CSS Color Module Level 3
+    WebColor(color = 0xf0f8ff, name = "aliceblue"),
+    WebColor(color = 0xfaebd7, name = "antiquewhite"),
+    WebColor(color = 0x7fffd4, name = "aquamarine"),
+    WebColor(color = 0xf0ffff, name = "azure"),
+    WebColor(color = 0xf5f5dc, name = "beige"),
+    WebColor(color = 0xffe4c4, name = "bisque"),
+    WebColor(color = 0xffebcd, name = "blanchedalmond"),
+    WebColor(color = 0x8a2be2, name = "blueviolet"),
+    WebColor(color = 0xa52a2a, name = "brown"),
+    WebColor(color = 0xdeb887, name = "burlywood"),
+    WebColor(color = 0x5f9ea0, name = "cadetblue"),
+    WebColor(color = 0x7fff00, name = "chartreuse"),
+    WebColor(color = 0xd2691e, name = "chocolate"),
+    WebColor(color = 0xff7f50, name = "coral"),
+    WebColor(color = 0x6495ed, name = "cornflowerblue"),
+    WebColor(color = 0xfff8dc, name = "cornsilk"),
+    WebColor(color = 0xdc143c, name = "crimson"),
+    WebColor(color = 0x00ffff, name = "cyan"),
+    WebColor(color = 0x00008b, name = "darkblue"),
+    WebColor(color = 0x008b8b, name = "darkcyan"),
+    WebColor(color = 0xb8860b, name = "darkgoldenrod"),
+    WebColor(color = 0xa9a9a9, name = "darkgray"),
+    WebColor(color = 0x006400, name = "darkgreen"),
+    WebColor(color = 0xa9a9a9, name = "darkgrey"),
+    WebColor(color = 0xbdb76b, name = "darkkhaki"),
+    WebColor(color = 0x8b008b, name = "darkmagenta"),
+    WebColor(color = 0x556b2f, name = "darkolivegreen"),
+    WebColor(color = 0xff8c00, name = "darkorange"),
+    WebColor(color = 0x9932cc, name = "darkorchid"),
+    WebColor(color = 0x8b0000, name = "darkred"),
+    WebColor(color = 0xe9967a, name = "darksalmon"),
+    WebColor(color = 0x8fbc8f, name = "darkseagreen"),
+    WebColor(color = 0x483d8b, name = "darkslateblue"),
+    WebColor(color = 0x2f4f4f, name = "darkslategray"),
+    WebColor(color = 0x2f4f4f, name = "darkslategrey"),
+    WebColor(color = 0x00ced1, name = "darkturquoise"),
+    WebColor(color = 0x9400d3, name = "darkviolet"),
+    WebColor(color = 0xff1493, name = "deeppink"),
+    WebColor(color = 0x00bfff, name = "deepskyblue"),
+    WebColor(color = 0x696969, name = "dimgray"),
+    WebColor(color = 0x696969, name = "dimgrey"),
+    WebColor(color = 0x1e90ff, name = "dodgerblue"),
+    WebColor(color = 0xb22222, name = "firebrick"),
+    WebColor(color = 0xfffaf0, name = "floralwhite"),
+    WebColor(color = 0x228b22, name = "forestgreen"),
+    WebColor(color = 0xdcdcdc, name = "gainsboro"),
+    WebColor(color = 0xf8f8ff, name = "ghostwhite"),
+    WebColor(color = 0xffd700, name = "gold"),
+    WebColor(color = 0xdaa520, name = "goldenrod"),
+    WebColor(color = 0xadff2f, name = "greenyellow"),
+    WebColor(color = 0x808080, name = "grey"),
+    WebColor(color = 0xf0fff0, name = "honeydew"),
+    WebColor(color = 0xff69b4, name = "hotpink"),
+    WebColor(color = 0xcd5c5c, name = "indianred"),
+    WebColor(color = 0x4b0082, name = "indigo"),
+    WebColor(color = 0xfffff0, name = "ivory"),
+    WebColor(color = 0xf0e68c, name = "khaki"),
+    WebColor(color = 0xe6e6fa, name = "lavender"),
+    WebColor(color = 0xfff0f5, name = "lavenderblush"),
+    WebColor(color = 0x7cfc00, name = "lawngreen"),
+    WebColor(color = 0xfffacd, name = "lemonchiffon"),
+    WebColor(color = 0xadd8e6, name = "lightblue"),
+    WebColor(color = 0xf08080, name = "lightcoral"),
+    WebColor(color = 0xe0ffff, name = "lightcyan"),
+    WebColor(color = 0xfafad2, name = "lightgoldenrodyellow"),
+    WebColor(color = 0xd3d3d3, name = "lightgray"),
+    WebColor(color = 0x90ee90, name = "lightgreen"),
+    WebColor(color = 0xd3d3d3, name = "lightgrey"),
+    WebColor(color = 0xffb6c1, name = "lightpink"),
+    WebColor(color = 0xffa07a, name = "lightsalmon"),
+    WebColor(color = 0x20b2aa, name = "lightseagreen"),
+    WebColor(color = 0x87cefa, name = "lightskyblue"),
+    WebColor(color = 0x778899, name = "lightslategray"),
+    WebColor(color = 0x778899, name = "lightslategrey"),
+    WebColor(color = 0xb0c4de, name = "lightsteelblue"),
+    WebColor(color = 0xffffe0, name = "lightyellow"),
+    WebColor(color = 0x32cd32, name = "limegreen"),
+    WebColor(color = 0xfaf0e6, name = "linen"),
+    WebColor(color = 0xff00ff, name = "magenta"),
+    WebColor(color = 0x66cdaa, name = "mediumaquamarine"),
+    WebColor(color = 0x0000cd, name = "mediumblue"),
+    WebColor(color = 0xba55d3, name = "mediumorchid"),
+    WebColor(color = 0x9370db, name = "mediumpurple"),
+    WebColor(color = 0x3cb371, name = "mediumseagreen"),
+    WebColor(color = 0x7b68ee, name = "mediumslateblue"),
+    WebColor(color = 0x00fa9a, name = "mediumspringgreen"),
+    WebColor(color = 0x48d1cc, name = "mediumturquoise"),
+    WebColor(color = 0xc71585, name = "mediumvioletred"),
+    WebColor(color = 0x191970, name = "midnightblue"),
+    WebColor(color = 0xf5fffa, name = "mintcream"),
+    WebColor(color = 0xffe4e1, name = "mistyrose"),
+    WebColor(color = 0xffe4b5, name = "moccasin"),
+    WebColor(color = 0xffdead, name = "navajowhite"),
+    WebColor(color = 0xfdf5e6, name = "oldlace"),
+    WebColor(color = 0x6b8e23, name = "olivedrab"),
+    WebColor(color = 0xff4500, name = "orangered"),
+    WebColor(color = 0xda70d6, name = "orchid"),
+    WebColor(color = 0xeee8aa, name = "palegoldenrod"),
+    WebColor(color = 0x98fb98, name = "palegreen"),
+    WebColor(color = 0xafeeee, name = "paleturquoise"),
+    WebColor(color = 0xdb7093, name = "palevioletred"),
+    WebColor(color = 0xffefd5, name = "papayawhip"),
+    WebColor(color = 0xffdab9, name = "peachpuff"),
+    WebColor(color = 0xcd853f, name = "peru"),
+    WebColor(color = 0xffc0cb, name = "pink"),
+    WebColor(color = 0xdda0dd, name = "plum"),
+    WebColor(color = 0xb0e0e6, name = "powderblue"),
+    WebColor(color = 0xbc8f8f, name = "rosybrown"),
+    WebColor(color = 0x4169e1, name = "royalblue"),
+    WebColor(color = 0x8b4513, name = "saddlebrown"),
+    WebColor(color = 0xfa8072, name = "salmon"),
+    WebColor(color = 0xf4a460, name = "sandybrown"),
+    WebColor(color = 0x2e8b57, name = "seagreen"),
+    WebColor(color = 0xfff5ee, name = "seashell"),
+    WebColor(color = 0xa0522d, name = "sienna"),
+    WebColor(color = 0x87ceeb, name = "skyblue"),
+    WebColor(color = 0x6a5acd, name = "slateblue"),
+    WebColor(color = 0x708090, name = "slategray"),
+    WebColor(color = 0x708090, name = "slategrey"),
+    WebColor(color = 0xfffafa, name = "snow"),
+    WebColor(color = 0x00ff7f, name = "springgreen"),
+    WebColor(color = 0x4682b4, name = "steelblue"),
+    WebColor(color = 0xd2b48c, name = "tan"),
+    WebColor(color = 0xd8bfd8, name = "thistle"),
+    WebColor(color = 0xff6347, name = "tomato"),
+    WebColor(color = 0x40e0d0, name = "turquoise"),
+    WebColor(color = 0xee82ee, name = "violet"),
+    WebColor(color = 0xf5deb3, name = "wheat"),
+    WebColor(color = 0xf5f5f5, name = "whitesmoke"),
+    WebColor(color = 0x9acd32, name = "yellowgreen"),
+    # CSS Color Module Level 4
+    WebColor(color = 0x663399, name = "rebeccapurple"),
+]
+
+## Ported from Libraries/LibGfx/Color.cpp:181 Gfx::Color::from_named_css_color_string.
+pub func color_from_named_css_color_string(string: ak.StringView) -> Color?:
+    if ak.string_view_is_empty(&string):
+        return none
+
+    for web_color in web_colors:
+        if ak.string_view_equals_ignoring_ascii_case(&string, ak.sv(web_color.name)):
+            return color_from_bgrx(web_color.color)
+
+    return none

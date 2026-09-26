@@ -1,0 +1,285 @@
+#==============================================================================================
+#
+#   color_1 - Color: construction, channels, blending and mixing
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Color.h (lines 21-330): the alpha type check, the
+#       constructors, the BGRA/RGBA/YUV/HSL/Oklab factories, the channel accessors and
+#       setters, blend, mixed_with, interpolate, multiply, distance and luminosity. The
+#       inline header functions go with Color.cpp's fragments (DESIGN.md §2.1); color_2
+#       continues the header, color_3 and color_named hold Color.cpp.
+#
+#       Integer arithmetic on channels is written in the width C++ promotes to (int), and a
+#       C++ narrowing to u8 is a `(u8)` cast. The libm calls of the C++ (lroundf, floorf,
+#       roundf) are luce-std's math32, which calls the same libm entry points.
+#
+#==============================================================================================
+
+# mark: Helpers =================================================================================
+
+## `Color(r, g, b)` as an expression: a Color built with color_construct_u8_u8_u8.
+pub func color_new_u8_u8_u8(r: u8, g: u8, b: u8) -> Color:
+    var color: Color
+    color_construct_u8_u8_u8(&color, r, g, b)
+    return color
+
+## `Color(r, g, b, a)` as an expression: a Color built with color_construct_u8_u8_u8_u8.
+pub func color_new_u8_u8_u8_u8(r: u8, g: u8, b: u8, a: u8) -> Color:
+    var color: Color
+    color_construct_u8_u8_u8_u8(&color, r, g, b, a)
+    return color
+
+## `Color(NamedColor)` as an expression: a Color built with color_construct_color_named_color.
+pub func color_new_named_color(named: ColorNamedColor) -> Color:
+    var color: Color
+    color_construct_color_named_color(&color, named)
+    return color
+
+## The private `Color(BGRA8888)` as an expression (color_construct_u32).
+func color_new_u32(argb: u32) -> Color:
+    var color: Color
+    color_construct_u32(&color, argb)
+    return color
+
+## AK::round_to<u8>(float): the AArch64 branch converts to u32 rounding to nearest even
+## (fcvtnu), then narrows.
+func round_to_u8_f32(value: f32) -> u8:
+    return (u8)ak.rounding_round_to_f32_u32(value)
+
+# mark: AlphaType ===============================================================================
+
+## Ported from Libraries/LibGfx/Color.h:30 Gfx::is_valid_alpha_type.
+pub func is_valid_alpha_type(alpha_type: u32) -> bool:
+    match alpha_type:
+        0, 1:
+            # (u32)AlphaType::Premultiplied, (u32)AlphaType::Unpremultiplied
+            return true
+        _:
+            # Not an AlphaType: the C++ switch falls through to the return below.
+            return false
+
+# mark: Construction ============================================================================
+
+## Ported from Libraries/LibGfx/Color.h:133 Gfx::Color::Color.
+pub func color_construct_u8_u8_u8(this: Color*, r: u8, g: u8, b: u8):
+    this.m_value = 0xff000000 | ((u32)r << 16) | ((u32)g << 8) | (u32)b
+
+## Ported from Libraries/LibGfx/Color.h:138 Gfx::Color::Color.
+pub func color_construct_u8_u8_u8_u8(this: Color*, r: u8, g: u8, b: u8, a: u8):
+    this.m_value = ((u32)a << 24) | ((u32)r << 16) | ((u32)g << 8) | (u32)b
+
+## Ported from Libraries/LibGfx/Color.h:145 Gfx::Color::from_bgrx.
+pub func color_from_bgrx(bgrx: u32) -> Color:
+    return color_new_u32(bgrx | 0xff000000)
+
+## Ported from Libraries/LibGfx/Color.h:146 Gfx::Color::from_bgra.
+pub func color_from_bgra(bgra: u32) -> Color:
+    return color_new_u32(bgra)
+
+## Ported from Libraries/LibGfx/Color.h:147 Gfx::Color::from_rgba.
+pub func color_from_rgba(rgba: u32) -> Color:
+    let bgra = (rgba & 0xff00ff00) | ((rgba & 0xff0000) >> 16) | ((rgba & 0xff) << 16)
+    return color_from_bgra(bgra)
+
+## Ported from Libraries/LibGfx/Color.h:152 Gfx::Color::from_rgbx.
+pub func color_from_rgbx(rgbx: u32) -> Color:
+    return color_from_rgba(rgbx | 0xff000000)
+
+## Ported from Libraries/LibGfx/Color.h:154 Gfx::Color::from_yuv.
+pub func color_from_yuv_yuv(yuv: Yuv) -> Color:
+    return color_from_yuv_f32(yuv.y, yuv.u, yuv.v)
+
+## Ported from Libraries/LibGfx/Color.h:155 Gfx::Color::from_yuv.
+pub func color_from_yuv_f32(y: f32, u: f32, v: f32) -> Color:
+    let srgb = yuv_to_srgb(color_components_new(y, u, v))
+    return color_new_u8_u8_u8(
+        (u8)math32.floor(color_components_at_const(&srgb, 0) * 255.0),
+        (u8)math32.floor(color_components_at_const(&srgb, 1) * 255.0),
+        (u8)math32.floor(color_components_at_const(&srgb, 2) * 255.0),
+    )
+
+## Ported from Libraries/LibGfx/Color.h:165 Gfx::Color::to_yuv.
+pub func color_to_yuv(this: const Color*) -> Yuv:
+    let yuv = srgb_to_yuv(color_components_new(
+        (f32)color_red(this) / 255.0,
+        (f32)color_green(this) / 255.0,
+        (f32)color_blue(this) / 255.0,
+    ))
+    return Yuv(
+        y = color_components_at_const(&yuv, 0),
+        u = color_components_at_const(&yuv, 1),
+        v = color_components_at_const(&yuv, 2),
+    )
+
+## Ported from Libraries/LibGfx/Color.h:171 Gfx::Color::from_hsl.
+pub func color_from_hsl(h_degrees: f32, s: f32, l: f32) -> Color:
+    return color_from_hsla(h_degrees, s, l, 1.0)
+
+## Ported from Libraries/LibGfx/Color.h:172 Gfx::Color::from_hsla.
+pub func color_from_hsla(h_degrees: f32, s: f32, l: f32, a: f32) -> Color:
+    let srgb = hsl_to_srgb(color_components_new(h_degrees, ak.clamp_f32(s, 0.0, 1.0), ak.clamp_f32(l, 0.0, 1.0), a))
+    let r_u8 = (u8)ak.clamp(lroundf(color_components_at_const(&srgb, 0) * 255.0), (i64)0, (i64)255)
+    let g_u8 = (u8)ak.clamp(lroundf(color_components_at_const(&srgb, 1) * 255.0), (i64)0, (i64)255)
+    let b_u8 = (u8)ak.clamp(lroundf(color_components_at_const(&srgb, 2) * 255.0), (i64)0, (i64)255)
+    let a_u8 = (u8)ak.clamp(lroundf(color_components_alpha(&srgb) * 255.0), (i64)0, (i64)255)
+    return color_new_u8_u8_u8_u8(r_u8, g_u8, b_u8, a_u8)
+
+## Ported from Libraries/LibGfx/Color.h:193 Gfx::Color::from_oklab.
+# https://bottosson.github.io/posts/oklab/
+pub func color_from_oklab(L: f32, a: f32, b: f32, alpha: f32 = 1.0) -> Color:
+    let linear = oklab_to_linear_srgb(color_components_new(L, a, b, alpha))
+    return color_from_linear_srgb_2(
+        color_components_at_const(&linear, 0),
+        color_components_at_const(&linear, 1),
+        color_components_at_const(&linear, 2),
+        color_components_alpha(&linear),
+    )
+
+## Ported from Libraries/LibGfx/Color.h:199 Gfx::Color::to_premultiplied_oklab.
+pub func color_to_premultiplied_oklab(this: Color*) -> Oklab:
+    let oklab = color_to_oklab(this)
+    return Oklab(
+        L = oklab.L * (f32)color_alpha(this) / 255.0,
+        a = oklab.a * (f32)color_alpha(this) / 255.0,
+        b = oklab.b * (f32)color_alpha(this) / 255.0,
+    )
+
+## Ported from Libraries/LibGfx/Color.h:210 Gfx::Color::to_oklab.
+# https://bottosson.github.io/posts/oklab/
+pub func color_to_oklab(this: Color*) -> Oklab:
+    let linear = srgb_to_linear_srgb(color_components_new(
+        (f32)color_red(this) / 255.0,
+        (f32)color_green(this) / 255.0,
+        (f32)color_blue(this) / 255.0,
+    ))
+    let oklab = linear_srgb_to_oklab(linear)
+    return Oklab(
+        L = color_components_at_const(&oklab, 0),
+        a = color_components_at_const(&oklab, 1),
+        b = color_components_at_const(&oklab, 2),
+    )
+
+# mark: Channels ================================================================================
+
+## Ported from Libraries/LibGfx/Color.h:217 Gfx::Color::red.
+pub func color_red(this: const Color*) -> u8:
+    return (u8)((this.m_value >> 16) & 0xff)
+
+## Ported from Libraries/LibGfx/Color.h:218 Gfx::Color::green.
+pub func color_green(this: const Color*) -> u8:
+    return (u8)((this.m_value >> 8) & 0xff)
+
+## Ported from Libraries/LibGfx/Color.h:219 Gfx::Color::blue.
+pub func color_blue(this: const Color*) -> u8:
+    return (u8)(this.m_value & 0xff)
+
+## Ported from Libraries/LibGfx/Color.h:220 Gfx::Color::alpha.
+pub func color_alpha(this: const Color*) -> u8:
+    return (u8)((this.m_value >> 24) & 0xff)
+
+## Ported from Libraries/LibGfx/Color.h:222 Gfx::Color::set_alpha.
+pub func color_set_alpha(this: Color*, value: u8, alpha_type: AlphaType = AlphaType.unpremultiplied):
+    match alpha_type:
+        .premultiplied:
+            this.m_value = (
+                ((u32)value << 24)
+                | (((u32)color_red(this) * (u32)value // 255) << 16)
+                | (((u32)color_green(this) * (u32)value // 255) << 8)
+                | ((u32)color_blue(this) * (u32)value // 255)
+            )
+        .unpremultiplied:
+            this.m_value = (this.m_value & 0x00ffffff) | ((u32)value << 24)
+        _:
+            trap("VERIFY_NOT_REACHED")
+
+## Ported from Libraries/LibGfx/Color.h:239 Gfx::Color::set_red.
+pub func color_set_red(this: Color*, value: u8):
+    this.m_value &= 0xff00ffff
+    this.m_value |= (u32)value << 16
+
+## Ported from Libraries/LibGfx/Color.h:245 Gfx::Color::set_green.
+pub func color_set_green(this: Color*, value: u8):
+    this.m_value &= 0xffff00ff
+    this.m_value |= (u32)value << 8
+
+## Ported from Libraries/LibGfx/Color.h:251 Gfx::Color::set_blue.
+pub func color_set_blue(this: Color*, value: u8):
+    this.m_value &= 0xffffff00
+    this.m_value |= (u32)value
+
+## Ported from Libraries/LibGfx/Color.h:257 Gfx::Color::with_alpha.
+pub func color_with_alpha(this: const Color*, alpha: u8, alpha_type: AlphaType = AlphaType.unpremultiplied) -> Color:
+    var with_alpha_color = color_new_u32(this.m_value)
+    color_set_alpha(&with_alpha_color, alpha, alpha_type)
+    return with_alpha_color
+
+# mark: Blending and mixing =====================================================================
+
+## Ported from Libraries/LibGfx/Color.h:264 Gfx::Color::blend.
+pub func color_blend(this: const Color*, source: Color) -> Color:
+    if color_alpha(this) == 0 or color_alpha(&source) == 255:
+        return source
+
+    if color_alpha(&source) == 0:
+        return *this
+
+    let alpha = (i32)color_alpha(this)
+    let source_alpha = (i32)color_alpha(&source)
+    let d: i32 = 255 * (alpha + source_alpha) - alpha * source_alpha
+    let r = (u8)(((i32)color_red(this) * alpha * (255 - source_alpha) + (i32)color_red(&source) * 255 * source_alpha) // d)
+    let g = (u8)(((i32)color_green(this) * alpha * (255 - source_alpha) + (i32)color_green(&source) * 255 * source_alpha) // d)
+    let b = (u8)(((i32)color_blue(this) * alpha * (255 - source_alpha) + (i32)color_blue(&source) * 255 * source_alpha) // d)
+    let a = (u8)(d // 255)
+    return color_new_u8_u8_u8_u8(r, g, b, a)
+
+## The `premultiplied_mix_channel` lambda of Color::mixed_with (Color.h:287), its captures
+## (`this`, `other`, `mixed_alpha`) passed as parameters.
+func color_mixed_with_premultiplied_mix_channel(this: const Color*, other: const Color*, mixed_alpha: f32, channel: f32, other_channel: f32, weight: f32) -> u8:
+    return round_to_u8_f32(ak.mix_f32(channel * (f32)color_alpha(this), other_channel * (f32)color_alpha(other), weight) / mixed_alpha)
+
+## Ported from Libraries/LibGfx/Color.h:280 Gfx::Color::mixed_with.
+pub func color_mixed_with(this: const Color*, other: Color, weight: f32) -> Color:
+    # with_alpha has no side effects, so computing it before the `or` changes nothing.
+    let this_transparent = color_with_alpha(this, 0)
+    if color_alpha(this) == color_alpha(&other) or color_eq(&this_transparent, color_with_alpha(&other, 0)):
+        return color_interpolate(this, other, weight)
+    # Fallback to slower, but more visually pleasing premultiplied alpha mix.
+    # This is needed for linear-gradient()s in LibWeb.
+    let mixed_alpha = ak.mix_f32((f32)color_alpha(this), (f32)color_alpha(&other), weight)
+    return color_new_u8_u8_u8_u8(
+        color_mixed_with_premultiplied_mix_channel(this, &other, mixed_alpha, (f32)color_red(this), (f32)color_red(&other), weight),
+        color_mixed_with_premultiplied_mix_channel(this, &other, mixed_alpha, (f32)color_green(this), (f32)color_green(&other), weight),
+        color_mixed_with_premultiplied_mix_channel(this, &other, mixed_alpha, (f32)color_blue(this), (f32)color_blue(&other), weight),
+        round_to_u8_f32(mixed_alpha),
+    )
+
+## Ported from Libraries/LibGfx/Color.h:298 Gfx::Color::interpolate.
+pub func color_interpolate(this: const Color*, other: Color, weight: f32) -> Color:
+    return color_new_u8_u8_u8_u8(
+        round_to_u8_f32(ak.mix_f32((f32)color_red(this), (f32)color_red(&other), weight)),
+        round_to_u8_f32(ak.mix_f32((f32)color_green(this), (f32)color_green(&other), weight)),
+        round_to_u8_f32(ak.mix_f32((f32)color_blue(this), (f32)color_blue(&other), weight)),
+        round_to_u8_f32(ak.mix_f32((f32)color_alpha(this), (f32)color_alpha(&other), weight)),
+    )
+
+## Ported from Libraries/LibGfx/Color.h:308 Gfx::Color::multiply.
+pub func color_multiply(this: const Color*, other: Color) -> Color:
+    return color_new_u8_u8_u8_u8(
+        (u8)((i32)color_red(this) * (i32)color_red(&other) // 255),
+        (u8)((i32)color_green(this) * (i32)color_green(&other) // 255),
+        (u8)((i32)color_blue(this) * (i32)color_blue(&other) // 255),
+        (u8)((i32)color_alpha(this) * (i32)color_alpha(&other) // 255),
+    )
+
+## Ported from Libraries/LibGfx/Color.h:317 Gfx::Color::distance_squared_to.
+pub func color_distance_squared_to(this: const Color*, other: Color) -> f32:
+    let delta_red: i32 = (i32)color_red(&other) - (i32)color_red(this)
+    let delta_green: i32 = (i32)color_green(&other) - (i32)color_green(this)
+    let delta_blue: i32 = (i32)color_blue(&other) - (i32)color_blue(this)
+    let delta_alpha: i32 = (i32)color_alpha(&other) - (i32)color_alpha(this)
+    let rgb_distance = (f32)(delta_red * delta_red + delta_green * delta_green + delta_blue * delta_blue) / (3.0 * 255.0 * 255.0)
+    return (f32)(delta_alpha * delta_alpha) / (2.0 * 255.0 * 255.0) + rgb_distance * (f32)color_alpha(this) * (f32)color_alpha(&other) / (f32)(255 * 255)
+
+## Ported from Libraries/LibGfx/Color.h:327 Gfx::Color::luminosity.
+pub func color_luminosity(this: const Color*) -> u8:
+    return round_to_u8_f32((f32)color_red(this) * 0.2126 + (f32)color_green(this) * 0.7152 + (f32)color_blue(this) * 0.0722)

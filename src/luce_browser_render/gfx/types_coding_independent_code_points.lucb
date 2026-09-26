@@ -8,8 +8,79 @@
 #       skeleton generator (DESIGN.md §4.4). Regenerate rather than edit, except to fill a
 #       field the generator could not map.
 #
+#       Fixed by hand (r08): the struct was opaque; ColorSpace::from_cicp reads its color
+#       primaries and transfer characteristics, so the four fields and their enums
+#       (CodingIndependentCodePoints.h lines 19-80 and 198-202) are declared here. The C++
+#       accessors are trivial getters; ported code reads the fields.
+#
 #==============================================================================================
 
-## Media::CodingIndependentCodePoints (Libraries/LibMedia/Color/CodingIndependentCodePoints.h:165): opaque in this phase (not in the phase-1 closure).
+## Media::ColorPrimaries (Libraries/LibMedia/Color/CodingIndependentCodePoints.h:19).
+pub enum MediaColorPrimaries as u8:
+    # Reserved
+    bt709 = 1
+    unspecified = 2  # Used by codecs to indicate that an alternative value may be used.
+    # Reserved
+    bt470m = 4
+    bt470bg = 5
+    bt601 = 6
+    smpte240 = 7
+    generic_film = 8
+    bt2020 = 9
+    xyz = 10
+    smpte431 = 11
+    smpte432 = 12
+    ebu3213 = 22
+
+## Media::TransferCharacteristics (Libraries/LibMedia/Color/CodingIndependentCodePoints.h:36).
+pub enum MediaTransferCharacteristics as u8:
+    # Reserved
+    bt709 = 1
+    unspecified = 2  # Used by codecs to indicate that an alternative value may be used
+    # Reserved
+    bt470m = 4
+    bt470bg = 5
+    bt601 = 6  # BT.601 or Rec. 601
+    smpte240 = 7
+    linear = 8
+    log100 = 9
+    log100_sqrt10 = 10
+    iec61966 = 11
+    bt1361 = 12
+    srgb = 13
+    bt2020_bit_depth10 = 14
+    bt2020_bit_depth12 = 15
+    smpte2084 = 16  # Also known as PQ
+    smpte428 = 17
+    hlg = 18
+
+## Media::MatrixCoefficients (Libraries/LibMedia/Color/CodingIndependentCodePoints.h:58).
+pub enum MediaMatrixCoefficients as u8:
+    identity = 0
+    bt709 = 1
+    unspecified = 2  # Used by codecs to indicate that an alternative value may be used.
+    # Reserved
+    fcc = 4
+    bt470bg = 5
+    bt601 = 6
+    smpte240 = 7
+    y_cg_co = 8
+    bt2020_non_constant_luminance = 9
+    bt2020_constant_luminance = 10
+    smpte2085 = 11
+    chromaticity_derived_non_constant_luminance = 12
+    chromaticity_derived_constant_luminance = 13
+    i_ct_cp = 14
+
+## Media::VideoFullRangeFlag (Libraries/LibMedia/Color/CodingIndependentCodePoints.h:76).
+pub enum MediaVideoFullRangeFlag as u8:
+    studio = 0  # Y range 16..235, UV range 16..240
+    full = 1  # 0..255
+    unspecified = 2  # Used by codecs to indicate that an alternative value may be used.
+
+## Media::CodingIndependentCodePoints (Libraries/LibMedia/Color/CodingIndependentCodePoints.h:165).
 pub struct MediaCodingIndependentCodePoints:
-    pub var opaque_: u8
+    pub var m_color_primaries: MediaColorPrimaries = MediaColorPrimaries.unspecified
+    pub var m_transfer_characteristics: MediaTransferCharacteristics = MediaTransferCharacteristics.unspecified
+    pub var m_matrix_coefficients: MediaMatrixCoefficients = MediaMatrixCoefficients.unspecified
+    pub var m_video_full_range_flag: MediaVideoFullRangeFlag = MediaVideoFullRangeFlag.unspecified

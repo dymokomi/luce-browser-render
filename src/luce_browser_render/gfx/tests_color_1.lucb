@@ -1,0 +1,317 @@
+#==============================================================================================
+#
+#   tests_color_1 - tests of Color: TestColor.cpp, channels, blending and filters
+#
+#   DESCRIPTION:
+#       Port of Tests/LibGfx/TestColor.cpp (Ladybird 47c82b38d0), then tests pinned to the C++ for
+#       what TestColor does not cover: blend, mixed_with, interpolate, multiply, distance,
+#       luminosity, contrast, grayscale, sepia, opacity, darkening, lightening, saturation,
+#       inversion, xor, the alpha and channel setters, shades and tints, the suggested foreground,
+#       and the named and branded colors.
+#       The expected values were printed by a C++ program built against the donor's LibGfx
+#       (Build/release, clang -ffp-contract=off as the donor builds) and are compared exactly:
+#       colors by value, floats by their bits.
+#
+#       Each test's body is a noinline function the test block calls, so that the test
+#       runner's `main` does not inline every body (# workaround:
+#       compiler-issues/ranges_facts_cubic).
+#
+#==============================================================================================
+
+# mark: Helpers =================================================================================
+
+## EXPECT_EQ on two colors, printing both on a mismatch.
+func expect_eq_color(actual: Color, expected: Color):
+    if not color_eq(&actual, expected):
+        print(f"got {hex(color_value(&actual))}, expected {hex(color_value(&expected))}")
+    assert(color_eq(&actual, expected))
+
+## Checks a color against the BGRA8888 value the C++ computed, printing both on a mismatch.
+func expect_color(actual: Color, expected: u32, what: str):
+    let value = color_value(&actual)
+    if value != expected:
+        print(f"{what}: got {hex(value)}, expected {hex(expected)}")
+    assert(value == expected)
+
+## Checks a float against the bits the C++ computed.
+func expect_f32_bits(actual: f32, expected: u32, what: str):
+    let bits = actual.bits()
+    if bits != expected:
+        print(f"{what}: got {hex(bits)} ({actual}), expected {hex(expected)}")
+    assert(bits == expected)
+
+## Checks a double against the bits the C++ computed.
+func expect_f64_bits(actual: f64, expected: u64, what: str):
+    let bits = actual.bits()
+    if bits != expected:
+        print(f"{what}: got {hex(bits)} ({actual}), expected {hex(expected)}")
+    assert(bits == expected)
+
+# mark: TestColor.cpp ===========================================================================
+
+test "color":
+    test_color()
+
+noinline func test_color():
+    var i: u16 = 0
+    while i < 256:
+        let gray = color_new_u8_u8_u8((u8)i, (u8)i, (u8)i)
+        expect_eq_color(gray, color_to_grayscale(&gray))
+        i += 1
+
+test "from_bgrx":
+    test_from_bgrx()
+
+noinline func test_from_bgrx():
+    expect_eq_color(color_from_bgrx(0x000000ff), color_new_u8_u8_u8(0x00, 0x00, 0xff))
+    expect_eq_color(color_from_bgrx(0x0000ff00), color_new_u8_u8_u8(0x00, 0xff, 0x00))
+    expect_eq_color(color_from_bgrx(0x00ff0000), color_new_u8_u8_u8(0xff, 0x00, 0x00))
+
+    expect_eq_color(color_from_bgrx(0xff0000ff), color_new_u8_u8_u8(0x00, 0x00, 0xff))
+    expect_eq_color(color_from_bgrx(0xff00ff00), color_new_u8_u8_u8(0x00, 0xff, 0x00))
+    expect_eq_color(color_from_bgrx(0xffff0000), color_new_u8_u8_u8(0xff, 0x00, 0x00))
+
+    expect_eq_color(color_from_bgrx(0x00aabbcc), color_new_u8_u8_u8(0xaa, 0xbb, 0xcc))
+
+test "from_bgra":
+    test_from_bgra()
+
+noinline func test_from_bgra():
+    expect_eq_color(color_from_bgra(0xff000000), color_new_u8_u8_u8_u8(0x00, 0x00, 0x00, 0xff))
+    expect_eq_color(color_from_bgra(0x000000ff), color_new_u8_u8_u8_u8(0x00, 0x00, 0xff, 0x00))
+    expect_eq_color(color_from_bgra(0x0000ff00), color_new_u8_u8_u8_u8(0x00, 0xff, 0x00, 0x00))
+    expect_eq_color(color_from_bgra(0x00ff0000), color_new_u8_u8_u8_u8(0xff, 0x00, 0x00, 0x00))
+
+    expect_eq_color(color_from_bgra(0xddaabbcc), color_new_u8_u8_u8_u8(0xaa, 0xbb, 0xcc, 0xdd))
+
+test "from_rgbx":
+    test_from_rgbx()
+
+noinline func test_from_rgbx():
+    expect_eq_color(color_from_rgbx(0x00ff0000), color_new_u8_u8_u8(0x00, 0x00, 0xff))
+    expect_eq_color(color_from_rgbx(0x0000ff00), color_new_u8_u8_u8(0x00, 0xff, 0x00))
+    expect_eq_color(color_from_rgbx(0x000000ff), color_new_u8_u8_u8(0xff, 0x00, 0x00))
+
+    expect_eq_color(color_from_rgbx(0xffff0000), color_new_u8_u8_u8(0x00, 0x00, 0xff))
+    expect_eq_color(color_from_rgbx(0xff00ff00), color_new_u8_u8_u8(0x00, 0xff, 0x00))
+    expect_eq_color(color_from_rgbx(0xff0000ff), color_new_u8_u8_u8(0xff, 0x00, 0x00))
+
+    expect_eq_color(color_from_rgbx(0x00ccbbaa), color_new_u8_u8_u8(0xaa, 0xbb, 0xcc))
+
+test "from_rgba":
+    test_from_rgba()
+
+noinline func test_from_rgba():
+    expect_eq_color(color_from_rgba(0xff000000), color_new_u8_u8_u8_u8(0x00, 0x00, 0x00, 0xff))
+    expect_eq_color(color_from_rgba(0x00ff0000), color_new_u8_u8_u8_u8(0x00, 0x00, 0xff, 0x00))
+    expect_eq_color(color_from_rgba(0x0000ff00), color_new_u8_u8_u8_u8(0x00, 0xff, 0x00, 0x00))
+    expect_eq_color(color_from_rgba(0x000000ff), color_new_u8_u8_u8_u8(0xff, 0x00, 0x00, 0x00))
+
+    expect_eq_color(color_from_rgba(0xddccbbaa), color_new_u8_u8_u8_u8(0xaa, 0xbb, 0xcc, 0xdd))
+
+test "all_green":
+    test_all_green()
+
+noinline func test_all_green():
+    expect_eq_color(color_from_lab(87.8185, -79.2711, 80.9946), color_new_named_color(ColorNamedColor.green))
+    expect_eq_color(color_from_xyz50(0.385152, 0.716887, 0.097081), color_new_named_color(ColorNamedColor.green))
+    expect_eq_color(color_from_xyz65(0.357584, 0.715169, 0.119195), color_new_named_color(ColorNamedColor.green))
+
+test "hsv":
+    test_hsv()
+
+noinline func test_hsv():
+    expect_eq_color(color_from_hsv_f64(120.0, 0.714285714, 0.7), color_new_u8_u8_u8(51, 179, 51))
+    let half = color_from_hsv_f64(120.0, 0.714285714, 0.7)
+    expect_eq_color(color_with_opacity(&half, 0.5), color_new_u8_u8_u8_u8(51, 179, 51, 128))
+    expect_eq_color(color_from_hsv_f64(108.0, 0.4, 0.5), color_new_u8_u8_u8(87, 128, 77))
+
+test "hsl":
+    test_hsl()
+
+noinline func test_hsl():
+    expect_eq_color(color_from_hsl(-300.0, 1.0, 0.375), color_new_u8_u8_u8(191, 191, 0))
+    expect_eq_color(color_from_hsl(400.0, 0.25, 0.5), color_new_u8_u8_u8(159, 138, 96))
+    expect_eq_color(color_from_hsl(330.0, 0.25, 0.5), color_new_u8_u8_u8(159, 96, 128))
+    expect_eq_color(color_from_hsl(300.0, 1.0, 0.25), color_new_u8_u8_u8(128, 0, 128))
+    expect_eq_color(color_from_hsl(180.0, 1.0, 0.25), color_new_u8_u8_u8(0, 128, 128))
+    expect_eq_color(color_from_hsl(90.0, 0.875, 0.5), color_new_u8_u8_u8(128, 239, 16))
+    expect_eq_color(color_from_hsl(90.0, 0.75, 0.5), color_new_u8_u8_u8(128, 223, 32))
+    expect_eq_color(color_from_hsl(90.0, 0.625, 0.5), color_new_u8_u8_u8(128, 207, 48))
+    expect_eq_color(color_from_hsl(90.0, 0.5, 0.5), color_new_u8_u8_u8(128, 191, 64))
+    expect_eq_color(color_from_hsl(90.0, 0.375, 0.5), color_new_u8_u8_u8(128, 175, 80))
+    expect_eq_color(color_from_hsl(90.0, 0.25, 0.5), color_new_u8_u8_u8(128, 159, 96))
+
+# mark: Channels, blending and filters ==========================================================
+
+test "blend":
+    test_blend()
+
+noinline func test_blend():
+    let a = color_new_u8_u8_u8_u8(200, 100, 50, 128)
+    let b = color_new_u8_u8_u8_u8(10, 20, 30, 200)
+    let op = color_new_u8_u8_u8_u8(12, 34, 56, 255)
+    let tr = color_new_u8_u8_u8_u8(1, 2, 3, 0)
+    expect_color(color_blend(&a, b), 0xe3211d20, "blend_ab")
+    expect_color(color_blend(&b, a), 0xe3744029, "blend_ba")
+    expect_color(color_blend(&a, op), 0xff0c2238, "blend_a_op")
+    expect_color(color_blend(&a, tr), 0x80c86432, "blend_a_tr")
+    expect_color(color_blend(&tr, a), 0x80c86432, "blend_tr_a")
+
+test "mixed_with and interpolate":
+    test_mixed_with_and_interpolate()
+
+noinline func test_mixed_with_and_interpolate():
+    let a = color_new_u8_u8_u8_u8(200, 100, 50, 128)
+    let b = color_new_u8_u8_u8_u8(10, 20, 30, 200)
+    let a40 = color_with_alpha(&a, 40)
+    expect_color(color_mixed_with(&a, b, 0.0), 0x80c86432, "mixed_ab 0")
+    expect_color(color_interpolate(&a, b, 0.0), 0x80c86432, "interp_ab 0")
+    expect_color(color_mixed_with(&a, a40, 0.0), 0x80c86432, "mixed_a_op 0")
+    expect_color(color_mixed_with(&a, b, 0.25), 0x9287492b, "mixed_ab 0.25")
+    expect_color(color_interpolate(&a, b, 0.25), 0x9298502d, "interp_ab 0.25")
+    expect_color(color_mixed_with(&a, a40, 0.25), 0x6ac86432, "mixed_a_op 0.25")
+    expect_color(color_mixed_with(&a, b, 0.5), 0xa4543326, "mixed_ab 0.5")
+    expect_color(color_interpolate(&a, b, 0.5), 0xa4693c28, "interp_ab 0.5")
+    expect_color(color_mixed_with(&a, a40, 0.5), 0x54c86432, "mixed_a_op 0.5")
+    expect_color(color_mixed_with(&a, b, 0.75), 0xb62b2222, "mixed_ab 0.75")
+    expect_color(color_interpolate(&a, b, 0.75), 0xb63a2823, "interp_ab 0.75")
+    expect_color(color_mixed_with(&a, a40, 0.75), 0x3ec86432, "mixed_a_op 0.75")
+    expect_color(color_mixed_with(&a, b, 1.0), 0xc80a141e, "mixed_ab 1")
+    expect_color(color_interpolate(&a, b, 1.0), 0xc80a141e, "interp_ab 1")
+    expect_color(color_mixed_with(&a, a40, 1.0), 0x28c86432, "mixed_a_op 1")
+    expect_color(color_mixed_with(&a, b, 0.3), 0x967c442a, "mixed_ab 0.3")
+    expect_color(color_interpolate(&a, b, 0.3), 0x968f4c2c, "interp_ab 0.3")
+    expect_color(color_mixed_with(&a, a40, 0.3), 0x66c86432, "mixed_a_op 0.3")
+
+test "multiply, distance, luminosity and contrast":
+    test_multiply_distance_luminosity_contrast()
+
+noinline func test_multiply_distance_luminosity_contrast():
+    let a = color_new_u8_u8_u8_u8(200, 100, 50, 128)
+    let b = color_new_u8_u8_u8_u8(10, 20, 30, 200)
+    let op = color_new_u8_u8_u8_u8(12, 34, 56, 255)
+    expect_color(color_multiply(&a, b), 0x64070705, "multiply")
+    expect_f32_bits(color_distance_squared_to(&a, b), 0x3e0179c9, "distance_ab")
+    expect_f32_bits(color_distance_squared_to(&a, op), 0x3e67b30c, "distance_a_op")
+    assert(color_luminosity(&a) == 118 and color_luminosity(&b) == 19 and color_luminosity(&op) == 31)
+    var mutable_a = a
+    expect_f32_bits(color_contrast_ratio(&mutable_a, b), 0x4083c78f, "contrast_ab")
+    var white = color_new_named_color(ColorNamedColor.white)
+    expect_f32_bits(color_contrast_ratio(&white, color_new_named_color(ColorNamedColor.black)), 0x41a80000, "contrast_white_black")
+
+test "filters":
+    test_filters()
+
+noinline func test_filters():
+    let a = color_new_u8_u8_u8_u8(200, 100, 50, 128)
+    let b = color_new_u8_u8_u8_u8(10, 20, 30, 200)
+    let op = color_new_u8_u8_u8_u8(12, 34, 56, 255)
+    expect_color(color_to_grayscale(&a), 0x80767676, "gray_a")
+    expect_color(color_sepia(&a), 0x80a59372, "sepia_a")
+    expect_color(color_sepia(&a, 0.5), 0x80b67b52, "sepia_a_half")
+    expect_color(color_sepia(&b, 0.0), 0xc80a141e, "sepia_b_0")
+    expect_color(color_with_opacity(&a, 0.3), 0x26c86432, "opacity_a")
+    expect_color(color_with_opacity(&op, 0.5), 0x800c2238, "opacity_op")
+    expect_color(color_darkened(&a), 0x80643219, "darkened_a")
+    expect_color(color_darkened(&a, 0.3), 0x803c1e0f, "darkened_a_03")
+    expect_color(color_lightened(&a), 0x80f0783c, "lightened_a")
+    expect_color(color_lightened(&a, 2.0), 0x80ffc864, "lightened_a_2")
+    expect_color(color_saturated_to(&a, 0.2), 0x80c8ada0, "saturated_a")
+    expect_color(color_saturated_to(&op, 1.0), 0xff001c38, "saturated_op")
+    expect_color(color_inverted(&a), 0x80379bcd, "inverted_a")
+    expect_color(color_xored(&a, b), 0x80c2702c, "xored_ab")
+
+test "alpha, setters, shades and tints":
+    test_alpha_setters_shades_tints()
+
+noinline func test_alpha_setters_shades_tints():
+    let a = color_new_u8_u8_u8_u8(200, 100, 50, 128)
+    let b = color_new_u8_u8_u8_u8(10, 20, 30, 200)
+    let white = color_new_named_color(ColorNamedColor.white)
+    expect_color(color_with_alpha(&a, 100, AlphaType.premultiplied), 0x644e2713, "with_alpha_pre")
+    expect_color(color_with_alpha(&a, 100), 0x64c86432, "with_alpha_unpre")
+    var x = a
+    color_set_red(&x, 1)
+    color_set_green(&x, 2)
+    color_set_blue(&x, 3)
+    expect_color(x, 0x80010203, "setters")
+    assert(is_valid_alpha_type(0) and is_valid_alpha_type(1) and not is_valid_alpha_type(2))
+    assert(color_red(&a) == 200 and color_green(&a) == 100 and color_blue(&a) == 50 and color_alpha(&a) == 128)
+    assert(color_value(&a) == 0x80c86432)
+    expect_color(color_from_rgba(0x11223344), 0x11443322, "from_rgba")
+    expect_color(color_suggested_foreground_color(&a), 0xffffffff, "suggest_a")
+    expect_color(color_suggested_foreground_color(&white), 0xff000000, "suggest_white")
+    var shades = color_shades(&a, 4)
+    assert(ak.vector_size(&shades) == 4)
+    expect_color(*ak.vector_at(&shades, 0), 0x80964b25, "shade 0")
+    expect_color(*ak.vector_at(&shades, 1), 0x80643219, "shade 1")
+    expect_color(*ak.vector_at(&shades, 2), 0x8032190c, "shade 2")
+    expect_color(*ak.vector_at(&shades, 3), 0x80000000, "shade 3")
+    var tints = color_tints(&b, 3, 0.9)
+    assert(ak.vector_size(&tints) == 3)
+    expect_color(*ak.vector_at(&tints, 0), 0xc80d1a27, "tint 0")
+    expect_color(*ak.vector_at(&tints, 1), 0xc80f1f2f, "tint 1")
+    expect_color(*ak.vector_at(&tints, 2), 0xc8122538, "tint 2")
+
+test "named and branded colors":
+    test_named_and_branded_colors()
+
+noinline func test_named_and_branded_colors():
+    expect_color(color_new_named_color(ColorNamedColor.transparent), 0x00000000, "named 0")
+    expect_color(color_new_named_color(ColorNamedColor.black), 0xff000000, "named 1")
+    expect_color(color_new_named_color(ColorNamedColor.white), 0xffffffff, "named 2")
+    expect_color(color_new_named_color(ColorNamedColor.red), 0xffff0000, "named 3")
+    expect_color(color_new_named_color(ColorNamedColor.green), 0xff00ff00, "named 4")
+    expect_color(color_new_named_color(ColorNamedColor.cyan), 0xff00ffff, "named 5")
+    expect_color(color_new_named_color(ColorNamedColor.blue), 0xff0000ff, "named 6")
+    expect_color(color_new_named_color(ColorNamedColor.yellow), 0xffffff00, "named 7")
+    expect_color(color_new_named_color(ColorNamedColor.magenta), 0xffff00ff, "named 8")
+    expect_color(color_new_named_color(ColorNamedColor.dark_gray), 0xff404040, "named 9")
+    expect_color(color_new_named_color(ColorNamedColor.mid_gray), 0xff7f7f7f, "named 10")
+    expect_color(color_new_named_color(ColorNamedColor.light_gray), 0xffc0c0c0, "named 11")
+    expect_color(color_new_named_color(ColorNamedColor.warm_gray), 0xffd4d0c8, "named 12")
+    expect_color(color_new_named_color(ColorNamedColor.dark_cyan), 0xff007f7f, "named 13")
+    expect_color(color_new_named_color(ColorNamedColor.dark_green), 0xff008000, "named 14")
+    expect_color(color_new_named_color(ColorNamedColor.dark_blue), 0xff000080, "named 15")
+    expect_color(color_new_named_color(ColorNamedColor.dark_red), 0xff800000, "named 16")
+    expect_color(color_new_named_color(ColorNamedColor.mid_cyan), 0xff00c0c0, "named 17")
+    expect_color(color_new_named_color(ColorNamedColor.mid_green), 0xff00c000, "named 18")
+    expect_color(color_new_named_color(ColorNamedColor.mid_red), 0xffc00000, "named 19")
+    expect_color(color_new_named_color(ColorNamedColor.mid_blue), 0xff0000c0, "named 20")
+    expect_color(color_new_named_color(ColorNamedColor.mid_magenta), 0xffc000c0, "named 21")
+    expect_color(color_new_named_color(ColorNamedColor.light_blue), 0xffadd8e6, "named 22")
+    expect_color(color_branded_color((ColorBrandedColor)0), 0xffa5a6f2, "branded 0")
+    expect_color(color_branded_color((ColorBrandedColor)1), 0xff8a88eb, "branded 1")
+    expect_color(color_branded_color((ColorBrandedColor)2), 0xff6851d6, "branded 2")
+    expect_color(color_branded_color((ColorBrandedColor)3), 0xff553fc4, "branded 3")
+    expect_color(color_branded_color((ColorBrandedColor)4), 0xff4d37b8, "branded 4")
+    expect_color(color_branded_color((ColorBrandedColor)5), 0xff3c28a1, "branded 5")
+    expect_color(color_branded_color((ColorBrandedColor)6), 0xff301f82, "branded 6")
+    expect_color(color_branded_color((ColorBrandedColor)7), 0xff2a1373, "branded 7")
+    expect_color(color_branded_color((ColorBrandedColor)8), 0xff260f73, "branded 8")
+    expect_color(color_branded_color((ColorBrandedColor)9), 0xff1d0c59, "branded 9")
+    expect_color(color_branded_color((ColorBrandedColor)10), 0xff190c4a, "branded 10")
+    expect_color(color_branded_color((ColorBrandedColor)11), 0xffe0d4ff, "branded 11")
+    expect_color(color_branded_color((ColorBrandedColor)12), 0xffcab5ff, "branded 12")
+    expect_color(color_branded_color((ColorBrandedColor)13), 0xffc3abff, "branded 13")
+    expect_color(color_branded_color((ColorBrandedColor)14), 0xffb496ff, "branded 14")
+    expect_color(color_branded_color((ColorBrandedColor)15), 0xffab8ef5, "branded 15")
+    expect_color(color_branded_color((ColorBrandedColor)16), 0xff9d7cf2, "branded 16")
+    expect_color(color_branded_color((ColorBrandedColor)17), 0xff936fed, "branded 17")
+    expect_color(color_branded_color((ColorBrandedColor)18), 0xff8a64e5, "branded 18")
+    expect_color(color_branded_color((ColorBrandedColor)19), 0xff8257e6, "branded 19")
+    expect_color(color_branded_color((ColorBrandedColor)20), 0xff7a4ce6, "branded 20")
+    expect_color(color_branded_color((ColorBrandedColor)21), 0xff6a39db, "branded 21")
+    expect_color(color_branded_color((ColorBrandedColor)22), 0xffcbe0f7, "branded 22")
+    expect_color(color_branded_color((ColorBrandedColor)23), 0xffc1d9f5, "branded 23")
+    expect_color(color_branded_color((ColorBrandedColor)24), 0xffb6d2f2, "branded 24")
+    expect_color(color_branded_color((ColorBrandedColor)25), 0xffa8c8ed, "branded 25")
+    expect_color(color_branded_color((ColorBrandedColor)26), 0xff97bce6, "branded 26")
+    expect_color(color_branded_color((ColorBrandedColor)27), 0xff86add9, "branded 27")
+    expect_color(color_branded_color((ColorBrandedColor)28), 0xff77a1d1, "branded 28")
+    expect_color(color_branded_color((ColorBrandedColor)29), 0xff6d98cc, "branded 29")
+    expect_color(color_branded_color((ColorBrandedColor)30), 0xff5c8ecc, "branded 30")
+    expect_color(color_branded_color((ColorBrandedColor)31), 0xff5484bf, "branded 31")
+    expect_color(color_branded_color((ColorBrandedColor)32), 0xff4872a3, "branded 32")
+    expect_eq_color(color_branded_color(color_branded_color_violet), color_branded_color(ColorBrandedColor.violet100))

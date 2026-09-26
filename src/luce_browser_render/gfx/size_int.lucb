@@ -1,0 +1,183 @@
+#==============================================================================================
+#
+#   size_int - Gfx::Size<int> (IntSize, also DevicePixelSize)
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Size.h (lines 16-223) and Size.cpp (lines 13-18) for T = int.
+#       The class template is instantiated per type (DESIGN.md §2.8): size_float.lucb,
+#       size_u32.lucb and size_css_pixels.lucb hold the other instantiations, function for
+#       function.
+#
+#       Member templates over a second type U are instantiated for the types phase 1 uses:
+#       the converting constructor `Size(Size<U>)` and `to_type<U>()` are `to_type_f32` and
+#       `to_type_css_pixels`; `contains` and `operator==` compare sizes of the same type.
+#       `to_rounded<I>()` calls round_to, which takes a floating-point value, so it exists only
+#       for FloatSize. As in C++, int overflow is not defined: it traps here.
+#
+#==============================================================================================
+
+# mark: Construction and access =================================================================
+
+## Ported from Libraries/LibGfx/Size.h:21 Gfx::Size::Size<T> for IntSize.
+pub func int_size_construct(this: IntSize*, w: i32, h: i32):
+    this.m_width = w
+    this.m_height = h
+
+## Ported from Libraries/LibGfx/Size.h:28 Gfx::Size::Size<T>(U width, U height) for IntSize, with U = float.
+pub func int_size_construct_f32(this: IntSize*, width: f32, height: f32):
+    this.m_width = (i32)width
+    this.m_height = (i32)height
+
+## Ported from Libraries/LibGfx/Size.h:41 Gfx::Size::width for IntSize.
+pub func int_size_width(this: const IntSize*) -> i32:
+    return this.m_width
+
+## Ported from Libraries/LibGfx/Size.h:42 Gfx::Size::height for IntSize.
+pub func int_size_height(this: const IntSize*) -> i32:
+    return this.m_height
+
+## Ported from Libraries/LibGfx/Size.h:43 Gfx::Size::area for IntSize.
+pub func int_size_area(this: const IntSize*) -> i32:
+    return int_size_width(this) * int_size_height(this)
+
+## Ported from Libraries/LibGfx/Size.h:45 Gfx::Size::set_width for IntSize.
+pub func int_size_set_width(this: IntSize*, w: i32):
+    this.m_width = w
+
+## Ported from Libraries/LibGfx/Size.h:46 Gfx::Size::set_height for IntSize.
+pub func int_size_set_height(this: IntSize*, h: i32):
+    this.m_height = h
+
+## Ported from Libraries/LibGfx/Size.h:48 Gfx::Size::is_empty for IntSize.
+pub func int_size_is_empty(this: const IntSize*) -> bool:
+    return this.m_width <= 0 or this.m_height <= 0
+
+# mark: Scaling =================================================================================
+
+## Ported from Libraries/LibGfx/Size.h:50 Gfx::Size::scale_by for IntSize.
+pub func int_size_scale_by_i32_i32(this: IntSize*, dx: i32, dy: i32):
+    this.m_width *= dx
+    this.m_height *= dy
+
+## Ported from Libraries/LibGfx/Size.h:56 Gfx::Size::scale_by for IntSize.
+pub func int_size_scale_by_i32(this: IntSize*, dboth: i32):
+    int_size_scale_by_i32_i32(this, dboth, dboth)
+
+## Ported from Libraries/LibGfx/Size.h:57 Gfx::Size::scale_by for IntSize.
+pub func int_size_scale_by_int_point(this: IntSize*, s: IntPoint):
+    int_size_scale_by_i32_i32(this, int_point_x(&s), int_point_y(&s))
+
+## Ported from Libraries/LibGfx/Size.h:59 Gfx::Size::scaled for IntSize.
+pub func int_size_scaled_i32_i32(this: const IntSize*, dx: i32, dy: i32) -> IntSize:
+    var size = *this
+    int_size_scale_by_i32_i32(&size, dx, dy)
+    return size
+
+## Ported from Libraries/LibGfx/Size.h:66 Gfx::Size::scaled for IntSize.
+pub func int_size_scaled_i32(this: const IntSize*, dboth: i32) -> IntSize:
+    var size = *this
+    int_size_scale_by_i32(&size, dboth)
+    return size
+
+## Ported from Libraries/LibGfx/Size.h:73 Gfx::Size::scaled for IntSize.
+pub func int_size_scaled_int_point(this: const IntSize*, s: IntPoint) -> IntSize:
+    var size = *this
+    int_size_scale_by_int_point(&size, s)
+    return size
+
+## Ported from Libraries/LibGfx/Size.h:80 Gfx::Size::aspect_ratio for IntSize.
+pub func int_size_aspect_ratio(this: const IntSize*) -> f32:
+    assert(int_size_height(this) != 0)
+    return (f32)int_size_width(this) / (f32)int_size_height(this)
+
+# Horizontal means preserve the width, Vertical means preserve the height.
+## Ported from Libraries/LibGfx/Size.h:87 Gfx::Size::match_aspect_ratio for IntSize.
+pub func int_size_match_aspect_ratio(this: const IntSize*, aspect_ratio: f32, side_to_preserve: Orientation) -> IntSize:
+    assert(aspect_ratio != 0.0)
+    var matched = *this
+    let height_corresponding_to_width = (i32)((f32)int_size_width(this) / aspect_ratio)
+    let width_corresponding_to_height = (i32)((f32)int_size_height(this) * aspect_ratio)
+
+    if side_to_preserve == Orientation.vertical:
+        matched.m_width = width_corresponding_to_height
+    elif side_to_preserve == Orientation.horizontal:
+        matched.m_height = height_corresponding_to_width
+    return matched
+
+## Ported from Libraries/LibGfx/Size.h:106 Gfx::Size::contains for IntSize (U = int).
+pub func int_size_contains(this: const IntSize*, other: IntSize) -> bool:
+    return other.m_width <= this.m_width and other.m_height <= this.m_height
+
+# mark: Operators ===============================================================================
+
+## Ported from Libraries/LibGfx/Size.h:112 Gfx::Size::operator== for IntSize (U = int).
+pub func int_size_eq(this: const IntSize*, other: IntSize) -> bool:
+    return int_size_width(this) == int_size_width(&other) and int_size_height(this) == int_size_height(&other)
+
+## Ported from Libraries/LibGfx/Size.h:117 Gfx::Size::operator-= for IntSize.
+pub func int_size_sub_assign(this: IntSize*, other: IntSize) -> IntSize*:
+    this.m_width -= other.m_width
+    this.m_height -= other.m_height
+    return this
+
+## Ported from Libraries/LibGfx/Size.h:124 Gfx::Size::operator+= for IntSize.
+pub func int_size_add_assign(this: IntSize*, other: IntSize) -> IntSize*:
+    this.m_width += other.m_width
+    this.m_height += other.m_height
+    return this
+
+## Ported from Libraries/LibGfx/Size.h:131 Gfx::Size::operator* for IntSize.
+pub func int_size_mul(this: const IntSize*, factor: i32) -> IntSize:
+    return IntSize(this.m_width * factor, this.m_height * factor)
+
+## Ported from Libraries/LibGfx/Size.h:133 Gfx::Size::operator*= for IntSize.
+pub func int_size_mul_assign(this: IntSize*, factor: i32) -> IntSize*:
+    this.m_width *= factor
+    this.m_height *= factor
+    return this
+
+# mark: Orientation =============================================================================
+
+## Ported from Libraries/LibGfx/Size.h:140 Gfx::Size::primary_size_for_orientation for IntSize.
+pub func int_size_primary_size_for_orientation(this: const IntSize*, orientation: Orientation) -> i32:
+    return int_size_height(this) if orientation == Orientation.vertical else int_size_width(this)
+
+## Ported from Libraries/LibGfx/Size.h:145 Gfx::Size::set_primary_size_for_orientation for IntSize.
+pub func int_size_set_primary_size_for_orientation(this: IntSize*, orientation: Orientation, value: i32):
+    if orientation == Orientation.vertical:
+        int_size_set_height(this, value)
+    else:
+        int_size_set_width(this, value)
+
+## Ported from Libraries/LibGfx/Size.h:154 Gfx::Size::secondary_size_for_orientation for IntSize.
+pub func int_size_secondary_size_for_orientation(this: const IntSize*, orientation: Orientation) -> i32:
+    return int_size_width(this) if orientation == Orientation.vertical else int_size_height(this)
+
+## Ported from Libraries/LibGfx/Size.h:159 Gfx::Size::set_secondary_size_for_orientation for IntSize.
+pub func int_size_set_secondary_size_for_orientation(this: IntSize*, orientation: Orientation, value: i32):
+    if orientation == Orientation.vertical:
+        int_size_set_width(this, value)
+    else:
+        int_size_set_height(this, value)
+
+# mark: Conversions =============================================================================
+
+## Ported from Libraries/LibGfx/Size.h:170 Gfx::Size::to_type<float> for IntSize (and the
+## converting constructor Size<float>(IntSize), Size.h:35).
+pub func int_size_to_type_f32(this: const IntSize*) -> FloatSize:
+    return FloatSize((f32)int_size_width(this), (f32)int_size_height(this))
+
+## Ported from Libraries/LibGfx/Size.h:170 Gfx::Size::to_type<CSSPixels> for IntSize (and the
+## converting constructor Size<CSSPixels>(IntSize), Size.h:35).
+pub func int_size_to_type_css_pixels(this: const IntSize*) -> CssPixelSize:
+    return CssPixelSize(css_pixels_from_int(int_size_width(this)), css_pixels_from_int(int_size_height(this)))
+
+## Ported from Libraries/LibGfx/Size.cpp:15 Gfx::Size::to_byte_string for IntSize.
+pub func int_size_to_byte_string(this: const IntSize*) -> ak.ByteString:
+    let arguments = [ak.arg_i64(this.m_width), ak.arg_i64(this.m_height)]
+    var params = ak.type_erased_format_params_create(arguments)
+    return ak.byte_string_vformatted(ak.sv("[{}x{}]"), &params)
+
+## Ported from Libraries/LibGfx/Size.h:218 AK::Traits<Gfx::Size<T>>::hash for IntSize.
+pub func int_size_hash(size: const IntSize*) -> u32:
+    return ak.pair_int_hash(ak.u32_hash((u32)int_size_width(size)), ak.u32_hash((u32)int_size_height(size)))

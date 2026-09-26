@@ -1,0 +1,554 @@
+#==============================================================================================
+#
+#   color_space - ColorSpace: color spaces from CICP code points and ICC profiles
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/ColorSpace.cpp (lines 16-163): the constructors,
+#       ColorSpace::from_cicp, ColorSpace::load_from_icc_bytes and the color_space<T>()
+#       accessor. The IPC encoder and decoder (lines 167-205) are not ported.
+#
+#       Skia is replaced in this port. ColorSpace wraps Skia's `sk_sp<SkColorSpace>`; here it
+#       wraps a small stand-in (SkColorSpace in types_color_space.lucb) that holds what
+#       SkColorSpace holds: the skcms transfer function and the 3x3 matrix to XYZ D50. The
+#       Skia and skcms code from_cicp needs is ported below, from the Skia pinned by the
+#       donor's vcpkg build: the SkNamedPrimaries, SkNamedTransferFn and SkNamedGamut
+#       constants (include/core/SkColorSpace.h), SkColorSpacePrimaries::toXYZD50 and
+#       SkColorSpace::MakeRGB with its sRGB and linear-sRGB singletons
+#       (src/core/SkColorSpace.cpp, src/core/SkColorSpacePriv.h), and the skcms functions
+#       they call (modules/skcms/skcms.cc: skcms_PrimariesToXYZD50, skcms_AdaptToXYZD50,
+#       skcms_Matrix3x3_invert, skcms_Matrix3x3_concat, skcms_TransferFunction_getType).
+#       Only the checks MakeRGB makes are ported; Skia's lazily computed inverse fields and
+#       hashes are not.
+#
+#       load_from_icc_bytes keeps the empty-profile path. Parsing an ICC profile
+#       (skcms_Parse, SkColorSpace::Make and skcms_ApproximateCurve) is not ported yet: a
+#       non-empty profile fails (FIXME below). Decoded images are phase 2.
+#
+#==============================================================================================
+
+# mark: skcms ===================================================================================
+
+## skcms_TFType (modules/skcms/src/skcms_public.h:79).
+enum SkcmsTfType as i32:
+    invalid = 0
+    srgbish = 1
+    pqish = 2
+    hlgish = 3
+    hlginvish = 4
+    pq = 5
+    hlg = 6
+
+## skcms_Vector3 (modules/skcms/skcms.cc:1814).
+struct SkcmsVector3:
+    var vals: f32[3]
+
+## Ported from modules/skcms/skcms.cc:111 isfinitef_.
+func skcms_isfinitef(x: f32) -> bool:
+    return 0.0 == x * 0.0
+
+## Ported from modules/skcms/skcms.cc:135 classify.
+## The PQ and HLG out-parameters are left out: getType does not ask for them.
+func skcms_classify(tf: const SkcmsTransferFunction*) -> SkcmsTfType:
+    if tf.g < 0.0:
+        # Negative "g" is mapped to enum values; large negative are for sure invalid.
+        if tf.g < -128.0:
+            return SkcmsTfType.invalid
+        let enum_g = -(i32)tf.g
+        # Non-whole "g" values are invalid as well.
+        if (f32)(-enum_g) != tf.g:
+            return SkcmsTfType.invalid
+        # TODO: soundness checks for PQ/HLG like we do for sRGBish?
+        match enum_g:
+            2:
+                return SkcmsTfType.pqish
+            3:
+                return SkcmsTfType.hlgish
+            4:
+                return SkcmsTfType.hlginvish
+            5:
+                if tf.b != 0.0 or tf.c != 0.0 or tf.d != 0.0 or tf.e != 0.0 or tf.f != 0.0:
+                    return SkcmsTfType.invalid
+                return SkcmsTfType.pq
+            6:
+                if tf.d != 0.0 or tf.e != 0.0 or tf.f != 0.0:
+                    return SkcmsTfType.invalid
+                return SkcmsTfType.hlg
+            _:
+                return SkcmsTfType.invalid
+
+    # Basic soundness checks for sRGBish transfer functions.
+    if (skcms_isfinitef(tf.a + tf.b + tf.c + tf.d + tf.e + tf.f + tf.g)
+            # a,c,d,g should be non-negative to make any sense.
+            and tf.a >= 0.0
+            and tf.c >= 0.0
+            and tf.d >= 0.0
+            and tf.g >= 0.0
+            # Raising a negative value to a fractional tf->g produces complex numbers.
+            and tf.a * tf.d + tf.b >= 0.0):
+        return SkcmsTfType.srgbish
+
+    return SkcmsTfType.invalid
+
+## Ported from modules/skcms/skcms.cc:193 skcms_TransferFunction_getType.
+func skcms_transfer_function_get_type(tf: const SkcmsTransferFunction*) -> SkcmsTfType:
+    return skcms_classify(tf)
+
+## Ported from modules/skcms/skcms.cc:1810 is_zero_to_one.
+func skcms_is_zero_to_one(x: f32) -> bool:
+    return 0.0 <= x and x <= 1.0
+
+## Ported from modules/skcms/skcms.cc:1816 mv_mul.
+func skcms_mv_mul(m: const SkcmsMatrix3x3*, v: const SkcmsVector3*) -> SkcmsVector3:
+    var dst = SkcmsVector3(vals = [0.0, 0.0, 0.0])
+    for row in 0..<3:
+        dst.vals[row] = (m.vals[row][0] * v.vals[0]
+            + m.vals[row][1] * v.vals[1]
+            + m.vals[row][2] * v.vals[2])
+    return dst
+
+## Ported from modules/skcms/skcms.cc:1826 skcms_AdaptToXYZD50.
+func skcms_adapt_to_xyzd50(wx: f32, wy: f32, to_xyzd50: SkcmsMatrix3x3*) -> bool:
+    if not skcms_is_zero_to_one(wx) or not skcms_is_zero_to_one(wy):
+        return false
+
+    # Assumes that Y is 1.0f.
+    let w_xyz = SkcmsVector3(vals = [wx / wy, 1.0, (1.0 - wx - wy) / wy])
+
+    # Now convert toXYZ matrix to toXYZD50.
+    let w_xyzd50 = SkcmsVector3(vals = [0.96422, 1.0, 0.82521])
+
+    # Calculate the chromatic adaptation matrix.  We will use the Bradford method, thus
+    # the matrices below.  The Bradford method is used by Adobe and is widely considered
+    # to be the best.
+    let xyz_to_lms = SkcmsMatrix3x3(vals = [
+        [0.8951, 0.2664, -0.1614],
+        [-0.7502, 1.7135, 0.0367],
+        [0.0389, -0.0685, 1.0296],
+    ])
+    let lms_to_xyz = SkcmsMatrix3x3(vals = [
+        [0.9869929, -0.1470543, 0.1599627],
+        [0.4323053, 0.5183603, 0.0492912],
+        [-0.0085287, 0.0400428, 0.9684867],
+    ])
+
+    let src_cone = skcms_mv_mul(&xyz_to_lms, &w_xyz)
+    let dst_cone = skcms_mv_mul(&xyz_to_lms, &w_xyzd50)
+
+    *to_xyzd50 = SkcmsMatrix3x3(vals = [
+        [dst_cone.vals[0] / src_cone.vals[0], 0.0, 0.0],
+        [0.0, dst_cone.vals[1] / src_cone.vals[1], 0.0],
+        [0.0, 0.0, dst_cone.vals[2] / src_cone.vals[2]],
+    ])
+    *to_xyzd50 = skcms_matrix3x3_concat(to_xyzd50, &xyz_to_lms)
+    *to_xyzd50 = skcms_matrix3x3_concat(&lms_to_xyz, to_xyzd50)
+
+    return true
+
+## Ported from modules/skcms/skcms.cc:1867 skcms_PrimariesToXYZD50.
+func skcms_primaries_to_xyzd50(rx: f32, ry: f32, gx: f32, gy: f32, bx: f32, by: f32, wx: f32, wy: f32, to_xyzd50: SkcmsMatrix3x3*) -> bool:
+    if (not skcms_is_zero_to_one(rx) or not skcms_is_zero_to_one(ry)
+            or not skcms_is_zero_to_one(gx) or not skcms_is_zero_to_one(gy)
+            or not skcms_is_zero_to_one(bx) or not skcms_is_zero_to_one(by)
+            or not skcms_is_zero_to_one(wx) or not skcms_is_zero_to_one(wy)):
+        return false
+
+    # First, we need to convert xy values (primaries) to XYZ.
+    let primaries = SkcmsMatrix3x3(vals = [
+        [rx, gx, bx],
+        [ry, gy, by],
+        [1.0 - rx - ry, 1.0 - gx - gy, 1.0 - bx - by],
+    ])
+    var primaries_inv = SkcmsMatrix3x3(vals = [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+    if not skcms_matrix3x3_invert(&primaries, &primaries_inv):
+        return false
+
+    # Assumes that Y is 1.0f.
+    let w_xyz = SkcmsVector3(vals = [wx / wy, 1.0, (1.0 - wx - wy) / wy])
+    let xyz = skcms_mv_mul(&primaries_inv, &w_xyz)
+
+    var to_xyz = SkcmsMatrix3x3(vals = [
+        [xyz.vals[0], 0.0, 0.0],
+        [0.0, xyz.vals[1], 0.0],
+        [0.0, 0.0, xyz.vals[2]],
+    ])
+    to_xyz = skcms_matrix3x3_concat(&primaries, &to_xyz)
+
+    var dx_to_d50 = SkcmsMatrix3x3(vals = [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+    if not skcms_adapt_to_xyzd50(wx, wy, &dx_to_d50):
+        return false
+
+    *to_xyzd50 = skcms_matrix3x3_concat(&dx_to_d50, &to_xyz)
+    return true
+
+## Ported from modules/skcms/skcms.cc:1912 skcms_Matrix3x3_invert.
+func skcms_matrix3x3_invert(src: const SkcmsMatrix3x3*, dst: SkcmsMatrix3x3*) -> bool:
+    let a00 = (f64)src.vals[0][0]
+    let a01 = (f64)src.vals[1][0]
+    let a02 = (f64)src.vals[2][0]
+    let a10 = (f64)src.vals[0][1]
+    let a11 = (f64)src.vals[1][1]
+    let a12 = (f64)src.vals[2][1]
+    let a20 = (f64)src.vals[0][2]
+    let a21 = (f64)src.vals[1][2]
+    let a22 = (f64)src.vals[2][2]
+
+    var b0 = a00 * a11 - a01 * a10
+    var b1 = a00 * a12 - a02 * a10
+    var b2 = a01 * a12 - a02 * a11
+    var b3 = a20
+    var b4 = a21
+    var b5 = a22
+
+    let determinant = b0 * b5 - b1 * b4 + b2 * b3
+
+    if determinant == 0.0:
+        return false
+
+    let invdet = 1.0 / determinant
+    # FLT_MAX
+    let flt_max: f64 = 3.40282346638528859811704183484516925440e+38
+    if invdet > flt_max or invdet < -flt_max or not skcms_isfinitef((f32)invdet):
+        return false
+
+    b0 *= invdet
+    b1 *= invdet
+    b2 *= invdet
+    b3 *= invdet
+    b4 *= invdet
+    b5 *= invdet
+
+    dst.vals[0][0] = (f32)(a11 * b5 - a12 * b4)
+    dst.vals[1][0] = (f32)(a02 * b4 - a01 * b5)
+    dst.vals[2][0] = (f32)(b2)
+    dst.vals[0][1] = (f32)(a12 * b3 - a10 * b5)
+    dst.vals[1][1] = (f32)(a00 * b5 - a02 * b3)
+    dst.vals[2][1] = (f32)(-b1)
+    dst.vals[0][2] = (f32)(a10 * b4 - a11 * b3)
+    dst.vals[1][2] = (f32)(a01 * b3 - a00 * b4)
+    dst.vals[2][2] = (f32)(b0)
+
+    for r in 0..<3:
+        for c in 0..<3:
+            if not skcms_isfinitef(dst.vals[r][c]):
+                return false
+    return true
+
+## Ported from modules/skcms/skcms.cc:1969 skcms_Matrix3x3_concat.
+func skcms_matrix3x3_concat(a: const SkcmsMatrix3x3*, b: const SkcmsMatrix3x3*) -> SkcmsMatrix3x3:
+    var m = SkcmsMatrix3x3(vals = [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+    for r in 0..<3:
+        for c in 0..<3:
+            m.vals[r][c] = (a.vals[r][0] * b.vals[0][c]
+                + a.vals[r][1] * b.vals[1][c]
+                + a.vals[r][2] * b.vals[2][c])
+    return m
+
+# mark: Skia constants ==========================================================================
+
+# SkNamedPrimaries (include/core/SkColorSpace.h): color primaries defined by ITU-T H.273,
+# table 2. Names are given by the first specification referenced in the value's row.
+
+## SkNamedPrimaries::kRec709: Rec. ITU-R BT.709-6, value 1.
+let sk_named_primaries_rec709 = SkColorSpacePrimaries(fRX = 0.64, fRY = 0.33, fGX = 0.3, fGY = 0.6, fBX = 0.15, fBY = 0.06, fWX = 0.3127, fWY = 0.329)
+## SkNamedPrimaries::kRec470SystemM: Rec. ITU-R BT.470-6 System M (historical), value 4.
+let sk_named_primaries_rec470_system_m = SkColorSpacePrimaries(fRX = 0.67, fRY = 0.33, fGX = 0.21, fGY = 0.71, fBX = 0.14, fBY = 0.08, fWX = 0.31, fWY = 0.316)
+## SkNamedPrimaries::kRec470SystemBG: Rec. ITU-R BT.470-6 System B, G (historical), value 5.
+let sk_named_primaries_rec470_system_bg = SkColorSpacePrimaries(fRX = 0.64, fRY = 0.33, fGX = 0.29, fGY = 0.60, fBX = 0.15, fBY = 0.06, fWX = 0.3127, fWY = 0.3290)
+## SkNamedPrimaries::kRec601: Rec. ITU-R BT.601-7 525, value 6.
+let sk_named_primaries_rec601 = SkColorSpacePrimaries(fRX = 0.630, fRY = 0.340, fGX = 0.310, fGY = 0.595, fBX = 0.155, fBY = 0.070, fWX = 0.3127, fWY = 0.3290)
+## SkNamedPrimaries::kSMPTE_ST_240: SMPTE ST 240, value 7 (functionally the same as value 6).
+let sk_named_primaries_smpte_st_240 = sk_named_primaries_rec601
+## SkNamedPrimaries::kGenericFilm: generic film (colour filters using Illuminant C), value 8.
+let sk_named_primaries_generic_film = SkColorSpacePrimaries(fRX = 0.681, fRY = 0.319, fGX = 0.243, fGY = 0.692, fBX = 0.145, fBY = 0.049, fWX = 0.310, fWY = 0.316)
+## SkNamedPrimaries::kRec2020: Rec. ITU-R BT.2020-2, value 9.
+let sk_named_primaries_rec2020 = SkColorSpacePrimaries(fRX = 0.708, fRY = 0.292, fGX = 0.170, fGY = 0.797, fBX = 0.131, fBY = 0.046, fWX = 0.3127, fWY = 0.3290)
+## SkNamedPrimaries::kSMPTE_RP_431_2: SMPTE RP 431-2, value 11.
+let sk_named_primaries_smpte_rp_431_2 = SkColorSpacePrimaries(fRX = 0.680, fRY = 0.320, fGX = 0.265, fGY = 0.690, fBX = 0.150, fBY = 0.060, fWX = 0.314, fWY = 0.351)
+## SkNamedPrimaries::kSMPTE_EG_432_1: SMPTE EG 432-1, value 12.
+let sk_named_primaries_smpte_eg_432_1 = SkColorSpacePrimaries(fRX = 0.680, fRY = 0.320, fGX = 0.265, fGY = 0.690, fBX = 0.150, fBY = 0.060, fWX = 0.3127, fWY = 0.3290)
+## SkNamedPrimaries::kITU_T_H273_Value22: value 22. No corresponding industry specification
+## identified. This is sometimes referred to as EBU 3213-E, but that document doesn't specify
+## these values.
+let sk_named_primaries_itu_t_h273_value22 = SkColorSpacePrimaries(fRX = 0.630, fRY = 0.340, fGX = 0.295, fGY = 0.605, fBX = 0.155, fBY = 0.077, fWX = 0.3127, fWY = 0.3290)
+
+# SkNamedTransferFn (include/core/SkColorSpace.h), each { g, a, b, c, d, e, f }.
+
+## SkNamedTransferFn::kSRGB. Like SkNamedGamut::kSRGB, keeping this bitwise exactly the same
+## as skcms makes things fastest.
+let sk_named_transfer_fn_srgb = SkcmsTransferFunction(g = 2.4, a = (f32)(1.0 / 1.055), b = (f32)(0.055 / 1.055), c = (f32)(1.0 / 12.92), d = 0.04045, e = 0.0, f = 0.0)
+## SkNamedTransferFn::k2Dot2.
+let sk_named_transfer_fn_2_dot_2 = SkcmsTransferFunction(g = 2.2, a = 1.0, b = 0.0, c = 0.0, d = 0.0, e = 0.0, f = 0.0)
+## SkNamedTransferFn::kRec709: Rec. ITU-R BT.709-6, value 1. This follows note 1, which
+## reads: "In the cases of [...] TransferCharacteristics equal to 1, 6, 14 or 15 [...],
+## although the value is defined in terms of a reference [OETF], a suggested corresponding
+## reference [EOTF] has been specified in Rec. ITU-R BT.1886-0."
+let sk_named_transfer_fn_rec709 = SkcmsTransferFunction(g = 2.4, a = 1.0, b = 0.0, c = 0.0, d = 0.0, e = 0.0, f = 0.0)
+## SkNamedTransferFn::kRec470SystemM: Rec. ITU-R BT.470-6 System M (historical) assumed
+## display gamma 2.2, value 4.
+let sk_named_transfer_fn_rec470_system_m = SkcmsTransferFunction(g = 2.2, a = 1.0, b = 0.0, c = 0.0, d = 0.0, e = 0.0, f = 0.0)
+## SkNamedTransferFn::kRec470SystemBG: Rec. ITU-R BT.470-6 System B, G (historical) assumed
+## display gamma 2.8, value 5.
+let sk_named_transfer_fn_rec470_system_bg = SkcmsTransferFunction(g = 2.8, a = 1.0, b = 0.0, c = 0.0, d = 0.0, e = 0.0, f = 0.0)
+## SkNamedTransferFn::kSMPTE_ST_240: SMPTE ST 240, value 7.
+let sk_named_transfer_fn_smpte_st_240 = SkcmsTransferFunction(g = 2.222222222222, a = 0.899626676224, b = 0.100373323776, c = 0.25, d = 0.091286342118, e = 0.0, f = 0.0)
+## SkNamedTransferFn::kLinear: linear, value 8.
+let sk_named_transfer_fn_linear = SkcmsTransferFunction(g = 1.0, a = 1.0, b = 0.0, c = 0.0, d = 0.0, e = 0.0, f = 0.0)
+## SkNamedTransferFn::kIEC61966_2_4: IEC 61966-2-4, value 11, same as kRec709 (but is
+## explicitly extended).
+let sk_named_transfer_fn_iec61966_2_4 = sk_named_transfer_fn_rec709
+## SkNamedTransferFn::kPQ: Rec. ITU-R BT.2100-2 perceptual quantization (PQ) system, value 16.
+let sk_named_transfer_fn_pq = SkcmsTransferFunction(g = -5.0, a = 203.0, b = 0.0, c = 0.0, d = 0.0, e = 0.0, f = 0.0)
+## SkNamedTransferFn::kSMPTE_ST_428_1: SMPTE ST 428-1, value 17.
+let sk_named_transfer_fn_smpte_st_428_1 = SkcmsTransferFunction(g = 2.6, a = 1.034080527699, b = 0.0, c = 0.0, d = 0.0, e = 0.0, f = 0.0)
+
+## SkFixedToFloat (include/private/base/SkFixed.h:41): a 16.16 fixed-point value as a float.
+func sk_fixed_to_float(x: i32) -> f32:
+    return (f32)x * 1.52587890625e-5
+
+## SkNamedGamut::kSRGB. ICC fixed-point (16.16) representation, taken from skcms. Please keep
+## them exactly in sync.
+##     0.436065674f, 0.385147095f, 0.143066406f,
+##     0.222488403f, 0.716873169f, 0.060607910f,
+##     0.013916016f, 0.097076416f, 0.714096069f,
+func sk_named_gamut_srgb() -> SkcmsMatrix3x3:
+    return SkcmsMatrix3x3(vals = [
+        [sk_fixed_to_float(0x6FA2), sk_fixed_to_float(0x6299), sk_fixed_to_float(0x24A0)],
+        [sk_fixed_to_float(0x38F5), sk_fixed_to_float(0xB785), sk_fixed_to_float(0x0F84)],
+        [sk_fixed_to_float(0x0390), sk_fixed_to_float(0x18DA), sk_fixed_to_float(0xB6CF)],
+    ])
+
+## SkNamedGamut::kXYZ.
+let sk_named_gamut_xyz = SkcmsMatrix3x3(vals = [
+    [1.0, 0.0, 0.0],
+    [0.0, 1.0, 0.0],
+    [0.0, 0.0, 1.0],
+])
+
+# mark: SkColorSpace ============================================================================
+
+## Ported from src/core/SkColorSpace.cpp:117 SkColorSpacePrimaries::toXYZD50.
+func sk_color_space_primaries_to_xyzd50(this: const SkColorSpacePrimaries*, to_xyz_d50: SkcmsMatrix3x3*) -> bool:
+    return skcms_primaries_to_xyzd50(this.fRX, this.fRY, this.fGX, this.fGY, this.fBX, this.fBY, this.fWX, this.fWY, to_xyz_d50)
+
+## Ported from src/core/SkColorSpacePriv.h:21 color_space_almost_equal.
+func sk_color_space_almost_equal(a: f32, b: f32) -> bool:
+    return math32.abs(a - b) < 0.01
+
+## Ported from src/core/SkColorSpacePriv.h:27 transfer_fn_almost_equal.
+## Let's use a stricter version for transfer functions. Worst case, these are encoded in ICC
+## format, which offers 16-bits of fractional precision.
+func sk_transfer_fn_almost_equal(a: f32, b: f32) -> bool:
+    return math32.abs(a - b) < 0.001
+
+## Ported from src/core/SkColorSpacePriv.h:31 is_almost_srgb.
+func sk_is_almost_srgb(coeffs: const SkcmsTransferFunction*) -> bool:
+    return (sk_transfer_fn_almost_equal(sk_named_transfer_fn_srgb.a, coeffs.a)
+        and sk_transfer_fn_almost_equal(sk_named_transfer_fn_srgb.b, coeffs.b)
+        and sk_transfer_fn_almost_equal(sk_named_transfer_fn_srgb.c, coeffs.c)
+        and sk_transfer_fn_almost_equal(sk_named_transfer_fn_srgb.d, coeffs.d)
+        and sk_transfer_fn_almost_equal(sk_named_transfer_fn_srgb.e, coeffs.e)
+        and sk_transfer_fn_almost_equal(sk_named_transfer_fn_srgb.f, coeffs.f)
+        and sk_transfer_fn_almost_equal(sk_named_transfer_fn_srgb.g, coeffs.g))
+
+## Ported from src/core/SkColorSpacePriv.h:41 is_almost_2dot2.
+func sk_is_almost_2dot2(coeffs: const SkcmsTransferFunction*) -> bool:
+    return (sk_transfer_fn_almost_equal(1.0, coeffs.a)
+        and sk_transfer_fn_almost_equal(0.0, coeffs.b)
+        and sk_transfer_fn_almost_equal(0.0, coeffs.e)
+        and sk_transfer_fn_almost_equal(2.2, coeffs.g)
+        and coeffs.d <= 0.0)
+
+## Ported from src/core/SkColorSpacePriv.h:49 is_almost_linear.
+func sk_is_almost_linear(coeffs: const SkcmsTransferFunction*) -> bool:
+    # OutputVal = InputVal ^ 1.0f
+    let linear_exp = (sk_transfer_fn_almost_equal(1.0, coeffs.a)
+        and sk_transfer_fn_almost_equal(0.0, coeffs.b)
+        and sk_transfer_fn_almost_equal(0.0, coeffs.e)
+        and sk_transfer_fn_almost_equal(1.0, coeffs.g)
+        and coeffs.d <= 0.0)
+
+    # OutputVal = 1.0f * InputVal
+    let linear_fn = (sk_transfer_fn_almost_equal(1.0, coeffs.c)
+        and sk_transfer_fn_almost_equal(0.0, coeffs.f)
+        and coeffs.d >= 1.0)
+
+    return linear_exp or linear_fn
+
+## Ported from src/core/SkColorSpace.cpp:18 xyz_almost_equal.
+func sk_xyz_almost_equal(m_a: const SkcmsMatrix3x3*, m_b: const SkcmsMatrix3x3*) -> bool:
+    for r in 0..<3:
+        for c in 0..<3:
+            if not sk_color_space_almost_equal(m_a.vals[r][c], m_b.vals[r][c]):
+                return false
+
+    return true
+
+## The static singletons of sk_srgb_singleton and sk_srgb_linear_singleton
+## (src/core/SkColorSpace.cpp:182).
+var sk_srgb_singleton_cs: SkColorSpace*?
+var sk_srgb_linear_singleton_cs: SkColorSpace*?
+
+## Ported from src/core/SkColorSpace.cpp:121 SkColorSpace::SkColorSpace.
+## The hashes are not kept.
+func sk_color_space_new(transfer_fn: const SkcmsTransferFunction*, to_xyzd50: const SkcmsMatrix3x3*) -> SkColorSpace*:
+    return new SkColorSpace(fTransferFn = *transfer_fn, fToXYZD50 = *to_xyzd50) else trap("out of memory")
+
+## Ported from src/core/SkColorSpace.cpp:182 sk_srgb_singleton.
+func sk_srgb_singleton() -> SkColorSpace*:
+    if let cs = sk_srgb_singleton_cs:
+        return cs
+    let gamut = sk_named_gamut_srgb()
+    let cs = sk_color_space_new(&sk_named_transfer_fn_srgb, &gamut)
+    sk_srgb_singleton_cs = cs
+    return cs
+
+## Ported from src/core/SkColorSpace.cpp:188 sk_srgb_linear_singleton.
+func sk_srgb_linear_singleton() -> SkColorSpace*:
+    if let cs = sk_srgb_linear_singleton_cs:
+        return cs
+    let gamut = sk_named_gamut_srgb()
+    let cs = sk_color_space_new(&sk_named_transfer_fn_linear, &gamut)
+    sk_srgb_linear_singleton_cs = cs
+    return cs
+
+## Ported from src/core/SkColorSpace.cpp:129 SkColorSpace::MakeRGB.
+func sk_color_space_make_rgb(transfer_fn: const SkcmsTransferFunction*, to_xyz: const SkcmsMatrix3x3*) -> SkSpSkColorSpace:
+    if skcms_transfer_function_get_type(transfer_fn) == SkcmsTfType.invalid:
+        return none
+
+    var tf = *transfer_fn
+
+    let srgb_gamut = sk_named_gamut_srgb()
+    if sk_is_almost_srgb(transfer_fn):
+        if sk_xyz_almost_equal(to_xyz, &srgb_gamut):
+            # SkColorSpace::MakeSRGB()
+            return sk_srgb_singleton()
+        tf = sk_named_transfer_fn_srgb
+    elif sk_is_almost_2dot2(transfer_fn):
+        tf = sk_named_transfer_fn_2_dot_2
+    elif sk_is_almost_linear(transfer_fn):
+        if sk_xyz_almost_equal(to_xyz, &srgb_gamut):
+            # SkColorSpace::MakeSRGBLinear()
+            return sk_srgb_linear_singleton()
+        tf = sk_named_transfer_fn_linear
+
+    return sk_color_space_new(&tf, to_xyz)
+
+# mark: ColorSpace ==============================================================================
+
+## Ported from Libraries/LibGfx/ColorSpace.cpp:26 Gfx::ColorSpace::ColorSpace.
+pub func color_space_construct(this: ColorSpace*):
+    this.m_color_space = new ColorSpaceImpl(color_space = none) else trap("out of memory")
+
+## Ported from Libraries/LibGfx/ColorSpace.cpp:47 Gfx::ColorSpace::ColorSpace.
+pub func color_space_construct_color_space_impl(this: ColorSpace*, color_space: ColorSpaceImpl*):
+    this.m_color_space = color_space
+
+## `ColorSpace { make<Details::ColorSpaceImpl>(color_space) }` as an expression.
+func color_space_new_sk_color_space(color_space: SkSpSkColorSpace) -> ColorSpace:
+    let impl = new ColorSpaceImpl(color_space = color_space) else trap("out of memory")
+    var result: ColorSpace = ---
+    color_space_construct_color_space_impl(&result, impl)
+    return result
+
+## The primaries `switch` of ColorSpace::from_cicp (ColorSpace.cpp:58), a lambda answering
+## ErrorOr<SkColorSpacePrimaries> in the C++.
+func color_space_from_cicp_primaries(color_primaries: MediaColorPrimaries) -> SkColorSpacePrimaries!:
+    match color_primaries:
+        .bt709, .unspecified:
+            return sk_named_primaries_rec709
+        .bt470m:
+            return sk_named_primaries_rec470_system_m
+        .bt470bg:
+            return sk_named_primaries_rec470_system_bg
+        .bt601:
+            return sk_named_primaries_rec601
+        .smpte240:
+            return sk_named_primaries_smpte_st_240
+        .generic_film:
+            return sk_named_primaries_generic_film
+        .bt2020:
+            return sk_named_primaries_rec2020
+        .xyz:
+            trap("VERIFY_NOT_REACHED")
+        .smpte431:
+            return sk_named_primaries_smpte_rp_431_2
+        .smpte432:
+            return sk_named_primaries_smpte_eg_432_1
+        .ebu3213:
+            return sk_named_primaries_itu_t_h273_value22
+        _:
+            error(ak.ak_error, "Illegal color primaries")
+
+## The gamut lambda of ColorSpace::from_cicp (ColorSpace.cpp:54), answering
+## ErrorOr<skcms_Matrix3x3> in the C++.
+func color_space_from_cicp_gamut(cicp: const MediaCodingIndependentCodePoints*) -> SkcmsMatrix3x3!:
+    if cicp.m_color_primaries == MediaColorPrimaries.xyz:
+        return sk_named_gamut_xyz
+
+    let primaries = try color_space_from_cicp_primaries(cicp.m_color_primaries)
+    var result = SkcmsMatrix3x3(vals = [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+    let converted = sk_color_space_primaries_to_xyzd50(&primaries, &result)
+    assert(converted)
+    return result
+
+## The transfer function lambda of ColorSpace::from_cicp (ColorSpace.cpp:91), answering
+## ErrorOr<skcms_TransferFunction> in the C++.
+func color_space_from_cicp_transfer_function(transfer_characteristics: MediaTransferCharacteristics) -> SkcmsTransferFunction!:
+    match transfer_characteristics:
+        .bt709, .unspecified, .bt601, .bt2020_bit_depth10, .bt2020_bit_depth12:
+            # This isn't technically correct, but Chromium has set the precedent that these are treated as sRGB as an
+            # optimization. Using the actual transfer characteristics will produce output inconsistent with other
+            # browsers, so we unfortunately have to follow suit.
+            return sk_named_transfer_fn_srgb
+        .bt470m:
+            return sk_named_transfer_fn_rec470_system_m
+        .bt470bg:
+            return sk_named_transfer_fn_rec470_system_bg
+        .smpte240:
+            return sk_named_transfer_fn_smpte_st_240
+        .linear:
+            return sk_named_transfer_fn_linear
+        .log100, .log100_sqrt10:
+            error(ak.ak_error, "Logarithmic transfer characteristics are unsupported.")
+        .iec61966:
+            return sk_named_transfer_fn_iec61966_2_4
+        .bt1361:
+            error(ak.ak_error, "BT.1361 transfer characteristics are not supported.")
+        .srgb:
+            return sk_named_transfer_fn_srgb
+        .smpte2084:
+            return sk_named_transfer_fn_pq
+        .smpte428:
+            return sk_named_transfer_fn_smpte_st_428_1
+        .hlg:
+            # FIXME: This will need to change to use the HLG transfer function when the surface we're painting to
+            #        supports HDR.
+            return sk_named_transfer_fn_srgb
+        _:
+            error(ak.ak_error, "Illegal transfer characteristics")
+
+## Ported from Libraries/LibGfx/ColorSpace.cpp:52 Gfx::ColorSpace::from_cicp.
+pub func color_space_from_cicp(cicp: MediaCodingIndependentCodePoints) -> ColorSpace!:
+    let gamut = try color_space_from_cicp_gamut(&cicp)
+
+    let transfer_function = try color_space_from_cicp_transfer_function(cicp.m_transfer_characteristics)
+
+    return color_space_new_sk_color_space(sk_color_space_make_rgb(&transfer_function, &gamut))
+
+## Ported from Libraries/LibGfx/ColorSpace.cpp:134 Gfx::ColorSpace::load_from_icc_bytes.
+pub func color_space_load_from_icc_bytes(icc_bytes: const u8[]) -> ColorSpace!:
+    if icc_bytes.length != 0:
+        # FIXME: skcms_Parse, SkColorSpace::Make(icc_profile) and the skcms_ApproximateCurve
+        #        fallback are not ported (Skia is replaced; decoded images are phase 2), so every
+        #        profile fails as one skcms_Parse rejects.
+        error(ak.ak_error, "Failed to parse the ICC profile")
+    var color_space: ColorSpace = ---
+    color_space_construct(&color_space)
+    return color_space
+
+## Ported from Libraries/LibGfx/ColorSpace.cpp:160 Gfx::ColorSpace::color_space.
+## The C++ template is specialized for sk_sp<SkColorSpace> only; this answers the reference to
+## the stand-in.
+pub func color_space_color_space_sk_sp(this: ColorSpace*) -> SkSpSkColorSpace*:
+    return &this.m_color_space.color_space

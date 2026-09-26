@@ -1,0 +1,381 @@
+#==============================================================================================
+#
+#   rect_css_pixels_1 - Gfx::Rect<Web::CSSPixels> (CSSPixelRect): construction to orientation
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Rect.h (lines 19-347) for T = CSSPixels, in the order of
+#       rect_int_1.lucb; rect_css_pixels_2.lucb has the rest of the class. Arithmetic is
+#       CSSPixels' (saturating, fixed point), spelled with its methods (pixel_units.lucb). A
+#       CSSPixels divided by 2 is a CSSPixelFraction that converts back to CSSPixels, as the
+#       C++ expression `x() + width() / 2` does implicitly (`css_pixels_halved`); a literal 0 is
+#       CSSPixels(0).
+#
+#       Member templates over a second type U are instantiated for the types phase 1 uses: the
+#       constructors from `Point<U>`/`Size<U>` and from `Rect<U>` are the `to_type_*` functions
+#       of the other instantiations; `contains(Container)` and `intersects(Container)` take a
+#       span of rects.
+#
+#==============================================================================================
+
+# mark: Construction and access =================================================================
+
+## Ported from Libraries/LibGfx/Rect.h:24 Gfx::Rect::Rect<T> for CssPixelRect.
+pub func css_pixel_rect_construct_css_pixels(this: CssPixelRect*, x: CssPixels, y: CssPixels, width: CssPixels, height: CssPixels):
+    this.m_location = CssPixelPoint(x, y)
+    this.m_size = CssPixelSize(width, height)
+
+## Ported from Libraries/LibGfx/Rect.h:31 Gfx::Rect::Rect<T>(U x, U y, U width, U height) for CssPixelRect, with U a signed integer.
+pub func css_pixel_rect_construct_int(this: CssPixelRect*, x: i64, y: i64, width: i64, height: i64):
+    css_pixel_point_construct_int(&this.m_location, x, y)
+    css_pixel_size_construct_int(&this.m_size, width, height)
+
+## Ported from Libraries/LibGfx/Rect.h:37 Gfx::Rect::Rect<T> for CssPixelRect.
+pub func css_pixel_rect_construct_css_pixel_point(this: CssPixelRect*, location: CssPixelPoint, size: CssPixelSize):
+    this.m_location = location
+    this.m_size = size
+
+## Ported from Libraries/LibGfx/Rect.h:57 Gfx::Rect::x for CssPixelRect.
+pub func css_pixel_rect_x(this: const CssPixelRect*) -> CssPixels:
+    return css_pixel_point_x(&this.m_location)
+
+## Ported from Libraries/LibGfx/Rect.h:58 Gfx::Rect::y for CssPixelRect.
+pub func css_pixel_rect_y(this: const CssPixelRect*) -> CssPixels:
+    return css_pixel_point_y(&this.m_location)
+
+## Ported from Libraries/LibGfx/Rect.h:59 Gfx::Rect::width for CssPixelRect.
+pub func css_pixel_rect_width(this: const CssPixelRect*) -> CssPixels:
+    return css_pixel_size_width(&this.m_size)
+
+## Ported from Libraries/LibGfx/Rect.h:60 Gfx::Rect::height for CssPixelRect.
+pub func css_pixel_rect_height(this: const CssPixelRect*) -> CssPixels:
+    return css_pixel_size_height(&this.m_size)
+
+## Ported from Libraries/LibGfx/Rect.h:62 Gfx::Rect::set_x for CssPixelRect.
+pub func css_pixel_rect_set_x(this: CssPixelRect*, x: CssPixels):
+    css_pixel_point_set_x(&this.m_location, x)
+
+## Ported from Libraries/LibGfx/Rect.h:63 Gfx::Rect::set_y for CssPixelRect.
+pub func css_pixel_rect_set_y(this: CssPixelRect*, y: CssPixels):
+    css_pixel_point_set_y(&this.m_location, y)
+
+## Ported from Libraries/LibGfx/Rect.h:64 Gfx::Rect::set_width for CssPixelRect.
+pub func css_pixel_rect_set_width(this: CssPixelRect*, width: CssPixels):
+    css_pixel_size_set_width(&this.m_size, width)
+
+## Ported from Libraries/LibGfx/Rect.h:65 Gfx::Rect::set_height for CssPixelRect.
+pub func css_pixel_rect_set_height(this: CssPixelRect*, height: CssPixels):
+    css_pixel_size_set_height(&this.m_size, height)
+
+## Ported from Libraries/LibGfx/Rect.h:67 Gfx::Rect::location for CssPixelRect.
+pub func css_pixel_rect_location(this: const CssPixelRect*) -> CssPixelPoint:
+    return this.m_location
+
+## Ported from Libraries/LibGfx/Rect.h:68 Gfx::Rect::size for CssPixelRect.
+pub func css_pixel_rect_size(this: const CssPixelRect*) -> CssPixelSize:
+    return this.m_size
+
+## Ported from Libraries/LibGfx/Rect.h:70 Gfx::Rect::is_empty for CssPixelRect.
+pub func css_pixel_rect_is_empty(this: const CssPixelRect*) -> bool:
+    return css_pixel_rect_width(this).le(css_pixels_from_int(0)) or css_pixel_rect_height(this).le(css_pixels_from_int(0))
+
+# CSSPixels::operator/(T) then CSSPixelFraction's operator CSSPixels: the C++ `value / 2` where a
+# CSSPixels is expected.
+func css_pixels_halved(value: CssPixels) -> CssPixels:
+    let fraction = div_css_pixels_int(value, 2)
+    return css_pixel_fraction_to_css_pixels(&fraction)
+
+# mark: Translation and scaling =================================================================
+
+## Ported from Libraries/LibGfx/Rect.h:72 Gfx::Rect::translate_by for CssPixelRect.
+pub func css_pixel_rect_translate_by_css_pixels_css_pixels(this: CssPixelRect*, dx: CssPixels, dy: CssPixels):
+    css_pixel_point_translate_by_css_pixels_css_pixels(&this.m_location, dx, dy)
+
+## Ported from Libraries/LibGfx/Rect.h:73 Gfx::Rect::translate_by for CssPixelRect.
+pub func css_pixel_rect_translate_by_css_pixels(this: CssPixelRect*, dboth: CssPixels):
+    css_pixel_point_translate_by_css_pixels(&this.m_location, dboth)
+
+## Ported from Libraries/LibGfx/Rect.h:74 Gfx::Rect::translate_by for CssPixelRect.
+pub func css_pixel_rect_translate_by_css_pixel_point(this: CssPixelRect*, delta: CssPixelPoint):
+    css_pixel_point_translate_by_css_pixel_point(&this.m_location, delta)
+
+## Ported from Libraries/LibGfx/Rect.h:76 Gfx::Rect::scale_by for CssPixelRect.
+pub func css_pixel_rect_scale_by_css_pixels_css_pixels(this: CssPixelRect*, dx: CssPixels, dy: CssPixels):
+    css_pixel_point_scale_by_css_pixels_css_pixels(&this.m_location, dx, dy)
+    css_pixel_size_scale_by_css_pixels_css_pixels(&this.m_size, dx, dy)
+
+## Ported from Libraries/LibGfx/Rect.h:81 Gfx::Rect::scale_by for CssPixelRect.
+pub func css_pixel_rect_scale_by_css_pixels(this: CssPixelRect*, dboth: CssPixels):
+    css_pixel_rect_scale_by_css_pixels_css_pixels(this, dboth, dboth)
+
+## Ported from Libraries/LibGfx/Rect.h:82 Gfx::Rect::scale_by for CssPixelRect.
+pub func css_pixel_rect_scale_by_css_pixel_point(this: CssPixelRect*, delta: CssPixelPoint):
+    css_pixel_rect_scale_by_css_pixels_css_pixels(this, css_pixel_point_x(&delta), css_pixel_point_y(&delta))
+
+## Ported from Libraries/LibGfx/Rect.h:84 Gfx::Rect::center for CssPixelRect.
+pub func css_pixel_rect_center(this: const CssPixelRect*) -> CssPixelPoint:
+    return CssPixelPoint(css_pixel_rect_x(this).add(css_pixels_halved(css_pixel_rect_width(this))), css_pixel_rect_y(this).add(css_pixels_halved(css_pixel_rect_height(this))))
+
+## Ported from Libraries/LibGfx/Rect.h:89 Gfx::Rect::set_location for CssPixelRect.
+pub func css_pixel_rect_set_location(this: CssPixelRect*, location: CssPixelPoint):
+    this.m_location = location
+
+## Ported from Libraries/LibGfx/Rect.h:94 Gfx::Rect::set_size for CssPixelRect.
+pub func css_pixel_rect_set_size_css_pixel_size(this: CssPixelRect*, size: CssPixelSize):
+    this.m_size = size
+
+## Ported from Libraries/LibGfx/Rect.h:99 Gfx::Rect::set_size for CssPixelRect.
+pub func css_pixel_rect_set_size_css_pixels(this: CssPixelRect*, width: CssPixels, height: CssPixels):
+    css_pixel_size_set_width(&this.m_size, width)
+    css_pixel_size_set_height(&this.m_size, height)
+
+# mark: Inflating and shrinking =================================================================
+
+## Ported from Libraries/LibGfx/Rect.h:105 Gfx::Rect::inflate for CssPixelRect.
+pub func css_pixel_rect_inflate_css_pixels_css_pixels(this: CssPixelRect*, w: CssPixels, h: CssPixels):
+    css_pixel_rect_set_x(this, css_pixel_rect_x(this).sub(css_pixels_halved(w)))
+    css_pixel_rect_set_width(this, css_pixel_rect_width(this).add(w))
+    css_pixel_rect_set_y(this, css_pixel_rect_y(this).sub(css_pixels_halved(h)))
+    css_pixel_rect_set_height(this, css_pixel_rect_height(this).add(h))
+
+## Ported from Libraries/LibGfx/Rect.h:113 Gfx::Rect::inflate for CssPixelRect.
+pub func css_pixel_rect_inflate_css_pixels_css_pixels_css_pixels(this: CssPixelRect*, top: CssPixels, right: CssPixels, bottom: CssPixels, left: CssPixels):
+    css_pixel_rect_set_x(this, css_pixel_rect_x(this).sub(left))
+    css_pixel_rect_set_width(this, css_pixel_rect_width(this).add(left).add(right))
+    css_pixel_rect_set_y(this, css_pixel_rect_y(this).sub(top))
+    css_pixel_rect_set_height(this, css_pixel_rect_height(this).add(top).add(bottom))
+
+## Ported from Libraries/LibGfx/Rect.h:121 Gfx::Rect::inflate for CssPixelRect.
+pub func css_pixel_rect_inflate_css_pixel_size(this: CssPixelRect*, size: CssPixelSize):
+    css_pixel_rect_set_x(this, css_pixel_rect_x(this).sub(css_pixels_halved(css_pixel_size_width(&size))))
+    css_pixel_rect_set_width(this, css_pixel_rect_width(this).add(css_pixel_size_width(&size)))
+    css_pixel_rect_set_y(this, css_pixel_rect_y(this).sub(css_pixels_halved(css_pixel_size_height(&size))))
+    css_pixel_rect_set_height(this, css_pixel_rect_height(this).add(css_pixel_size_height(&size)))
+
+## Ported from Libraries/LibGfx/Rect.h:129 Gfx::Rect::shrink for CssPixelRect.
+pub func css_pixel_rect_shrink_css_pixels_css_pixels(this: CssPixelRect*, w: CssPixels, h: CssPixels):
+    css_pixel_rect_set_x(this, css_pixel_rect_x(this).add(css_pixels_halved(w)))
+    css_pixel_rect_set_width(this, css_pixel_rect_width(this).sub(w))
+    css_pixel_rect_set_y(this, css_pixel_rect_y(this).add(css_pixels_halved(h)))
+    css_pixel_rect_set_height(this, css_pixel_rect_height(this).sub(h))
+
+## Ported from Libraries/LibGfx/Rect.h:137 Gfx::Rect::shrink for CssPixelRect.
+pub func css_pixel_rect_shrink_css_pixels_css_pixels_css_pixels(this: CssPixelRect*, top: CssPixels, right: CssPixels, bottom: CssPixels, left: CssPixels):
+    css_pixel_rect_set_x(this, css_pixel_rect_x(this).add(left))
+    css_pixel_rect_set_width(this, css_pixel_rect_width(this).sub(left.add(right)))
+    css_pixel_rect_set_y(this, css_pixel_rect_y(this).add(top))
+    css_pixel_rect_set_height(this, css_pixel_rect_height(this).sub(top.add(bottom)))
+
+## Ported from Libraries/LibGfx/Rect.h:145 Gfx::Rect::shrink for CssPixelRect.
+pub func css_pixel_rect_shrink_css_pixel_size(this: CssPixelRect*, size: CssPixelSize):
+    css_pixel_rect_set_x(this, css_pixel_rect_x(this).add(css_pixels_halved(css_pixel_size_width(&size))))
+    css_pixel_rect_set_width(this, css_pixel_rect_width(this).sub(css_pixel_size_width(&size)))
+    css_pixel_rect_set_y(this, css_pixel_rect_y(this).add(css_pixels_halved(css_pixel_size_height(&size))))
+    css_pixel_rect_set_height(this, css_pixel_rect_height(this).sub(css_pixel_size_height(&size)))
+
+## Ported from Libraries/LibGfx/Rect.h:153 Gfx::Rect::translated for CssPixelRect.
+pub func css_pixel_rect_translated_css_pixels_css_pixels(this: const CssPixelRect*, dx: CssPixels, dy: CssPixels) -> CssPixelRect:
+    var rect = *this
+    css_pixel_rect_translate_by_css_pixels_css_pixels(&rect, dx, dy)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:160 Gfx::Rect::translated for CssPixelRect.
+pub func css_pixel_rect_translated_css_pixels(this: const CssPixelRect*, dboth: CssPixels) -> CssPixelRect:
+    var rect = *this
+    css_pixel_rect_translate_by_css_pixels(&rect, dboth)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:167 Gfx::Rect::translated for CssPixelRect.
+pub func css_pixel_rect_translated_css_pixel_point(this: const CssPixelRect*, delta: CssPixelPoint) -> CssPixelRect:
+    var rect = *this
+    css_pixel_rect_translate_by_css_pixel_point(&rect, delta)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:174 Gfx::Rect::scaled for CssPixelRect.
+pub func css_pixel_rect_scaled_css_pixels(this: const CssPixelRect*, dboth: CssPixels) -> CssPixelRect:
+    var rect = *this
+    css_pixel_rect_scale_by_css_pixels(&rect, dboth)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:181 Gfx::Rect::scaled for CssPixelRect.
+pub func css_pixel_rect_scaled_css_pixels_css_pixels(this: const CssPixelRect*, sx: CssPixels, sy: CssPixels) -> CssPixelRect:
+    var rect = *this
+    css_pixel_rect_scale_by_css_pixels_css_pixels(&rect, sx, sy)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:188 Gfx::Rect::scaled for CssPixelRect.
+pub func css_pixel_rect_scaled_css_pixel_point(this: const CssPixelRect*, s: CssPixelPoint) -> CssPixelRect:
+    var rect = *this
+    css_pixel_rect_scale_by_css_pixel_point(&rect, s)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:195 Gfx::Rect::shrunken for CssPixelRect.
+pub func css_pixel_rect_shrunken_css_pixels_css_pixels(this: const CssPixelRect*, w: CssPixels, h: CssPixels) -> CssPixelRect:
+    var rect = *this
+    css_pixel_rect_shrink_css_pixels_css_pixels(&rect, w, h)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:202 Gfx::Rect::shrunken for CssPixelRect.
+pub func css_pixel_rect_shrunken_css_pixels_css_pixels_css_pixels(this: const CssPixelRect*, top: CssPixels, right: CssPixels, bottom: CssPixels, left: CssPixels) -> CssPixelRect:
+    var rect = *this
+    css_pixel_rect_shrink_css_pixels_css_pixels_css_pixels(&rect, top, right, bottom, left)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:209 Gfx::Rect::shrunken for CssPixelRect.
+pub func css_pixel_rect_shrunken_css_pixel_size(this: const CssPixelRect*, size: CssPixelSize) -> CssPixelRect:
+    var rect = *this
+    css_pixel_rect_shrink_css_pixel_size(&rect, size)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:216 Gfx::Rect::inflated for CssPixelRect.
+pub func css_pixel_rect_inflated_css_pixels_css_pixels(this: const CssPixelRect*, w: CssPixels, h: CssPixels) -> CssPixelRect:
+    var rect = *this
+    css_pixel_rect_inflate_css_pixels_css_pixels(&rect, w, h)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:223 Gfx::Rect::inflated for CssPixelRect.
+pub func css_pixel_rect_inflated_css_pixels_css_pixels_css_pixels(this: const CssPixelRect*, top: CssPixels, right: CssPixels, bottom: CssPixels, left: CssPixels) -> CssPixelRect:
+    var rect = *this
+    css_pixel_rect_inflate_css_pixels_css_pixels_css_pixels(&rect, top, right, bottom, left)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:230 Gfx::Rect::inflated for CssPixelRect.
+pub func css_pixel_rect_inflated_css_pixel_size(this: const CssPixelRect*, size: CssPixelSize) -> CssPixelRect:
+    var rect = *this
+    css_pixel_rect_inflate_css_pixel_size(&rect, size)
+    return rect
+
+# mark: Taking slices ===========================================================================
+
+## Ported from Libraries/LibGfx/Rect.h:237 Gfx::Rect::take_from_right for CssPixelRect.
+pub func css_pixel_rect_take_from_right(this: CssPixelRect*, w: CssPixels) -> CssPixelRect:
+    var w_ = w
+    if w_.gt(css_pixel_rect_width(this)):
+        w_ = css_pixel_rect_width(this)
+    var rect = *this
+    css_pixel_rect_set_width(this, css_pixel_rect_width(this).sub(w_))
+    css_pixel_rect_set_x(&rect, css_pixel_rect_x(this).add(css_pixel_rect_width(this)))
+    css_pixel_rect_set_width(&rect, w_)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:248 Gfx::Rect::take_from_left for CssPixelRect.
+pub func css_pixel_rect_take_from_left(this: CssPixelRect*, w: CssPixels) -> CssPixelRect:
+    var w_ = w
+    if w_.gt(css_pixel_rect_width(this)):
+        w_ = css_pixel_rect_width(this)
+    var rect = *this
+    css_pixel_rect_set_x(this, css_pixel_rect_x(this).add(w_))
+    css_pixel_rect_set_width(this, css_pixel_rect_width(this).sub(w_))
+    css_pixel_rect_set_width(&rect, w_)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:259 Gfx::Rect::take_from_top for CssPixelRect.
+pub func css_pixel_rect_take_from_top(this: CssPixelRect*, h: CssPixels) -> CssPixelRect:
+    var h_ = h
+    if h_.gt(css_pixel_rect_height(this)):
+        h_ = css_pixel_rect_height(this)
+    var rect = *this
+    css_pixel_rect_set_y(this, css_pixel_rect_y(this).add(h_))
+    css_pixel_rect_set_height(this, css_pixel_rect_height(this).sub(h_))
+    css_pixel_rect_set_height(&rect, h_)
+    return rect
+
+## Ported from Libraries/LibGfx/Rect.h:270 Gfx::Rect::take_from_bottom for CssPixelRect.
+pub func css_pixel_rect_take_from_bottom(this: CssPixelRect*, h: CssPixels) -> CssPixelRect:
+    var h_ = h
+    if h_.gt(css_pixel_rect_height(this)):
+        h_ = css_pixel_rect_height(this)
+    var rect = *this
+    css_pixel_rect_set_height(this, css_pixel_rect_height(this).sub(h_))
+    css_pixel_rect_set_y(&rect, css_pixel_rect_y(this).add(css_pixel_rect_height(this)))
+    css_pixel_rect_set_height(&rect, h_)
+    return rect
+
+# mark: Containment =============================================================================
+
+## Ported from Libraries/LibGfx/Rect.h:281 Gfx::Rect::contains_vertically for CssPixelRect.
+pub func css_pixel_rect_contains_vertically(this: const CssPixelRect*, y: CssPixels) -> bool:
+    return y.ge(css_pixel_rect_top(this)) and y.lt(css_pixel_rect_bottom(this))
+
+## Ported from Libraries/LibGfx/Rect.h:286 Gfx::Rect::contains_horizontally for CssPixelRect.
+pub func css_pixel_rect_contains_horizontally(this: const CssPixelRect*, x: CssPixels) -> bool:
+    return x.ge(css_pixel_rect_left(this)) and x.lt(css_pixel_rect_right(this))
+
+## Ported from Libraries/LibGfx/Rect.h:291 Gfx::Rect::contains for CssPixelRect.
+pub func css_pixel_rect_contains_css_pixels(this: const CssPixelRect*, x: CssPixels, y: CssPixels) -> bool:
+    return css_pixel_rect_contains_horizontally(this, x) and css_pixel_rect_contains_vertically(this, y)
+
+## Ported from Libraries/LibGfx/Rect.h:296 Gfx::Rect::contains for CssPixelRect.
+pub func css_pixel_rect_contains_css_pixel_point(this: const CssPixelRect*, point: CssPixelPoint) -> bool:
+    return css_pixel_rect_contains_css_pixels(this, css_pixel_point_x(&point), css_pixel_point_y(&point))
+
+## Ported from Libraries/LibGfx/Rect.h:301 Gfx::Rect::contains for CssPixelRect.
+pub func css_pixel_rect_contains_css_pixel_rect(this: const CssPixelRect*, other: CssPixelRect) -> bool:
+    return (css_pixel_rect_left(this).le(css_pixel_rect_left(&other))
+        and css_pixel_rect_right(this).ge(css_pixel_rect_right(&other))
+        and css_pixel_rect_top(this).le(css_pixel_rect_top(&other))
+        and css_pixel_rect_bottom(this).ge(css_pixel_rect_bottom(&other)))
+
+## Ported from Libraries/LibGfx/Rect.h:310 Gfx::Rect::contains<Container> for CssPixelRect.
+pub func css_pixel_rect_contains_t_container(this: const CssPixelRect*, others: const CssPixelRect[]) -> bool:
+    var have_any = false
+    for other in others:
+        if not css_pixel_rect_contains_css_pixel_rect(this, other):
+            return false
+        have_any = true
+    return have_any
+
+# mark: Orientation =============================================================================
+
+## Ported from Libraries/LibGfx/Rect.h:321 Gfx::Rect::primary_offset_for_orientation for CssPixelRect.
+pub func css_pixel_rect_primary_offset_for_orientation(this: const CssPixelRect*, orientation: Orientation) -> CssPixels:
+    return css_pixel_point_primary_offset_for_orientation(&this.m_location, orientation)
+
+## Ported from Libraries/LibGfx/Rect.h:322 Gfx::Rect::set_primary_offset_for_orientation for CssPixelRect.
+pub func css_pixel_rect_set_primary_offset_for_orientation(this: CssPixelRect*, orientation: Orientation, value: CssPixels):
+    css_pixel_point_set_primary_offset_for_orientation(&this.m_location, orientation, value)
+
+## Ported from Libraries/LibGfx/Rect.h:323 Gfx::Rect::secondary_offset_for_orientation for CssPixelRect.
+pub func css_pixel_rect_secondary_offset_for_orientation(this: const CssPixelRect*, orientation: Orientation) -> CssPixels:
+    return css_pixel_point_secondary_offset_for_orientation(&this.m_location, orientation)
+
+## Ported from Libraries/LibGfx/Rect.h:324 Gfx::Rect::set_secondary_offset_for_orientation for CssPixelRect.
+pub func css_pixel_rect_set_secondary_offset_for_orientation(this: CssPixelRect*, orientation: Orientation, value: CssPixels):
+    css_pixel_point_set_secondary_offset_for_orientation(&this.m_location, orientation, value)
+
+## Ported from Libraries/LibGfx/Rect.h:325 Gfx::Rect::translate_primary_offset_for_orientation for CssPixelRect.
+pub func css_pixel_rect_translate_primary_offset_for_orientation(this: CssPixelRect*, orientation: Orientation, delta: CssPixels):
+    css_pixel_point_set_primary_offset_for_orientation(&this.m_location, orientation, css_pixel_point_primary_offset_for_orientation(&this.m_location, orientation).add(delta))
+
+## Ported from Libraries/LibGfx/Rect.h:326 Gfx::Rect::translate_secondary_offset_for_orientation for CssPixelRect.
+pub func css_pixel_rect_translate_secondary_offset_for_orientation(this: CssPixelRect*, orientation: Orientation, delta: CssPixels):
+    css_pixel_point_set_secondary_offset_for_orientation(&this.m_location, orientation, css_pixel_point_secondary_offset_for_orientation(&this.m_location, orientation).add(delta))
+
+## Ported from Libraries/LibGfx/Rect.h:328 Gfx::Rect::primary_size_for_orientation for CssPixelRect.
+pub func css_pixel_rect_primary_size_for_orientation(this: const CssPixelRect*, orientation: Orientation) -> CssPixels:
+    return css_pixel_size_primary_size_for_orientation(&this.m_size, orientation)
+
+## Ported from Libraries/LibGfx/Rect.h:329 Gfx::Rect::secondary_size_for_orientation for CssPixelRect.
+pub func css_pixel_rect_secondary_size_for_orientation(this: const CssPixelRect*, orientation: Orientation) -> CssPixels:
+    return css_pixel_size_secondary_size_for_orientation(&this.m_size, orientation)
+
+## Ported from Libraries/LibGfx/Rect.h:330 Gfx::Rect::set_primary_size_for_orientation for CssPixelRect.
+pub func css_pixel_rect_set_primary_size_for_orientation(this: CssPixelRect*, orientation: Orientation, value: CssPixels):
+    css_pixel_size_set_primary_size_for_orientation(&this.m_size, orientation, value)
+
+## Ported from Libraries/LibGfx/Rect.h:331 Gfx::Rect::set_secondary_size_for_orientation for CssPixelRect.
+pub func css_pixel_rect_set_secondary_size_for_orientation(this: CssPixelRect*, orientation: Orientation, value: CssPixels):
+    css_pixel_size_set_secondary_size_for_orientation(&this.m_size, orientation, value)
+
+## Ported from Libraries/LibGfx/Rect.h:333 Gfx::Rect::inflate_primary_for_orientation for CssPixelRect.
+pub func css_pixel_rect_inflate_primary_for_orientation(this: CssPixelRect*, orientation: Orientation, before: CssPixels, after: CssPixels):
+    if orientation == Orientation.horizontal:
+        css_pixel_rect_inflate_css_pixels_css_pixels_css_pixels(this, css_pixels_from_int(0), after, css_pixels_from_int(0), before)
+    else:
+        css_pixel_rect_inflate_css_pixels_css_pixels_css_pixels(this, before, css_pixels_from_int(0), after, css_pixels_from_int(0))
+
+## Ported from Libraries/LibGfx/Rect.h:341 Gfx::Rect::inflate_secondary_for_orientation for CssPixelRect.
+pub func css_pixel_rect_inflate_secondary_for_orientation(this: CssPixelRect*, orientation: Orientation, before: CssPixels, after: CssPixels):
+    if orientation == Orientation.horizontal:
+        css_pixel_rect_inflate_css_pixels_css_pixels_css_pixels(this, before, css_pixels_from_int(0), after, css_pixels_from_int(0))
+    else:
+        css_pixel_rect_inflate_css_pixels_css_pixels_css_pixels(this, css_pixels_from_int(0), after, css_pixels_from_int(0), before)

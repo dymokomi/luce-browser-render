@@ -19,31 +19,101 @@ pub struct DevicePixelsDecl:
 # mark: CssPixels ===============================================================================
 
 ## Web::CSSPixels (Libraries/LibWeb/PixelUnits.h:61).
-pub struct CssPixels:
+##
+## The C++ operators are the free functions of pixel_units.lucb (`css_pixels_add_css_pixels`,
+## ...). The one-line methods below forward to them so that `a + b * c` reads
+## `a.add(b.mul(c))` (DESIGN.md §2.8), and `compare` makes it Comparable for ak.min/max/clamp;
+## they were added by hand (region r08).
+pub struct CssPixels: luce.Comparable:
     pub var m_value: i32  # C++ default: { 0 }
+
+    ## Comparable (for ak.min, ak.max, ak.clamp): CSSPixels::operator<=>.
+    pub func compare(other: CssPixels) -> i64: return (i64)css_pixels_cmp(&self, other)
+
+    ## CSSPixels::from_raw.
+    pub static func from_raw(value: i32) -> CssPixels: return css_pixels_from_raw(value)
+
+    ## CSSPixels(I) for a signed integer (saturating).
+    pub static func from_int(value: i64) -> CssPixels: return css_pixels_from_int(value)
+
+    ## explicit CSSPixels(float): the nearest value.
+    pub static func from_f32(value: f32) -> CssPixels: return css_pixels_from_f32(value)
+
+    ## explicit CSSPixels(double): the nearest value.
+    pub static func from_f64(value: f64) -> CssPixels: return css_pixels_from_f64(value)
+
+    ## CSSPixels::raw_value.
+    pub func raw_value() -> i32: return self.m_value
+
+    ## CSSPixels::to_float.
+    pub func to_float() -> f32: return css_pixels_to_float_const(&self)
+
+    ## CSSPixels::to_double.
+    pub func to_double() -> f64: return css_pixels_to_double_const(&self)
+
+    ## CSSPixels::to_int.
+    pub func to_int() -> i32: return css_pixels_to_int_const(&self)
+
+    ## CSSPixels::might_be_saturated.
+    pub func might_be_saturated() -> bool: return css_pixels_might_be_saturated(&self)
+
+    ## CSSPixels::operator+ (saturating).
+    pub func add(other: CssPixels) -> CssPixels: return css_pixels_add_css_pixels(&self, other)
+
+    ## CSSPixels::operator- (saturating).
+    pub func sub(other: CssPixels) -> CssPixels: return css_pixels_sub(&self, other)
+
+    ## CSSPixels::operator* (rounds half to even).
+    pub func mul(other: CssPixels) -> CssPixels: return css_pixels_mul_css_pixels(&self, other)
+
+    ## CSSPixels::operator*(CSSPixelFraction).
+    pub func mul_fraction(other: CssPixelFraction) -> CssPixels: return css_pixels_mul_css_pixel_fraction(&self, other)
+
+    ## CSSPixels::operator/(CSSPixels): the exact fraction.
+    pub func div(other: CssPixels) -> CssPixelFraction: return css_pixels_div_css_pixels(&self, other)
+
+    ## CSSPixels::operator/(CSSPixelFraction).
+    pub func div_fraction(other: CssPixelFraction) -> CssPixels: return css_pixels_div_css_pixel_fraction(&self, other)
+
+    ## Unary CSSPixels::operator-.
+    pub func neg() -> CssPixels: return css_pixels_neg(&self)
+
+    ## CSSPixels::abs.
+    pub func abs() -> CssPixels: return css_pixels_abs(&self)
+
+    ## CSSPixels::operator<=>: -1, 0 or 1.
+    pub func cmp(other: CssPixels) -> i32: return css_pixels_cmp(&self, other)
+
+    ## CSSPixels < CSSPixels.
+    pub func lt(other: CssPixels) -> bool: return self.m_value < other.m_value
+
+    ## CSSPixels <= CSSPixels.
+    pub func le(other: CssPixels) -> bool: return self.m_value <= other.m_value
+
+    ## CSSPixels > CSSPixels.
+    pub func gt(other: CssPixels) -> bool: return self.m_value > other.m_value
+
+    ## CSSPixels >= CSSPixels.
+    pub func ge(other: CssPixels) -> bool: return self.m_value >= other.m_value
 
 ## Web::CSSPixels::fractional_bits (Libraries/LibWeb/PixelUnits.h:63).
 pub let css_pixels_fractional_bits: i32 = 6
 
 ## Web::CSSPixels::fixed_point_denominator (Libraries/LibWeb/PixelUnits.h:64).
-# C++ initializer: 1 << fractional_bits
-pub var css_pixels_fixed_point_denominator: i32
+pub let css_pixels_fixed_point_denominator: i32 = 1 << css_pixels_fractional_bits
 
 ## Web::CSSPixels::radix_mask (Libraries/LibWeb/PixelUnits.h:66).
-# C++ initializer: fixed_point_denominator - 1
-pub var css_pixels_radix_mask: i32
+pub let css_pixels_radix_mask: i32 = css_pixels_fixed_point_denominator - 1
 
 ## Web::CSSPixels::max_integer_value (Libraries/LibWeb/PixelUnits.h:68).
-# C++ initializer: NumericLimits < int > :: max ( ) >> fractional_bits
-pub var css_pixels_max_integer_value: i32
+pub let css_pixels_max_integer_value: i32 = 2147483647 >> css_pixels_fractional_bits
 
 ## Web::CSSPixels::min_integer_value (Libraries/LibWeb/PixelUnits.h:69).
-# C++ initializer: NumericLimits < int > :: min ( ) >> fractional_bits
-pub var css_pixels_min_integer_value: i32
+pub let css_pixels_min_integer_value: i32 = -2147483648 >> css_pixels_fractional_bits
 
+# NOTE: This is apparently the largest value allowed by Firefox. Probably enough for us as well.
 ## Web::CSSPixels::max_dimension_value (Libraries/LibWeb/PixelUnits.h:72).
-# C++ initializer: 17895700
-pub var css_pixels_max_dimension_value: f32
+pub let css_pixels_max_dimension_value: f32 = 17895700.0
 
 # mark: CssPixelFraction ========================================================================
 

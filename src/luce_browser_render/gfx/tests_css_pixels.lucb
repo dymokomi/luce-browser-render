@@ -1,0 +1,172 @@
+#==============================================================================================
+#
+#   tests_css_pixels - Tests/LibWeb/TestCSSPixels.cpp
+#
+#   DESCRIPTION:
+#       Port of Tests/LibWeb/TestCSSPixels.cpp (lines 1-157), every case. `CSSPixels(n)` with an
+#       integer is css_pixels_from_int, with a double css_pixels_from_f64; EXPECT_EQ on two
+#       CSSPixels compares the raw values.
+#
+#       Each test's body is a noinline function the test block calls, so that the test
+#       runner's `main` does not inline every body (# workaround:
+#       compiler-issues/ranges_facts_cubic).
+#
+#==============================================================================================
+
+test "css_pixels: addition1":
+    test_css_pixels_addition1()
+
+noinline func test_css_pixels_addition1():
+    let a = css_pixels_from_int(10)
+    let b = css_pixels_from_int(20)
+    let c = a.add(b)
+    assert(c == css_pixels_from_int(30))
+
+test "css_pixels: subtraction1":
+    test_css_pixels_subtraction1()
+
+noinline func test_css_pixels_subtraction1():
+    let a = css_pixels_from_int(30)
+    let b = css_pixels_from_int(10)
+    let c = a.sub(b)
+    assert(c == css_pixels_from_int(20))
+
+test "css_pixels: division1":
+    test_css_pixels_division1()
+
+noinline func test_css_pixels_division1():
+    var a = css_pixels_from_int(10)
+    var b = css_pixels_from_int(5)
+    let quotient = a.div(b)
+    let c = css_pixel_fraction_to_css_pixels(&quotient)
+    assert(c == css_pixels_from_int(2))
+
+    a = css_pixels_from_raw(0x3FFFFFFF)  # int_max / 2
+    b = css_pixels_from_f64(0.25)
+    assert(not a.might_be_saturated())
+    let saturated = a.div(b)
+    assert(css_pixel_fraction_might_be_saturated(&saturated))
+
+test "css_pixels: multiplication1":
+    test_css_pixels_multiplication1()
+
+noinline func test_css_pixels_multiplication1():
+    var a = css_pixels_from_int(3)
+    var b = css_pixels_from_int(4)
+    let c = a.mul(b)
+    assert(c == css_pixels_from_int(12))
+
+    # Temporary overflow
+    a = css_pixels_from_raw((i32)(0xFFFFFFFF >> (css_pixels_fractional_bits + 1)))
+    b = css_pixels_from_int(1)
+    assert(a.mul(b) == a)
+
+    # Rounding
+    a = css_pixels_from_raw(0b01000001)
+    b = css_pixels_from_raw(0b01100000)
+    assert(a.mul(b) == css_pixels_from_f64(a.to_double() * b.to_double()))
+    assert(a.mul(b.neg()) == css_pixels_from_f64(a.to_double() * -b.to_double()))
+
+    assert(css_pixels_from_raw(0b010000011).mul(css_pixels_from_raw(0b00010000)) == css_pixels_from_raw(0b000100001))
+    assert(css_pixels_from_raw(0b010000111).mul(css_pixels_from_raw(0b00010000)) == css_pixels_from_raw(0b000100010))
+
+test "css_pixels: addition2":
+    test_css_pixels_addition2()
+
+noinline func test_css_pixels_addition2():
+    var a = css_pixels_from_int(3)
+    discard(css_pixels_add_assign(&a, css_pixels_from_int(2)))
+    assert(a == css_pixels_from_int(5))
+
+test "css_pixels: to_double":
+    test_css_pixels_to_double()
+
+noinline func test_css_pixels_to_double():
+    let a = css_pixels_from_int(10)
+    assert(a.to_double() == 10.0)
+
+test "css_pixels: to_float":
+    test_css_pixels_to_float()
+
+noinline func test_css_pixels_to_float():
+    let a = css_pixels_from_int(11)
+    assert(a.to_float() == 11.0)
+
+test "css_pixels: to_int":
+    test_css_pixels_to_int()
+
+noinline func test_css_pixels_to_int():
+    let b = css_pixels_from_int(12)
+    assert(b.to_int() == 12)
+
+test "css_pixels: comparison1":
+    test_css_pixels_comparison1()
+
+noinline func test_css_pixels_comparison1():
+    assert(css_pixels_from_int(1).lt(css_pixels_from_int(2)) == true)
+
+test "css_pixels: comparison2":
+    test_css_pixels_comparison2()
+
+noinline func test_css_pixels_comparison2():
+    assert((css_pixels_from_int(123) == css_pixels_from_int(123)) == true)
+
+test "css_pixels: saturated_addition":
+    test_css_pixels_saturated_addition()
+
+noinline func test_css_pixels_saturated_addition():
+    let infinity = f32.bits(0x7f800000)
+    assert(css_pixels_from_f32(infinity) == css_pixels_from_f32(infinity).add(css_pixels_from_int(1)))
+
+test "css_pixels: saturated_subtraction":
+    test_css_pixels_saturated_subtraction()
+
+noinline func test_css_pixels_saturated_subtraction():
+    let value = css_pixels_from_f32(f32.bits(0x7f800000))
+    assert(value.sub(css_pixels_from_int(-1)) == css_pixels_from_f32(f32.bits(0x7f800000)))
+
+test "css_pixels: multiplication_uses_i64_for_raw_values":
+    test_css_pixels_multiplication_uses_i64_for_raw_values()
+
+noinline func test_css_pixels_multiplication_uses_i64_for_raw_values():
+    let a = css_pixels_from_int(1200)
+    let b = css_pixels_from_int(647)
+    let c = a.mul(b)
+    assert(c == css_pixels_from_int(776400))
+
+test "css_pixels: rounding":
+    test_css_pixels_rounding()
+
+noinline func test_css_pixels_rounding():
+    assert(ceil(css_pixels_from_int(0)) == css_pixels_from_int(0))
+    assert(ceil(css_pixels_from_f64(0.5)) == css_pixels_from_int(1))
+    assert(ceil(css_pixels_from_f64(1.3)) == css_pixels_from_int(2))
+    assert(ceil(css_pixels_from_f64(1.5)) == css_pixels_from_int(2))
+    assert(ceil(css_pixels_from_f64(1.7)) == css_pixels_from_int(2))
+
+    assert(ceil(css_pixels_from_f64(-0.5)) == css_pixels_from_int(0))
+    assert(ceil(css_pixels_from_f64(-1.3)) == css_pixels_from_int(-1))
+    assert(ceil(css_pixels_from_f64(-1.5)) == css_pixels_from_int(-1))
+    assert(ceil(css_pixels_from_f64(-1.7)) == css_pixels_from_int(-1))
+
+    assert(floor(css_pixels_from_int(0)) == css_pixels_from_int(0))
+    assert(floor(css_pixels_from_f64(0.5)) == css_pixels_from_int(0))
+    assert(floor(css_pixels_from_f64(1.3)) == css_pixels_from_int(1))
+    assert(floor(css_pixels_from_f64(1.5)) == css_pixels_from_int(1))
+    assert(floor(css_pixels_from_f64(1.7)) == css_pixels_from_int(1))
+
+    assert(floor(css_pixels_from_f64(-0.5)) == css_pixels_from_int(-1))
+    assert(floor(css_pixels_from_f64(-1.3)) == css_pixels_from_int(-2))
+    assert(floor(css_pixels_from_f64(-1.5)) == css_pixels_from_int(-2))
+    assert(floor(css_pixels_from_f64(-1.7)) == css_pixels_from_int(-2))
+
+    assert(round(css_pixels_from_int(0)) == css_pixels_from_int(0))
+    assert(round(css_pixels_from_f64(0.5)) == css_pixels_from_int(1))
+    assert(round(css_pixels_from_f64(1.3)) == css_pixels_from_int(1))
+    assert(round(css_pixels_from_f64(1.5)) == css_pixels_from_int(2))
+    assert(round(css_pixels_from_f64(1.7)) == css_pixels_from_int(2))
+
+    assert(round(css_pixels_from_f64(-0.5)) == css_pixels_from_int(-1))
+    assert(round(css_pixels_from_f64(-1.3)) == css_pixels_from_int(-1))
+    assert(round(css_pixels_from_f64(-1.5)) == css_pixels_from_int(-2))
+    assert(round(css_pixels_from_f64(-1.7)) == css_pixels_from_int(-2))

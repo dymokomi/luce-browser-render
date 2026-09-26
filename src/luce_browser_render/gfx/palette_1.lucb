@@ -1,0 +1,121 @@
+#==============================================================================================
+#
+#   palette_1 - PaletteImpl, and Palette's constructor and setters
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/Palette.h (lines 19-56: PaletteImpl's inline members) and
+#       Palette.cpp (lines 11-93): creating and cloning a PaletteImpl over the SystemTheme in
+#       its AnonymousBuffer, reading its colors, alignments, flags, metrics and paths, and
+#       Palette's constructor and setters. Palette's inline accessors are in palette_2.
+#
+#       No reference counts (DESIGN.md §3.3): the C++ setters clone the PaletteImpl when it
+#       is shared (`m_impl->ref_count() != 1`) and write it in place otherwise. This port
+#       cannot see whether it is shared, so the setters always clone (copy-on-write that
+#       never writes a shared theme); only the identity of an unshared PaletteImpl differs.
+#
+#==============================================================================================
+
+# mark: PaletteImpl =============================================================================
+
+## Ported from Libraries/LibGfx/Palette.cpp:13 Gfx::PaletteImpl::create_with_anonymous_buffer.
+pub func palette_impl_create_with_anonymous_buffer(buffer: CoreAnonymousBuffer) -> PaletteImpl*:
+    let impl = new PaletteImpl else trap("out of memory")
+    palette_impl_construct(impl, buffer)
+    return impl
+
+## Ported from Libraries/LibGfx/Palette.cpp:18 Gfx::PaletteImpl::PaletteImpl.
+pub func palette_impl_construct(this: PaletteImpl*, buffer: CoreAnonymousBuffer):
+    this.m_theme_buffer = buffer
+
+## Ported from Libraries/LibGfx/Palette.h:28 Gfx::PaletteImpl::color.
+pub func palette_impl_color(this: const PaletteImpl*, role: ColorRole) -> Color:
+    assert((i32)role < (i32)ColorRole.count)
+    return color_from_bgra(palette_impl_theme(this).color[(i32)role])
+
+## Ported from Libraries/LibGfx/Palette.h:34 Gfx::PaletteImpl::alignment.
+pub func palette_impl_alignment(this: const PaletteImpl*, role: AlignmentRole) -> TextAlignment:
+    assert((i32)role < (i32)AlignmentRole.count)
+    return palette_impl_theme(this).alignment[(i32)role]
+
+## Ported from Libraries/LibGfx/Palette.h:40 Gfx::PaletteImpl::flag.
+pub func palette_impl_flag(this: const PaletteImpl*, role: FlagRole) -> bool:
+    assert((i32)role < (i32)FlagRole.count)
+    return palette_impl_theme(this).flag[(i32)role]
+
+## Ported from Libraries/LibGfx/Palette.cpp:28 Gfx::PaletteImpl::metric.
+pub func palette_impl_metric(this: const PaletteImpl*, role: MetricRole) -> i32:
+    assert((i32)role < (i32)MetricRole.count)
+    return palette_impl_theme(this).metric[(i32)role]
+
+## Ported from Libraries/LibGfx/Palette.cpp:34 Gfx::PaletteImpl::path.
+pub func palette_impl_path(this: const PaletteImpl*, role: PathRole) -> ak.ByteString:
+    assert((i32)role < (i32)PathRole.count)
+    # ByteString(char const*): the characters up to the NUL.
+    let path: const u8[] = palette_impl_theme(this).path[(i32)role]
+    var length: usize = 0
+    while length < path.length and path[length] != 0:
+        length += 1
+    return ak.byte_string_from_string_view(ak.string_view_from_bytes(path[0..<length]))
+
+## Ported from Libraries/LibGfx/Palette.h:48 Gfx::PaletteImpl::theme.
+pub func palette_impl_theme(this: const PaletteImpl*) -> const SystemTheme*:
+    let data = core_anonymous_buffer_data(&this.m_theme_buffer) else trap("null theme buffer")
+    return (const SystemTheme*)data
+
+## Ported from Libraries/LibGfx/Palette.cpp:40 Gfx::PaletteImpl::clone.
+pub func palette_impl_clone(this: const PaletteImpl*) -> PaletteImpl*:
+    let size = core_anonymous_buffer_size(&this.m_theme_buffer)
+    let new_theme_buffer = core_anonymous_buffer_create_with_size(size) else trap("release_value")
+    let destination = core_anonymous_buffer_data(&new_theme_buffer) else trap("null theme buffer")
+    # memcpy(new_theme_buffer.data<SystemTheme>(), &theme(), m_theme_buffer.size());
+    memory.copy(u8[]((u8*)destination, size), u8[]((u8*)palette_impl_theme(this), size), size)
+    return palette_impl_create_with_anonymous_buffer(new_theme_buffer)
+
+## Ported from Libraries/LibGfx/Palette.cpp:88 Gfx::PaletteImpl::replace_internal_buffer.
+pub func palette_impl_replace_internal_buffer(this: PaletteImpl*, buffer: CoreAnonymousBuffer):
+    this.m_theme_buffer = buffer
+
+# mark: Palette =================================================================================
+
+## Ported from Libraries/LibGfx/Palette.cpp:23 Gfx::Palette::Palette.
+pub func palette_construct(this: Palette*, impl: PaletteImpl*):
+    this.m_impl = impl
+
+## The theme a Palette setter writes: `const_cast<SystemTheme&>(impl().theme())`, after the
+## copy-on-write clone (`if (m_impl->ref_count() != 1) m_impl = m_impl->clone();`), which this
+## port always takes (see the header).
+func palette_writable_theme(this: Palette*) -> SystemTheme*:
+    this.m_impl = palette_impl_clone(this.m_impl)
+    return (SystemTheme*)palette_impl_theme(palette_impl(this))
+
+## Ported from Libraries/LibGfx/Palette.cpp:47 Gfx::Palette::set_color.
+pub func palette_set_color(this: Palette*, role: ColorRole, color: Color):
+    let theme = palette_writable_theme(this)
+    theme.color[(i32)role] = color_value(&color)
+
+## Ported from Libraries/LibGfx/Palette.cpp:55 Gfx::Palette::set_alignment.
+pub func palette_set_alignment(this: Palette*, role: AlignmentRole, value: TextAlignment):
+    let theme = palette_writable_theme(this)
+    theme.alignment[(i32)role] = value
+
+## Ported from Libraries/LibGfx/Palette.cpp:63 Gfx::Palette::set_flag.
+pub func palette_set_flag(this: Palette*, role: FlagRole, value: bool):
+    let theme = palette_writable_theme(this)
+    theme.flag[(i32)role] = value
+
+## Ported from Libraries/LibGfx/Palette.cpp:71 Gfx::Palette::set_metric.
+pub func palette_set_metric(this: Palette*, role: MetricRole, value: i32):
+    let theme = palette_writable_theme(this)
+    theme.metric[(i32)role] = value
+
+## Ported from Libraries/LibGfx/Palette.cpp:79 Gfx::Palette::set_path.
+pub func palette_set_path(this: Palette*, role: PathRole, path: ak.ByteString):
+    let theme = palette_writable_theme(this)
+    let destination: u8[] = theme.path[(i32)role]
+    # memcpy(theme.path[role], path.characters(), min(path.length() + 1, sizeof(theme.path[role])));
+    # path.characters() is NUL-terminated, so the copy of length() + 1 bytes ends with the NUL.
+    let characters = ak.byte_string_bytes(&path)
+    let count = ak.min(characters.length + 1, destination.length)
+    for i in 0..<count:
+        destination[i] = characters[i] if i < characters.length else 0
+    destination[destination.length - 1] = 0

@@ -1,0 +1,571 @@
+#==============================================================================================
+#
+#   tests_affine_transform - AffineTransform, Matrix<4, float> and Matrix4x4, pinned
+#
+#   DESCRIPTION:
+#       Values computed by the donor's AffineTransform.cpp, Matrix.h and Matrix4x4.h (Ladybird
+#       47c82b38d0, compiled locally); the donor has no unit tests for these files. Floats are
+#       compared by their bits. The helpers (`test_affine`, `test_sample_matrix`, ...) are in
+#       tests_rect.lucb.
+#
+#       Each test's body is a noinline function the test block calls, so that the test
+#       runner's `main` does not inline every body (# workaround:
+#       compiler-issues/ranges_facts_cubic).
+#
+#==============================================================================================
+
+test "affine_transform: default_is_identity":
+    test_affine_transform_default_is_identity()
+
+# C++:  AffineTransform().is_identity()
+noinline func test_affine_transform_default_is_identity():
+    var t: AffineTransform
+    affine_transform_construct(&t)
+    assert((affine_transform_is_identity(&t)) == true)
+
+test "affine_transform: translation_is_identity_or_translation":
+    test_affine_transform_translation_is_identity_or_translation()
+
+# C++: AffineTransform t; t.translate(3, 4); t.is_identity_or_translation()
+noinline func test_affine_transform_translation_is_identity_or_translation():
+    var t = test_affine_identity()
+    discard(affine_transform_translate_f32(&t, 3.0, 4.0))
+    assert((affine_transform_is_identity_or_translation(&t)) == true)
+
+test "affine_transform: scale_is_identity_or_translation_or_scale":
+    test_affine_transform_scale_is_identity_or_translation_or_scale()
+
+# C++: t.is_identity_or_translation_or_scale() && !t.is_identity_or_translation()
+noinline func test_affine_transform_scale_is_identity_or_translation_or_scale():
+    var t = test_affine_identity()
+    discard(affine_transform_scale_f32(&t, 3.0, 4.0))
+    assert((affine_transform_is_identity_or_translation_or_scale(&t) and not affine_transform_is_identity_or_translation(&t)) == true)
+
+test "affine_transform: translate_scale_rotate":
+    test_affine_transform_translate_scale_rotate()
+
+# C++: fb(t.a()); fb(t.b()); fb(t.c()); fb(t.d()); fb(t.e()); fb(t.f())
+noinline func test_affine_transform_translate_scale_rotate():
+    var t = test_affine_identity()
+    discard(affine_transform_translate_f32(&t, 10.0, -5.0))
+    discard(affine_transform_scale_f32(&t, 2.0, 0.5))
+    discard(affine_transform_rotate_radians(&t, 0.3))
+    assert((i64)(affine_transform_a(&t).bits()) == 1072992495)
+    assert((i64)(affine_transform_b(&t).bits()) == 1041714797)
+    assert((i64)(affine_transform_c(&t).bits()) == 3205975661)
+    assert((i64)(affine_transform_d(&t).bits()) == 1056215279)
+    assert((i64)(affine_transform_e(&t).bits()) == 1092616192)
+    assert((i64)(affine_transform_f(&t).bits()) == 3231711232)
+
+test "affine_transform: rotate_then_translate":
+    test_affine_transform_rotate_then_translate()
+
+# C++: fb(t.a()); fb(t.b()); fb(t.c()); fb(t.d()); fb(t.e()); fb(t.f())
+noinline func test_affine_transform_rotate_then_translate():
+    var t = test_affine_identity()
+    discard(affine_transform_rotate_radians(&t, 1.0))
+    discard(affine_transform_translate_float_point(&t, FloatPoint(3.0, 4.0)))
+    assert((i64)(affine_transform_a(&t).bits()) == 1057640768)
+    assert((i64)(affine_transform_b(&t).bits()) == 1062693540)
+    assert((i64)(affine_transform_c(&t).bits()) == 3210177188)
+    assert((i64)(affine_transform_d(&t).bits()) == 1057640768)
+    assert((i64)(affine_transform_e(&t).bits()) == 3219086184)
+    assert((i64)(affine_transform_f(&t).bits()) == 1083568286)
+
+test "affine_transform: skew":
+    test_affine_transform_skew()
+
+# C++: fb(t.a()); fb(t.b()); fb(t.c()); fb(t.d()); fb(t.e()); fb(t.f())
+noinline func test_affine_transform_skew():
+    var t = test_affine(1.0, 2.0, 3.0, 4.0, 5.0, 6.0)
+    discard(affine_transform_skew_radians(&t, 0.25, -0.5))
+    assert((i64)(affine_transform_a(&t).bits()) == 3206778736)
+    assert((i64)(affine_transform_b(&t).bits()) == 3191711664)
+    assert((i64)(affine_transform_c(&t).bits()) == 1079007110)
+    assert((i64)(affine_transform_d(&t).bits()) == 1083201414)
+    assert((i64)(affine_transform_e(&t).bits()) == 1084227584)
+    assert((i64)(affine_transform_f(&t).bits()) == 1086324736)
+
+test "affine_transform: set_scale_set_translation":
+    test_affine_transform_set_scale_set_translation()
+
+# C++: fb(t.a()); fb(t.b()); fb(t.c()); fb(t.d()); fb(t.e()); fb(t.f())
+noinline func test_affine_transform_set_scale_set_translation():
+    var t = test_affine(1.0, 2.0, 3.0, 4.0, 5.0, 6.0)
+    discard(affine_transform_set_scale_float_point(&t, FloatPoint(7.0, 8.0)))
+    discard(affine_transform_set_translation_f32(&t, 9.0, 10.0))
+    assert((i64)(affine_transform_a(&t).bits()) == 1088421888)
+    assert((i64)(affine_transform_b(&t).bits()) == 0)
+    assert((i64)(affine_transform_c(&t).bits()) == 0)
+    assert((i64)(affine_transform_d(&t).bits()) == 1090519040)
+    assert((i64)(affine_transform_e(&t).bits()) == 1091567616)
+    assert((i64)(affine_transform_f(&t).bits()) == 1092616192)
+
+test "affine_transform: multiply":
+    test_affine_transform_multiply()
+
+# C++: fb(t.a()); fb(t.b()); fb(t.c()); fb(t.d()); fb(t.e()); fb(t.f())
+noinline func test_affine_transform_multiply():
+    var t = test_affine(1.0, 2.0, 3.0, 4.0, 5.0, 6.0)
+    discard(affine_transform_multiply(&t, test_affine(0.5, -1.0, 2.0, 0.25, -3.0, 7.0)))
+    assert((i64)(affine_transform_a(&t).bits()) == 3223322624)
+    assert((i64)(affine_transform_b(&t).bits()) == 3225419776)
+    assert((i64)(affine_transform_c(&t).bits()) == 1076887552)
+    assert((i64)(affine_transform_d(&t).bits()) == 1084227584)
+    assert((i64)(affine_transform_e(&t).bits()) == 1102577664)
+    assert((i64)(affine_transform_f(&t).bits()) == 1105199104)
+
+test "affine_transform: inverse":
+    test_affine_transform_inverse()
+
+# C++: fb(t.a()); fb(t.b()); fb(t.c()); fb(t.d()); fb(t.e()); fb(t.f())
+noinline func test_affine_transform_inverse():
+    let source = test_affine(1.0, 2.0, 3.0, 4.0, 5.0, 6.0)
+    let t = affine_transform_inverse(&source) else trap("no inverse")
+    assert((i64)(affine_transform_a(&t).bits()) == 3221225472)
+    assert((i64)(affine_transform_b(&t).bits()) == 1065353216)
+    assert((i64)(affine_transform_c(&t).bits()) == 1069547520)
+    assert((i64)(affine_transform_d(&t).bits()) == 3204448256)
+    assert((i64)(affine_transform_e(&t).bits()) == 1065353216)
+    assert((i64)(affine_transform_f(&t).bits()) == 3221225472)
+
+test "affine_transform: inverse_singular":
+    test_affine_transform_inverse_singular()
+
+# C++:  AffineTransform(1, 2, 2, 4, 5, 6).inverse().has_value()
+noinline func test_affine_transform_inverse_singular():
+    let t = test_affine(1.0, 2.0, 2.0, 4.0, 5.0, 6.0)
+    assert((affine_transform_inverse(&t) != none) == false)
+
+test "affine_transform: determinant":
+    test_affine_transform_determinant()
+
+# C++:  AffineTransform(1.5f, 2, 3, 4.25f, 5, 6).determinant()
+noinline func test_affine_transform_determinant():
+    let t = test_affine(1.5, 2.0, 3.0, 4.25, 5.0, 6.0)
+    assert((affine_transform_determinant(&t)).bits() == 0x3ec00000)  # 0.375
+
+test "affine_transform: x_scale":
+    test_affine_transform_x_scale()
+
+# C++: AffineTransform t; t.rotate_radians(0.7f).scale(3, 2); t.x_scale()
+noinline func test_affine_transform_x_scale():
+    var t = test_affine_identity()
+    discard(affine_transform_rotate_radians(&t, 0.7))
+    discard(affine_transform_scale_f32(&t, 3.0, 2.0))
+    assert((affine_transform_x_scale(&t)).bits() == 0x40400000)  # 3
+
+test "affine_transform: y_scale":
+    test_affine_transform_y_scale()
+
+# C++: AffineTransform t; t.rotate_radians(0.7f).scale(3, 2); t.y_scale()
+noinline func test_affine_transform_y_scale():
+    var t = test_affine_identity()
+    discard(affine_transform_rotate_radians(&t, 0.7))
+    discard(affine_transform_scale_f32(&t, 3.0, 2.0))
+    assert((affine_transform_y_scale(&t)).bits() == 0x40000000)  # 2
+
+test "affine_transform: rotation":
+    test_affine_transform_rotation()
+
+# C++: AffineTransform t; t.rotate_radians(2.5f).rotate_radians(2.5f); t.rotation()
+noinline func test_affine_transform_rotation():
+    var t = test_affine_identity()
+    discard(affine_transform_rotate_radians(&t, 2.5))
+    discard(affine_transform_rotate_radians(&t, 2.5))
+    assert((affine_transform_rotation(&t)).bits() == 0xbfa43f6a)  # -1.28318524
+
+test "affine_transform: map_int_point":
+    test_affine_transform_map_int_point()
+
+# C++: p.x(); p.y()
+noinline func test_affine_transform_map_int_point():
+    let t = test_affine(0.5, 0.25, -1.0, 2.0, 0.5, 1.5)
+    let p = affine_transform_map_i32_int_point(&t, IntPoint(3, 5))
+    assert((i64)(int_point_x(&p)) == -3)
+    assert((i64)(int_point_y(&p)) == 12)
+
+test "affine_transform: map_float_point":
+    test_affine_transform_map_float_point()
+
+# C++: fb(p.x()); fb(p.y())
+noinline func test_affine_transform_map_float_point():
+    let t = test_affine(0.5, 0.25, -1.0, 2.0, 0.5, 1.5)
+    let p = affine_transform_map_f32_float_point(&t, FloatPoint(3.3, 5.0))
+    assert((i64)(float_point_x(&p).bits()) == 3224790630)
+    assert((i64)(float_point_y(&p).bits()) == 1095054131)
+
+test "affine_transform: map_int_size":
+    test_affine_transform_map_int_size()
+
+# C++: s.width(); s.height()
+noinline func test_affine_transform_map_int_size():
+    var t = test_affine_identity()
+    discard(affine_transform_rotate_radians(&t, 0.4))
+    discard(affine_transform_scale_f32(&t, 1.5, 3.0))
+    let s = affine_transform_map_i32_int_size(&t, IntSize(7, 9))
+    assert((i64)(int_size_width(&s)) == 10)
+    assert((i64)(int_size_height(&s)) == 27)
+
+test "affine_transform: map_float_size":
+    test_affine_transform_map_float_size()
+
+# C++: fb(s.width()); fb(s.height())
+noinline func test_affine_transform_map_float_size():
+    var t = test_affine_identity()
+    discard(affine_transform_scale_f32(&t, 1.5, 3.0))
+    let s = affine_transform_map_f32_float_size(&t, FloatSize(7.1, 9.0))
+    assert((i64)(float_size_width(&s).bits()) == 1093297766)
+    assert((i64)(float_size_height(&s).bits()) == 1104674816)
+
+test "affine_transform: map_float_rect_rotated":
+    test_affine_transform_map_float_rect_rotated()
+
+# C++: fb(r.x()); fb(r.y()); fb(r.width()); fb(r.height())
+noinline func test_affine_transform_map_float_rect_rotated():
+    var t = test_affine_identity()
+    discard(affine_transform_rotate_radians(&t, 0.6))
+    let r = affine_transform_map_f32_float_rect(&t, test_frect(1.0, 2.0, 10.0, 5.0))
+    assert((i64)(float_rect_x(&r).bits()) == 3225953132)
+    assert((i64)(float_rect_y(&r).bits()) == 1074644915)
+    assert((i64)(float_rect_width(&r).bits()) == 1093745056)
+    assert((i64)(float_rect_height(&r).bits()) == 1092378273)
+
+test "affine_transform: map_float_rect_translated":
+    test_affine_transform_map_float_rect_translated()
+
+# C++: fb(r.x()); fb(r.y()); fb(r.width()); fb(r.height())
+noinline func test_affine_transform_map_float_rect_translated():
+    var t = test_affine_identity()
+    discard(affine_transform_translate_f32(&t, 0.5, -0.25))
+    let r = affine_transform_map_f32_float_rect(&t, test_frect(1.0, 2.0, 10.0, 5.0))
+    assert((i64)(float_rect_x(&r).bits()) == 1069547520)
+    assert((i64)(float_rect_y(&r).bits()) == 1071644672)
+    assert((i64)(float_rect_width(&r).bits()) == 1092616192)
+    assert((i64)(float_rect_height(&r).bits()) == 1084227584)
+
+test "affine_transform: map_int_rect":
+    test_affine_transform_map_int_rect()
+
+# C++: r.x(); r.y(); r.width(); r.height()
+noinline func test_affine_transform_map_int_rect():
+    var t = test_affine_identity()
+    discard(affine_transform_rotate_radians(&t, 0.6))
+    discard(affine_transform_scale_f32(&t, 1.1, 0.9))
+    let r = affine_transform_map_i32_device_pixel_rect(&t, test_irect(1, 2, 10, 5))
+    assert((i64)(device_pixel_rect_x(&r)) == -3)
+    assert((i64)(device_pixel_rect_y(&r)) == 2)
+    assert((i64)(device_pixel_rect_width(&r)) == 12)
+    assert((i64)(device_pixel_rect_height(&r)) == 11)
+
+test "affine_transform: map_to_quad":
+    test_affine_transform_map_to_quad()
+
+# C++: fb(q.p1().x()); fb(q.p1().y()); fb(q.p2().x()); fb(q.p2().y()); fb(q.p3().x()); fb(q.p3().y()); fb(q.p4().x()); fb(q.p4().y())
+noinline func test_affine_transform_map_to_quad():
+    var t = test_affine_identity()
+    discard(affine_transform_rotate_radians(&t, 0.6))
+    let q = affine_transform_map_to_quad(&t, test_frect(1.0, 2.0, 10.0, 5.0))
+    assert((i64)(q.m_p1.m_x.bits()) == 3197869888)
+    assert((i64)(q.m_p1.m_y.bits()) == 1074644915)
+    assert((i64)(q.m_p2.m_x.bits()) == 1090412938)
+    assert((i64)(q.m_p2.m_y.bits()) == 1090229084)
+    assert((i64)(q.m_p3.m_x.bits()) == 1084492232)
+    assert((i64)(q.m_p3.m_y.bits()) == 1094701198)
+    assert((i64)(q.m_p4.m_x.bits()) == 3225953132)
+    assert((i64)(q.m_p4.m_y.bits()) == 1087041945)
+
+test "affine_transform: to_matrix":
+    test_affine_transform_to_matrix()
+
+# C++: fb(m[0, 0]); fb(m[0, 1]); fb(m[0, 2]); fb(m[0, 3]); fb(m[1, 0]); fb(m[1, 1]); fb(m[1, 2]); fb(m[1, 3]); fb(m[2, 0]); fb(m[2, 1]); fb(m[2, 2]); fb(m[2, 3]); fb(m[3, 0]); fb(m[3, 1]); fb(m[3, 2]); fb(m[3, 3])
+noinline func test_affine_transform_to_matrix():
+    let t = test_affine(1.0, 2.0, 3.0, 4.0, 5.0, 6.0)
+    let m = affine_transform_to_matrix(&t)
+    assert((i64)(float_matrix4_x4_at_const(&m, 0, 0).bits()) == 1065353216)
+    assert((i64)(float_matrix4_x4_at_const(&m, 0, 1).bits()) == 1077936128)
+    assert((i64)(float_matrix4_x4_at_const(&m, 0, 2).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&m, 0, 3).bits()) == 1084227584)
+    assert((i64)(float_matrix4_x4_at_const(&m, 1, 0).bits()) == 1073741824)
+    assert((i64)(float_matrix4_x4_at_const(&m, 1, 1).bits()) == 1082130432)
+    assert((i64)(float_matrix4_x4_at_const(&m, 1, 2).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&m, 1, 3).bits()) == 1086324736)
+    assert((i64)(float_matrix4_x4_at_const(&m, 2, 0).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&m, 2, 1).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&m, 2, 2).bits()) == 1065353216)
+    assert((i64)(float_matrix4_x4_at_const(&m, 2, 3).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&m, 3, 0).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&m, 3, 1).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&m, 3, 2).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&m, 3, 3).bits()) == 1065353216)
+
+test "affine_transform: extract_2d_affine_transform":
+    test_affine_transform_extract_2d_affine_transform()
+
+# C++: fb(t.a()); fb(t.b()); fb(t.c()); fb(t.d()); fb(t.e()); fb(t.f())
+noinline func test_affine_transform_extract_2d_affine_transform():
+    let source = test_affine(1.0, 2.0, 3.0, 4.0, 5.0, 6.0)
+    let t = extract_2d_affine_transform(affine_transform_to_matrix(&source))
+    assert((i64)(affine_transform_a(&t).bits()) == 1065353216)
+    assert((i64)(affine_transform_b(&t).bits()) == 1073741824)
+    assert((i64)(affine_transform_c(&t).bits()) == 1077936128)
+    assert((i64)(affine_transform_d(&t).bits()) == 1082130432)
+    assert((i64)(affine_transform_e(&t).bits()) == 1084227584)
+    assert((i64)(affine_transform_f(&t).bits()) == 1086324736)
+
+test "affine_transform: matrix_determinant":
+    test_affine_transform_matrix_determinant()
+
+# C++:  sample_matrix().determinant()
+noinline func test_affine_transform_matrix_determinant():
+    let m = test_sample_matrix()
+    assert((float_matrix4_x4_determinant(&m)).bits() == 0xc1800000)  # -16
+
+test "affine_transform: matrix_first_minor":
+    test_affine_transform_matrix_first_minor()
+
+# C++:  sample_matrix().first_minor(2, 1)
+noinline func test_affine_transform_matrix_first_minor():
+    let m = test_sample_matrix()
+    assert((float_matrix4_x4_first_minor(&m, 2, 1)).bits() == 0xc08c0000)  # -4.375
+
+test "affine_transform: matrix_adjugate":
+    test_affine_transform_matrix_adjugate()
+
+# C++: fb(r[0, 0]); fb(r[0, 1]); fb(r[0, 2]); fb(r[0, 3]); fb(r[1, 0]); fb(r[1, 1]); fb(r[1, 2]); fb(r[1, 3]); fb(r[2, 0]); fb(r[2, 1]); fb(r[2, 2]); fb(r[2, 3]); fb(r[3, 0]); fb(r[3, 1]); fb(r[3, 2]); fb(r[3, 3])
+noinline func test_affine_transform_matrix_adjugate():
+    let m = test_sample_matrix()
+    let r = float_matrix4_x4_adjugate(&m)
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 0).bits()) == 1105985536)
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 1).bits()) == 3242196992)
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 2).bits()) == 1091829760)
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 3).bits()) == 3261595648)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 0).bits()) == 1098121216)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 1).bits()) == 3240099840)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 2).bits()) == 1082916864)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 3).bits()) == 3252158464)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 0).bits()) == 3246915584)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 1).bits()) == 1090519040)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 2).bits()) == 3236954112)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 3).bits()) == 1105199104)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 0).bits()) == 3252289536)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 1).bits()) == 1092616192)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 2).bits()) == 3234594816)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 3).bits()) == 1110179840)
+
+test "affine_transform: matrix_inverse":
+    test_affine_transform_matrix_inverse()
+
+# C++: fb(r[0, 0]); fb(r[0, 1]); fb(r[0, 2]); fb(r[0, 3]); fb(r[1, 0]); fb(r[1, 1]); fb(r[1, 2]); fb(r[1, 3]); fb(r[2, 0]); fb(r[2, 1]); fb(r[2, 2]); fb(r[2, 3]); fb(r[3, 0]); fb(r[3, 1]); fb(r[3, 2]); fb(r[3, 3])
+noinline func test_affine_transform_matrix_inverse():
+    let m = test_sample_matrix()
+    let r = float_matrix4_x4_inverse(&m)
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 0).bits()) == 3219914752)
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 1).bits()) == 1061158912)
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 2).bits()) == 3205758976)
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 3).bits()) == 1080557568)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 0).bits()) == 3212050432)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 1).bits()) == 1059061760)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 2).bits()) == 3196846080)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 3).bits()) == 1071120384)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 0).bits()) == 1065877504)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 1).bits()) == 3204448256)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 2).bits()) == 1055916032)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 3).bits()) == 3219128320)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 0).bits()) == 1071251456)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 1).bits()) == 3206545408)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 2).bits()) == 1053556736)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 3).bits()) == 3224109056)
+
+test "affine_transform: matrix_mul":
+    test_affine_transform_matrix_mul()
+
+# C++: fb(r[0, 0]); fb(r[0, 1]); fb(r[0, 2]); fb(r[0, 3]); fb(r[1, 0]); fb(r[1, 1]); fb(r[1, 2]); fb(r[1, 3]); fb(r[2, 0]); fb(r[2, 1]); fb(r[2, 2]); fb(r[2, 3]); fb(r[3, 0]); fb(r[3, 1]); fb(r[3, 2]); fb(r[3, 3])
+noinline func test_affine_transform_matrix_mul():
+    let m = test_sample_matrix()
+    let r = float_matrix4_x4_mul(&m, float_matrix4_x4_transpose(&m))
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 0).bits()) == 1097072640)
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 1).bits()) == 1084489728)
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 2).bits()) == 3217031168)
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 3).bits()) == 1087373312)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 0).bits()) == 1084489728)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 1).bits()) == 1099988992)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 2).bits()) == 1088946176)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 3).bits()) == 3196059648)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 0).bits()) == 3217031168)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 1).bits()) == 1088946176)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 2).bits()) == 1107558400)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 3).bits()) == 1077936128)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 0).bits()) == 1087373312)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 1).bits()) == 3196059648)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 2).bits()) == 1077936128)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 3).bits()) == 1082654720)
+
+test "affine_transform: matrix_add_div":
+    test_affine_transform_matrix_add_div()
+
+# C++: fb(r[0, 0]); fb(r[0, 1]); fb(r[0, 2]); fb(r[0, 3]); fb(r[1, 0]); fb(r[1, 1]); fb(r[1, 2]); fb(r[1, 3]); fb(r[2, 0]); fb(r[2, 1]); fb(r[2, 2]); fb(r[2, 3]); fb(r[3, 0]); fb(r[3, 1]); fb(r[3, 2]); fb(r[3, 3])
+noinline func test_affine_transform_matrix_add_div():
+    let m = test_sample_matrix()
+    let sum = float_matrix4_x4_add(&m, float_matrix4_x4_identity())
+    let r = float_matrix4_x4_div(&sum, 3.0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 0).bits()) == 1065353216)
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 1).bits()) == 1051372203)
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 2).bits()) == 1042983595)
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 3).bits()) == 1065353216)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 0).bits()) == 3198855851)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 1).bits()) == 1070945621)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 2).bits()) == 1034594987)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 3).bits()) == 1051372203)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 0).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 1).bits()) == 1059760811)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 2).bits()) == 1073741824)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 3).bits()) == 3207244459)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 0).bits()) == 1056964608)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 1).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 2).bits()) == 1051372203)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 3).bits()) == 1059760811)
+
+test "affine_transform: matrix_is_identity":
+    test_affine_transform_matrix_is_identity()
+
+# C++:  FloatMatrix4x4::identity().is_identity() && !sample_matrix().is_identity()
+noinline func test_affine_transform_matrix_is_identity():
+    let m = test_sample_matrix()
+    let identity = float_matrix4_x4_identity()
+    assert((float_matrix4_x4_is_identity(&identity) and not float_matrix4_x4_is_identity(&m)) == true)
+
+test "affine_transform: matrix_is_invertible_singular":
+    test_affine_transform_matrix_is_invertible_singular()
+
+# C++: m.is_invertible()
+noinline func test_affine_transform_matrix_is_invertible_singular():
+    var m = test_sample_matrix()
+    *float_matrix4_x4_at(&m, 3, 0) = float_matrix4_x4_at_const(&m, 0, 0)
+    *float_matrix4_x4_at(&m, 3, 1) = float_matrix4_x4_at_const(&m, 0, 1)
+    *float_matrix4_x4_at(&m, 3, 2) = float_matrix4_x4_at_const(&m, 0, 2)
+    *float_matrix4_x4_at(&m, 3, 3) = float_matrix4_x4_at_const(&m, 0, 3)
+    assert((float_matrix4_x4_is_invertible(&m)) == false)
+
+test "affine_transform: matrix_elements":
+    test_affine_transform_matrix_elements()
+
+# C++: auto m = sample_matrix(); auto e = m.elements(); fb(e[1][2]); fb(e[3][0])
+noinline func test_affine_transform_matrix_elements():
+    let m = test_sample_matrix()
+    let e = float_matrix4_x4_elements_const(&m)
+    assert((i64)((*e)[1][2].bits()) == 1048576000)
+    assert((i64)((*e)[3][0].bits()) == 1069547520)
+
+test "affine_transform: rotation_matrix":
+    test_affine_transform_rotation_matrix()
+
+# C++: fb(r[0, 0]); fb(r[0, 1]); fb(r[0, 2]); fb(r[0, 3]); fb(r[1, 0]); fb(r[1, 1]); fb(r[1, 2]); fb(r[1, 3]); fb(r[2, 0]); fb(r[2, 1]); fb(r[2, 2]); fb(r[2, 3]); fb(r[3, 0]); fb(r[3, 1]); fb(r[3, 2]); fb(r[3, 3])
+noinline func test_affine_transform_rotation_matrix():
+    let r = rotation_matrix(FloatVector3([0.6, 0.0, 0.8]), 0.9)
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 0).bits()) == 1061290284)
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 1).bits()) == 3206573284)
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 2).bits()) == 1043987580)
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 3).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 0).bits()) == 1059089636)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 1).bits()) == 1059004885)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 2).bits()) == 3203441495)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 3).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 0).bits()) == 1043987580)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 1).bits()) == 1055957847)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 2).bits()) == 1063067817)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 3).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 0).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 1).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 2).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 3).bits()) == 1065353216)
+
+test "affine_transform: rotation_matrix_half_turn":
+    test_affine_transform_rotation_matrix_half_turn()
+
+# C++: fb(r[0, 0]); fb(r[0, 1]); fb(r[0, 2]); fb(r[0, 3]); fb(r[1, 0]); fb(r[1, 1]); fb(r[1, 2]); fb(r[1, 3]); fb(r[2, 0]); fb(r[2, 1]); fb(r[2, 2]); fb(r[2, 3]); fb(r[3, 0]); fb(r[3, 1]); fb(r[3, 2]); fb(r[3, 3])
+noinline func test_affine_transform_rotation_matrix_half_turn():
+    let r = rotation_matrix(FloatVector3([0.0, 0.0, 1.0]), ak.pi_f32)
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 0).bits()) == 3212836864)
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 1).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 2).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 3).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 0).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 1).bits()) == 3212836864)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 2).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 3).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 0).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 1).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 2).bits()) == 1065353216)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 3).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 0).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 1).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 2).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 3).bits()) == 1065353216)
+
+test "affine_transform: translation_matrix":
+    test_affine_transform_translation_matrix()
+
+# C++: fb(r[0, 0]); fb(r[0, 1]); fb(r[0, 2]); fb(r[0, 3]); fb(r[1, 0]); fb(r[1, 1]); fb(r[1, 2]); fb(r[1, 3]); fb(r[2, 0]); fb(r[2, 1]); fb(r[2, 2]); fb(r[2, 3]); fb(r[3, 0]); fb(r[3, 1]); fb(r[3, 2]); fb(r[3, 3])
+noinline func test_affine_transform_translation_matrix():
+    let r = translation_matrix(FloatVector3([1.5, -2.0, 3.0]))
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 0).bits()) == 1065353216)
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 1).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 2).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 3).bits()) == 1069547520)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 0).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 1).bits()) == 1065353216)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 2).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 3).bits()) == 3221225472)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 0).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 1).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 2).bits()) == 1065353216)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 3).bits()) == 1077936128)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 0).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 1).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 2).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 3).bits()) == 1065353216)
+
+test "affine_transform: scale_matrix":
+    test_affine_transform_scale_matrix()
+
+# C++: fb(r[0, 0]); fb(r[0, 1]); fb(r[0, 2]); fb(r[0, 3]); fb(r[1, 0]); fb(r[1, 1]); fb(r[1, 2]); fb(r[1, 3]); fb(r[2, 0]); fb(r[2, 1]); fb(r[2, 2]); fb(r[2, 3]); fb(r[3, 0]); fb(r[3, 1]); fb(r[3, 2]); fb(r[3, 3])
+noinline func test_affine_transform_scale_matrix():
+    let r = scale_matrix(FloatVector3([1.5, -2.0, 3.0]))
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 0).bits()) == 1069547520)
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 1).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 2).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 0, 3).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 0).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 1).bits()) == 3221225472)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 2).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 1, 3).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 0).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 1).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 2).bits()) == 1077936128)
+    assert((i64)(float_matrix4_x4_at_const(&r, 2, 3).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 0).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 1).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 2).bits()) == 0)
+    assert((i64)(float_matrix4_x4_at_const(&r, 3, 3).bits()) == 1065353216)
+
+test "affine_transform: transform_point":
+    test_affine_transform_transform_point()
+
+# C++: fb(p.x()); fb(p.y()); fb(p.z())
+noinline func test_affine_transform_transform_point():
+    let p = transform_point(test_sample_matrix(), FloatVector3([1.5, -2.0, 3.0]))
+    assert((i64)(p.m_data[0].bits()) == 1085276160)
+    assert((i64)(p.m_data[1].bits()) == 3237478400)
+    assert((i64)(p.m_data[2].bits()) == 1091567616)
+
+test "affine_transform: matrix_times_vector":
+    test_affine_transform_matrix_times_vector()
+
+# C++: fb(p.x()); fb(p.y()); fb(p.z()); fb(p.w())
+noinline func test_affine_transform_matrix_times_vector():
+    let p = mul_float_matrix4_x4_float_vector4(test_sample_matrix(), FloatVector4([1.5, -2.0, 3.0, 0.5]))
+    assert((i64)(p.m_data[0].bits()) == 1082130432)
+    assert((i64)(p.m_data[1].bits()) == 3238264832)
+    assert((i64)(p.m_data[2].bits()) == 1092616192)
+    assert((i64)(p.m_data[3].bits()) == 1085800448)

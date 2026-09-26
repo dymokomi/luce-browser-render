@@ -14,7 +14,7 @@
 
 ## Gfx::Matrix<f32> (Libraries/LibGfx/Matrix.h:17), instantiated (DESIGN.md §2.8).
 pub struct FloatMatrix4X4:
-    pub var m_elements: (f32*?)*?
+    pub var m_elements: f32[4][4]  # T m_elements[N][N] (fixed by hand, region r08)
 
 ## Gfx::Matrix (Libraries/LibGfx/Matrix.h:17): opaque in this phase (not in the phase-1 closure).
 pub struct Matrix:

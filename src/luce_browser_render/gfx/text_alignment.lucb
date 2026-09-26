@@ -1,0 +1,63 @@
+#==============================================================================================
+#
+#   text_alignment - TextAlignment: classification and string conversion
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibGfx/TextAlignment.h (lines 14-73). The
+#       GFX_ENUMERATE_TEXT_ALIGNMENTS X-macro is expanded by hand into the table below, in
+#       the macro's order; text_alignment_from_string and to_string walk it as the macro
+#       expansions test each name in turn.
+#
+#==============================================================================================
+
+## One entry of GFX_ENUMERATE_TEXT_ALIGNMENTS (TextAlignment.h:14): a case and its name,
+## `#x`, NUL-terminated as a C++ string literal.
+struct TextAlignmentName:
+    var alignment: TextAlignment
+    var name: str
+
+## GFX_ENUMERATE_TEXT_ALIGNMENTS(M) (TextAlignment.h:14).
+let text_alignment_names: TextAlignmentName[9] = [
+    TextAlignmentName(alignment = TextAlignment.center, name = "Center"),
+    TextAlignmentName(alignment = TextAlignment.center_left, name = "CenterLeft"),
+    TextAlignmentName(alignment = TextAlignment.center_right, name = "CenterRight"),
+    TextAlignmentName(alignment = TextAlignment.top_center, name = "TopCenter"),
+    TextAlignmentName(alignment = TextAlignment.top_left, name = "TopLeft"),
+    TextAlignmentName(alignment = TextAlignment.top_right, name = "TopRight"),
+    TextAlignmentName(alignment = TextAlignment.bottom_center, name = "BottomCenter"),
+    TextAlignmentName(alignment = TextAlignment.bottom_left, name = "BottomLeft"),
+    TextAlignmentName(alignment = TextAlignment.bottom_right, name = "BottomRight"),
+]
+
+## Ported from Libraries/LibGfx/TextAlignment.h:31 Gfx::is_right_text_alignment.
+pub func is_right_text_alignment(alignment: TextAlignment) -> bool:
+    match alignment:
+        .center_right, .top_right, .bottom_right:
+            return true
+        _:
+            return false
+
+## Ported from Libraries/LibGfx/TextAlignment.h:43 Gfx::is_vertically_centered_text_alignment.
+pub func is_vertically_centered_text_alignment(alignment: TextAlignment) -> bool:
+    match alignment:
+        .center_left, .center_right, .center:
+            return true
+        _:
+            return false
+
+## Ported from Libraries/LibGfx/TextAlignment.h:55 Gfx::text_alignment_from_string.
+pub func text_alignment_from_string(string: ak.StringView) -> TextAlignment?:
+    # if (string == #x) return TextAlignment::x;, for each x of the macro.
+    for entry in text_alignment_names:
+        if ak.string_view_equals(&string, entry.name):
+            return entry.alignment
+    return none
+
+## Ported from Libraries/LibGfx/TextAlignment.h:65 Gfx::to_string.
+## The case's name as a NUL-terminated C string, or none (a null `char const*`).
+pub func to_string(text_alignment: TextAlignment) -> const u8*?:
+    # if (text_alignment == TextAlignment::x) return #x;, for each x of the macro.
+    for entry in text_alignment_names:
+        if text_alignment == entry.alignment:
+            return entry.name.bytes.data
+    return none
