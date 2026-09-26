@@ -50,8 +50,9 @@ func expect_f64_bits(actual: f64, expected: u64, what: str):
 ## How many units in the last place a result may differ from the expected bits. The expected
 ## values were printed on macOS, and the color conversions call the C library's cbrt, atan2,
 ## sin and cos, whose last bits differ between C libraries (the donor built on Linux differs
-## from them the same way), so only macOS compares exactly.
-let libm_ulps: u64 = 0 if os.macos else 4
+## from them the same way; conversions such as Oklab compound the difference), so only macOS
+## compares exactly.
+let libm_ulps: u64 = 0 if os.macos else 64
 
 ## Whether two floats' bit patterns (of one width, same sign) are at most libm_ulps apart.
 func within_libm_ulps(bits: u64, expected: u64) -> bool:
