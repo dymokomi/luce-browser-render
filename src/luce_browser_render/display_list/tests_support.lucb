@@ -1,0 +1,247 @@
+#==============================================================================================
+#
+#   tests_support - what the display-list tests share
+#
+#   DESCRIPTION:
+#       The gates of the tests that reach other regions' stubs, value helpers, a player
+#       that records the virtual calls DisplayListPlayer::execute_impl makes, and the CPU
+#       player's test scenes (a player drawing on a canvas of its own, compared with Skia's
+#       pixels).
+#
+#       Regions r08 (gfx geometry), r09 (web_fonts) and r10 (gfx paint) are ported in
+#       parallel with this one. A test that reaches their functions returns at its start
+#       while the region's flag is false; set the flag when the region is merged. Every
+#       gated test was run locally against scratch stand-ins of those functions (never
+#       committed) and passed.
+#
+#       Every test body is a `noinline` function (# workaround: compiler-issues/
+#       ranges_facts_cubic, as the foundation's tests do).
+#
+#==============================================================================================
+
+# mark: Gates ==================================================================================
+
+## Region r08 (gfx geometry: rectangles, points, colors, CSSPixels) is merged.
+var gfx_geometry_is_ported: bool = true
+
+## Region r10 (gfx paint: paths, bitmaps, surfaces, gradients' helpers) is merged.
+var gfx_paint_is_ported: bool = true
+
+# mark: Values =================================================================================
+
+## A Gfx::Color from its unpremultiplied channels.
+func test_color(r: u8, g: u8, b: u8, a: u8) -> gfx.Color:
+    return gfx.Color(m_value = ((u32)a << 24) | ((u32)r << 16) | ((u32)g << 8) | (u32)b)
+
+## A Gfx::IntRect.
+func test_rect(x: i32, y: i32, width: i32, height: i32) -> gfx.DevicePixelRect:
+    return gfx.DevicePixelRect(m_location = gfx.IntPoint(m_x = x, m_y = y), m_size = gfx.IntSize(m_width = width, m_height = height))
+
+## A Gfx::IntPoint.
+func test_point(x: i32, y: i32) -> gfx.IntPoint:
+    return gfx.IntPoint(m_x = x, m_y = y)
+
+## The same radius at every corner.
+func test_uniform_radii(radius: i32) -> CornerRadii:
+    let r = CornerRadius(horizontal_radius = radius, vertical_radius = radius)
+    return CornerRadii(top_left = r, top_right = r, bottom_right = r, bottom_left = r)
+
+## A 4x4 matrix from its rows.
+func test_matrix(rows: f32[4][4]) -> gfx.FloatMatrix4X4:
+    return gfx.FloatMatrix4X4(m_elements = rows)
+
+## The identity 4x4 matrix.
+func test_identity_matrix() -> gfx.FloatMatrix4X4:
+    return test_matrix([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]])
+
+## The text of a StringBuilder.
+func test_builder_text(builder: const ak.StringBuilder*) -> str:
+    return ak.string_view_text(ak.string_builder_string_view(builder))
+
+## Traps with both texts when `actual` is not `expected`.
+func expect_text(actual: str, expected: str):
+    if actual != expected:
+        print(f"expected \"{expected}\", got \"{actual}\"")
+        trap("text mismatch")
+
+# mark: A player that records its calls ========================================================
+
+## A DisplayListPlayer whose virtuals append their names (and a few arguments) to `log`.
+struct TestRecordingPlayer: IsDisplayListPlayer:
+    var base: DisplayListPlayer
+    var log: ak.StringBuilder
+    ## What `would_be_fully_clipped_by_painter` answers.
+    var fully_clipped: bool
+
+    func display_list_player() -> DisplayListPlayer*: return (DisplayListPlayer*)&self
+
+## A new recording player, with a surface so that `execute_impl` may run.
+func test_recording_player_create() -> TestRecordingPlayer*:
+    let player = new TestRecordingPlayer(base = DisplayListPlayer(vtable = &test_recording_player_vtable, class_id = display_list_player_class.first_id), log = ak.string_builder_new()) else trap("out of memory")
+    player.base.m_surface = gfx.painting_surface_create_with_size(gfx.IntSize(m_width = 1, m_height = 1), gfx.BitmapFormat.bgra8888, gfx.AlphaType.premultiplied)
+    return player
+
+## The recording player of a DisplayListPlayer pointer.
+func test_recorded(base: DisplayListPlayer*) -> TestRecordingPlayer*:
+    return (TestRecordingPlayer*)base
+
+## Appends `text` and a separator to the player's log.
+func test_record(base: DisplayListPlayer*, text: str):
+    ak.string_builder_append(&test_recorded(base).log, text)
+    ak.string_builder_append(&test_recorded(base).log, ";")
+
+func test_recording_flush(base: DisplayListPlayer*): test_record(base, "flush")
+func test_recording_draw_glyph_run(base: DisplayListPlayer*, arg0: DrawGlyphRun): test_record(base, "draw_glyph_run")
+func test_recording_fill_rect(base: DisplayListPlayer*, arg0: FillRect): test_record(base, "fill_rect")
+func test_recording_draw_scaled_immutable_bitmap(base: DisplayListPlayer*, arg0: DrawScaledImmutableBitmap): test_record(base, "draw_scaled_immutable_bitmap")
+func test_recording_draw_repeated_immutable_bitmap(base: DisplayListPlayer*, arg0: DrawRepeatedImmutableBitmap): test_record(base, "draw_repeated_immutable_bitmap")
+func test_recording_draw_external_content(base: DisplayListPlayer*, arg0: DrawExternalContent): test_record(base, "draw_external_content")
+func test_recording_save(base: DisplayListPlayer*, arg0: Save): test_record(base, "save")
+func test_recording_save_layer(base: DisplayListPlayer*, arg0: SaveLayer): test_record(base, "save_layer")
+func test_recording_restore(base: DisplayListPlayer*, arg0: Restore): test_record(base, "restore")
+func test_recording_add_clip_rect(base: DisplayListPlayer*, arg0: AddClipRect): test_record(base, "add_clip_rect")
+func test_recording_paint_linear_gradient(base: DisplayListPlayer*, arg0: PaintLinearGradient): test_record(base, "paint_linear_gradient")
+func test_recording_paint_radial_gradient(base: DisplayListPlayer*, arg0: PaintRadialGradient): test_record(base, "paint_radial_gradient")
+func test_recording_paint_conic_gradient(base: DisplayListPlayer*, arg0: PaintConicGradient): test_record(base, "paint_conic_gradient")
+func test_recording_paint_outer_box_shadow(base: DisplayListPlayer*, arg0: PaintOuterBoxShadow): test_record(base, "paint_outer_box_shadow")
+func test_recording_paint_inner_box_shadow(base: DisplayListPlayer*, arg0: PaintInnerBoxShadow): test_record(base, "paint_inner_box_shadow")
+func test_recording_paint_text_shadow(base: DisplayListPlayer*, arg0: PaintTextShadow): test_record(base, "paint_text_shadow")
+func test_recording_fill_rect_with_rounded_corners(base: DisplayListPlayer*, arg0: FillRectWithRoundedCorners): test_record(base, "fill_rect_with_rounded_corners")
+func test_recording_fill_path(base: DisplayListPlayer*, arg0: FillPath): test_record(base, "fill_path")
+func test_recording_stroke_path(base: DisplayListPlayer*, arg0: StrokePath): test_record(base, "stroke_path")
+func test_recording_draw_ellipse(base: DisplayListPlayer*, arg0: DrawEllipse): test_record(base, "draw_ellipse")
+func test_recording_fill_ellipse(base: DisplayListPlayer*, arg0: FillEllipse): test_record(base, "fill_ellipse")
+func test_recording_draw_line(base: DisplayListPlayer*, arg0: DrawLine): test_record(base, "draw_line")
+func test_recording_apply_backdrop_filter(base: DisplayListPlayer*, arg0: ApplyBackdropFilter): test_record(base, "apply_backdrop_filter")
+func test_recording_draw_rect(base: DisplayListPlayer*, arg0: DrawRect): test_record(base, "draw_rect")
+func test_recording_add_rounded_rect_clip(base: DisplayListPlayer*, arg0: AddRoundedRectClip): test_record(base, "add_rounded_rect_clip")
+func test_recording_paint_nested_display_list(base: DisplayListPlayer*, arg0: PaintNestedDisplayList): test_record(base, "paint_nested_display_list")
+func test_recording_paint_scrollbar(base: DisplayListPlayer*, arg0: PaintScrollBar): test_record(base, "paint_scrollbar")
+func test_recording_apply_transform(base: DisplayListPlayer*, origin: gfx.FloatPoint, arg1: gfx.FloatMatrix4X4): test_record(base, "apply_transform")
+func test_recording_add_clip_path(base: DisplayListPlayer*, arg0: gfx.Path): test_record(base, "add_clip_path")
+
+func test_recording_apply_effects(base: DisplayListPlayer*, command: ApplyEffects):
+    ak.string_builder_append(&test_recorded(base).log, "apply_effects(")
+    ak.format_f32(&test_recorded(base).log, command.opacity)
+    ak.string_builder_append(&test_recorded(base).log, ")")
+    test_record(base, "")
+
+func test_recording_translate(base: DisplayListPlayer*, command: Translate):
+    ak.string_builder_append(&test_recorded(base).log, "translate(")
+    ak.format_i64(&test_recorded(base).log, command.delta.m_x)
+    ak.string_builder_append(&test_recorded(base).log, ",")
+    ak.format_i64(&test_recorded(base).log, command.delta.m_y)
+    ak.string_builder_append(&test_recorded(base).log, ")")
+    test_record(base, "")
+
+func test_recording_would_be_fully_clipped_by_painter(base: DisplayListPlayer*, arg0: gfx.DevicePixelRect) -> bool:
+    return test_recorded(base).fully_clipped
+
+## The recording player's vtable.
+let test_recording_player_vtable: DisplayListPlayerVTable = DisplayListPlayerVTable(class_info = &display_list_player_class,
+    flush = test_recording_flush, draw_glyph_run = test_recording_draw_glyph_run, fill_rect = test_recording_fill_rect,
+    draw_scaled_immutable_bitmap = test_recording_draw_scaled_immutable_bitmap, draw_repeated_immutable_bitmap = test_recording_draw_repeated_immutable_bitmap,
+    draw_external_content = test_recording_draw_external_content, save = test_recording_save, save_layer = test_recording_save_layer,
+    restore = test_recording_restore, translate = test_recording_translate, add_clip_rect = test_recording_add_clip_rect,
+    paint_linear_gradient = test_recording_paint_linear_gradient, paint_radial_gradient = test_recording_paint_radial_gradient,
+    paint_conic_gradient = test_recording_paint_conic_gradient, paint_outer_box_shadow = test_recording_paint_outer_box_shadow,
+    paint_inner_box_shadow = test_recording_paint_inner_box_shadow, paint_text_shadow = test_recording_paint_text_shadow,
+    fill_rect_with_rounded_corners = test_recording_fill_rect_with_rounded_corners, fill_path = test_recording_fill_path,
+    stroke_path = test_recording_stroke_path, draw_ellipse = test_recording_draw_ellipse, fill_ellipse = test_recording_fill_ellipse,
+    draw_line = test_recording_draw_line, apply_backdrop_filter = test_recording_apply_backdrop_filter, draw_rect = test_recording_draw_rect,
+    add_rounded_rect_clip = test_recording_add_rounded_rect_clip, paint_nested_display_list = test_recording_paint_nested_display_list,
+    paint_scrollbar = test_recording_paint_scrollbar, apply_effects = test_recording_apply_effects, apply_transform = test_recording_apply_transform,
+    would_be_fully_clipped_by_painter = test_recording_would_be_fully_clipped_by_painter, add_clip_path = test_recording_add_clip_path)
+
+# mark: CPU player scenes ======================================================================
+
+## A CPU player drawing on a canvas of `width` x `height`, as if on a surface.
+struct TestScene:
+    var player: DisplayListPlayerCpu*
+    var canvas: CpuCanvas*
+
+## A new scene: a CPU player whose current surface is a stand-in with its own canvas.
+func test_scene_new(width: u32, height: u32) -> TestScene:
+    let player = display_list_player_cpu_create()
+    let surface = gfx.painting_surface_create_with_size(gfx.IntSize(m_width = (i32)width, m_height = (i32)height), gfx.BitmapFormat.bgra8888, gfx.AlphaType.premultiplied)
+    let canvas = cpu_canvas_create(width, height)
+    display_list_player_cpu_attach_canvas(player, surface, canvas)
+    player.display_list_player_base.m_surface = surface
+    return TestScene(player = player, canvas = canvas)
+
+## The scene's player as a DisplayListPlayer.
+func test_scene_player(scene: const TestScene*) -> DisplayListPlayer*:
+    return scene.player.display_list_player()
+
+## Frees the scene's canvas.
+func test_scene_release(scene: const TestScene*):
+    cpu_canvas_release(scene.canvas)
+
+## The value of one hexadecimal digit.
+func test_hex_digit(c: u8) -> u32:
+    if c >= '0' and c <= '9':
+        return (u32)(c - '0')
+    if c >= 'a' and c <= 'f':
+        return (u32)(c - 'a') + 10
+    trap("not a hexadecimal digit")
+
+## The largest channel difference between the canvas and Skia's pixels `expected`
+## (tests_skia_reference_data), and the number of pixels that differ at all.
+func test_compare_with_skia(canvas: CpuCanvas*, expected: str) -> (u32, usize):
+    let pixels = cpu_canvas_pixmap(canvas).pixels()
+    let text = expected.bytes
+    var index: usize = 0
+    var max_difference: u32 = 0
+    var differing: usize = 0
+    var i: usize = 0
+    while i < text.length:
+        if text[i] == ' ' or text[i] == '\n':
+            i += 1
+            continue
+        var value: u32 = 0
+        for k in 0..<8usize:
+            value = (value << 4) | test_hex_digit(text[i + k])
+        i += 8
+        if index >= pixels.length:
+            trap("more expected pixels than the canvas has")
+        let p = pixels[index]
+        index += 1
+        let actual: u32[4] = [(u32)p.alpha(), (u32)p.red(), (u32)p.green(), (u32)p.blue()]
+        let wanted: u32[4] = [(value >> 24) & 0xff, (value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff]
+        var pixel_difference: u32 = 0
+        for c in 0..<4usize:
+            let d = actual[c] - wanted[c] if actual[c] > wanted[c] else wanted[c] - actual[c]
+            if d > pixel_difference:
+                pixel_difference = d
+        if pixel_difference > 0:
+            differing += 1
+        if pixel_difference > max_difference:
+            max_difference = pixel_difference
+    if index != pixels.length:
+        trap("fewer expected pixels than the canvas has")
+    return (max_difference, differing)
+
+## Ladybird's fuzzy reftest rule (test-web/Fuzzy.cpp) against Skia's pixels: at most
+## `max_pixels` differing pixels, none by more than `max_difference` in any channel.
+func expect_like_skia(scene: const TestScene*, name: str, expected: str, max_difference: u32, max_pixels: usize):
+    let (difference, pixels) = test_compare_with_skia(scene.canvas, expected)
+    if difference > max_difference or pixels > max_pixels:
+        print(f"{name}: {pixels} pixels differ from Skia's, by up to {difference} (allowed: {max_pixels} by {max_difference})")
+        test_print_canvas(scene.canvas)
+        trap("the CPU player's pixels are not close enough to Skia's")
+
+## Prints the canvas's pixels as 0xAARRGGBB words, a row per line (to compare by hand).
+func test_print_canvas(canvas: CpuCanvas*):
+    let pixmap = cpu_canvas_pixmap(canvas)
+    let pixels = pixmap.pixels()
+    let width = (usize)pixmap.width()
+    for y in 0..<(usize)pixmap.height():
+        var builder = ak.string_builder_new()
+        for x in 0..<width:
+            let p = pixels[y * width + x]
+            let value = ((u32)p.alpha() << 24) | ((u32)p.red() << 16) | ((u32)p.green() << 8) | (u32)p.blue()
+            let digits = "0123456789abcdef".bytes
+            for k in 0..<8usize:
+                ak.string_builder_append_u8(&builder, digits[(usize)((value >> (u32)(28 - 4 * k)) & 0xf)])
+            ak.string_builder_append_u8(&builder, ' ')
+        print(test_builder_text(&builder))

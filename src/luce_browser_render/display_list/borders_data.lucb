@@ -1,0 +1,27 @@
+#==============================================================================================
+#
+#   borders_data - the four borders of a box in device pixels
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibWeb/Painting/BordersData.h (lines 1-66): BordersDataDevicePixels'
+#       per-edge accessors. BordersData::to_device_pixels (BordersData.cpp) reads the recording
+#       context and stays in the engine (DESIGN.md §4.1.3).
+#
+#       Copyright (c) 2020, Andreas Kling <andreas@ladybird.org>
+#       Copyright (c) 2021-2023, Sam Atkins <atkinssj@serenityos.org>
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+## Ported from Libraries/LibWeb/Painting/BordersData.h:37 Web::Painting::BordersDataDevicePixels::for_edge.
+pub func borders_data_device_pixels_for_edge(this: BordersDataDevicePixels*, edge: BorderEdge) -> BorderDataDevicePixels*:
+    match edge:
+        .top: return &this.top
+        .right: return &this.right
+        .bottom: return &this.bottom
+        # BorderEdge::Left:
+        _: return &this.left
+
+## Ported from Libraries/LibWeb/Painting/BordersData.h:51 Web::Painting::BordersDataDevicePixels::for_edge.
+pub func borders_data_device_pixels_for_edge_const(this: const BordersDataDevicePixels*, edge: BorderEdge) -> const BorderDataDevicePixels*:
+    return borders_data_device_pixels_for_edge((BordersDataDevicePixels*)this, edge)

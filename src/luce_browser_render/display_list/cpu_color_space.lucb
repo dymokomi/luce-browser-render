@@ -1,0 +1,365 @@
+#==============================================================================================
+#
+#   cpu_color_space - the color spaces gradients interpolate in
+#
+#   DESCRIPTION:
+#       New code for DisplayListPlayerCpu (DESIGN.md §7.3): what Skia's
+#       SkGradientShader::Interpolation does with a color before and after interpolating
+#       (the conversions of Skia's SkGradientBaseShader, which follow CSS Color 4's sample
+#       code): from sRGB into one of the interpolation spaces the Skia player selects
+#       (`to_skia_interpolation` in DisplayListPlayerSkia.cpp) and back. Colors are four
+#       floats, the three components of the space and alpha; the polar spaces keep their hue
+#       in degrees (HSL and HWB: component 0; LCH and OkLCH: component 2).
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+## Skia's SkGradientShader::Interpolation::ColorSpace, as the Skia player uses it.
+enum CpuColorSpace:
+    srgb
+    srgb_linear
+    lab
+    oklab
+    display_p3
+    a98_rgb
+    prophoto_rgb
+    rec2020
+    hsl
+    hwb
+    lch
+    oklch
+
+## Skia's SkGradientShader::Interpolation::HueMethod.
+enum CpuHueMethod:
+    shorter
+    longer
+    increasing
+    decreasing
+
+## A color: three components and alpha.
+type CpuColor4 = f32[4]
+
+## The index of the hue component of a polar space, or none.
+func cpu_color_space_hue_index(space: CpuColorSpace) -> usize?:
+    match space:
+        .hsl, .hwb: return 0
+        .lch, .oklch: return 2
+        _: return none
+
+# mark: Matrices and transfer functions ========================================================
+
+## `m` (row-major 3x3) times (x, y, z).
+func cpu_mat3_mul(m: f32[9], x: f32, y: f32, z: f32) -> (f32, f32, f32):
+    return (m[0] * x + m[1] * y + m[2] * z, m[3] * x + m[4] * y + m[5] * z, m[6] * x + m[7] * y + m[8] * z)
+
+let lin_srgb_to_xyz_d65: f32[9] = [0.41239079926595934, 0.357584339383878, 0.1804807884018343, 0.21263900587151027, 0.715168678767756, 0.07219231536073371, 0.01933081871559182, 0.11919477979462598, 0.9505321522496607]
+let xyz_d65_to_lin_srgb: f32[9] = [3.2409699419045226, -1.537383177570094, -0.4986107602930034, -0.9692436362808796, 1.8759675015077202, 0.04155505740717559, 0.05563007969699366, -0.20397695888897652, 1.0569715142428786]
+let lin_p3_to_xyz_d65: f32[9] = [0.4865709486482162, 0.26566769316909306, 0.1982172852343625, 0.2289745640697488, 0.6917385218365064, 0.079286914093745, 0.0, 0.04511338185890264, 1.043944368900976]
+let xyz_d65_to_lin_p3: f32[9] = [2.493496911941425, -0.9313836179191239, -0.40271078445071684, -0.8294889695615747, 1.7626640603183463, 0.023624685841943577, 0.03584583024378447, -0.07617238926804182, 0.9568845240076872]
+let lin_a98_to_xyz_d65: f32[9] = [0.5766690429101305, 0.1855582379065463, 0.1882286462349947, 0.29734497525053605, 0.6273635662554661, 0.07529145849399788, 0.02703136138641234, 0.07068885253582723, 0.9913375368376388]
+let xyz_d65_to_lin_a98: f32[9] = [2.0415879038107465, -0.5650069742788596, -0.34473135077832956, -0.9692436362808795, 1.8759675015077202, 0.04155505740717557, 0.013444280632031142, -0.11836239223101838, 1.0151749943912054]
+let lin_rec2020_to_xyz_d65: f32[9] = [0.6369580483012914, 0.14461690358620832, 0.1688809751641721, 0.2627002120112671, 0.6779980715188708, 0.05930171646986196, 0.0, 0.028072693049087428, 1.060985057710791]
+let xyz_d65_to_lin_rec2020: f32[9] = [1.7166511879712674, -0.35567078377639233, -0.25336628137365974, -0.6666843518324892, 1.6164812366349395, 0.01576854581391113, 0.017639857445310783, -0.042770613257808524, 0.9421031212354738]
+let xyz_d65_to_d50: f32[9] = [1.0479298208405488, 0.022946793341019088, -0.05019222954313557, 0.029627815688159344, 0.990434484573249, -0.01707382502938514, -0.009243058152591178, 0.015055144896577895, 0.7518742899580008]
+let xyz_d50_to_d65: f32[9] = [0.9554734527042182, -0.023098536874261423, 0.0632593086610217, -0.028369706963208136, 1.0099954580058226, 0.021041398966943008, 0.012314001688319899, -0.020507696433477912, 1.3303659366080753]
+let lin_prophoto_to_xyz_d50: f32[9] = [0.7977604896723027, 0.13518583717574031, 0.0313493495815248, 0.2880711282292934, 0.7118432178101014, 0.00008565396060525902, 0.0, 0.0, 0.8251046025104601]
+let xyz_d50_to_lin_prophoto: f32[9] = [1.3457989731028281, -0.25558010007997534, -0.05110628506753401, -0.5446224939028347, 1.5082327413132781, 0.02053603239147973, 0.0, 0.0, 1.2119675456389454]
+
+## `|x|` with `x`'s sign carried through `f`: CSS Color 4 extends the transfer functions to
+## negative values this way.
+func cpu_signed(x: f32, magnitude: f32) -> f32:
+    return -magnitude if x < 0.0 else magnitude
+
+## The sRGB (and Display P3) transfer function: encoded to linear.
+func cpu_srgb_to_linear(c: f32) -> f32:
+    let a = math32.abs(c)
+    if a <= 0.04045:
+        return c / 12.92
+    return cpu_signed(c, math32.pow((a + 0.055) / 1.055, 2.4))
+
+## The inverse sRGB transfer function: linear to encoded.
+func cpu_linear_to_srgb(c: f32) -> f32:
+    let a = math32.abs(c)
+    if a <= 0.0031308:
+        return c * 12.92
+    return cpu_signed(c, 1.055 * math32.pow(a, 1.0 / 2.4) - 0.055)
+
+func cpu_a98_to_linear(c: f32) -> f32:
+    return cpu_signed(c, math32.pow(math32.abs(c), 563.0 / 256.0))
+
+func cpu_linear_to_a98(c: f32) -> f32:
+    return cpu_signed(c, math32.pow(math32.abs(c), 256.0 / 563.0))
+
+func cpu_prophoto_to_linear(c: f32) -> f32:
+    let a = math32.abs(c)
+    if a <= 16.0 / 512.0:
+        return c / 16.0
+    return cpu_signed(c, math32.pow(a, 1.8))
+
+func cpu_linear_to_prophoto(c: f32) -> f32:
+    let a = math32.abs(c)
+    if a >= 1.0 / 512.0:
+        return cpu_signed(c, math32.pow(a, 1.0 / 1.8))
+    return 16.0 * c
+
+let rec2020_alpha: f32 = 1.09929682680944
+let rec2020_beta: f32 = 0.018053968510807
+
+func cpu_rec2020_to_linear(c: f32) -> f32:
+    let a = math32.abs(c)
+    if a < rec2020_beta * 4.5:
+        return c / 4.5
+    return cpu_signed(c, math32.pow((a + rec2020_alpha - 1.0) / rec2020_alpha, 1.0 / 0.45))
+
+func cpu_linear_to_rec2020(c: f32) -> f32:
+    let a = math32.abs(c)
+    if a > rec2020_beta:
+        return cpu_signed(c, rec2020_alpha * math32.pow(a, 0.45) - (rec2020_alpha - 1.0))
+    return 4.5 * c
+
+# mark: Lab and OkLab ==========================================================================
+
+let lab_epsilon: f32 = 216.0 / 24389.0
+let lab_kappa: f32 = 24389.0 / 27.0
+let d50_white: f32[3] = [0.9642956764295677, 1.0, 0.8251046025104602]
+
+func cpu_lab_f(x: f32) -> f32:
+    if x > lab_epsilon:
+        return math32.cbrt(x)
+    return (lab_kappa * x + 16.0) / 116.0
+
+## XYZ (D50) to CIE Lab.
+func cpu_xyz_d50_to_lab(x: f32, y: f32, z: f32) -> (f32, f32, f32):
+    let f0 = cpu_lab_f(x / d50_white[0])
+    let f1 = cpu_lab_f(y / d50_white[1])
+    let f2 = cpu_lab_f(z / d50_white[2])
+    return (116.0 * f1 - 16.0, 500.0 * (f0 - f1), 200.0 * (f1 - f2))
+
+## CIE Lab to XYZ (D50).
+func cpu_lab_to_xyz_d50(l: f32, a: f32, b: f32) -> (f32, f32, f32):
+    let f1 = (l + 16.0) / 116.0
+    let f0 = a / 500.0 + f1
+    let f2 = f1 - b / 200.0
+    let x = f0 * f0 * f0 if f0 * f0 * f0 > lab_epsilon else (116.0 * f0 - 16.0) / lab_kappa
+    let y = f1 * f1 * f1 if l > lab_kappa * lab_epsilon else l / lab_kappa
+    let z = f2 * f2 * f2 if f2 * f2 * f2 > lab_epsilon else (116.0 * f2 - 16.0) / lab_kappa
+    return (x * d50_white[0], y * d50_white[1], z * d50_white[2])
+
+## Linear sRGB to OkLab.
+func cpu_lin_srgb_to_oklab(r: f32, g: f32, b: f32) -> (f32, f32, f32):
+    let l = math32.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b)
+    let m = math32.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b)
+    let s = math32.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b)
+    return (0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+        1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+        0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s)
+
+## OkLab to linear sRGB.
+func cpu_oklab_to_lin_srgb(ok_l: f32, ok_a: f32, ok_b: f32) -> (f32, f32, f32):
+    let l0 = ok_l + 0.3963377774 * ok_a + 0.2158037573 * ok_b
+    let m0 = ok_l - 0.1055613458 * ok_a - 0.0638541728 * ok_b
+    let s0 = ok_l - 0.0894841775 * ok_a - 1.2914855480 * ok_b
+    let l = l0 * l0 * l0
+    let m = m0 * m0 * m0
+    let s = s0 * s0 * s0
+    return (4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+        -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+        -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s)
+
+## Rectangular (a, b) to polar (chroma, hue in degrees).
+func cpu_to_polar(a: f32, b: f32) -> (f32, f32):
+    let chroma = math32.sqrt(a * a + b * b)
+    var hue = math32.atan2(b, a) * 180.0 / 3.14159265358979323846
+    if hue < 0.0:
+        hue += 360.0
+    return (chroma, hue)
+
+## Polar (chroma, hue in degrees) to rectangular (a, b).
+func cpu_from_polar(chroma: f32, hue: f32) -> (f32, f32):
+    let radians = hue * 3.14159265358979323846 / 180.0
+    return (chroma * math32.cos(radians), chroma * math32.sin(radians))
+
+# mark: HSL and HWB ============================================================================
+
+## The hue of an sRGB color in degrees (0 for a gray).
+func cpu_srgb_hue(r: f32, g: f32, b: f32) -> f32:
+    let max_ = cpu_max_f32(cpu_max_f32(r, g), b)
+    let min_ = cpu_min_f32(cpu_min_f32(r, g), b)
+    let d = max_ - min_
+    if d == 0.0:
+        return 0.0
+    var hue: f32 = 0.0
+    if max_ == r:
+        hue = (g - b) / d + (6.0 if g < b else 0.0)
+    elif max_ == g:
+        hue = (b - r) / d + 2.0
+    else:
+        hue = (r - g) / d + 4.0
+    return hue * 60.0
+
+## sRGB to HSL (hue in degrees, saturation and lightness in [0, 1]).
+func cpu_srgb_to_hsl(r: f32, g: f32, b: f32) -> (f32, f32, f32):
+    let max_ = cpu_max_f32(cpu_max_f32(r, g), b)
+    let min_ = cpu_min_f32(cpu_min_f32(r, g), b)
+    let lightness = (min_ + max_) / 2.0
+    var saturation: f32 = 0.0
+    if max_ - min_ != 0.0 and lightness != 0.0 and lightness != 1.0:
+        saturation = (max_ - lightness) / cpu_min_f32(lightness, 1.0 - lightness)
+    return (cpu_srgb_hue(r, g, b), saturation, lightness)
+
+## HSL to sRGB.
+func cpu_hsl_to_srgb(hue0: f32, saturation: f32, lightness: f32) -> (f32, f32, f32):
+    var hue = hue0 - math32.floor(hue0 / 360.0) * 360.0
+    let a = saturation * cpu_min_f32(lightness, 1.0 - lightness)
+    var out: f32[3] = [0.0, 0.0, 0.0]
+    let ns: f32[3] = [0.0, 8.0, 4.0]
+    for i in 0..<3usize:
+        var k = ns[i] + hue / 30.0
+        k = k - math32.floor(k / 12.0) * 12.0
+        out[i] = lightness - a * cpu_max_f32(-1.0, cpu_min_f32(cpu_min_f32(k - 3.0, 9.0 - k), 1.0))
+    return (out[0], out[1], out[2])
+
+## sRGB to HWB (hue in degrees, whiteness and blackness in [0, 1]).
+func cpu_srgb_to_hwb(r: f32, g: f32, b: f32) -> (f32, f32, f32):
+    let hue = cpu_srgb_hue(r, g, b)
+    let white = cpu_min_f32(cpu_min_f32(r, g), b)
+    let black = 1.0 - cpu_max_f32(cpu_max_f32(r, g), b)
+    return (hue, white, black)
+
+## HWB to sRGB.
+func cpu_hwb_to_srgb(hue: f32, white0: f32, black0: f32) -> (f32, f32, f32):
+    var white = white0
+    var black = black0
+    if white + black >= 1.0:
+        let gray = white / (white + black)
+        return (gray, gray, gray)
+    let (r, g, b) = cpu_hsl_to_srgb(hue, 1.0, 0.5)
+    let scale = 1.0 - white - black
+    return (r * scale + white, g * scale + white, b * scale + white)
+
+# mark: Conversions ============================================================================
+
+## A non-linear sRGB color (unpremultiplied) in `space`.
+func cpu_color_from_srgb(space: CpuColorSpace, color: CpuColor4) -> CpuColor4:
+    let r = color[0]
+    let g = color[1]
+    let b = color[2]
+    let a = color[3]
+    match space:
+        .srgb: return color
+        .hsl:
+            let (h, s, l) = cpu_srgb_to_hsl(r, g, b)
+            return [h, s, l, a]
+        .hwb:
+            let (h, w, bl) = cpu_srgb_to_hwb(r, g, b)
+            return [h, w, bl, a]
+        _:
+            discard(0)
+    let lr = cpu_srgb_to_linear(r)
+    let lg = cpu_srgb_to_linear(g)
+    let lb = cpu_srgb_to_linear(b)
+    match space:
+        .srgb_linear: return [lr, lg, lb, a]
+        .oklab:
+            let (l, oa, ob) = cpu_lin_srgb_to_oklab(lr, lg, lb)
+            return [l, oa, ob, a]
+        .oklch:
+            let (l, oa, ob) = cpu_lin_srgb_to_oklab(lr, lg, lb)
+            let (c, h) = cpu_to_polar(oa, ob)
+            return [l, c, h, a]
+        _:
+            discard(0)
+    let (x, y, z) = cpu_mat3_mul(lin_srgb_to_xyz_d65, lr, lg, lb)
+    match space:
+        .display_p3:
+            let (pr, pg, pb) = cpu_mat3_mul(xyz_d65_to_lin_p3, x, y, z)
+            return [cpu_linear_to_srgb(pr), cpu_linear_to_srgb(pg), cpu_linear_to_srgb(pb), a]
+        .a98_rgb:
+            let (ar, ag, ab) = cpu_mat3_mul(xyz_d65_to_lin_a98, x, y, z)
+            return [cpu_linear_to_a98(ar), cpu_linear_to_a98(ag), cpu_linear_to_a98(ab), a]
+        .rec2020:
+            let (rr, rg, rb) = cpu_mat3_mul(xyz_d65_to_lin_rec2020, x, y, z)
+            return [cpu_linear_to_rec2020(rr), cpu_linear_to_rec2020(rg), cpu_linear_to_rec2020(rb), a]
+        _:
+            discard(0)
+    let (x50, y50, z50) = cpu_mat3_mul(xyz_d65_to_d50, x, y, z)
+    match space:
+        .prophoto_rgb:
+            let (pr, pg, pb) = cpu_mat3_mul(xyz_d50_to_lin_prophoto, x50, y50, z50)
+            return [cpu_linear_to_prophoto(pr), cpu_linear_to_prophoto(pg), cpu_linear_to_prophoto(pb), a]
+        .lab:
+            let (l, la, lb2) = cpu_xyz_d50_to_lab(x50, y50, z50)
+            return [l, la, lb2, a]
+        .lch:
+            let (l, la, lb2) = cpu_xyz_d50_to_lab(x50, y50, z50)
+            let (c, h) = cpu_to_polar(la, lb2)
+            return [l, c, h, a]
+        _:
+            return color
+
+## A color of `space` (unpremultiplied) as non-linear sRGB.
+func cpu_color_to_srgb(space: CpuColorSpace, color: CpuColor4) -> CpuColor4:
+    let a = color[3]
+    match space:
+        .srgb: return color
+        .hsl:
+            let (r, g, b) = cpu_hsl_to_srgb(color[0], color[1], color[2])
+            return [r, g, b, a]
+        .hwb:
+            let (r, g, b) = cpu_hwb_to_srgb(color[0], color[1], color[2])
+            return [r, g, b, a]
+        .srgb_linear:
+            return [cpu_linear_to_srgb(color[0]), cpu_linear_to_srgb(color[1]), cpu_linear_to_srgb(color[2]), a]
+        .oklab:
+            let (r, g, b) = cpu_oklab_to_lin_srgb(color[0], color[1], color[2])
+            return [cpu_linear_to_srgb(r), cpu_linear_to_srgb(g), cpu_linear_to_srgb(b), a]
+        .oklch:
+            let (oa, ob) = cpu_from_polar(color[1], color[2])
+            let (r, g, b) = cpu_oklab_to_lin_srgb(color[0], oa, ob)
+            return [cpu_linear_to_srgb(r), cpu_linear_to_srgb(g), cpu_linear_to_srgb(b), a]
+        _:
+            discard(0)
+    match space:
+        .display_p3:
+            let (x, y, z) = cpu_mat3_mul(lin_p3_to_xyz_d65, cpu_srgb_to_linear(color[0]), cpu_srgb_to_linear(color[1]), cpu_srgb_to_linear(color[2]))
+            return cpu_xyz_d65_to_srgb(x, y, z, a)
+        .a98_rgb:
+            let (x, y, z) = cpu_mat3_mul(lin_a98_to_xyz_d65, cpu_a98_to_linear(color[0]), cpu_a98_to_linear(color[1]), cpu_a98_to_linear(color[2]))
+            return cpu_xyz_d65_to_srgb(x, y, z, a)
+        .rec2020:
+            let (x, y, z) = cpu_mat3_mul(lin_rec2020_to_xyz_d65, cpu_rec2020_to_linear(color[0]), cpu_rec2020_to_linear(color[1]), cpu_rec2020_to_linear(color[2]))
+            return cpu_xyz_d65_to_srgb(x, y, z, a)
+        .prophoto_rgb:
+            let (x50, y50, z50) = cpu_mat3_mul(lin_prophoto_to_xyz_d50, cpu_prophoto_to_linear(color[0]), cpu_prophoto_to_linear(color[1]), cpu_prophoto_to_linear(color[2]))
+            return cpu_xyz_d50_to_srgb(x50, y50, z50, a)
+        .lab:
+            let (x50, y50, z50) = cpu_lab_to_xyz_d50(color[0], color[1], color[2])
+            return cpu_xyz_d50_to_srgb(x50, y50, z50, a)
+        .lch:
+            let (la, lb) = cpu_from_polar(color[1], color[2])
+            let (x50, y50, z50) = cpu_lab_to_xyz_d50(color[0], la, lb)
+            return cpu_xyz_d50_to_srgb(x50, y50, z50, a)
+        _:
+            return color
+
+## XYZ (D65) and alpha as non-linear sRGB.
+func cpu_xyz_d65_to_srgb(x: f32, y: f32, z: f32, a: f32) -> CpuColor4:
+    let (r, g, b) = cpu_mat3_mul(xyz_d65_to_lin_srgb, x, y, z)
+    return [cpu_linear_to_srgb(r), cpu_linear_to_srgb(g), cpu_linear_to_srgb(b), a]
+
+## XYZ (D50) and alpha as non-linear sRGB.
+func cpu_xyz_d50_to_srgb(x: f32, y: f32, z: f32, a: f32) -> CpuColor4:
+    let (x65, y65, z65) = cpu_mat3_mul(xyz_d50_to_d65, x, y, z)
+    return cpu_xyz_d65_to_srgb(x65, y65, z65, a)
+
+## Whether a polar color's hue is powerless (the color is achromatic), so it takes the hue
+## of its neighbor stop.
+func cpu_color_hue_is_powerless(space: CpuColorSpace, color: CpuColor4) -> bool:
+    match space:
+        .hsl: return color[1] <= 0.0
+        .hwb: return color[1] + color[2] >= 1.0
+        .lch: return color[1] <= 0.0015
+        .oklch: return color[1] <= 0.000004
+        _: return false

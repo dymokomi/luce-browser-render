@@ -1,0 +1,454 @@
+#==============================================================================================
+#
+#   tests_display_list - the visual context tree, the command loop, commands, the recorder
+#
+#   DESCRIPTION:
+#       Ladybird has no unit tests for these files; the expected values are pinned to the
+#       donor's behaviour: they were printed by the C++ (AccumulatedVisualContext.cpp,
+#       DisplayList.cpp, DisplayListCommand.cpp, DisplayListRecorder.cpp and
+#       BorderRadiiData.cpp compiled locally from the pinned donor, with a recording
+#       DisplayListPlayer subclass) for the same inputs. Tests that reach region r08's
+#       geometry stubs are gated (tests_support.lucb).
+#
+#==============================================================================================
+
+# mark: AccumulatedVisualContextTree ===========================================================
+
+## The tree of the donor run: scroll 3 (sticky) <- effects (0.5, multiply) <- transform (30
+## degrees about (8.5, 2)) <- clip ([1,2 30x40], radii 1,2,3,4) <- perspective <- effects
+## (normal); indices 1 to 6.
+func test_visual_context_tree() -> AccumulatedVisualContextTree*:
+    let tree = accumulated_visual_context_tree_create()
+    let s = accumulated_visual_context_tree_append(tree, .scroll_data(value = ScrollData(scroll_frame_index = 3, is_sticky = true)), 0)
+    let e = accumulated_visual_context_tree_append(tree, .effects_data(value = EffectsData(opacity = 0.5, blend_mode = gfx.CompositingAndBlendingOperator.multiply)), s)
+    let angle: f32 = 30.0 * 3.14159265358979323846 / 180.0
+    let c = math32.cos(angle)
+    let sn = math32.sin(angle)
+    discard(accumulated_visual_context_tree_append(tree, .transform_data(value = TransformData(
+        matrix = test_matrix([[c, -sn, 0.0, 0.0], [sn, c, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]), origin = gfx.FloatPoint(m_x = 8.5, m_y = 2.0))), e))
+    return tree
+
+test "visual context tree: the sentinel":
+    test_visual_context_tree_sentinel()
+
+noinline func test_visual_context_tree_sentinel():
+    let tree = accumulated_visual_context_tree_create()
+    assert(ak.vector_size(&tree.m_nodes) == 1)
+    let sentinel = accumulated_visual_context_tree_node_at(tree, 0)
+    assert(sentinel.depth == 0 and sentinel.parent_index == 0 and not sentinel.has_empty_effective_clip)
+    # A null context index dumps nothing and is its own common ancestor with anything.
+    var builder = ak.string_builder_new()
+    accumulated_visual_context_tree_dump(tree, 0, &builder)
+    expect_text(test_builder_text(&builder), "")
+    assert(accumulated_visual_context_tree_find_common_ancestor(tree, 0, 0) == 0)
+
+test "visual context tree: append, depths and common ancestors":
+    test_visual_context_tree_append()
+
+noinline func test_visual_context_tree_append():
+    let tree = test_visual_context_tree()
+    let p = accumulated_visual_context_tree_append(tree, .perspective_data(value = PerspectiveData(matrix = test_identity_matrix())), 3)
+    let e2 = accumulated_visual_context_tree_append(tree, .effects_data(value = EffectsData(opacity = 1.0, blend_mode = gfx.CompositingAndBlendingOperator.normal)), p)
+    let s2 = accumulated_visual_context_tree_append(tree, .scroll_data(value = ScrollData(scroll_frame_index = 1, is_sticky = false)), 0)
+    assert(p == 4 and e2 == 5 and s2 == 6)
+    assert(accumulated_visual_context_tree_node_at(tree, 1).depth == 1)
+    assert(accumulated_visual_context_tree_node_at(tree, 3).depth == 3)
+    assert(accumulated_visual_context_tree_node_at(tree, 5).depth == 5)
+    assert(accumulated_visual_context_tree_node_at(tree, 5).parent_index == 4)
+    # The donor: find_common_ancestor(4, 6) with 6 under 5 is 4; the tree's two roots share none.
+    assert(accumulated_visual_context_tree_find_common_ancestor(tree, 3, 5) == 3)
+    assert(accumulated_visual_context_tree_find_common_ancestor(tree, 5, 6) == 0)
+    assert(accumulated_visual_context_tree_find_common_ancestor(tree, 2, 5) == 2)
+    assert(accumulated_visual_context_tree_find_common_ancestor(tree, 5, 5) == 5)
+
+    var chain = accumulated_visual_context_tree_build_ancestor_chain(tree, 5)
+    assert(ak.vector_size(&chain) == 5)
+    for i in 0..<5usize:
+        assert(*ak.vector_at(&chain, i) == (u64)(5 - i))
+
+test "visual context tree: an empty clip empties every descendant":
+    test_visual_context_tree_empty_clip_inherited()
+
+noinline func test_visual_context_tree_empty_clip_inherited():
+    let tree = test_visual_context_tree()
+    # A node whose effective clip is empty (what appending an empty ClipData makes).
+    ak.vector_append_t(&tree.m_nodes, AccumulatedVisualContextNode(data = .effects_data(value = EffectsData(opacity = 1.0, blend_mode = gfx.CompositingAndBlendingOperator.normal)),
+        parent_index = 3, depth = 4, has_empty_effective_clip = true))
+    let under = accumulated_visual_context_tree_append(tree, .effects_data(value = EffectsData(opacity = 1.0, blend_mode = gfx.CompositingAndBlendingOperator.normal)), 4)
+    assert(accumulated_visual_context_tree_has_empty_effective_clip(tree, under))
+    assert(not accumulated_visual_context_tree_has_empty_effective_clip(tree, 3))
+
+    # The display list drops commands recorded under an empty clip.
+    let display_list_ = display_list_create(tree)
+    assert(not display_list_append(display_list_, .save(value = Save()), under))
+    assert(display_list_append(display_list_, .save(value = Save()), 3))
+    assert(display_list_append(display_list_, .save(value = Save()), 0))
+    assert(ak.vector_size(display_list_commands(display_list_)) == 2)
+
+test "visual context tree: dump (scroll, effects, perspective)":
+    test_visual_context_tree_dump()
+
+noinline func test_visual_context_tree_dump():
+    let tree = test_visual_context_tree()
+    let p = accumulated_visual_context_tree_append(tree, .perspective_data(value = PerspectiveData(matrix = test_identity_matrix())), 3)
+    let e2 = accumulated_visual_context_tree_append(tree, .effects_data(value = EffectsData(opacity = 1.0, blend_mode = gfx.CompositingAndBlendingOperator.normal)), p)
+    var builder = ak.string_builder_new()
+    accumulated_visual_context_tree_dump(tree, 1, &builder)
+    expect_text(test_builder_text(&builder), "scroll_frame_id=3 (sticky)")
+    builder = ak.string_builder_new()
+    accumulated_visual_context_tree_dump(tree, 2, &builder)
+    expect_text(test_builder_text(&builder), "effects=[opacity=0.5 blend_mode=2]")
+    builder = ak.string_builder_new()
+    accumulated_visual_context_tree_dump(tree, p, &builder)
+    expect_text(test_builder_text(&builder), "perspective")
+    builder = ak.string_builder_new()
+    accumulated_visual_context_tree_dump(tree, e2, &builder)
+    expect_text(test_builder_text(&builder), "effects=[]")
+
+test "visual context tree: dump, clips and hit testing (gated on r08)":
+    test_visual_context_tree_gated()
+
+noinline func test_visual_context_tree_gated():
+    if not gfx_geometry_is_ported:
+        return
+    let tree = test_visual_context_tree()
+    let radii = CornerRadii(top_left = CornerRadius(horizontal_radius = 1, vertical_radius = 1), top_right = CornerRadius(horizontal_radius = 2, vertical_radius = 2),
+        bottom_right = CornerRadius(horizontal_radius = 3, vertical_radius = 3), bottom_left = CornerRadius(horizontal_radius = 4, vertical_radius = 4))
+    let c = accumulated_visual_context_tree_append(tree, .clip_data(value = ClipData(rect = test_rect(1, 2, 30, 40), corner_radii = radii)), 3)
+    var builder = ak.string_builder_new()
+    accumulated_visual_context_tree_dump(tree, 3, &builder)
+    expect_text(test_builder_text(&builder), "transform=[0.8660254,-0.5,0.5,0.8660254,0,0] origin=(8.5,2)")
+    builder = ak.string_builder_new()
+    accumulated_visual_context_tree_dump(tree, c, &builder)
+    expect_text(test_builder_text(&builder), "clip=[1,2 30x40] radii=(1,2,3,4)")
+
+    # An empty clip rectangle empties the node and its descendants.
+    let empty = accumulated_visual_context_tree_append(tree, .clip_data(value = ClipData(rect = test_rect(0, 0, 0, 5))), 3)
+    let under = accumulated_visual_context_tree_append(tree, .effects_data(value = EffectsData(opacity = 1.0, blend_mode = gfx.CompositingAndBlendingOperator.normal)), empty)
+    assert(accumulated_visual_context_tree_has_empty_effective_clip(tree, empty))
+    assert(accumulated_visual_context_tree_has_empty_effective_clip(tree, under))
+
+    var snapshot: ScrollStateSnapshot
+    let hit = accumulated_visual_context_tree_transform_point_for_hit_test(tree, c, gfx.FloatPoint(m_x = 10.0, m_y = 10.0), &snapshot) else trap("expected a hit")
+    assert(math32.abs(hit.m_x - 13.799038) < 0.0001 and math32.abs(hit.m_y - 8.178204) < 0.0001)
+    assert(accumulated_visual_context_tree_transform_point_for_hit_test(tree, c, gfx.FloatPoint(m_x = 100.0, m_y = 100.0), &snapshot) == none)
+    let inverse = accumulated_visual_context_tree_inverse_transform_point(tree, c, gfx.FloatPoint(m_x = 10.0, m_y = 10.0))
+    assert(math32.abs(inverse.m_x - 13.799038) < 0.0001 and math32.abs(inverse.m_y - 8.178204) < 0.0001)
+    let viewport = accumulated_visual_context_tree_transform_rect_to_viewport(tree, c,
+        gfx.FloatRect(m_location = gfx.FloatPoint(m_x = 1.0, m_y = 2.0), m_size = gfx.FloatSize(m_width = 3.0, m_height = 4.0)), &snapshot)
+    assert(math32.abs(viewport.m_location.m_x - 0.0048093796) < 0.0001 and math32.abs(viewport.m_location.m_y + 1.75) < 0.0001)
+    assert(math32.abs(viewport.m_size.m_width - 4.5980763) < 0.0001 and math32.abs(viewport.m_size.m_height - 4.964102) < 0.0001)
+
+# mark: The command loop =======================================================================
+
+## The tree of the donor's command-loop runs: effects 0.5 (1) <- transform (2) <- clip
+## [0,0 10x10] (3); a rounded clip under the transform (4); a perspective root (5).
+func test_command_loop_tree() -> AccumulatedVisualContextTree*:
+    let tree = accumulated_visual_context_tree_create()
+    let e = accumulated_visual_context_tree_append(tree, .effects_data(value = EffectsData(opacity = 0.5, blend_mode = gfx.CompositingAndBlendingOperator.normal)), 0)
+    let t = accumulated_visual_context_tree_append(tree, .transform_data(value = TransformData(matrix = test_identity_matrix(), origin = gfx.FloatPoint(m_x = 0.0, m_y = 0.0))), e)
+    # ClipData nodes appended by hand: appending asks r08's rectangles whether they are empty.
+    ak.vector_append_t(&tree.m_nodes, AccumulatedVisualContextNode(data = .clip_data(value = ClipData(rect = test_rect(0, 0, 10, 10))), parent_index = t, depth = 3))
+    var radii: CornerRadii
+    radii.top_left = CornerRadius(horizontal_radius = 2, vertical_radius = 2)
+    ak.vector_append_t(&tree.m_nodes, AccumulatedVisualContextNode(data = .clip_data(value = ClipData(rect = test_rect(0, 0, 10, 10), corner_radii = radii)), parent_index = t, depth = 3))
+    discard(accumulated_visual_context_tree_append(tree, .perspective_data(value = PerspectiveData(matrix = test_identity_matrix())), 0))
+    return tree
+
+test "command loop: context switches around commands without bounds":
+    test_command_loop_context_switches()
+
+noinline func test_command_loop_context_switches():
+    let tree = test_command_loop_tree()
+    let display_list_ = display_list_create(tree)
+    discard(display_list_append(display_list_, .save(value = Save()), 0))
+    discard(display_list_append(display_list_, .translate(value = Translate(delta = test_point(1, 2))), 3))
+    discard(display_list_append(display_list_, .save_layer(value = SaveLayer()), 4))
+    discard(display_list_append(display_list_, .restore(value = Restore()), 5))
+    discard(display_list_append(display_list_, .apply_effects(value = ApplyEffects(opacity = 0.75, compositing_and_blending_operator = gfx.CompositingAndBlendingOperator.normal)), 0))
+    discard(display_list_append(display_list_, .restore(value = Restore()), 0))
+    discard(display_list_append(display_list_, .restore(value = Restore()), 1))
+
+    let player = test_recording_player_create()
+    var snapshot: ScrollStateSnapshot
+    display_list_player_execute_impl(player.display_list_player(), display_list_, &snapshot)
+    display_list_player_flush(player.display_list_player())
+    # What the donor's player records for the same display list ("seq2").
+    expect_text(test_builder_text(&player.log), "save;apply_effects(0.5);save;apply_transform;save;add_clip_rect;translate(1,2);restore;save;add_rounded_rect_clip;save_layer;restore;restore;restore;save;apply_transform;restore;restore;apply_effects(0.75);restore;apply_effects(0.5);restore;restore;flush;")
+
+test "command loop: the donor's recorded display list (gated on r08)":
+    test_command_loop_recorded()
+
+noinline func test_command_loop_recorded():
+    if not gfx_geometry_is_ported:
+        return
+    let tree = test_command_loop_tree()
+    discard(accumulated_visual_context_tree_append(tree, .scroll_data(value = ScrollData(scroll_frame_index = 1, is_sticky = false)), 0))
+    let display_list_ = display_list_create(tree)
+    var recorder = display_list_recorder_new(display_list_)
+    let red = test_color(255, 0, 0, 255)
+    display_list_recorder_save(&recorder)
+    display_list_recorder_set_accumulated_visual_context(&recorder, 3)
+    display_list_recorder_translate(&recorder, test_point(1, 2))
+    display_list_recorder_fill_rect(&recorder, test_rect(0, 0, 5, 5), red)
+    display_list_recorder_set_accumulated_visual_context(&recorder, 4)
+    display_list_recorder_fill_rect(&recorder, test_rect(0, 0, 5, 5), red)
+    display_list_recorder_set_accumulated_visual_context(&recorder, 5)
+    display_list_recorder_save_layer(&recorder)
+    display_list_recorder_set_accumulated_visual_context(&recorder, 6)
+    display_list_recorder_restore(&recorder)
+    display_list_recorder_paint_scrollbar(&recorder, 1, test_rect(0, 0, 4, 20), test_rect(0, 2, 4, 6), 2.0, test_color(1, 2, 3, 4), test_color(5, 6, 7, 8), true)
+    display_list_recorder_set_accumulated_visual_context(&recorder, 0)
+    display_list_recorder_fill_rect(&recorder, test_rect(0, 0, 0, 5), red)
+    display_list_recorder_apply_effects(&recorder, 0.75)
+    display_list_recorder_restore(&recorder)
+    display_list_recorder_restore(&recorder)
+    assert(recorder.m_save_nesting_level == 0)
+
+    # ScrollStateSnapshot::create of a sentinel and a frame scrolled by (3, 5), at 2 device
+    # pixels per CSS pixel: frame 1 is offset by (6, 10).
+    var frames: ak.Vector[ScrollFrame]
+    var sentinel: ScrollFrame
+    ak.vector_append_t(&frames, sentinel)
+    var frame: ScrollFrame
+    scroll_frame_set_own_offset(&frame, gfx.CssPixelPoint(m_x = gfx.CssPixels(m_value = 3 * 64), m_y = gfx.CssPixels(m_value = 5 * 64)))
+    ak.vector_append_t(&frames, frame)
+    let snapshot = scroll_state_snapshot_create(&frames, 2.0)
+
+    let player = test_recording_player_create()
+    display_list_player_execute_impl(player.display_list_player(), display_list_, &snapshot)
+    display_list_player_flush(player.display_list_player())
+    expect_text(test_builder_text(&player.log), "save;apply_effects(0.5);save;apply_transform;save;add_clip_rect;translate(1,2);fill_rect;restore;save;add_rounded_rect_clip;fill_rect;restore;restore;restore;save;apply_transform;save_layer;restore;save;translate(6,10);restore;paint_scrollbar;restore;apply_effects(0.75);restore;restore;flush;")
+
+    # Everything would be clipped: the commands with bounds are dropped.
+    let clipped = test_recording_player_create()
+    clipped.fully_clipped = true
+    display_list_player_execute_impl(clipped.display_list_player(), display_list_, &snapshot)
+    display_list_player_flush(clipped.display_list_player())
+    expect_text(test_builder_text(&clipped.log), "save;apply_effects(0.5);save;apply_transform;save;add_clip_rect;translate(1,2);restore;save;add_rounded_rect_clip;restore;restore;restore;save;apply_transform;save_layer;restore;save;translate(6,10);restore;paint_scrollbar;restore;apply_effects(0.75);restore;restore;flush;")
+
+# mark: Commands ===============================================================================
+
+test "commands: dumps and bounding rects (gated on r08)":
+    test_commands_gated()
+
+noinline func test_commands_gated():
+    if not gfx_geometry_is_ported:
+        return
+    var builder = ak.string_builder_new()
+    let fill = FillRect(rect = test_rect(1, 2, 3, 4), color = test_color(10, 20, 30, 40))
+    fill_rect_dump(&fill, &builder)
+    ak.string_builder_append(&builder, "|")
+    let translate = Translate(delta = test_point(-3, 7))
+    translate_dump(&translate, &builder)
+    ak.string_builder_append(&builder, "|")
+    let line = DrawLine(color = test_color(255, 0, 0, 255), from_ = test_point(1, 2), to = test_point(3, 4), thickness = 2, style = gfx.LineStyle.solid, alternate_color = test_color(0, 0, 0, 0))
+    draw_line_dump(&line, &builder)
+    ak.string_builder_append(&builder, "|")
+    let rect = DrawRect(rect = test_rect(1, 2, 3, 4), color = test_color(0, 0, 255, 128), rough = true)
+    draw_rect_dump(&rect, &builder)
+    ak.string_builder_append(&builder, "|")
+    let effects = ApplyEffects(opacity = 0.25, compositing_and_blending_operator = gfx.CompositingAndBlendingOperator.normal)
+    apply_effects_dump(&effects, &builder)
+    ak.string_builder_append(&builder, "|")
+    expect_text(test_builder_text(&builder), " rect=[1,2 3x4] color=rgba(10, 20, 30, 0.157)| delta=[-3,7]| from=[1,2] to=[3,4] color=rgb(255, 0, 0) thickness=2| rect=[1,2 3x4] color=rgba(0, 0, 255, 0.5) rough=true| opacity=0.25 has_filter=false|")
+
+    var none_radii: CornerRadii
+    let shadow = PaintOuterBoxShadow(color = test_color(0, 0, 0, 255), blur_radius = 4, device_content_rect = test_rect(6, 6, 12, 12), content_corner_radii = none_radii,
+        shadow_rect = test_rect(8, 8, 12, 12), shadow_corner_radii = none_radii)
+    assert(paint_outer_box_shadow_bounding_rect(&shadow) == test_rect(0, 0, 28, 28))
+    let diagonal = DrawLine(color = test_color(255, 0, 0, 255), from_ = test_point(5, 2), to = test_point(1, 9), thickness = 3, style = gfx.LineStyle.solid, alternate_color = test_color(0, 0, 0, 0))
+    assert(draw_line_bounding_rect(&diagonal) == test_rect(0, 1, 7, 10))
+
+test "commands: bounds and clips of the command variant":
+    test_commands_variant()
+
+noinline func test_commands_variant():
+    let fill: DisplayListCommand = .fill_rect(value = FillRect(rect = test_rect(1, 2, 3, 4), color = test_color(1, 2, 3, 4)))
+    assert(command_bounding_rectangle(&fill) == test_rect(1, 2, 3, 4))
+    assert(not command_is_clip(&fill))
+    let clip: DisplayListCommand = .add_clip_rect(value = AddClipRect(rect = test_rect(5, 6, 7, 8)))
+    assert(command_bounding_rectangle(&clip) == test_rect(5, 6, 7, 8))
+    assert(command_is_clip(&clip))
+    var radii: CornerRadii
+    let rounded: DisplayListCommand = .add_rounded_rect_clip(value = AddRoundedRectClip(corner_radii = radii, border_rect = test_rect(0, 1, 2, 3), corner_clip = CornerClip.inside))
+    assert(command_bounding_rectangle(&rounded) == test_rect(0, 1, 2, 3))
+    assert(command_is_clip(&rounded))
+    let save: DisplayListCommand = .save(value = Save())
+    assert(command_bounding_rectangle(&save) == none)
+    let effects: DisplayListCommand = .apply_effects(value = ApplyEffects(opacity = 1.0, compositing_and_blending_operator = gfx.CompositingAndBlendingOperator.normal))
+    assert(command_bounding_rectangle(&effects) == none)
+    assert(command_nesting_level_change(&save) == 1 and command_nesting_level_change(&effects) == 1)
+    let restore: DisplayListCommand = .restore(value = Restore())
+    assert(command_nesting_level_change(&restore) == -1 and command_nesting_level_change(&fill) == 0)
+    expect_text(save_command_name, "Save")
+    expect_text(paint_scroll_bar_command_name, "PaintScrollBar")
+
+# mark: DisplayListRecorder ====================================================================
+
+## The kinds of a display list's commands, "Name(opacity,operator,mask)" for ApplyEffects,
+## as the donor run printed them.
+func test_command_names(display_list_: const DisplayList*) -> ak.StringBuilder:
+    var builder = ak.string_builder_new()
+    for item in ak.vector_span_const(display_list_commands(display_list_)):
+        match item.command:
+            .save(_): ak.string_builder_append(&builder, save_command_name)
+            .save_layer(_): ak.string_builder_append(&builder, save_layer_command_name)
+            .restore(_): ak.string_builder_append(&builder, restore_command_name)
+            .translate(_): ak.string_builder_append(&builder, translate_command_name)
+            .add_clip_rect(_): ak.string_builder_append(&builder, add_clip_rect_command_name)
+            .paint_nested_display_list(_): ak.string_builder_append(&builder, paint_nested_display_list_command_name)
+            .apply_effects(effects):
+                ak.string_builder_append(&builder, apply_effects_command_name)
+                ak.string_builder_append(&builder, "(")
+                ak.format_f32(&builder, effects.opacity)
+                ak.string_builder_append(&builder, ",")
+                ak.format_i64(&builder, (i32)effects.compositing_and_blending_operator)
+                ak.string_builder_append(&builder, ",")
+                ak.format_i64(&builder, (i32)(effects.mask_kind else (gfx.MaskKind)(-1)))
+                ak.string_builder_append(&builder, ")")
+            _: ak.string_builder_append(&builder, "?")
+        ak.string_builder_append(&builder, " ")
+    return builder
+
+test "recorder: nesting, capture, replay and masks":
+    test_recorder_capture_and_masks()
+
+noinline func test_recorder_capture_and_masks():
+    let tree = accumulated_visual_context_tree_create()
+    let display_list_ = display_list_create(tree)
+    var recorder = display_list_recorder_new(display_list_)
+    display_list_recorder_save(&recorder)
+
+    var capture = display_list_recorder_begin_command_capture(&recorder)
+    display_list_recorder_translate(&recorder, test_point(4, 5))
+    display_list_recorder_save_layer(&recorder)
+    display_list_recorder_apply_effects(&recorder, 0.5)
+    let captured = display_list_recorder_command_capture_take(&capture)
+    display_list_recorder_command_capture_destroy(&capture)
+    assert(ak.vector_size(&captured) == 3)
+    assert(recorder.m_save_nesting_level == 3)
+    assert(not recorder.m_is_capturing)
+
+    display_list_recorder_replay_cached_commands(&recorder, ak.vector_span_const(&captured))
+    assert(recorder.m_save_nesting_level == 5)
+
+    let mask_list = display_list_create(tree)
+    let masks: DisplayListRecorderMaskInfo[2] = [
+        DisplayListRecorderMaskInfo(display_list = mask_list, rect = test_rect(1, 2, 3, 4), kind = gfx.MaskKind.alpha),
+        DisplayListRecorderMaskInfo(display_list = mask_list, rect = test_rect(5, 6, 7, 8), kind = gfx.MaskKind.luminance),
+    ]
+    display_list_recorder_begin_masks(&recorder, masks)
+    display_list_recorder_end_masks(&recorder, masks)
+    assert(recorder.m_save_nesting_level == 5)
+
+    let names = test_command_names(display_list_)
+    expect_text(test_builder_text(&names), "Save Translate SaveLayer ApplyEffects(0.5,1,-1) Translate SaveLayer ApplyEffects(0.5,1,-1) Save AddClipRect SaveLayer Save AddClipRect SaveLayer ApplyEffects(1,22,1) PaintNestedDisplayList Restore Restore Restore ApplyEffects(1,22,-1) PaintNestedDisplayList Restore Restore Restore ")
+
+test "recorder: an abandoned capture ends":
+    test_recorder_abandoned_capture()
+
+noinline func test_recorder_abandoned_capture():
+    let display_list_ = display_list_create(accumulated_visual_context_tree_create())
+    var recorder = display_list_recorder_new(display_list_)
+    var capture = display_list_recorder_begin_command_capture(&recorder)
+    display_list_recorder_save(&recorder)
+    assert(ak.vector_size(&recorder.m_captured_commands) == 1)
+    display_list_recorder_command_capture_destroy(&capture)
+    assert(not recorder.m_is_capturing)
+    assert(ak.vector_is_empty(&recorder.m_captured_commands))
+    # Recording goes on; the display list kept the command.
+    display_list_recorder_restore(&recorder)
+    assert(ak.vector_size(display_list_commands(display_list_)) == 2)
+
+test "recorder: the state saver":
+    test_recorder_state_saver()
+
+noinline func test_recorder_state_saver():
+    let display_list_ = display_list_create(accumulated_visual_context_tree_create())
+    var recorder = display_list_recorder_new(display_list_)
+    var saver = display_list_recorder_state_saver_new(&recorder)
+    assert(recorder.m_save_nesting_level == 1)
+    display_list_recorder_state_saver_destroy(&saver)
+    assert(recorder.m_save_nesting_level == 0)
+    let names = test_command_names(display_list_)
+    expect_text(test_builder_text(&names), "Save Restore ")
+
+test "recorder: commands are dropped under an empty clip":
+    test_recorder_empty_clip()
+
+noinline func test_recorder_empty_clip():
+    let tree = accumulated_visual_context_tree_create()
+    ak.vector_append_t(&tree.m_nodes, AccumulatedVisualContextNode(data = .clip_data(value = ClipData(rect = test_rect(0, 0, 0, 0))), parent_index = 0, depth = 1, has_empty_effective_clip = true))
+    let display_list_ = display_list_create(tree)
+    var recorder = display_list_recorder_new(display_list_)
+    display_list_recorder_set_accumulated_visual_context(&recorder, 1)
+    assert(display_list_recorder_accumulated_visual_context(&recorder) == 1)
+    display_list_recorder_save(&recorder)
+    # The nesting level counts the command although the list dropped it, as in C++.
+    assert(recorder.m_save_nesting_level == 1)
+    assert(ak.vector_is_empty(display_list_commands(display_list_)))
+
+# mark: Borders and radii ======================================================================
+
+test "corner radii: operator bool and has_any_radius":
+    test_corner_radii_bool()
+
+noinline func test_corner_radii_bool():
+    let both = CornerRadius(horizontal_radius = 2, vertical_radius = 3)
+    let one = CornerRadius(horizontal_radius = 2, vertical_radius = 0)
+    assert(corner_radius_to_bool(&both))
+    assert(not corner_radius_to_bool(&one))
+    var radii: CornerRadii
+    assert(not corner_radii_has_any_radius(&radii))
+    radii.bottom_left = one
+    assert(not corner_radii_has_any_radius(&radii))
+    radii.bottom_right = both
+    assert(corner_radii_has_any_radius(&radii))
+
+test "corner radii: adjust_corners_for_spread_distance":
+    test_corner_radii_spread()
+
+## CornerRadii { { 4, 6 }, { 1, 0 }, { 8, 8 }, { 3, 12 } } adjusted by `spread`.
+func test_spread_radii(spread: i32) -> i32[8]:
+    var radii = CornerRadii(top_left = CornerRadius(horizontal_radius = 4, vertical_radius = 6), top_right = CornerRadius(horizontal_radius = 1, vertical_radius = 0),
+        bottom_right = CornerRadius(horizontal_radius = 8, vertical_radius = 8), bottom_left = CornerRadius(horizontal_radius = 3, vertical_radius = 12))
+    corner_radii_adjust_corners_for_spread_distance(&radii, spread)
+    return [radii.top_left.horizontal_radius, radii.top_left.vertical_radius, radii.top_right.horizontal_radius, radii.top_right.vertical_radius,
+        radii.bottom_right.horizontal_radius, radii.bottom_right.vertical_radius, radii.bottom_left.horizontal_radius, radii.bottom_left.vertical_radius]
+
+noinline func test_corner_radii_spread():
+    # The donor's results.
+    assert(test_spread_radii(-7) == [-2, 0, -1, 0, 1, 1, -2, 5])
+    assert(test_spread_radii(-3) == [1, 3, -1, 0, 5, 5, 0, 9])
+    assert(test_spread_radii(0) == [4, 6, 1, 0, 8, 8, 3, 12])
+    assert(test_spread_radii(2) == [6, 8, 2, 0, 10, 10, 5, 14])
+    assert(test_spread_radii(5) == [8, 11, 3, 0, 13, 13, 7, 17])
+    assert(test_spread_radii(10) == [11, 15, 3, 0, 17, 17, 9, 22])
+
+test "corner radii: contains (gated on r08)":
+    test_corner_radii_contains()
+
+noinline func test_corner_radii_contains():
+    if not gfx_geometry_is_ported:
+        return
+    let radii = CornerRadii(top_left = CornerRadius(horizontal_radius = 5, vertical_radius = 5), top_right = CornerRadius(horizontal_radius = 0, vertical_radius = 0),
+        bottom_right = CornerRadius(horizontal_radius = 3, vertical_radius = 6), bottom_left = CornerRadius(horizontal_radius = 0, vertical_radius = 0))
+    let rect = test_rect(10, 10, 20, 20)
+    let points: gfx.IntPoint[11] = [test_point(10, 10), test_point(11, 11), test_point(12, 12), test_point(13, 11), test_point(29, 10), test_point(29, 29),
+        test_point(28, 28), test_point(27, 29), test_point(30, 30), test_point(15, 15), test_point(9, 15)]
+    let expected: bool[11] = [false, false, true, true, true, false, true, true, false, true, false]
+    for i in 0..<11usize:
+        assert(corner_radii_contains(&radii, points[i], rect) == expected[i])
+
+test "borders: for_edge":
+    test_borders_for_edge()
+
+noinline func test_borders_for_edge():
+    var borders: BordersDataDevicePixels
+    borders_data_device_pixels_for_edge(&borders, BorderEdge.top).width = 1
+    borders_data_device_pixels_for_edge(&borders, BorderEdge.right).width = 2
+    borders_data_device_pixels_for_edge(&borders, BorderEdge.bottom).width = 3
+    borders_data_device_pixels_for_edge(&borders, BorderEdge.left).width = 4
+    assert(borders.top.width == 1 and borders.right.width == 2 and borders.bottom.width == 3 and borders.left.width == 4)
+    assert(borders_data_device_pixels_for_edge_const(&borders, BorderEdge.bottom).width == 3)

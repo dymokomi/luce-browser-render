@@ -1,0 +1,508 @@
+#==============================================================================================
+#
+#   cpu_canvas - the canvas the CPU display-list player draws on (Skia's SkCanvas, on raster)
+#
+#   DESCRIPTION:
+#       New code for DisplayListPlayerCpu (DESIGN.md §7.3), which replaces
+#       DisplayListPlayerSkia: the part of SkCanvas's behavior that player relies on, built
+#       on the raster module (the tiny-skia port). A CpuCanvas has
+#
+#       - a stack of layers: the base layer is the surface's pixels; `save_layer` pushes a
+#         transparent layer of the same size that `restore` composites into the layer below
+#         with the layer's opacity, blend mode, luminance-to-alpha color filter, blur and
+#         image filter (SkCanvas::saveLayer with an SkPaint);
+#       - a stack of states (SkCanvas's MCRec): the current transform, a 2D affine
+#         transform, and the clip, kept as its device bounds plus, when it is not exactly
+#         that rectangle, an 8-bit coverage mask (anti-aliased clips as Skia's raster
+#         backend has them). Clips only narrow; `restore` brings back the saved ones.
+#
+#       Pixels are premultiplied RGBA (raster.Pixmap). Everything the canvas allocates lives
+#       in `memory.heap`, as the raster module's own storage does; `cpu_canvas_release`
+#       frees it. The canvas is private to the display list module; the player turns
+#       commands into its calls.
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+# mark: Types ==================================================================================
+
+## How a layer is composited into the layer below it when it is restored.
+struct CpuLayerEffects:
+    ## The layer's opacity, SkPaint::setAlphaf.
+    var opacity: f32 = 1.0
+    ## The blend mode, SkPaint::setBlender.
+    var blend_mode: raster.BlendMode = raster.BlendMode.source_over
+    ## SkLumaColorFilter: the layer's luminance becomes its alpha.
+    var luminance_to_alpha: bool = false
+    ## SkImageFilters::Blur with this sigma (0: none).
+    var blur_sigma: f32 = 0.0
+    ## An image filter from the display list (applied through `apply_gfx_filter`).
+    var filter: gfx.Filter?
+    ## The plus-darker operator (a runtime blender in the Skia player), composited by hand.
+    var plus_darker: bool = false
+
+## A layer: an offscreen pixmap of the canvas size and how it is composited.
+struct CpuLayer:
+    var pixmap: raster.Pixmap
+    var effects: CpuLayerEffects
+
+## A saved state (SkCanvas's MCRec): the transform, the clip, and the layer drawn into.
+struct CpuCanvasState:
+    var transform: raster.Transform
+    ## Nothing is visible: every later draw is dropped until the state is restored.
+    var clip_empty: bool
+    ## The clip's device bounds, [left, right) x [top, bottom); valid unless clip_empty.
+    var clip_left: i32
+    var clip_top: i32
+    var clip_right: i32
+    var clip_bottom: i32
+    ## Whether the clip has a coverage mask; without one the clip is exactly its bounds.
+    var has_clip_mask: bool
+    ## The clip's coverage (when `has_clip_mask`).
+    var clip_mask: raster.Mask
+    ## Whether `clip_mask` was made for this state (and is freed when it is restored).
+    var owns_clip_mask: bool
+    ## The layer drawing goes into.
+    var layer_index: usize
+    ## Whether this state was pushed by `save_layer` (its restore composites the layer).
+    var pushes_layer: bool
+
+## The canvas: a pixmap of `width` x `height` pixels with layers and saved states.
+struct CpuCanvas:
+    var width: u32
+    var height: u32
+    var layers: ak.Vector[CpuLayer]
+    var states: ak.Vector[CpuCanvasState]
+
+# mark: Creation ===============================================================================
+
+## A new canvas of `width` x `height` transparent pixels, with an identity transform and no
+## clip.
+func cpu_canvas_create(width: u32, height: u32) -> CpuCanvas*:
+    let canvas = new CpuCanvas(width = width, height = height) else trap("out of memory")
+    let pixmap = raster.Pixmap.new_(width, height) else trap("CpuCanvas: empty size")
+    ak.vector_append_t(&canvas.layers, CpuLayer(pixmap = pixmap, effects = CpuLayerEffects()))
+    ak.vector_append_t(&canvas.states, CpuCanvasState(transform = raster.Transform.identity(), clip_empty = false,
+        clip_left = 0, clip_top = 0, clip_right = (i32)width, clip_bottom = (i32)height, has_clip_mask = false,
+        owns_clip_mask = false, layer_index = 0, pushes_layer = false))
+    return canvas
+
+## Frees the canvas's pixels, layers and clip masks.
+func cpu_canvas_release(canvas: CpuCanvas*):
+    while ak.vector_size(&canvas.states) > 1:
+        cpu_canvas_restore(canvas)
+    let base = ak.vector_last(&canvas.states)
+    if base.owns_clip_mask:
+        base.clip_mask.release()
+    for i in 0..<ak.vector_size(&canvas.layers):
+        ak.vector_at(&canvas.layers, i).pixmap.release()
+    ak.vector_clear(&canvas.layers)
+    ak.vector_clear(&canvas.states)
+
+## The base layer's pixels: the canvas's result.
+func cpu_canvas_pixmap(canvas: CpuCanvas*) -> raster.Pixmap*:
+    return &ak.vector_at(&canvas.layers, 0).pixmap
+
+## The current state.
+func cpu_canvas_state(canvas: CpuCanvas*) -> CpuCanvasState*:
+    return ak.vector_last(&canvas.states)
+
+## The pixmap drawing goes into: the current state's layer.
+func cpu_canvas_target(canvas: CpuCanvas*) -> raster.Pixmap*:
+    return &ak.vector_at(&canvas.layers, cpu_canvas_state(canvas).layer_index).pixmap
+
+## The number of saved states, SkCanvas::getSaveCount (1 when nothing is saved).
+func cpu_canvas_save_count(canvas: const CpuCanvas*) -> usize:
+    return ak.vector_size(&canvas.states)
+
+# mark: Save and restore =======================================================================
+
+## SkCanvas::save.
+func cpu_canvas_save(canvas: CpuCanvas*):
+    var state = *cpu_canvas_state(canvas)
+    state.owns_clip_mask = false
+    state.pushes_layer = false
+    ak.vector_append_t(&canvas.states, state)
+
+## SkCanvas::saveLayer(nullptr bounds, paint): a transparent layer, composited with `effects`
+## when restored.
+func cpu_canvas_save_layer(canvas: CpuCanvas*, effects: CpuLayerEffects):
+    let pixmap = raster.Pixmap.new_(canvas.width, canvas.height) else trap("CpuCanvas: empty size")
+    ak.vector_append_t(&canvas.layers, CpuLayer(pixmap = pixmap, effects = effects))
+    var state = *cpu_canvas_state(canvas)
+    state.owns_clip_mask = false
+    state.pushes_layer = true
+    state.layer_index = ak.vector_size(&canvas.layers) - 1
+    ak.vector_append_t(&canvas.states, state)
+
+## SkCanvas::saveLayer with a backdrop filter (SaveLayerRec's fBackdrop): the new layer starts
+## as the current layer's pixels passed through `filter`.
+func cpu_canvas_save_layer_with_backdrop(canvas: CpuCanvas*, filter: const gfx.Filter*):
+    let source = cpu_canvas_target(canvas).data()
+    var pixmap = raster.Pixmap.new_(canvas.width, canvas.height) else trap("CpuCanvas: empty size")
+    let target = pixmap.data_mut()
+    for i in 0..<target.length:
+        target[i] = source[i]
+    apply_gfx_filter(filter, &pixmap)
+    ak.vector_append_t(&canvas.layers, CpuLayer(pixmap = pixmap, effects = CpuLayerEffects()))
+    var state = *cpu_canvas_state(canvas)
+    state.owns_clip_mask = false
+    state.pushes_layer = true
+    state.layer_index = ak.vector_size(&canvas.layers) - 1
+    ak.vector_append_t(&canvas.states, state)
+
+## SkCanvas::restore: drops the current state; a layer is composited into the one below
+## through the restored clip.
+func cpu_canvas_restore(canvas: CpuCanvas*):
+    # SkCanvas ignores a restore with nothing saved.
+    if ak.vector_size(&canvas.states) <= 1:
+        return
+    var state = ak.vector_take_last(&canvas.states)
+    if state.owns_clip_mask:
+        state.clip_mask.release()
+    if not state.pushes_layer:
+        return
+
+    var layer = ak.vector_take_last(&canvas.layers)
+    defer layer.pixmap.release()
+    cpu_canvas_apply_layer_effects(canvas, &layer)
+    if cpu_canvas_state(canvas).clip_empty:
+        return
+    let mask = cpu_canvas_draw_mask(canvas)
+    if layer.effects.plus_darker:
+        cpu_composite_plus_darker(cpu_canvas_target(canvas), &layer.pixmap, cpu_clamp_unit(layer.effects.opacity), mask)
+        return
+    let paint = raster.PixmapPaint(opacity = cpu_clamp_unit(layer.effects.opacity), blend_mode = layer.effects.blend_mode, quality = raster.FilterQuality.nearest)
+    cpu_canvas_target(canvas).draw_pixmap(0, 0, layer.pixmap.as_ref(), &paint, raster.Transform.identity(), mask)
+
+## Composites `source` onto `target` with the Skia player's plus-darker blender,
+## `saturate(saturate(da + sa) - saturate(da - d) - saturate(sa - s))` per premultiplied
+## channel, after scaling the source by `opacity` and through `mask`.
+func cpu_composite_plus_darker(target: raster.Pixmap*, source: const raster.Pixmap*, opacity: f32, mask: const raster.Mask*?):
+    let dst = target.data_mut()
+    let src = source.data()
+    var i: usize = 0
+    while i + 3 < dst.length:
+        var coverage = opacity
+        if let m = mask:
+            coverage *= (f32)m.data()[i // 4] / 255.0
+        let sa = (f32)src[i + 3] / 255.0 * coverage
+        let da = (f32)dst[i + 3] / 255.0
+        var result: f32[4] = [0.0, 0.0, 0.0, 0.0]
+        for c in 0..<4usize:
+            let s = (f32)src[i + c] / 255.0 * coverage
+            let d = (f32)dst[i + c] / 255.0
+            result[c] = cpu_clamp_unit(cpu_clamp_unit(da + sa) - cpu_clamp_unit(da - d) - cpu_clamp_unit(sa - s))
+        for c in 0..<4usize:
+            dst[i + c] = cpu_unit_to_u8(result[c])
+        i += 4
+
+## Applies a restored layer's filters to its pixels before it is composited: the image
+## filter, then the blur, then the luminance color filter (the order SkPaint applies an
+## image filter and a color filter).
+func cpu_canvas_apply_layer_effects(canvas: CpuCanvas*, layer: CpuLayer*):
+    if let filter = layer.effects.filter:
+        apply_gfx_filter(&filter, &layer.pixmap)
+    if layer.effects.blur_sigma > 0.0:
+        cpu_blur_pixmap(&layer.pixmap, layer.effects.blur_sigma, layer.effects.blur_sigma)
+    if layer.effects.luminance_to_alpha:
+        cpu_luminance_to_alpha(&layer.pixmap)
+
+## SkLumaColorFilter: each pixel becomes (0, 0, 0, luma) with the luma of its unpremultiplied
+## color scaled by its alpha, as the raster module's luminance masks compute it.
+func cpu_luminance_to_alpha(pixmap: raster.Pixmap*):
+    let data = pixmap.data_mut()
+    var i: usize = 0
+    while i + 3 < data.length:
+        let a = (f32)data[i + 3] / 255.0
+        var r = (f32)data[i] / 255.0
+        var g = (f32)data[i + 1] / 255.0
+        var b = (f32)data[i + 2] / 255.0
+        if data[i + 3] != 0:
+            r /= a
+            g /= a
+            b /= a
+        let luma = r * 0.2126 + g * 0.7152 + b * 0.0722
+        data[i] = 0
+        data[i + 1] = 0
+        data[i + 2] = 0
+        data[i + 3] = (u8)math32.round(cpu_clamp_unit(luma * a) * 255.0)
+        i += 4
+
+# mark: Transform ==============================================================================
+
+## SkCanvas::translate.
+func cpu_canvas_translate(canvas: CpuCanvas*, dx: f32, dy: f32):
+    let state = cpu_canvas_state(canvas)
+    state.transform = state.transform.pre_translate(dx, dy)
+
+## SkCanvas::concat: the transform becomes `current * transform`.
+func cpu_canvas_concat(canvas: CpuCanvas*, transform: raster.Transform):
+    let state = cpu_canvas_state(canvas)
+    state.transform = state.transform.pre_concat(transform)
+
+## SkCanvas::rotate(degrees, px, py).
+func cpu_canvas_rotate(canvas: CpuCanvas*, degrees: f32, px: f32, py: f32):
+    cpu_canvas_concat(canvas, raster.Transform.from_rotate_at(degrees, px, py))
+
+## The current transform.
+func cpu_canvas_transform(canvas: CpuCanvas*) -> raster.Transform:
+    return cpu_canvas_state(canvas).transform
+
+# mark: Clipping ===============================================================================
+
+## Whether the current clip lets nothing through.
+func cpu_canvas_is_clip_empty(canvas: CpuCanvas*) -> bool:
+    return cpu_canvas_state(canvas).clip_empty
+
+## The coverage mask a draw goes through: none when the clip is the whole canvas; the
+## clip's mask, made from its bounds when the clip is a rectangle. Only call when the clip
+## is not empty.
+func cpu_canvas_draw_mask(canvas: CpuCanvas*) -> const raster.Mask*?:
+    let state = cpu_canvas_state(canvas)
+    if not state.has_clip_mask:
+        if state.clip_left <= 0 and state.clip_top <= 0 and state.clip_right >= (i32)canvas.width and state.clip_bottom >= (i32)canvas.height:
+            return none
+        var mask = raster.Mask.new_(canvas.width, canvas.height) else trap("CpuCanvas: empty size")
+        cpu_mask_fill_rect(&mask, state.clip_left, state.clip_top, state.clip_right, state.clip_bottom, 255)
+        state.clip_mask = mask
+        state.has_clip_mask = true
+        state.owns_clip_mask = true
+    return &state.clip_mask
+
+## Sets [left, right) x [top, bottom) of `mask` (clamped to the mask) to `value`.
+func cpu_mask_fill_rect(mask: raster.Mask*, left: i32, top: i32, right: i32, bottom: i32, value: u8):
+    let width = (i32)mask.width()
+    let height = (i32)mask.height()
+    let l = cpu_clamp_i32(left, 0, width)
+    let r = cpu_clamp_i32(right, 0, width)
+    let t = cpu_clamp_i32(top, 0, height)
+    let b = cpu_clamp_i32(bottom, 0, height)
+    let data = mask.data_mut()
+    var y = t
+    while y < b:
+        let row = (usize)y * (usize)width
+        var x = l
+        while x < r:
+            data[row + (usize)x] = value
+            x += 1
+        y += 1
+
+## Zeroes `mask` outside [left, right) x [top, bottom).
+func cpu_mask_keep_rect(mask: raster.Mask*, left: i32, top: i32, right: i32, bottom: i32):
+    let width = (i32)mask.width()
+    let height = (i32)mask.height()
+    cpu_mask_fill_rect(mask, 0, 0, width, top, 0)
+    cpu_mask_fill_rect(mask, 0, bottom, width, height, 0)
+    cpu_mask_fill_rect(mask, 0, top, left, bottom, 0)
+    cpu_mask_fill_rect(mask, right, top, width, bottom, 0)
+
+## Replaces the current state's clip mask with `mask` (which the state then owns).
+func cpu_canvas_set_clip_mask(canvas: CpuCanvas*, mask: raster.Mask):
+    let state = cpu_canvas_state(canvas)
+    if state.owns_clip_mask:
+        state.clip_mask.release()
+    state.clip_mask = mask
+    state.has_clip_mask = true
+    state.owns_clip_mask = true
+
+## Narrows the clip bounds to [left, right) x [top, bottom); an empty result empties the clip.
+func cpu_canvas_intersect_clip_bounds(canvas: CpuCanvas*, left: i32, top: i32, right: i32, bottom: i32):
+    let state = cpu_canvas_state(canvas)
+    state.clip_left = cpu_max_i32(state.clip_left, left)
+    state.clip_top = cpu_max_i32(state.clip_top, top)
+    state.clip_right = cpu_min_i32(state.clip_right, right)
+    state.clip_bottom = cpu_min_i32(state.clip_bottom, bottom)
+    if state.clip_left >= state.clip_right or state.clip_top >= state.clip_bottom:
+        state.clip_empty = true
+
+## SkCanvas::clipRect(rect, kIntersect, anti_alias). A rectangle whose device edges land on
+## whole pixels narrows the bounds only; any other goes through a coverage mask.
+func cpu_canvas_clip_rect(canvas: CpuCanvas*, rect: raster.Rect, anti_alias: bool):
+    let state = cpu_canvas_state(canvas)
+    if state.clip_empty:
+        return
+    let ts = state.transform
+    if ts.is_translate() or ts.is_identity():
+        let left = rect.left() + ts.tx
+        let top = rect.top() + ts.ty
+        let right = rect.right() + ts.tx
+        let bottom = rect.bottom() + ts.ty
+        if left == math32.floor(left) and top == math32.floor(top) and right == math32.floor(right) and bottom == math32.floor(bottom):
+            let l = cpu_f32_to_i32(left)
+            let t = cpu_f32_to_i32(top)
+            let r = cpu_f32_to_i32(right)
+            let b = cpu_f32_to_i32(bottom)
+            cpu_canvas_intersect_clip_bounds(canvas, l, t, r, b)
+            if cpu_canvas_state(canvas).clip_empty:
+                return
+            if cpu_canvas_state(canvas).has_clip_mask:
+                # The mask must stay within the bounds; a copy keeps the saved state's mask.
+                var mask = cpu_canvas_clip_mask_copy(canvas)
+                cpu_mask_keep_rect(&mask, l, t, r, b)
+                cpu_canvas_set_clip_mask(canvas, mask)
+            return
+    var path = raster.PathBuilder.from_rect(rect)
+    defer path.release()
+    cpu_canvas_clip_path(canvas, &path, raster.FillRule.winding, anti_alias, false)
+
+## A copy of the current clip's coverage (its mask, or its bounds as a mask).
+func cpu_canvas_clip_mask_copy(canvas: CpuCanvas*) -> raster.Mask:
+    var mask = raster.Mask.new_(canvas.width, canvas.height) else trap("CpuCanvas: empty size")
+    let state = cpu_canvas_state(canvas)
+    if state.has_clip_mask:
+        let source = state.clip_mask.data()
+        let target = mask.data_mut()
+        for i in 0..<target.length:
+            target[i] = source[i]
+    else:
+        cpu_mask_fill_rect(&mask, state.clip_left, state.clip_top, state.clip_right, state.clip_bottom, 255)
+    return mask
+
+## SkCanvas::clipPath(path, op, anti_alias) in the current transform: kIntersect when
+## `difference` is false, kDifference when it is true.
+func cpu_canvas_clip_path(canvas: CpuCanvas*, path: const raster.Path*, fill_rule: raster.FillRule, anti_alias: bool, difference: bool):
+    if cpu_canvas_state(canvas).clip_empty:
+        return
+    let ts = cpu_canvas_state(canvas).transform
+    var shape = raster.Mask.new_(canvas.width, canvas.height) else trap("CpuCanvas: empty size")
+    shape.fill_path(path, fill_rule, anti_alias, ts)
+    if difference:
+        shape.invert()
+    else:
+        # The clip bounds shrink to the shape's device bounds.
+        if let device_bounds = path.bounds().transform(ts):
+            cpu_canvas_intersect_clip_bounds(canvas, cpu_f32_to_i32(math32.floor(device_bounds.left())), cpu_f32_to_i32(math32.floor(device_bounds.top())),
+                cpu_f32_to_i32(math32.ceil(device_bounds.right())), cpu_f32_to_i32(math32.ceil(device_bounds.bottom())))
+        else:
+            cpu_canvas_state(canvas).clip_empty = true
+        if cpu_canvas_state(canvas).clip_empty:
+            shape.release()
+            return
+    # Combine with the current clip.
+    let state = cpu_canvas_state(canvas)
+    let target = shape.data_mut()
+    if state.has_clip_mask:
+        let source = state.clip_mask.data()
+        for i in 0..<target.length:
+            target[i] = raster.premultiply_u8(target[i], source[i])
+    cpu_mask_keep_rect(&shape, state.clip_left, state.clip_top, state.clip_right, state.clip_bottom)
+    cpu_canvas_set_clip_mask(canvas, shape)
+
+## SkCanvas::quickReject: whether `rect` (in the current transform) certainly draws nothing,
+## because its device bounds miss the clip bounds outset by one pixel for anti-aliasing.
+func cpu_canvas_quick_reject(canvas: CpuCanvas*, rect: raster.Rect) -> bool:
+    let state = cpu_canvas_state(canvas)
+    if state.clip_empty:
+        return true
+    let device_rect = rect.transform(state.transform) else return true
+    let left = (f32)state.clip_left - 1.0
+    let top = (f32)state.clip_top - 1.0
+    let right = (f32)state.clip_right + 1.0
+    let bottom = (f32)state.clip_bottom + 1.0
+    # SkRect::intersects: the intersection has a positive area.
+    let intersects = cpu_max_f32(left, device_rect.left()) < cpu_min_f32(right, device_rect.right()) and cpu_max_f32(top, device_rect.top()) < cpu_min_f32(bottom, device_rect.bottom())
+    return not intersects
+
+# mark: Drawing ================================================================================
+
+## SkCanvas::drawPath with a fill paint.
+func cpu_canvas_fill_path(canvas: CpuCanvas*, path: const raster.Path*, paint: const raster.Paint*, fill_rule: raster.FillRule):
+    if cpu_canvas_is_clip_empty(canvas):
+        return
+    let mask = cpu_canvas_draw_mask(canvas)
+    let ts = cpu_canvas_transform(canvas)
+    cpu_canvas_target(canvas).fill_path(path, paint, fill_rule, ts, mask)
+
+## SkCanvas::drawPath with a stroke paint.
+func cpu_canvas_stroke_path(canvas: CpuCanvas*, path: const raster.Path*, paint: const raster.Paint*, stroke: const raster.Stroke*):
+    if cpu_canvas_is_clip_empty(canvas):
+        return
+    let mask = cpu_canvas_draw_mask(canvas)
+    let ts = cpu_canvas_transform(canvas)
+    cpu_canvas_target(canvas).stroke_path(path, paint, stroke, ts, mask)
+
+## SkCanvas::drawRect with a fill paint.
+func cpu_canvas_fill_rect(canvas: CpuCanvas*, rect: raster.Rect, paint: const raster.Paint*):
+    var path = raster.PathBuilder.from_rect(rect)
+    defer path.release()
+    cpu_canvas_fill_path(canvas, &path, paint, raster.FillRule.winding)
+
+## SkCanvas::drawRect with a stroke paint of `width` and miter joins. When the transform keeps
+## rectangles axis-aligned, Skia draws the stroke as a frame (SkScan::AntiFrameRect): the
+## rectangle outset by half the width minus the one inset by half the width, which the
+## frame's even-odd fill reproduces; otherwise it strokes the rectangle's path.
+func cpu_canvas_stroke_rect(canvas: CpuCanvas*, rect: raster.Rect, paint: const raster.Paint*, width: f32):
+    let ts = cpu_canvas_transform(canvas)
+    let half = width / 2.0
+    if ts.kx == 0.0 and ts.ky == 0.0:
+        if let outer = rect.outset(half, half):
+            var builder = raster.PathBuilder.new_()
+            builder.push_rect(outer)
+            if let inner = rect.inset(half, half):
+                builder.push_rect(inner)
+            var frame = builder.finish() else return
+            defer frame.release()
+            cpu_canvas_fill_path(canvas, &frame, paint, raster.FillRule.even_odd)
+            return
+    var path = raster.PathBuilder.from_rect(rect)
+    defer path.release()
+    let stroke = raster.Stroke(width = width)
+    cpu_canvas_stroke_path(canvas, &path, paint, &stroke)
+
+## Fills the device-space coverage `coverage` (a canvas-sized mask) with `paint`, through the
+## clip: how a blurred shape (Skia's mask filter) reaches the canvas.
+func cpu_canvas_fill_coverage(canvas: CpuCanvas*, coverage: raster.Mask*, paint: const raster.Paint*):
+    if cpu_canvas_is_clip_empty(canvas):
+        return
+    let data = coverage.data_mut()
+    if let clip = cpu_canvas_draw_mask(canvas):
+        let clip_data = clip.data()
+        for i in 0..<data.length:
+            data[i] = raster.premultiply_u8(data[i], clip_data[i])
+    let full = raster.Rect.from_ltrb(0.0, 0.0, (f32)canvas.width, (f32)canvas.height) else return
+    cpu_canvas_target(canvas).fill_rect(full, paint, raster.Transform.identity(), coverage)
+
+# mark: Helpers ================================================================================
+
+## `value` clamped to [0, 1]; NaN becomes 0.
+func cpu_clamp_unit(value: f32) -> f32:
+    if not (value > 0.0):
+        return 0.0
+    if value > 1.0:
+        return 1.0
+    return value
+
+## `value` clamped to [low, high].
+func cpu_clamp_i32(value: i32, low: i32, high: i32) -> i32:
+    if value < low:
+        return low
+    if value > high:
+        return high
+    return value
+
+## The smaller of two integers.
+func cpu_min_i32(a: i32, b: i32) -> i32:
+    return a if a < b else b
+
+## The larger of two integers.
+func cpu_max_i32(a: i32, b: i32) -> i32:
+    return a if a > b else b
+
+## The smaller of two floats (the first when either is NaN).
+func cpu_min_f32(a: f32, b: f32) -> f32:
+    return b if b < a else a
+
+## The larger of two floats (the first when either is NaN).
+func cpu_max_f32(a: f32, b: f32) -> f32:
+    return b if b > a else a
+
+## A float coordinate as an integer, saturating far outside the canvas.
+func cpu_f32_to_i32(value: f32) -> i32:
+    if value < -1073741824.0:
+        return -1073741824
+    if value > 1073741824.0:
+        return 1073741824
+    return (i32)value

@@ -1,0 +1,429 @@
+#==============================================================================================
+#
+#   display_list - DisplayList, and DisplayListPlayer's command loop
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibWeb/Painting/DisplayList.cpp (lines 1-228) and DisplayList.h
+#       (lines 1-101). DisplayListPlayer is the abstract player: `execute_impl` walks the
+#       commands, switches between their accumulated visual contexts (saving, clipping,
+#       transforming and applying effects on the way down, restoring on the way up), culls
+#       commands the painter would clip away, and hands each command to the player's
+#       virtual. Its pure virtuals trap; DisplayListPlayerCpu (display_list_player_cpu*.lucb)
+#       implements them.
+#
+#       The lambdas of `execute_impl` share one frame of state in C++; here that state is
+#       DisplayListPlayerExecuteState, and the recursive `for_each_node_from_common_ancestor_to_target`
+#       lambda with its callback is a recursive function over a SwitchToContextVisit capture
+#       (DESIGN.md §2.7, case 2). DisplayList's SegmentedVector<CommandListItem, 512> is an
+#       ak.Vector.
+#
+#       Copyright (c) 2024-2026, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
+#       Copyright (c) 2025, Jelle Raaijmakers <jelle@ladybird.org>
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+# mark: DisplayList ============================================================================
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:74 Web::Painting::DisplayList::create.
+pub func display_list_create(visual_context_tree: const AccumulatedVisualContextTree*) -> DisplayList*:
+    let display_list = new DisplayList(m_visual_context_tree = visual_context_tree) else trap("out of memory")
+    display_list_construct(display_list, visual_context_tree)
+    return display_list
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:92 Web::Painting::DisplayList::DisplayList.
+func display_list_construct(this: DisplayList*, visual_context_tree: const AccumulatedVisualContextTree*):
+    this.m_visual_context_tree = visual_context_tree
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.cpp:13 Web::Painting::DisplayList::append.
+pub func display_list_append(this: DisplayList*, command: DisplayListCommand, context_index: u64) -> bool:
+    if context_index != 0 and accumulated_visual_context_tree_has_empty_effective_clip(this.m_visual_context_tree, context_index):
+        return false
+    ak.vector_append_t(&this.m_commands, DisplayListCommandListItem(context_index = context_index, command = command))
+    return true
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:86 Web::Painting::DisplayList::visual_context_tree.
+pub func display_list_visual_context_tree(this: const DisplayList*) -> const AccumulatedVisualContextTree*:
+    return this.m_visual_context_tree
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:88 Web::Painting::DisplayList::commands
+## (the mutable overload, for DisplayListRecorder).
+pub func display_list_commands_display_list_recorder(this: DisplayList*) -> ak.Vector[DisplayListCommandListItem]*:
+    return &this.m_commands
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:89 Web::Painting::DisplayList::commands.
+pub func display_list_commands(this: const DisplayList*) -> const ak.Vector[DisplayListCommandListItem]*:
+    return &this.m_commands
+
+# mark: Commands ===============================================================================
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.cpp:21 Web::Painting::command_bounding_rectangle:
+## the command's `bounding_rect()`, for the commands that have one.
+func command_bounding_rectangle(command: const DisplayListCommand*) -> gfx.DevicePixelRect?:
+    match *command:
+        .draw_glyph_run(c): return draw_glyph_run_bounding_rect(&c)
+        .fill_rect(c): return fill_rect_bounding_rect(&c)
+        .draw_scaled_immutable_bitmap(c): return draw_scaled_immutable_bitmap_bounding_rect(&c)
+        .draw_repeated_immutable_bitmap(c): return draw_repeated_immutable_bitmap_bounding_rect(&c)
+        .draw_external_content(c): return draw_external_content_bounding_rect(&c)
+        .save(_): return none
+        .save_layer(_): return none
+        .restore(_): return none
+        .translate(_): return none
+        .add_clip_rect(c): return add_clip_rect_bounding_rect(&c)
+        .paint_linear_gradient(c): return paint_linear_gradient_bounding_rect(&c)
+        .paint_radial_gradient(c): return paint_radial_gradient_bounding_rect(&c)
+        .paint_conic_gradient(c): return paint_conic_gradient_bounding_rect(&c)
+        .paint_outer_box_shadow(c): return paint_outer_box_shadow_bounding_rect(&c)
+        .paint_inner_box_shadow(c): return paint_inner_box_shadow_bounding_rect(&c)
+        .paint_text_shadow(c): return paint_text_shadow_bounding_rect(&c)
+        .fill_rect_with_rounded_corners(c): return fill_rect_with_rounded_corners_bounding_rect(&c)
+        .fill_path(c): return fill_path_bounding_rect(&c)
+        .stroke_path(c): return stroke_path_bounding_rect(&c)
+        .draw_ellipse(c): return draw_ellipse_bounding_rect(&c)
+        .fill_ellipse(c): return fill_ellipse_bounding_rect(&c)
+        .draw_line(c): return draw_line_bounding_rect(&c)
+        .apply_backdrop_filter(c): return apply_backdrop_filter_bounding_rect(&c)
+        .draw_rect(c): return draw_rect_bounding_rect(&c)
+        .add_rounded_rect_clip(c): return add_rounded_rect_clip_bounding_rect(&c)
+        .paint_nested_display_list(c): return paint_nested_display_list_bounding_rect(&c)
+        .paint_scroll_bar(_): return none
+        .apply_effects(_): return none
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.cpp:32 Web::Painting::command_is_clip: the
+## command's `is_clip()`, for the commands that have one.
+func command_is_clip(command: const DisplayListCommand*) -> bool:
+    match *command:
+        .add_clip_rect(c): return add_clip_rect_is_clip(&c)
+        .add_rounded_rect_clip(c): return add_rounded_rect_clip_is_clip(&c)
+        _: return false
+
+# mark: DisplayListPlayer ======================================================================
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.cpp:43 Web::Painting::DisplayListPlayer::execute.
+pub func display_list_player_execute(this: DisplayListPlayer*, display_list_: DisplayList*, scroll_state_snapshot_: const ScrollStateSnapshot*, surface: gfx.PaintingSurface*?):
+    if let s = surface:
+        gfx.painting_surface_lock_context(s)
+    this.m_surface = surface
+    display_list_player_execute_impl(this, display_list_, scroll_state_snapshot_)
+    if surface != none:
+        display_list_player_flush(this)
+    this.m_surface = none
+    if let s = surface:
+        gfx.painting_surface_unlock_context(s)
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:30 Web::Painting::DisplayListPlayer::surface.
+func display_list_player_surface(this: const DisplayListPlayer*) -> gfx.PaintingSurface*:
+    return this.m_surface else trap("DisplayListPlayer: no surface")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.cpp:58 Web::Painting::DisplayListPlayer::execute_display_list_into_surface.
+func display_list_player_execute_display_list_into_surface(this: DisplayListPlayer*, display_list_: DisplayList*, target_surface: gfx.PaintingSurface*):
+    # TemporaryChange surface_change { m_surface, target_surface }
+    let saved_surface = this.m_surface
+    this.m_surface = target_surface
+    var empty_scroll_state: ScrollStateSnapshot
+    display_list_player_execute_impl(this, display_list_, &empty_scroll_state)
+    this.m_surface = saved_surface
+
+## The state `execute_impl`'s lambdas share: the player, the tree, the scroll offsets and the
+## context the player has applied so far.
+struct DisplayListPlayerExecuteState:
+    var player: DisplayListPlayer*
+    var visual_context_tree: const AccumulatedVisualContextTree*
+    var scroll_state: const ScrollStateSnapshot*
+    var applied_context_index: u64
+    var applied_depth: usize
+
+## `execute_impl`'s SwitchResult.
+enum SwitchResult as u8:
+    switched = 0
+    culled_by_effect = 1
+
+## The captures of `switch_to_context`'s callback to `for_each_node_from_common_ancestor_to_target`.
+struct SwitchToContextVisit:
+    var state: DisplayListPlayerExecuteState*
+    var bounding_rect: gfx.DevicePixelRect?
+    var result: SwitchResult
+
+## `execute_impl`'s `apply_accumulated_visual_context` lambda.
+func display_list_player_apply_accumulated_visual_context(state: DisplayListPlayerExecuteState*, node: const AccumulatedVisualContextNode*):
+    let player = state.player
+    match node.data:
+        .effects_data(effects):
+            var command = ApplyEffects(opacity = effects.opacity, compositing_and_blending_operator = effects.blend_mode, filter = effects.gfx_filter)
+            display_list_player_apply_effects(player, command)
+        .perspective_data(perspective):
+            display_list_player_save(player, Save())
+            display_list_player_apply_transform(player, gfx.FloatPoint(m_x = 0.0, m_y = 0.0), perspective.matrix)
+        .scroll_data(scroll):
+            display_list_player_save(player, Save())
+            let offset = scroll_state_snapshot_device_offset_for_index(state.scroll_state, scroll.scroll_frame_index)
+            if not gfx.float_point_is_zero(&offset):
+                display_list_player_translate(player, Translate(delta = float_point_to_int_point(offset)))
+        .transform_data(transform):
+            display_list_player_save(player, Save())
+            display_list_player_apply_transform(player, transform.origin, transform.matrix)
+        .clip_data(clip):
+            display_list_player_save(player, Save())
+            if corner_radii_has_any_radius(&clip.corner_radii):
+                display_list_player_add_rounded_rect_clip(player, AddRoundedRectClip(corner_radii = clip.corner_radii, border_rect = clip.rect, corner_clip = CornerClip.outside))
+            else:
+                display_list_player_add_clip_rect(player, AddClipRect(rect = clip.rect))
+        .clip_path_data(clip_path):
+            display_list_player_save(player, Save())
+            display_list_player_add_clip_path(player, clip_path.path)
+
+## `execute_impl`'s recursive `for_each_node_from_common_ancestor_to_target` lambda, with
+## `switch_to_context`'s callback: visits the nodes below `common_ancestor_index` down to
+## `target_index`, outermost first.
+func display_list_player_for_each_node_from_common_ancestor_to_target(visit: SwitchToContextVisit*, common_ancestor_index: u64, target_index: u64) -> ak.IterationDecision:
+    let visual_context_tree = visit.state.visual_context_tree
+    if target_index == 0 or target_index == common_ancestor_index:
+        return ak.IterationDecision.continue_
+    if display_list_player_for_each_node_from_common_ancestor_to_target(visit, common_ancestor_index, accumulated_visual_context_tree_node_at(visual_context_tree, target_index).parent_index) == ak.IterationDecision.break_:
+        return ak.IterationDecision.break_
+    return display_list_player_switch_to_context_visit_node(visit, accumulated_visual_context_tree_node_at(visual_context_tree, target_index))
+
+## The callback `switch_to_context` passes to `for_each_node_from_common_ancestor_to_target`.
+func display_list_player_switch_to_context_visit_node(visit: SwitchToContextVisit*, node: const AccumulatedVisualContextNode*) -> ak.IterationDecision:
+    if let bounding_rect = visit.bounding_rect:
+        match node.data:
+            .effects_data(_):
+                if gfx.device_pixel_rect_is_empty(&bounding_rect) or display_list_player_would_be_fully_clipped_by_painter(visit.state.player, bounding_rect):
+                    visit.result = SwitchResult.culled_by_effect
+                    return ak.IterationDecision.break_
+            _:
+                discard(0)
+    display_list_player_apply_accumulated_visual_context(visit.state, node)
+    visit.state.applied_depth += 1
+    return ak.IterationDecision.continue_
+
+## `execute_impl`'s `switch_to_context` lambda.
+# OPTIMIZATION: When walking down to apply effects (opacity, filters, blend modes), check culling before applying
+#               each effect. Effects don't affect clip state, so the culling check is valid before applying them.
+#               This avoids expensive saveLayer/restore cycles for off-screen elements with effects like blur.
+func display_list_player_switch_to_context(state: DisplayListPlayerExecuteState*, target_index: u64, bounding_rect: gfx.DevicePixelRect?) -> SwitchResult:
+    if state.applied_context_index == target_index:
+        return SwitchResult.switched
+
+    let visual_context_tree = state.visual_context_tree
+    let common_ancestor_index = accumulated_visual_context_tree_find_common_ancestor(visual_context_tree, state.applied_context_index, target_index)
+    let common_ancestor_depth: usize = accumulated_visual_context_tree_node_at(visual_context_tree, common_ancestor_index).depth if common_ancestor_index != 0 else 0
+
+    while state.applied_depth > common_ancestor_depth:
+        display_list_player_restore(state.player, Restore())
+        state.applied_depth -= 1
+
+    var visit = SwitchToContextVisit(state = state, bounding_rect = bounding_rect, result = SwitchResult.switched)
+    discard(display_list_player_for_each_node_from_common_ancestor_to_target(&visit, common_ancestor_index, target_index))
+
+    if visit.result == SwitchResult.switched:
+        state.applied_context_index = target_index
+    return visit.result
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.cpp:65 Web::Painting::DisplayListPlayer::execute_impl.
+func display_list_player_execute_impl(this: DisplayListPlayer*, display_list_: DisplayList*, scroll_state: const ScrollStateSnapshot*):
+    let commands = display_list_commands(display_list_)
+    let visual_context_tree = display_list_visual_context_tree(display_list_)
+
+    assert(this.m_surface != none)
+
+    var state = DisplayListPlayerExecuteState(player = this, visual_context_tree = visual_context_tree, scroll_state = scroll_state, applied_context_index = 0, applied_depth = 0)
+
+    for command_index in 0..<ak.vector_size(commands):
+        let item = ak.vector_at_const(commands, command_index)
+        let context_index = item.context_index
+        let command = &item.command
+
+        let bounding_rect = command_bounding_rectangle(command)
+
+        if display_list_player_switch_to_context(&state, context_index, bounding_rect) == SwitchResult.culled_by_effect:
+            continue
+
+        match *command:
+            .paint_scroll_bar(scroll_bar):
+                var paint_scroll_bar = scroll_bar
+                let device_offset = scroll_state_snapshot_device_offset_for_index(scroll_state, paint_scroll_bar.scroll_frame_index)
+                if paint_scroll_bar.vertical:
+                    gfx.device_pixel_rect_translate_by_i32_i32(&paint_scroll_bar.thumb_rect, 0, (i32)(-(f64)gfx.float_point_y(&device_offset) * paint_scroll_bar.scroll_size))
+                else:
+                    gfx.device_pixel_rect_translate_by_i32_i32(&paint_scroll_bar.thumb_rect, (i32)(-(f64)gfx.float_point_x(&device_offset) * paint_scroll_bar.scroll_size), 0)
+                display_list_player_paint_scrollbar(this, paint_scroll_bar)
+                continue
+            _:
+                discard(0)
+
+        if let rect = bounding_rect:
+            if gfx.device_pixel_rect_is_empty(&rect) or display_list_player_would_be_fully_clipped_by_painter(this, rect):
+                # Any clip that's located outside of the visible region is equivalent to a simple clip-rect,
+                # so replace it with one to avoid doing unnecessary work.
+                if command_is_clip(command):
+                    match *command:
+                        .add_clip_rect(clip): display_list_player_add_clip_rect(this, clip)
+                        _: display_list_player_add_clip_rect(this, AddClipRect(rect = rect))
+                continue
+
+        # HANDLE_COMMAND(command_type, executor_method)
+        match *command:
+            .draw_glyph_run(c): display_list_player_draw_glyph_run(this, c)
+            .fill_rect(c): display_list_player_fill_rect(this, c)
+            .draw_scaled_immutable_bitmap(c): display_list_player_draw_scaled_immutable_bitmap(this, c)
+            .draw_repeated_immutable_bitmap(c): display_list_player_draw_repeated_immutable_bitmap(this, c)
+            .draw_external_content(c): display_list_player_draw_external_content(this, c)
+            .add_clip_rect(c): display_list_player_add_clip_rect(this, c)
+            .save(c): display_list_player_save(this, c)
+            .save_layer(c): display_list_player_save_layer(this, c)
+            .restore(c): display_list_player_restore(this, c)
+            .translate(c): display_list_player_translate(this, c)
+            .paint_linear_gradient(c): display_list_player_paint_linear_gradient(this, c)
+            .paint_radial_gradient(c): display_list_player_paint_radial_gradient(this, c)
+            .paint_conic_gradient(c): display_list_player_paint_conic_gradient(this, c)
+            .paint_outer_box_shadow(c): display_list_player_paint_outer_box_shadow(this, c)
+            .paint_inner_box_shadow(c): display_list_player_paint_inner_box_shadow(this, c)
+            .paint_text_shadow(c): display_list_player_paint_text_shadow(this, c)
+            .fill_rect_with_rounded_corners(c): display_list_player_fill_rect_with_rounded_corners(this, c)
+            .fill_path(c): display_list_player_fill_path(this, c)
+            .stroke_path(c): display_list_player_stroke_path(this, c)
+            .draw_ellipse(c): display_list_player_draw_ellipse(this, c)
+            .fill_ellipse(c): display_list_player_fill_ellipse(this, c)
+            .draw_line(c): display_list_player_draw_line(this, c)
+            .apply_backdrop_filter(c): display_list_player_apply_backdrop_filter(this, c)
+            .draw_rect(c): display_list_player_draw_rect(this, c)
+            .add_rounded_rect_clip(c): display_list_player_add_rounded_rect_clip(this, c)
+            .paint_nested_display_list(c): display_list_player_paint_nested_display_list(this, c)
+            .apply_effects(c): display_list_player_apply_effects(this, c)
+            .paint_scroll_bar(_): trap("VERIFY_NOT_REACHED")
+
+    while state.applied_depth > 0:
+        display_list_player_restore(this, Restore())
+        state.applied_depth -= 1
+
+# mark: DisplayListPlayer pure virtuals ========================================================
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:35 Web::Painting::DisplayListPlayer::flush (virtual).
+pub func display_list_player_flush_impl(this: DisplayListPlayer*):
+    trap("pure virtual: Web::Painting::DisplayListPlayer::flush")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:36 Web::Painting::DisplayListPlayer::draw_glyph_run (virtual).
+pub func display_list_player_draw_glyph_run_impl(this: DisplayListPlayer*, arg0: DrawGlyphRun):
+    trap("pure virtual: Web::Painting::DisplayListPlayer::draw_glyph_run")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:37 Web::Painting::DisplayListPlayer::fill_rect (virtual).
+pub func display_list_player_fill_rect_impl(this: DisplayListPlayer*, arg0: FillRect):
+    trap("pure virtual: Web::Painting::DisplayListPlayer::fill_rect")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:38 Web::Painting::DisplayListPlayer::draw_scaled_immutable_bitmap (virtual).
+pub func display_list_player_draw_scaled_immutable_bitmap_impl(this: DisplayListPlayer*, arg0: DrawScaledImmutableBitmap):
+    trap("pure virtual: Web::Painting::DisplayListPlayer::draw_scaled_immutable_bitmap")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:39 Web::Painting::DisplayListPlayer::draw_repeated_immutable_bitmap (virtual).
+pub func display_list_player_draw_repeated_immutable_bitmap_impl(this: DisplayListPlayer*, arg0: DrawRepeatedImmutableBitmap):
+    trap("pure virtual: Web::Painting::DisplayListPlayer::draw_repeated_immutable_bitmap")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:40 Web::Painting::DisplayListPlayer::draw_external_content (virtual).
+pub func display_list_player_draw_external_content_impl(this: DisplayListPlayer*, arg0: DrawExternalContent):
+    trap("pure virtual: Web::Painting::DisplayListPlayer::draw_external_content")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:41 Web::Painting::DisplayListPlayer::save (virtual).
+pub func display_list_player_save_impl(this: DisplayListPlayer*, arg0: Save):
+    trap("pure virtual: Web::Painting::DisplayListPlayer::save")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:42 Web::Painting::DisplayListPlayer::save_layer (virtual).
+pub func display_list_player_save_layer_impl(this: DisplayListPlayer*, arg0: SaveLayer):
+    trap("pure virtual: Web::Painting::DisplayListPlayer::save_layer")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:43 Web::Painting::DisplayListPlayer::restore (virtual).
+pub func display_list_player_restore_impl(this: DisplayListPlayer*, arg0: Restore):
+    trap("pure virtual: Web::Painting::DisplayListPlayer::restore")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:44 Web::Painting::DisplayListPlayer::translate (virtual).
+pub func display_list_player_translate_impl(this: DisplayListPlayer*, arg0: Translate):
+    trap("pure virtual: Web::Painting::DisplayListPlayer::translate")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:45 Web::Painting::DisplayListPlayer::add_clip_rect (virtual).
+pub func display_list_player_add_clip_rect_impl(this: DisplayListPlayer*, arg0: AddClipRect):
+    trap("pure virtual: Web::Painting::DisplayListPlayer::add_clip_rect")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:46 Web::Painting::DisplayListPlayer::paint_linear_gradient (virtual).
+pub func display_list_player_paint_linear_gradient_impl(this: DisplayListPlayer*, arg0: PaintLinearGradient):
+    trap("pure virtual: Web::Painting::DisplayListPlayer::paint_linear_gradient")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:47 Web::Painting::DisplayListPlayer::paint_radial_gradient (virtual).
+pub func display_list_player_paint_radial_gradient_impl(this: DisplayListPlayer*, arg0: PaintRadialGradient):
+    trap("pure virtual: Web::Painting::DisplayListPlayer::paint_radial_gradient")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:48 Web::Painting::DisplayListPlayer::paint_conic_gradient (virtual).
+pub func display_list_player_paint_conic_gradient_impl(this: DisplayListPlayer*, arg0: PaintConicGradient):
+    trap("pure virtual: Web::Painting::DisplayListPlayer::paint_conic_gradient")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:49 Web::Painting::DisplayListPlayer::paint_outer_box_shadow (virtual).
+pub func display_list_player_paint_outer_box_shadow_impl(this: DisplayListPlayer*, arg0: PaintOuterBoxShadow):
+    trap("pure virtual: Web::Painting::DisplayListPlayer::paint_outer_box_shadow")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:50 Web::Painting::DisplayListPlayer::paint_inner_box_shadow (virtual).
+pub func display_list_player_paint_inner_box_shadow_impl(this: DisplayListPlayer*, arg0: PaintInnerBoxShadow):
+    trap("pure virtual: Web::Painting::DisplayListPlayer::paint_inner_box_shadow")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:51 Web::Painting::DisplayListPlayer::paint_text_shadow (virtual).
+pub func display_list_player_paint_text_shadow_impl(this: DisplayListPlayer*, arg0: PaintTextShadow):
+    trap("pure virtual: Web::Painting::DisplayListPlayer::paint_text_shadow")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:52 Web::Painting::DisplayListPlayer::fill_rect_with_rounded_corners (virtual).
+pub func display_list_player_fill_rect_with_rounded_corners_impl(this: DisplayListPlayer*, arg0: FillRectWithRoundedCorners):
+    trap("pure virtual: Web::Painting::DisplayListPlayer::fill_rect_with_rounded_corners")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:53 Web::Painting::DisplayListPlayer::fill_path (virtual).
+pub func display_list_player_fill_path_impl(this: DisplayListPlayer*, arg0: FillPath):
+    trap("pure virtual: Web::Painting::DisplayListPlayer::fill_path")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:54 Web::Painting::DisplayListPlayer::stroke_path (virtual).
+pub func display_list_player_stroke_path_impl(this: DisplayListPlayer*, arg0: StrokePath):
+    trap("pure virtual: Web::Painting::DisplayListPlayer::stroke_path")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:55 Web::Painting::DisplayListPlayer::draw_ellipse (virtual).
+pub func display_list_player_draw_ellipse_impl(this: DisplayListPlayer*, arg0: DrawEllipse):
+    trap("pure virtual: Web::Painting::DisplayListPlayer::draw_ellipse")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:56 Web::Painting::DisplayListPlayer::fill_ellipse (virtual).
+pub func display_list_player_fill_ellipse_impl(this: DisplayListPlayer*, arg0: FillEllipse):
+    trap("pure virtual: Web::Painting::DisplayListPlayer::fill_ellipse")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:57 Web::Painting::DisplayListPlayer::draw_line (virtual).
+pub func display_list_player_draw_line_impl(this: DisplayListPlayer*, arg0: DrawLine):
+    trap("pure virtual: Web::Painting::DisplayListPlayer::draw_line")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:58 Web::Painting::DisplayListPlayer::apply_backdrop_filter (virtual).
+pub func display_list_player_apply_backdrop_filter_impl(this: DisplayListPlayer*, arg0: ApplyBackdropFilter):
+    trap("pure virtual: Web::Painting::DisplayListPlayer::apply_backdrop_filter")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:59 Web::Painting::DisplayListPlayer::draw_rect (virtual).
+pub func display_list_player_draw_rect_impl(this: DisplayListPlayer*, arg0: DrawRect):
+    trap("pure virtual: Web::Painting::DisplayListPlayer::draw_rect")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:60 Web::Painting::DisplayListPlayer::add_rounded_rect_clip (virtual).
+pub func display_list_player_add_rounded_rect_clip_impl(this: DisplayListPlayer*, arg0: AddRoundedRectClip):
+    trap("pure virtual: Web::Painting::DisplayListPlayer::add_rounded_rect_clip")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:61 Web::Painting::DisplayListPlayer::paint_nested_display_list (virtual).
+pub func display_list_player_paint_nested_display_list_impl(this: DisplayListPlayer*, arg0: PaintNestedDisplayList):
+    trap("pure virtual: Web::Painting::DisplayListPlayer::paint_nested_display_list")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:62 Web::Painting::DisplayListPlayer::paint_scrollbar (virtual).
+pub func display_list_player_paint_scrollbar_impl(this: DisplayListPlayer*, arg0: PaintScrollBar):
+    trap("pure virtual: Web::Painting::DisplayListPlayer::paint_scrollbar")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:63 Web::Painting::DisplayListPlayer::apply_effects (virtual).
+pub func display_list_player_apply_effects_impl(this: DisplayListPlayer*, arg0: ApplyEffects):
+    trap("pure virtual: Web::Painting::DisplayListPlayer::apply_effects")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:64 Web::Painting::DisplayListPlayer::apply_transform (virtual).
+pub func display_list_player_apply_transform_impl(this: DisplayListPlayer*, origin: gfx.FloatPoint, arg1: gfx.FloatMatrix4X4):
+    trap("pure virtual: Web::Painting::DisplayListPlayer::apply_transform")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:65 Web::Painting::DisplayListPlayer::would_be_fully_clipped_by_painter (virtual).
+pub func display_list_player_would_be_fully_clipped_by_painter_impl(this: DisplayListPlayer*, arg0: gfx.DevicePixelRect) -> bool:
+    trap("pure virtual: Web::Painting::DisplayListPlayer::would_be_fully_clipped_by_painter")
+
+## Ported from Libraries/LibWeb/Painting/DisplayList.h:67 Web::Painting::DisplayListPlayer::add_clip_path (virtual).
+pub func display_list_player_add_clip_path_impl(this: DisplayListPlayer*, arg0: gfx.Path):
+    trap("pure virtual: Web::Painting::DisplayListPlayer::add_clip_path")

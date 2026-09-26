@@ -1,0 +1,373 @@
+#==============================================================================================
+#
+#   cpu_gradient - linear, radial, two-point conical and sweep gradients
+#
+#   DESCRIPTION:
+#       New code for DisplayListPlayerCpu (DESIGN.md §7.3): the gradient shaders the Skia
+#       player creates (SkGradientShader::MakeLinear, MakeRadial, MakeTwoPointConical and
+#       MakeSweep), with Skia's semantics: the stop list is normalized as
+#       SkGradientBaseShader does (a stop at 0 and one at 1 are added when missing,
+#       positions are clamped to be monotonic in [0, 1]); t is tiled (clamp, repeat, mirror,
+#       decal); colors are interpolated in the requested color space, premultiplied when
+#       asked (SkGradientShader::Interpolation::InPremul), with the hue of polar spaces
+#       adjusted by the hue method; degenerate geometry follows
+#       SkGradientBaseShader::MakeDegenerateGradient. Unlike Skia, gradients are not
+#       dithered.
+#
+#       A gradient fill evaluates the shader once per device pixel of the shape's clipped
+#       bounds into a scratch pixmap, then fills the shape with that pixmap as a pattern
+#       aligned to the device pixel grid, so edges keep the rasterizer's anti-aliasing.
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+# mark: Types ==================================================================================
+
+## A color stop: its position and its unpremultiplied non-linear sRGB color.
+struct CpuGradientStop:
+    var position: f32
+    var color: CpuColor4
+
+## SkTileMode.
+enum CpuTileMode:
+    clamp
+    repeat
+    mirror
+    decal
+
+## The gradient's geometry in its own coordinate space.
+enum CpuGradientGeometry:
+    ## SkGradientShader::MakeLinear: t runs from (x0, y0) to (x1, y1).
+    linear(x0: f32, y0: f32, x1: f32, y1: f32)
+    ## SkGradientShader::MakeRadial: t is the distance from (cx, cy) over `radius`.
+    radial(cx: f32, cy: f32, radius: f32)
+    ## SkGradientShader::MakeTwoPointConical.
+    two_point_conical(x0: f32, y0: f32, r0: f32, x1: f32, y1: f32, r1: f32)
+    ## SkGradientShader::MakeSweep from 0 to 360 degrees: t is the angle around (cx, cy),
+    ## clockwise from the positive x axis, over a full turn.
+    sweep(cx: f32, cy: f32)
+
+## A gradient shader.
+struct CpuGradient:
+    var geometry: CpuGradientGeometry
+    var stops: ak.Vector[CpuGradientStop]
+    var tile_mode: CpuTileMode
+    var space: CpuColorSpace = CpuColorSpace.srgb
+    var hue_method: CpuHueMethod = CpuHueMethod.shorter
+    ## Interpolate premultiplied colors (InPremul::kYes).
+    var premul: bool
+    ## The shader's local matrix: gradient space to the canvas's user space.
+    var local_matrix: raster.Transform
+    ## Apply SkColorFilters::LinearToSRGBGamma to the result (SVG's linearRGB).
+    var linear_to_srgb: bool
+
+## A gradient ready to evaluate: normalized positions, colors in the interpolation space.
+struct CpuPreparedGradient:
+    var positions: ak.Vector[f32]
+    var colors: ak.Vector[CpuColor4]
+    var space: CpuColorSpace
+    var premul: bool
+    var linear_to_srgb: bool
+
+# mark: Preparation ============================================================================
+
+## Normalizes the stops as SkGradientBaseShader's constructor does and converts their colors
+## into the interpolation space.
+func cpu_gradient_prepare(gradient: const CpuGradient*) -> CpuPreparedGradient:
+    var prepared = CpuPreparedGradient(space = gradient.space, premul = gradient.premul, linear_to_srgb = gradient.linear_to_srgb)
+    let stops = ak.vector_span_const(&gradient.stops)
+    let count = stops.length
+    if count == 0:
+        return prepared
+
+    let dummy_first = stops[0].position != 0.0
+    let dummy_last = stops[count - 1].position != 1.0
+
+    # Now copy over the colors, adding the dummies as needed.
+    if dummy_first:
+        ak.vector_append_t(&prepared.colors, stops[0].color)
+    for stop in stops:
+        ak.vector_append_t(&prepared.colors, stop.color)
+    if dummy_last:
+        ak.vector_append_t(&prepared.colors, stops[count - 1].color)
+
+    var prev: f32 = 0.0
+    ak.vector_append_t(&prepared.positions, prev) # force the first pos to 0
+    let start_index: usize = 0 if dummy_first else 1
+    let total = count + (1 if dummy_last else 0)
+    for i in start_index..<total:
+        # Pin the last value to 1.0, and make sure pos is monotonic.
+        let curr = 1.0 if i == count else cpu_pin_f32(stops[i].position, prev, 1.0)
+        ak.vector_append_t(&prepared.positions, curr)
+        prev = curr
+
+    # Convert into the interpolation space.
+    let colors = ak.vector_span(&prepared.colors)
+    for i in 0..<colors.length:
+        colors[i] = cpu_color_from_srgb(gradient.space, colors[i])
+
+    if let hue_index = cpu_color_space_hue_index(gradient.space):
+        cpu_gradient_fix_powerless_hues(gradient.space, colors, hue_index)
+        for i in 0..<colors.length:
+            colors[i][hue_index] = colors[i][hue_index] - math32.floor(colors[i][hue_index] / 360.0) * 360.0
+        for i in 1..<colors.length:
+            let h1 = colors[i - 1][hue_index]
+            var h2 = colors[i][hue_index]
+            match gradient.hue_method:
+                .shorter:
+                    if h2 - h1 > 180.0:
+                        h2 -= 360.0
+                    elif h2 - h1 < -180.0:
+                        h2 += 360.0
+                .longer:
+                    if 0.0 < h2 - h1 and h2 - h1 < 180.0:
+                        h2 -= 360.0
+                    elif -180.0 < h2 - h1 and h2 - h1 <= 0.0:
+                        h2 += 360.0
+                .increasing:
+                    if h2 < h1:
+                        h2 += 360.0
+                .decreasing:
+                    if h1 < h2:
+                        h2 -= 360.0
+            colors[i][hue_index] = h2
+
+    if gradient.premul:
+        let hue = cpu_color_space_hue_index(gradient.space)
+        for i in 0..<colors.length:
+            for c in 0..<3usize:
+                if not cpu_is_hue_component(hue, c):
+                    colors[i][c] *= colors[i][3]
+    return prepared
+
+## Whether component `c` is the hue `hue` of a polar space (premultiplication skips it).
+func cpu_is_hue_component(hue: usize?, c: usize) -> bool:
+    if let h = hue:
+        return h == c
+    return false
+
+## Gives each stop whose hue is powerless the hue of the nearest stop before it that has
+## one, or else after it.
+func cpu_gradient_fix_powerless_hues(space: CpuColorSpace, colors: CpuColor4[], hue_index: usize):
+    var last_hue: f32? = none
+    for i in 0..<colors.length:
+        if cpu_color_hue_is_powerless(space, colors[i]):
+            if let hue = last_hue:
+                colors[i][hue_index] = hue
+        else:
+            last_hue = colors[i][hue_index]
+    var next_hue: f32? = none
+    var i = colors.length
+    while i > 0:
+        i -= 1
+        if cpu_color_hue_is_powerless(space, colors[i]):
+            if last_hue == none:
+                if let hue = next_hue:
+                    colors[i][hue_index] = hue
+        else:
+            next_hue = colors[i][hue_index]
+
+## SkTPin: `value` clamped to [low, high].
+func cpu_pin_f32(value: f32, low: f32, high: f32) -> f32:
+    if value < low:
+        return low
+    if value > high:
+        return high
+    return value
+
+# mark: Evaluation =============================================================================
+
+## The interpolated color at `t` in [0, 1], still in the interpolation space.
+func cpu_gradient_color_at(prepared: const CpuPreparedGradient*, t: f32) -> CpuColor4:
+    let positions = ak.vector_span_const(&prepared.positions)
+    let colors = ak.vector_span_const(&prepared.colors)
+    let n = positions.length
+    if t <= positions[0]:
+        return colors[0]
+    if t >= positions[n - 1]:
+        return colors[n - 1]
+    var i: usize = 0
+    while i + 1 < n and not (t < positions[i + 1]):
+        i += 1
+    let span = positions[i + 1] - positions[i]
+    let f: f32 = (t - positions[i]) / span if span > 0.0 else 0.0
+    let a = colors[i]
+    let b = colors[i + 1]
+    return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f, a[3] + (b[3] - a[3]) * f]
+
+## A color of the interpolation space as a premultiplied sRGB pixel.
+func cpu_gradient_to_pixel(prepared: const CpuPreparedGradient*, color0: CpuColor4) -> raster.PremultipliedColorU8:
+    var color = color0
+    let alpha = cpu_clamp_unit(color[3])
+    if prepared.premul and color[3] > 0.0:
+        let hue = cpu_color_space_hue_index(prepared.space)
+        for c in 0..<3usize:
+            if not cpu_is_hue_component(hue, c):
+                color[c] /= color[3]
+    var srgb = cpu_color_to_srgb(prepared.space, color)
+    if prepared.linear_to_srgb:
+        srgb = [cpu_linear_to_srgb(cpu_clamp_unit(srgb[0])), cpu_linear_to_srgb(cpu_clamp_unit(srgb[1])), cpu_linear_to_srgb(cpu_clamp_unit(srgb[2])), srgb[3]]
+    let r = cpu_clamp_unit(srgb[0]) * alpha
+    let g = cpu_clamp_unit(srgb[1]) * alpha
+    let b = cpu_clamp_unit(srgb[2]) * alpha
+    return raster.PremultipliedColorU8.from_rgba(cpu_unit_to_u8(r), cpu_unit_to_u8(g), cpu_unit_to_u8(b), cpu_unit_to_u8(alpha)) else raster.PremultipliedColorU8.transparent()
+
+## A [0, 1] value as a byte, rounded.
+func cpu_unit_to_u8(value: f32) -> u8:
+    return (u8)math32.round(cpu_clamp_unit(value) * 255.0)
+
+## `t` tiled by `mode`; none when decal leaves the point transparent.
+func cpu_tile(t: f32, mode: CpuTileMode) -> f32?:
+    if not math32.is_finite(t):
+        return none
+    match mode:
+        .clamp: return cpu_pin_f32(t, 0.0, 1.0)
+        .repeat: return t - math32.floor(t)
+        .mirror:
+            let u = t - 1.0
+            let v = u - 2.0 * math32.floor(u * 0.5) - 1.0
+            return math32.abs(v)
+        .decal:
+            if t < 0.0 or t > 1.0:
+                return none
+            return t
+
+## The gradient's t at `(x, y)` in gradient space; none where the gradient is not defined.
+func cpu_gradient_t(geometry: const CpuGradientGeometry*, x: f32, y: f32) -> f32?:
+    match *geometry:
+        .linear(x0, y0, x1, y1):
+            let dx = x1 - x0
+            let dy = y1 - y0
+            return ((x - x0) * dx + (y - y0) * dy) / (dx * dx + dy * dy)
+        .radial(cx, cy, radius):
+            let dx = x - cx
+            let dy = y - cy
+            return math32.sqrt(dx * dx + dy * dy) / radius
+        .two_point_conical(x0, y0, r0, x1, y1, r1):
+            return cpu_two_point_conical_t(x, y, x0, y0, r0, x1, y1, r1)
+        .sweep(cx, cy):
+            var t = math32.atan2(y - cy, x - cx) / (2.0 * 3.14159265358979323846)
+            if t < 0.0:
+                t += 1.0
+            if t >= 1.0:
+                t = 0.0
+            return t
+
+## The two-point conical t at (x, y): the largest ω with |p - c(ω)| = r(ω) and r(ω) >= 0,
+## where c and r run linearly from (c0, r0) at 0 to (c1, r1) at 1.
+func cpu_two_point_conical_t(x: f32, y: f32, x0: f32, y0: f32, r0: f32, x1: f32, y1: f32, r1: f32) -> f32?:
+    let cdx = (f64)(x1 - x0)
+    let cdy = (f64)(y1 - y0)
+    let pdx = (f64)(x - x0)
+    let pdy = (f64)(y - y0)
+    let dr = (f64)(r1 - r0)
+    let a = cdx * cdx + cdy * cdy - dr * dr
+    let b = pdx * cdx + pdy * cdy + (f64)r0 * dr
+    let c = pdx * pdx + pdy * pdy - (f64)r0 * (f64)r0
+    if math.abs(a) < 1e-9:
+        if b == 0.0:
+            return none
+        let omega = c / (2.0 * b)
+        if (f64)r0 + omega * dr < 0.0:
+            return none
+        return (f32)omega
+    let discriminant = b * b - a * c
+    if discriminant < 0.0:
+        return none
+    let root = math.sqrt(discriminant)
+    let omega1 = (b + root) / a
+    let omega2 = (b - root) / a
+    let larger = omega1 if omega1 > omega2 else omega2
+    let smaller = omega2 if omega1 > omega2 else omega1
+    if (f64)r0 + larger * dr >= 0.0:
+        return (f32)larger
+    if (f64)r0 + smaller * dr >= 0.0:
+        return (f32)smaller
+    return none
+
+## Whether the geometry is degenerate (SkGradientShader's kDegenerateThreshold).
+func cpu_gradient_is_degenerate(geometry: const CpuGradientGeometry*) -> bool:
+    let threshold: f32 = 1.0 / 32768.0
+    match *geometry:
+        .linear(x0, y0, x1, y1):
+            let dx = x1 - x0
+            let dy = y1 - y0
+            return math32.sqrt(dx * dx + dy * dy) <= threshold
+        .radial(_, _, radius):
+            return radius <= threshold
+        .two_point_conical(x0, y0, r0, x1, y1, r1):
+            let dx = x1 - x0
+            let dy = y1 - y0
+            return math32.sqrt(dx * dx + dy * dy) <= threshold and math32.abs(r1 - r0) <= threshold
+        .sweep(_, _):
+            return false
+
+## SkGradientBaseShader::MakeDegenerateGradient's color: the average of the gradient for
+## repeat and mirror, its last color for clamp, and none (nothing drawn) for decal.
+func cpu_degenerate_color(prepared: const CpuPreparedGradient*, mode: CpuTileMode) -> CpuColor4?:
+    let positions = ak.vector_span_const(&prepared.positions)
+    let colors = ak.vector_span_const(&prepared.colors)
+    match mode:
+        .decal: return none
+        .clamp: return colors[colors.length - 1]
+        _:
+            var sum: CpuColor4 = [0.0, 0.0, 0.0, 0.0]
+            for i in 0..<(positions.length - 1):
+                let w = positions[i + 1] - positions[i]
+                for c in 0..<4usize:
+                    sum[c] += (colors[i][c] + colors[i + 1][c]) * 0.5 * w
+            return sum
+
+# mark: Filling ================================================================================
+
+## Fills `path` (in the current transform) with `gradient` at `opacity`.
+func cpu_canvas_fill_path_with_gradient(canvas: CpuCanvas*, path: const raster.Path*, fill_rule: raster.FillRule, anti_alias: bool, gradient: const CpuGradient*, opacity: f32):
+    if cpu_canvas_is_clip_empty(canvas) or ak.vector_is_empty(&gradient.stops):
+        return
+    let state = cpu_canvas_state(canvas)
+    let ctm = state.transform
+    let total = ctm.pre_concat(gradient.local_matrix)
+    # A non-invertible matrix draws nothing, as in Skia.
+    let inverse = total.invert() else return
+    let ctm_inverse = ctm.invert() else return
+    let device_bounds = path.bounds().transform(ctm) else return
+    let x0 = cpu_max_i32(state.clip_left, cpu_f32_to_i32(math32.floor(device_bounds.left())))
+    let y0 = cpu_max_i32(state.clip_top, cpu_f32_to_i32(math32.floor(device_bounds.top())))
+    let x1 = cpu_min_i32(state.clip_right, cpu_f32_to_i32(math32.ceil(device_bounds.right())))
+    let y1 = cpu_min_i32(state.clip_bottom, cpu_f32_to_i32(math32.ceil(device_bounds.bottom())))
+    if x0 >= x1 or y0 >= y1:
+        return
+
+    let prepared = cpu_gradient_prepare(gradient)
+    var degenerate: CpuColor4? = none
+    let is_degenerate = cpu_gradient_is_degenerate(&gradient.geometry)
+    if is_degenerate:
+        degenerate = cpu_degenerate_color(&prepared, gradient.tile_mode)
+        if degenerate == none:
+            return
+
+    var shader_pixels = raster.Pixmap.new_((u32)(x1 - x0), (u32)(y1 - y0)) else return
+    defer shader_pixels.release()
+    let pixels = shader_pixels.pixels_mut()
+    let row_width = (usize)(x1 - x0)
+    for y in y0..<y1:
+        for x in x0..<x1:
+            var color: CpuColor4? = degenerate
+            if not is_degenerate:
+                var point = raster.Point.from_xy((f32)x + 0.5, (f32)y + 0.5)
+                inverse.map_point(&point)
+                if let t = cpu_gradient_t(&gradient.geometry, point.x, point.y):
+                    if let tiled = cpu_tile(t, gradient.tile_mode):
+                        color = cpu_gradient_color_at(&prepared, tiled)
+            if let c = color:
+                pixels[(usize)(y - y0) * row_width + (usize)(x - x0)] = cpu_gradient_to_pixel(&prepared, c)
+
+    # The pattern's pixels sit on the device grid: pattern space -> device is a translation
+    # by (x0, y0), so pattern -> user space is ctm^-1 * translate(x0, y0).
+    var paint = raster.Paint()
+    paint.anti_alias = anti_alias
+    paint.shader = raster.Pattern.new_(shader_pixels.as_ref(), raster.SpreadMode.pad_, raster.FilterQuality.nearest, opacity,
+        ctm_inverse.pre_translate((f32)x0, (f32)y0))
+    cpu_canvas_fill_path(canvas, path, &paint, fill_rule)

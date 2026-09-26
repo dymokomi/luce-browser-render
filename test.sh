@@ -18,6 +18,10 @@ luce-base test src/luce_browser_render/gfx
 echo "== luce-base test src/luce_browser_render/web_fonts"
 luce-base test src/luce_browser_render/web_fonts
 
+# display_list: the module's tests (the CPU player against Skia's pixels, the ported LibWeb logic).
+echo "== luce-base test src/luce_browser_render/display_list"
+luce-base test src/luce_browser_render/display_list --native
+
 # raster: written by hand (not generated); run its tests once it exists.
 if [ -f src/luce_browser_render/raster/ORDER ]; then
     echo "== luce-base test src/luce_browser_render/raster"

@@ -1,0 +1,384 @@
+#==============================================================================================
+#
+#   display_list_command - the commands' bounding rectangles and dumps
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibWeb/Painting/DisplayListCommand.cpp (lines 1-163) with the inline
+#       `bounding_rect()` and `is_clip()` members of DisplayListCommand.h (lines 1-407), in the
+#       header's order. `dump` writes what `appendff` writes: AK's Formatters for Gfx::Rect
+#       ("[x,y wxh]"), Point ("[x,y]"), Size ("[wxh]"), Color (its `to_byte_string()`), bool
+#       and the numbers, spelled out in the `append_*` helpers at the end of the fragment.
+#
+#       Copyright (c) 2024-2025, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+# mark: DrawGlyphRun, FillRect, bitmaps ========================================================
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:23 Web::Painting::DrawGlyphRun::bounding_rect.
+pub func draw_glyph_run_bounding_rect(this: const DrawGlyphRun*) -> gfx.DevicePixelRect:
+    let bounds = web_fonts.glyph_run_cached_blob_bounds(this.glyph_run)
+    return float_rect_to_rounded_int_rect(gfx.float_rect_translated_float_point(&bounds, this.translation))
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:28 Web::Painting::DrawGlyphRun::dump.
+pub func draw_glyph_run_dump(this: const DrawGlyphRun*, builder: ak.StringBuilder*):
+    # " rect={} translation={} color={}"
+    ak.string_builder_append(builder, " rect=")
+    append_int_rect(builder, this.rect)
+    ak.string_builder_append(builder, " translation=")
+    append_float_point(builder, this.translation)
+    ak.string_builder_append(builder, " color=")
+    append_color(builder, this.color)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.h:57 Web::Painting::FillRect::bounding_rect.
+pub func fill_rect_bounding_rect(this: const FillRect*) -> gfx.DevicePixelRect:
+    return this.rect
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:33 Web::Painting::FillRect::dump.
+pub func fill_rect_dump(this: const FillRect*, builder: ak.StringBuilder*):
+    # " rect={} color={}"
+    ak.string_builder_append(builder, " rect=")
+    append_int_rect(builder, this.rect)
+    ak.string_builder_append(builder, " color=")
+    append_color(builder, this.color)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.h:69 Web::Painting::DrawScaledImmutableBitmap::bounding_rect.
+pub func draw_scaled_immutable_bitmap_bounding_rect(this: const DrawScaledImmutableBitmap*) -> gfx.DevicePixelRect:
+    return this.clip_rect
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:38 Web::Painting::DrawScaledImmutableBitmap::dump.
+pub func draw_scaled_immutable_bitmap_dump(this: const DrawScaledImmutableBitmap*, builder: ak.StringBuilder*):
+    # " dst_rect={} clip_rect={}"
+    ak.string_builder_append(builder, " dst_rect=")
+    append_int_rect(builder, this.dst_rect)
+    ak.string_builder_append(builder, " clip_rect=")
+    append_int_rect(builder, this.clip_rect)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.h:87 Web::Painting::DrawRepeatedImmutableBitmap::bounding_rect.
+pub func draw_repeated_immutable_bitmap_bounding_rect(this: const DrawRepeatedImmutableBitmap*) -> gfx.DevicePixelRect:
+    return this.clip_rect
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:43 Web::Painting::DrawRepeatedImmutableBitmap::dump.
+pub func draw_repeated_immutable_bitmap_dump(this: const DrawRepeatedImmutableBitmap*, builder: ak.StringBuilder*):
+    # " dst_rect={} clip_rect={}"
+    ak.string_builder_append(builder, " dst_rect=")
+    append_int_rect(builder, this.dst_rect)
+    ak.string_builder_append(builder, " clip_rect=")
+    append_int_rect(builder, this.clip_rect)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.h:98 Web::Painting::DrawExternalContent::bounding_rect.
+pub func draw_external_content_bounding_rect(this: const DrawExternalContent*) -> gfx.DevicePixelRect:
+    return this.dst_rect
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:48 Web::Painting::DrawExternalContent::dump.
+pub func draw_external_content_dump(this: const DrawExternalContent*, builder: ak.StringBuilder*):
+    # " dst_rect={}"
+    ak.string_builder_append(builder, " dst_rect=")
+    append_int_rect(builder, this.dst_rect)
+
+# mark: Save, SaveLayer, Restore, Translate, AddClipRect =======================================
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:53 Web::Painting::Save::dump.
+pub func save_dump(this: const Save*, arg0: ak.StringBuilder*):
+    return
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:57 Web::Painting::SaveLayer::dump.
+pub func save_layer_dump(this: const SaveLayer*, arg0: ak.StringBuilder*):
+    return
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:61 Web::Painting::Restore::dump.
+pub func restore_dump(this: const Restore*, arg0: ak.StringBuilder*):
+    return
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:65 Web::Painting::Translate::dump.
+pub func translate_dump(this: const Translate*, builder: ak.StringBuilder*):
+    # " delta={}"
+    ak.string_builder_append(builder, " delta=")
+    append_int_point(builder, this.delta)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.h:136 Web::Painting::AddClipRect::bounding_rect.
+pub func add_clip_rect_bounding_rect(this: const AddClipRect*) -> gfx.DevicePixelRect:
+    return this.rect
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.h:137 Web::Painting::AddClipRect::is_clip.
+pub func add_clip_rect_is_clip(this: const AddClipRect*) -> bool:
+    return true
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:70 Web::Painting::AddClipRect::dump.
+pub func add_clip_rect_dump(this: const AddClipRect*, builder: ak.StringBuilder*):
+    # " rect={}"
+    ak.string_builder_append(builder, " rect=")
+    append_int_rect(builder, this.rect)
+
+# mark: Gradients and shadows ==================================================================
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.h:147 Web::Painting::PaintLinearGradient::bounding_rect.
+pub func paint_linear_gradient_bounding_rect(this: const PaintLinearGradient*) -> gfx.DevicePixelRect:
+    return this.gradient_rect
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:75 Web::Painting::PaintLinearGradient::dump.
+pub func paint_linear_gradient_dump(this: const PaintLinearGradient*, builder: ak.StringBuilder*):
+    # " rect={}"
+    ak.string_builder_append(builder, " rect=")
+    append_int_rect(builder, this.gradient_rect)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:11 Web::Painting::PaintOuterBoxShadow::bounding_rect.
+pub func paint_outer_box_shadow_bounding_rect(this: const PaintOuterBoxShadow*) -> gfx.DevicePixelRect:
+    var rect = this.shadow_rect
+    gfx.device_pixel_rect_inflate_i32_i32_i32(&rect, this.blur_radius * 2, this.blur_radius * 2, this.blur_radius * 2, this.blur_radius * 2)
+    return rect
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:90 Web::Painting::PaintOuterBoxShadow::dump.
+pub func paint_outer_box_shadow_dump(this: const PaintOuterBoxShadow*, builder: ak.StringBuilder*):
+    # " content_rect={} shadow_rect={} blur_radius={} color={}"
+    ak.string_builder_append(builder, " content_rect=")
+    append_int_rect(builder, this.device_content_rect)
+    ak.string_builder_append(builder, " shadow_rect=")
+    append_int_rect(builder, this.shadow_rect)
+    ak.string_builder_append(builder, " blur_radius=")
+    ak.format_i64(builder, this.blur_radius)
+    ak.string_builder_append(builder, " color=")
+    append_color(builder, this.color)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:18 Web::Painting::PaintInnerBoxShadow::bounding_rect.
+pub func paint_inner_box_shadow_bounding_rect(this: const PaintInnerBoxShadow*) -> gfx.DevicePixelRect:
+    return this.device_content_rect
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:95 Web::Painting::PaintInnerBoxShadow::dump.
+pub func paint_inner_box_shadow_dump(this: const PaintInnerBoxShadow*, builder: ak.StringBuilder*):
+    # " content_rect={} outer_shadow_rect={} inner_shadow_rect={} blur_radius={} color={}"
+    ak.string_builder_append(builder, " content_rect=")
+    append_int_rect(builder, this.device_content_rect)
+    ak.string_builder_append(builder, " outer_shadow_rect=")
+    append_int_rect(builder, this.outer_shadow_rect)
+    ak.string_builder_append(builder, " inner_shadow_rect=")
+    append_int_rect(builder, this.inner_shadow_rect)
+    ak.string_builder_append(builder, " blur_radius=")
+    ak.format_i64(builder, this.blur_radius)
+    ak.string_builder_append(builder, " color=")
+    append_color(builder, this.color)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.h:191 Web::Painting::PaintTextShadow::bounding_rect.
+pub func paint_text_shadow_bounding_rect(this: const PaintTextShadow*) -> gfx.DevicePixelRect:
+    return gfx.DevicePixelRect(m_location = float_point_to_int_point(this.draw_location), m_size = gfx.device_pixel_rect_size(&this.shadow_bounding_rect))
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:100 Web::Painting::PaintTextShadow::dump.
+pub func paint_text_shadow_dump(this: const PaintTextShadow*, builder: ak.StringBuilder*):
+    # " shadow_rect={} text_rect={} draw_location={} blur_radius={} color={}"
+    ak.string_builder_append(builder, " shadow_rect=")
+    append_int_rect(builder, this.shadow_bounding_rect)
+    ak.string_builder_append(builder, " text_rect=")
+    append_int_rect(builder, this.text_rect)
+    ak.string_builder_append(builder, " draw_location=")
+    append_float_point(builder, this.draw_location)
+    ak.string_builder_append(builder, " blur_radius=")
+    ak.format_i64(builder, this.blur_radius)
+    ak.string_builder_append(builder, " color=")
+    append_color(builder, this.color)
+
+# mark: Shapes and paths =======================================================================
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.h:202 Web::Painting::FillRectWithRoundedCorners::bounding_rect.
+pub func fill_rect_with_rounded_corners_bounding_rect(this: const FillRectWithRoundedCorners*) -> gfx.DevicePixelRect:
+    return this.rect
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:105 Web::Painting::FillRectWithRoundedCorners::dump.
+pub func fill_rect_with_rounded_corners_dump(this: const FillRectWithRoundedCorners*, builder: ak.StringBuilder*):
+    # " rect={} color={}"
+    ak.string_builder_append(builder, " rect=")
+    append_int_rect(builder, this.rect)
+    ak.string_builder_append(builder, " color=")
+    append_color(builder, this.color)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.h:216 Web::Painting::FillPath::bounding_rect.
+pub func fill_path_bounding_rect(this: const FillPath*) -> gfx.DevicePixelRect:
+    return this.path_bounding_rect
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:110 Web::Painting::FillPath::dump.
+pub func fill_path_dump(this: const FillPath*, builder: ak.StringBuilder*):
+    # " path_bounding_rect={}"
+    ak.string_builder_append(builder, " path_bounding_rect=")
+    append_int_rect(builder, this.path_bounding_rect)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.h:236 Web::Painting::StrokePath::bounding_rect.
+pub func stroke_path_bounding_rect(this: const StrokePath*) -> gfx.DevicePixelRect:
+    return this.path_bounding_rect
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:115 Web::Painting::StrokePath::dump.
+pub func stroke_path_dump(this: const StrokePath*, arg0: ak.StringBuilder*):
+    return
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.h:248 Web::Painting::DrawEllipse::bounding_rect.
+pub func draw_ellipse_bounding_rect(this: const DrawEllipse*) -> gfx.DevicePixelRect:
+    return this.rect
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:119 Web::Painting::DrawEllipse::dump.
+pub func draw_ellipse_dump(this: const DrawEllipse*, builder: ak.StringBuilder*):
+    # " rect={} color={} thickness={}"
+    ak.string_builder_append(builder, " rect=")
+    append_int_rect(builder, this.rect)
+    ak.string_builder_append(builder, " color=")
+    append_color(builder, this.color)
+    ak.string_builder_append(builder, " thickness=")
+    ak.format_i64(builder, this.thickness)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.h:259 Web::Painting::FillEllipse::bounding_rect.
+pub func fill_ellipse_bounding_rect(this: const FillEllipse*) -> gfx.DevicePixelRect:
+    return this.rect
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:124 Web::Painting::FillEllipse::dump.
+pub func fill_ellipse_dump(this: const FillEllipse*, builder: ak.StringBuilder*):
+    # " rect={} color={}"
+    ak.string_builder_append(builder, " rect=")
+    append_int_rect(builder, this.rect)
+    ak.string_builder_append(builder, " color=")
+    append_color(builder, this.color)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.h:274 Web::Painting::DrawLine::bounding_rect.
+pub func draw_line_bounding_rect(this: const DrawLine*) -> gfx.DevicePixelRect:
+    let rect = gfx.device_pixel_rect_from_two_points(this.from_, this.to)
+    return gfx.device_pixel_rect_inflated_i32_i32(&rect, this.thickness, this.thickness)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:129 Web::Painting::DrawLine::dump.
+pub func draw_line_dump(this: const DrawLine*, builder: ak.StringBuilder*):
+    # " from={} to={} color={} thickness={}"
+    ak.string_builder_append(builder, " from=")
+    append_int_point(builder, this.from_)
+    ak.string_builder_append(builder, " to=")
+    append_int_point(builder, this.to)
+    ak.string_builder_append(builder, " color=")
+    append_color(builder, this.color)
+    ak.string_builder_append(builder, " thickness=")
+    ak.format_i64(builder, this.thickness)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.h:285 Web::Painting::ApplyBackdropFilter::bounding_rect.
+pub func apply_backdrop_filter_bounding_rect(this: const ApplyBackdropFilter*) -> gfx.DevicePixelRect:
+    return this.backdrop_region
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:134 Web::Painting::ApplyBackdropFilter::dump.
+pub func apply_backdrop_filter_dump(this: const ApplyBackdropFilter*, builder: ak.StringBuilder*):
+    # " backdrop_region={}"
+    ak.string_builder_append(builder, " backdrop_region=")
+    append_int_rect(builder, this.backdrop_region)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.h:297 Web::Painting::DrawRect::bounding_rect.
+pub func draw_rect_bounding_rect(this: const DrawRect*) -> gfx.DevicePixelRect:
+    return this.rect
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:139 Web::Painting::DrawRect::dump.
+pub func draw_rect_dump(this: const DrawRect*, builder: ak.StringBuilder*):
+    # " rect={} color={} rough={}"
+    ak.string_builder_append(builder, " rect=")
+    append_int_rect(builder, this.rect)
+    ak.string_builder_append(builder, " color=")
+    append_color(builder, this.color)
+    ak.string_builder_append(builder, " rough=")
+    append_bool(builder, this.rough)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.h:310 Web::Painting::PaintRadialGradient::bounding_rect.
+pub func paint_radial_gradient_bounding_rect(this: const PaintRadialGradient*) -> gfx.DevicePixelRect:
+    return this.rect
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:80 Web::Painting::PaintRadialGradient::dump.
+pub func paint_radial_gradient_dump(this: const PaintRadialGradient*, builder: ak.StringBuilder*):
+    # " rect={} center={} size={}"
+    ak.string_builder_append(builder, " rect=")
+    append_int_rect(builder, this.rect)
+    ak.string_builder_append(builder, " center=")
+    append_int_point(builder, this.center)
+    ak.string_builder_append(builder, " size=")
+    append_int_size(builder, this.size)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.h:322 Web::Painting::PaintConicGradient::bounding_rect.
+pub func paint_conic_gradient_bounding_rect(this: const PaintConicGradient*) -> gfx.DevicePixelRect:
+    return this.rect
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:85 Web::Painting::PaintConicGradient::dump.
+pub func paint_conic_gradient_dump(this: const PaintConicGradient*, builder: ak.StringBuilder*):
+    # " rect={} position={} angle={}"
+    ak.string_builder_append(builder, " rect=")
+    append_int_rect(builder, this.rect)
+    ak.string_builder_append(builder, " position=")
+    append_int_point(builder, this.position)
+    ak.string_builder_append(builder, " angle=")
+    ak.format_f32(builder, this.conic_gradient_data.start_angle)
+
+# mark: Clips, nesting, scrollbars, effects ====================================================
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.h:334 Web::Painting::AddRoundedRectClip::bounding_rect.
+pub func add_rounded_rect_clip_bounding_rect(this: const AddRoundedRectClip*) -> gfx.DevicePixelRect:
+    return this.border_rect
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.h:335 Web::Painting::AddRoundedRectClip::is_clip.
+pub func add_rounded_rect_clip_is_clip(this: const AddRoundedRectClip*) -> bool:
+    return true
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:144 Web::Painting::AddRoundedRectClip::dump.
+pub func add_rounded_rect_clip_dump(this: const AddRoundedRectClip*, builder: ak.StringBuilder*):
+    # " rect={}"
+    ak.string_builder_append(builder, " rect=")
+    append_int_rect(builder, this.border_rect)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.h:346 Web::Painting::PaintNestedDisplayList::bounding_rect.
+pub func paint_nested_display_list_bounding_rect(this: const PaintNestedDisplayList*) -> gfx.DevicePixelRect:
+    return this.rect
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:149 Web::Painting::PaintNestedDisplayList::dump.
+pub func paint_nested_display_list_dump(this: const PaintNestedDisplayList*, builder: ak.StringBuilder*):
+    # " rect={}"
+    ak.string_builder_append(builder, " rect=")
+    append_int_rect(builder, this.rect)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:154 Web::Painting::PaintScrollBar::dump.
+pub func paint_scroll_bar_dump(this: const PaintScrollBar*, arg0: ak.StringBuilder*):
+    return
+
+## Ported from Libraries/LibWeb/Painting/DisplayListCommand.cpp:158 Web::Painting::ApplyEffects::dump.
+pub func apply_effects_dump(this: const ApplyEffects*, builder: ak.StringBuilder*):
+    # " opacity={} has_filter={}"
+    ak.string_builder_append(builder, " opacity=")
+    ak.format_f32(builder, this.opacity)
+    ak.string_builder_append(builder, " has_filter=")
+    append_bool(builder, this.filter != none)
+
+# mark: Formatters =============================================================================
+
+## AK::Formatter<Gfx::Rect<int>>: "[{},{} {}x{}]".
+func append_int_rect(builder: ak.StringBuilder*, rect: gfx.DevicePixelRect):
+    ak.string_builder_append(builder, "[")
+    append_rect_bounds(builder, &rect)
+    ak.string_builder_append(builder, "]")
+
+## AK::Formatter<Gfx::Point<int>>: "[{},{}]".
+func append_int_point(builder: ak.StringBuilder*, point: gfx.IntPoint):
+    ak.string_builder_append(builder, "[")
+    ak.format_i64(builder, gfx.int_point_x(&point))
+    ak.string_builder_append(builder, ",")
+    ak.format_i64(builder, gfx.int_point_y(&point))
+    ak.string_builder_append(builder, "]")
+
+## AK::Formatter<Gfx::Point<float>>: "[{},{}]".
+func append_float_point(builder: ak.StringBuilder*, point: gfx.FloatPoint):
+    ak.string_builder_append(builder, "[")
+    ak.format_f32(builder, gfx.float_point_x(&point))
+    ak.string_builder_append(builder, ",")
+    ak.format_f32(builder, gfx.float_point_y(&point))
+    ak.string_builder_append(builder, "]")
+
+## AK::Formatter<Gfx::Size<int>>: "[{}x{}]".
+func append_int_size(builder: ak.StringBuilder*, size: gfx.IntSize):
+    ak.string_builder_append(builder, "[")
+    ak.format_i64(builder, gfx.int_size_width(&size))
+    ak.string_builder_append(builder, "x")
+    ak.format_i64(builder, gfx.int_size_height(&size))
+    ak.string_builder_append(builder, "]")
+
+## AK::Formatter<Gfx::Color>: the color's `to_byte_string()`.
+func append_color(builder: ak.StringBuilder*, color: gfx.Color):
+    let text = gfx.color_to_byte_string(&color)
+    ak.string_builder_append_string_view(builder, ak.byte_string_view(&text))
+
+## AK::Formatter<bool>: "true" or "false".
+func append_bool(builder: ak.StringBuilder*, value: bool):
+    ak.string_builder_append(builder, "true" if value else "false")

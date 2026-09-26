@@ -1,0 +1,292 @@
+#==============================================================================================
+#
+#   tests_cpu_player - the CPU player's pixels against Skia's
+#
+#   DESCRIPTION:
+#       Each scene draws a small display list through DisplayListPlayerCpu's virtuals
+#       (what DisplayListPlayer::execute_impl calls for it) and compares the pixels with
+#       what Ladybird's DisplayListPlayerSkia renders for the same display list
+#       (tests_skia_reference_data.lucb), under Ladybird's fuzzy reftest rule. Pixels
+#       inside shapes and away from their edges match exactly; the tolerances cover
+#       anti-aliased edges, where Skia's analytic coverage and the rasterizer's 4x4
+#       supersampling differ by a few levels, Skia's gradient dithering, and the blur.
+#
+#==============================================================================================
+
+# mark: Rects and rounded rects ================================================================
+
+test "cpu player: fill_rect":
+    test_cpu_player_fill_rect()
+
+noinline func test_cpu_player_fill_rect():
+    let scene = test_scene_new(8, 8)
+    defer test_scene_release(&scene)
+    display_list_player_fill_rect(test_scene_player(&scene), FillRect(rect = test_rect(2, 3, 4, 2), color = test_color(255, 0, 0, 255)))
+    expect_like_skia(&scene, "fill_rect", skia_fill_rect, 0, 0)
+
+test "cpu player: fill_rect_with_rounded_corners":
+    test_cpu_player_rounded_rect()
+
+noinline func test_cpu_player_rounded_rect():
+    let scene = test_scene_new(16, 16)
+    defer test_scene_release(&scene)
+    display_list_player_fill_rect_with_rounded_corners(test_scene_player(&scene), FillRectWithRoundedCorners(rect = test_rect(1, 1, 14, 14), color = test_color(0, 0, 255, 255), corner_radii = test_uniform_radii(5)))
+    expect_like_skia(&scene, "rounded_rect", skia_rounded_rect, 40, 40)
+
+test "cpu player: fill_rect_with_rounded_corners, elliptical corners":
+    test_cpu_player_rounded_rect_elliptic()
+
+noinline func test_cpu_player_rounded_rect_elliptic():
+    let scene = test_scene_new(16, 16)
+    defer test_scene_release(&scene)
+    let radii = CornerRadii(top_left = CornerRadius(horizontal_radius = 6, vertical_radius = 3), top_right = CornerRadius(horizontal_radius = 2, vertical_radius = 2),
+        bottom_right = CornerRadius(horizontal_radius = 0, vertical_radius = 0), bottom_left = CornerRadius(horizontal_radius = 4, vertical_radius = 8))
+    display_list_player_fill_rect_with_rounded_corners(test_scene_player(&scene), FillRectWithRoundedCorners(rect = test_rect(1, 1, 14, 14), color = test_color(0, 128, 0, 255), corner_radii = radii))
+    expect_like_skia(&scene, "rounded_rect_elliptic", skia_rounded_rect_elliptic, 40, 30)
+
+# mark: Clips ==================================================================================
+
+test "cpu player: add_clip_rect":
+    test_cpu_player_clip_rect()
+
+noinline func test_cpu_player_clip_rect():
+    let scene = test_scene_new(16, 16)
+    defer test_scene_release(&scene)
+    let player = test_scene_player(&scene)
+    display_list_player_save(player, Save())
+    display_list_player_add_clip_rect(player, AddClipRect(rect = test_rect(4, 4, 8, 8)))
+    display_list_player_fill_rect(player, FillRect(rect = test_rect(0, 0, 16, 16), color = test_color(255, 0, 0, 255)))
+    display_list_player_restore(player, Restore())
+    expect_like_skia(&scene, "clip_rect", skia_clip_rect, 0, 0)
+
+test "cpu player: add_rounded_rect_clip outside":
+    test_cpu_player_rounded_clip_outside()
+
+noinline func test_cpu_player_rounded_clip_outside():
+    let scene = test_scene_new(16, 16)
+    defer test_scene_release(&scene)
+    let player = test_scene_player(&scene)
+    display_list_player_save(player, Save())
+    display_list_player_add_rounded_rect_clip(player, AddRoundedRectClip(corner_radii = test_uniform_radii(6), border_rect = test_rect(2, 2, 12, 12), corner_clip = CornerClip.outside))
+    display_list_player_fill_rect(player, FillRect(rect = test_rect(0, 0, 16, 16), color = test_color(255, 0, 0, 255)))
+    display_list_player_restore(player, Restore())
+    expect_like_skia(&scene, "rounded_clip_outside", skia_rounded_clip_outside, 48, 48)
+
+test "cpu player: add_rounded_rect_clip inside":
+    test_cpu_player_rounded_clip_inside()
+
+noinline func test_cpu_player_rounded_clip_inside():
+    let scene = test_scene_new(16, 16)
+    defer test_scene_release(&scene)
+    let player = test_scene_player(&scene)
+    display_list_player_save(player, Save())
+    display_list_player_add_rounded_rect_clip(player, AddRoundedRectClip(corner_radii = test_uniform_radii(6), border_rect = test_rect(2, 2, 12, 12), corner_clip = CornerClip.inside))
+    display_list_player_fill_rect(player, FillRect(rect = test_rect(0, 0, 16, 16), color = test_color(255, 0, 0, 255)))
+    display_list_player_restore(player, Restore())
+    expect_like_skia(&scene, "rounded_clip_inside", skia_rounded_clip_inside, 48, 48)
+
+test "cpu player: a fractional clip under a scale":
+    test_cpu_player_clip_fractional_transform()
+
+noinline func test_cpu_player_clip_fractional_transform():
+    let scene = test_scene_new(16, 16)
+    defer test_scene_release(&scene)
+    let player = test_scene_player(&scene)
+    display_list_player_save(player, Save())
+    display_list_player_apply_transform(player, gfx.FloatPoint(m_x = 0.0, m_y = 0.0), test_matrix([[1.5, 0.0, 0.0, 0.0], [0.0, 1.5, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]))
+    display_list_player_save(player, Save())
+    display_list_player_add_clip_rect(player, AddClipRect(rect = test_rect(1, 1, 5, 5)))
+    display_list_player_fill_rect(player, FillRect(rect = test_rect(0, 0, 10, 10), color = test_color(255, 0, 0, 255)))
+    display_list_player_restore(player, Restore())
+    display_list_player_restore(player, Restore())
+    expect_like_skia(&scene, "clip_fractional_transform", skia_clip_fractional_transform, 2, 16)
+
+# mark: Layers and transforms ==================================================================
+
+test "cpu player: apply_effects opacity":
+    test_cpu_player_opacity_layer()
+
+noinline func test_cpu_player_opacity_layer():
+    let scene = test_scene_new(16, 16)
+    defer test_scene_release(&scene)
+    let player = test_scene_player(&scene)
+    display_list_player_fill_rect(player, FillRect(rect = test_rect(0, 0, 16, 16), color = test_color(0, 0, 255, 255)))
+    let effects = ApplyEffects(opacity = 0.5, compositing_and_blending_operator = gfx.CompositingAndBlendingOperator.normal)
+    display_list_player_apply_effects(player, effects)
+    display_list_player_fill_rect(player, FillRect(rect = test_rect(2, 2, 8, 8), color = test_color(255, 0, 0, 255)))
+    display_list_player_restore(player, Restore())
+    expect_like_skia(&scene, "opacity_layer", skia_opacity_layer, 1, 64)
+
+test "cpu player: apply_effects multiply":
+    test_cpu_player_blend_multiply()
+
+noinline func test_cpu_player_blend_multiply():
+    let scene = test_scene_new(16, 16)
+    defer test_scene_release(&scene)
+    let player = test_scene_player(&scene)
+    display_list_player_fill_rect(player, FillRect(rect = test_rect(0, 0, 16, 16), color = test_color(200, 100, 50, 255)))
+    display_list_player_apply_effects(player, ApplyEffects(opacity = 1.0, compositing_and_blending_operator = gfx.CompositingAndBlendingOperator.multiply))
+    display_list_player_fill_rect(player, FillRect(rect = test_rect(4, 4, 8, 8), color = test_color(100, 200, 250, 255)))
+    display_list_player_restore(player, Restore())
+    expect_like_skia(&scene, "blend_multiply", skia_blend_multiply, 0, 0)
+
+test "cpu player: translate":
+    test_cpu_player_translate()
+
+noinline func test_cpu_player_translate():
+    let scene = test_scene_new(16, 16)
+    defer test_scene_release(&scene)
+    let player = test_scene_player(&scene)
+    display_list_player_save(player, Save())
+    display_list_player_translate(player, Translate(delta = test_point(3, 5)))
+    display_list_player_fill_rect(player, FillRect(rect = test_rect(0, 0, 4, 4), color = test_color(0, 255, 0, 255)))
+    display_list_player_restore(player, Restore())
+    display_list_player_fill_rect(player, FillRect(rect = test_rect(0, 0, 2, 2), color = test_color(0, 0, 255, 255)))
+    expect_like_skia(&scene, "translate", skia_translate, 0, 0)
+
+test "cpu player: apply_transform (a rotation about a point)":
+    test_cpu_player_rotate()
+
+noinline func test_cpu_player_rotate():
+    let scene = test_scene_new(16, 16)
+    defer test_scene_release(&scene)
+    let player = test_scene_player(&scene)
+    # Gfx::rotation_matrix({ 0, 0, 1 }, 30 degrees)
+    let angle: f32 = 30.0 * 3.14159265358979323846 / 180.0
+    let c = math32.cos(angle)
+    let s = math32.sin(angle)
+    display_list_player_save(player, Save())
+    display_list_player_apply_transform(player, gfx.FloatPoint(m_x = 8.0, m_y = 8.0), test_matrix([[c, -s, 0.0, 0.0], [s, c, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]))
+    display_list_player_fill_rect(player, FillRect(rect = test_rect(4, 4, 8, 8), color = test_color(255, 0, 0, 255)))
+    display_list_player_restore(player, Restore())
+    expect_like_skia(&scene, "rotate", skia_rotate, 24, 56)
+
+# mark: Gradients ==============================================================================
+
+## The red-to-blue stop list of the gradient scenes.
+func test_red_to_blue_stops() -> ColorStopData:
+    var data: ColorStopData
+    ak.vector_append_t(&data.list, gfx.ColorStop(color = test_color(255, 0, 0, 255), position = 0.0))
+    ak.vector_append_t(&data.list, gfx.ColorStop(color = test_color(0, 0, 255, 255), position = 1.0))
+    return data
+
+test "cpu player: paint_radial_gradient":
+    test_cpu_player_radial_gradient()
+
+noinline func test_cpu_player_radial_gradient():
+    let scene = test_scene_new(16, 16)
+    defer test_scene_release(&scene)
+    let data = RadialGradientData(color_stops = test_red_to_blue_stops(), interpolation_method = .rectangular_color_space(value = css_data.RectangularColorSpace.srgb))
+    display_list_player_paint_radial_gradient(test_scene_player(&scene), PaintRadialGradient(rect = test_rect(0, 0, 16, 16), radial_gradient_data = data,
+        center = test_point(8, 8), size = gfx.IntSize(m_width = 8, m_height = 6)))
+    expect_like_skia(&scene, "radial_gradient", skia_radial_gradient, 2, 96)
+
+test "cpu player: paint_conic_gradient":
+    test_cpu_player_conic_gradient()
+
+noinline func test_cpu_player_conic_gradient():
+    let scene = test_scene_new(16, 16)
+    defer test_scene_release(&scene)
+    let data = ConicGradientData(start_angle = 0.0, color_stops = test_red_to_blue_stops(), interpolation_method = .rectangular_color_space(value = css_data.RectangularColorSpace.srgb))
+    display_list_player_paint_conic_gradient(test_scene_player(&scene), PaintConicGradient(rect = test_rect(0, 0, 16, 16), conic_gradient_data = data, position = test_point(8, 8)))
+    expect_like_skia(&scene, "conic_gradient", skia_conic_gradient, 2, 140)
+
+test "cpu player: paint_linear_gradient (gated on r10's calculate_gradient_length)":
+    test_cpu_player_linear_gradient()
+
+noinline func test_cpu_player_linear_gradient():
+    if not gfx_paint_is_ported:
+        return
+    let scene = test_scene_new(16, 16)
+    defer test_scene_release(&scene)
+    let data = LinearGradientData(gradient_angle = 90.0, color_stops = test_red_to_blue_stops(), interpolation_method = .rectangular_color_space(value = css_data.RectangularColorSpace.srgb))
+    display_list_player_paint_linear_gradient(test_scene_player(&scene), PaintLinearGradient(gradient_rect = test_rect(0, 0, 16, 16), linear_gradient_data = data))
+    expect_like_skia(&scene, "linear_gradient", skia_linear_gradient, 2, 160)
+
+    let scene_45 = test_scene_new(16, 16)
+    defer test_scene_release(&scene_45)
+    let data_45 = LinearGradientData(gradient_angle = 45.0, color_stops = test_red_to_blue_stops(), interpolation_method = .rectangular_color_space(value = css_data.RectangularColorSpace.srgb))
+    display_list_player_paint_linear_gradient(test_scene_player(&scene_45), PaintLinearGradient(gradient_rect = test_rect(0, 0, 16, 16), linear_gradient_data = data_45))
+    expect_like_skia(&scene_45, "linear_gradient_45", skia_linear_gradient_45, 2, 200)
+
+# mark: Shadows ================================================================================
+
+test "cpu player: paint_outer_box_shadow":
+    test_cpu_player_outer_box_shadow()
+
+noinline func test_cpu_player_outer_box_shadow():
+    let scene = test_scene_new(24, 24)
+    defer test_scene_release(&scene)
+    var none_radii: CornerRadii
+    display_list_player_paint_outer_box_shadow(test_scene_player(&scene), PaintOuterBoxShadow(color = test_color(0, 0, 0, 255), blur_radius = 4,
+        device_content_rect = test_rect(6, 6, 12, 12), content_corner_radii = none_radii, shadow_rect = test_rect(8, 8, 12, 12), shadow_corner_radii = none_radii))
+    expect_like_skia(&scene, "outer_box_shadow", skia_outer_box_shadow, 2, 48)
+
+test "cpu player: paint_inner_box_shadow":
+    test_cpu_player_inner_box_shadow()
+
+noinline func test_cpu_player_inner_box_shadow():
+    let scene = test_scene_new(24, 24)
+    defer test_scene_release(&scene)
+    var none_radii: CornerRadii
+    display_list_player_paint_inner_box_shadow(test_scene_player(&scene), PaintInnerBoxShadow(color = test_color(0, 0, 0, 255), blur_radius = 4,
+        device_content_rect = test_rect(4, 4, 16, 16), content_corner_radii = none_radii, outer_shadow_rect = test_rect(0, 0, 24, 24),
+        inner_shadow_rect = test_rect(8, 8, 12, 12), inner_shadow_corner_radii = none_radii))
+    expect_like_skia(&scene, "inner_box_shadow", skia_inner_box_shadow, 2, 40)
+
+# mark: Ellipses, rects and lines ==============================================================
+
+test "cpu player: draw_ellipse":
+    test_cpu_player_draw_ellipse()
+
+noinline func test_cpu_player_draw_ellipse():
+    let scene = test_scene_new(16, 16)
+    defer test_scene_release(&scene)
+    display_list_player_draw_ellipse(test_scene_player(&scene), DrawEllipse(rect = test_rect(2, 2, 12, 10), color = test_color(255, 0, 0, 255), thickness = 2))
+    expect_like_skia(&scene, "draw_ellipse", skia_draw_ellipse, 40, 80)
+
+test "cpu player: fill_ellipse":
+    test_cpu_player_fill_ellipse()
+
+noinline func test_cpu_player_fill_ellipse():
+    let scene = test_scene_new(16, 16)
+    defer test_scene_release(&scene)
+    display_list_player_fill_ellipse(test_scene_player(&scene), FillEllipse(rect = test_rect(2, 3, 11, 9), color = test_color(255, 0, 0, 255)))
+    expect_like_skia(&scene, "fill_ellipse", skia_fill_ellipse, 48, 36)
+
+test "cpu player: draw_rect":
+    test_cpu_player_draw_rect()
+
+noinline func test_cpu_player_draw_rect():
+    let scene = test_scene_new(16, 16)
+    defer test_scene_release(&scene)
+    display_list_player_draw_rect(test_scene_player(&scene), DrawRect(rect = test_rect(3, 3, 10, 8), color = test_color(255, 0, 0, 255), rough = false))
+    expect_like_skia(&scene, "draw_rect", skia_draw_rect, 1, 24)
+
+test "cpu player: draw_line":
+    test_cpu_player_draw_line()
+
+noinline func test_cpu_player_draw_line():
+    let scene = test_scene_new(16, 16)
+    defer test_scene_release(&scene)
+    display_list_player_draw_line(test_scene_player(&scene), DrawLine(color = test_color(255, 0, 0, 255), from_ = test_point(1, 2), to = test_point(14, 9), thickness = 2,
+        style = gfx.LineStyle.solid, alternate_color = test_color(0, 0, 0, 0)))
+    expect_like_skia(&scene, "draw_line", skia_draw_line, 48, 48)
+
+test "cpu player: draw_line dotted and dashed (gated on r08's distance_from)":
+    test_cpu_player_draw_line_styles()
+
+noinline func test_cpu_player_draw_line_styles():
+    if not gfx_geometry_is_ported:
+        return
+    let dotted = test_scene_new(24, 8)
+    defer test_scene_release(&dotted)
+    display_list_player_draw_line(test_scene_player(&dotted), DrawLine(color = test_color(255, 0, 0, 255), from_ = test_point(2, 4), to = test_point(21, 4), thickness = 2,
+        style = gfx.LineStyle.dotted, alternate_color = test_color(0, 0, 0, 0)))
+    expect_like_skia(&dotted, "draw_line_dotted", skia_draw_line_dotted, 32, 40)
+
+    let dashed = test_scene_new(24, 8)
+    defer test_scene_release(&dashed)
+    display_list_player_draw_line(test_scene_player(&dashed), DrawLine(color = test_color(255, 0, 0, 255), from_ = test_point(2, 4), to = test_point(21, 4), thickness = 2,
+        style = gfx.LineStyle.dashed, alternate_color = test_color(0, 0, 0, 0)))
+    expect_like_skia(&dashed, "draw_line_dashed", skia_draw_line_dashed, 32, 16)

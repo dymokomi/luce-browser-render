@@ -273,7 +273,7 @@ pub func rotation_matrix(axis: FloatVector3, angle: f32) -> FloatMatrix4X4:
     return matrix
 
 ## Ported from Libraries/LibGfx/Matrix4x4.h:86 Gfx::extract_2d_affine_transform, for float.
-pub func extract_2d_affine_transform(m: FloatMatrix4X4) -> AffineTransform:
+pub func extract_2d_affine_transform(m: const FloatMatrix4X4*) -> AffineTransform:
     var transform: AffineTransform
     affine_transform_construct_f32(&transform, m.m_elements[0][0], m.m_elements[1][0], m.m_elements[0][1], m.m_elements[1][1], m.m_elements[0][3], m.m_elements[1][3])
     return transform

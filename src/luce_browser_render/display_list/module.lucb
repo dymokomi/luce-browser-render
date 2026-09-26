@@ -18,3 +18,8 @@ import gc
 import css_data
 import luce_browser_render.gfx as gfx
 import luce_browser_render.web_fonts as web_fonts
+import luce_browser_render.raster as raster
+import luce
+import math
+import math32
+import memory

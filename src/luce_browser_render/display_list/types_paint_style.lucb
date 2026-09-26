@@ -57,8 +57,8 @@ pub struct ColorStop:
 
 ## The non-zero default member initializers of Web::Painting::ColorStop; the constructor runs them first.
 pub func color_stop_init_fields(this: ColorStop*):
-    # position: C++ default AK :: NaN < float > (not translated by the generator)
-    return
+    # Filled by hand (region r51a): C++ default AK::NaN<float>.
+    this.position = ak.nan_f32
 
 # mark: SvgGradientPaintStyle ===================================================================
 

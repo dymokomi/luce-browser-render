@@ -1,0 +1,394 @@
+#==============================================================================================
+#
+#   display_list_recorder - recording painting commands into a DisplayList
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibWeb/Painting/DisplayListRecorder.cpp (lines 1-421) and
+#       DisplayListRecorder.h (lines 1-176). Every command goes through
+#       `display_list_recorder_append`, the C++ APPEND macro: it tracks the save nesting
+#       level and, while a CommandCapture is active, also keeps a copy of each command the
+#       display list accepted. Commands are immutable once recorded, so the copy shares the
+#       command's buffers (DESIGN.md §3.3 rule 2 needs no clone here).
+#
+#       The C++ destructors that do work become calls the owner makes where the C++ object
+#       goes out of scope: `display_list_recorder_command_capture_destroy` (CommandCapture
+#       ends a capture it did not hand out) and `display_list_recorder_state_saver_destroy`
+#       (DisplayListRecorderStateSaver restores). Parameters the C++ takes by const
+#       reference and keeps (`Gfx::GlyphRun const&`, `Gfx::ImmutableBitmap const&`, `Font
+#       const&`, `Utf16String const&`) are pointers.
+#
+#       Copyright (c) 2023-2026, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
+#       Copyright (c) 2025, Jelle Raaijmakers <jelle@ladybird.org>
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+# mark: Construction and capture ===============================================================
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:14 Web::Painting::DisplayListRecorder::DisplayListRecorder.
+pub func display_list_recorder_construct(this: DisplayListRecorder*, command_list: DisplayList*):
+    this.m_display_list = command_list
+
+## A recorder over `command_list`: `DisplayListRecorder recorder(command_list)`.
+pub func display_list_recorder_new(command_list: DisplayList*) -> DisplayListRecorder:
+    var recorder = DisplayListRecorder(m_display_list = command_list)
+    display_list_recorder_construct(&recorder, command_list)
+    return recorder
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:23 Web::Painting::DisplayListRecorder::CommandCapture::CommandCapture.
+func display_list_recorder_command_capture_construct(this: DisplayListRecorderCommandCapture*, recorder: DisplayListRecorder*):
+    this.m_recorder = recorder
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:28 Web::Painting::DisplayListRecorder::CommandCapture::~CommandCapture:
+## call where the C++ capture goes out of scope.
+pub func display_list_recorder_command_capture_destroy(this: DisplayListRecorderCommandCapture*):
+    if let recorder = this.m_recorder:
+        display_list_recorder_end_capture(recorder)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:34 Web::Painting::DisplayListRecorder::CommandCapture::take.
+pub func display_list_recorder_command_capture_take(this: DisplayListRecorderCommandCapture*) -> ak.Vector[DisplayListCommand]:
+    let recorder = this.m_recorder else trap("VERIFY: CommandCapture::take without a recorder")
+    # move(m_recorder->m_captured_commands) leaves the recorder's vector empty.
+    let commands = recorder.m_captured_commands
+    var empty: ak.Vector[DisplayListCommand]
+    recorder.m_captured_commands = empty
+    recorder.m_is_capturing = false
+    this.m_recorder = none
+    return commands
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:41 Web::Painting::DisplayListRecorder::begin_command_capture.
+pub func display_list_recorder_begin_command_capture(this: DisplayListRecorder*) -> DisplayListRecorderCommandCapture:
+    assert(not this.m_is_capturing)
+    this.m_is_capturing = true
+    ak.vector_clear(&this.m_captured_commands)
+    var capture: DisplayListRecorderCommandCapture
+    display_list_recorder_command_capture_construct(&capture, this)
+    return capture
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:49 Web::Painting::DisplayListRecorder::end_capture.
+func display_list_recorder_end_capture(this: DisplayListRecorder*):
+    this.m_is_capturing = false
+    ak.vector_clear(&this.m_captured_commands)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:56 Web::Painting::command_nesting_level_change:
+## the command's `nesting_level_change`, or 0 for commands that have none. The C++ template is
+## instantiated per command type in APPEND and visited over the variant in
+## `replay_cached_commands`; both answer this.
+func command_nesting_level_change(command: const DisplayListCommand*) -> i32:
+    match *command:
+        .save(_): return save_nesting_level_change
+        .save_layer(_): return save_layer_nesting_level_change
+        .restore(_): return restore_nesting_level_change
+        .apply_effects(_): return apply_effects_nesting_level_change
+        _: return 0
+
+## The C++ APPEND macro (DisplayListRecorder.cpp:63).
+func display_list_recorder_append(this: DisplayListRecorder*, command: DisplayListCommand):
+    this.m_save_nesting_level += command_nesting_level_change(&command)
+    if this.m_is_capturing:
+        let command_copy = command
+        if display_list_append(this.m_display_list, command, this.m_accumulated_visual_context_index):
+            ak.vector_append_t(&this.m_captured_commands, command_copy)
+    else:
+        discard(display_list_append(this.m_display_list, command, this.m_accumulated_visual_context_index))
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:76 Web::Painting::DisplayListRecorder::replay_cached_commands.
+pub func display_list_recorder_replay_cached_commands(this: DisplayListRecorder*, commands: const DisplayListCommand[]):
+    for command in commands:
+        let command_copy = command
+        this.m_save_nesting_level += command_nesting_level_change(&command_copy)
+        discard(display_list_append(this.m_display_list, command_copy, this.m_accumulated_visual_context_index))
+
+# mark: Nesting, clips and masks ===============================================================
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:89 Web::Painting::DisplayListRecorder::paint_nested_display_list.
+pub func display_list_recorder_paint_nested_display_list(this: DisplayListRecorder*, display_list_: DisplayList*?, rect: gfx.DevicePixelRect):
+    display_list_recorder_append(this, .paint_nested_display_list(value = PaintNestedDisplayList(display_list = display_list_, rect = rect)))
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:94 Web::Painting::DisplayListRecorder::add_rounded_rect_clip.
+pub func display_list_recorder_add_rounded_rect_clip(this: DisplayListRecorder*, corner_radii: CornerRadii, border_rect: gfx.DevicePixelRect, corner_clip: CornerClip):
+    display_list_recorder_append(this, .add_rounded_rect_clip(value = AddRoundedRectClip(corner_radii = corner_radii, border_rect = border_rect, corner_clip = corner_clip)))
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:99 Web::Painting::DisplayListRecorder::begin_masks.
+pub func display_list_recorder_begin_masks(this: DisplayListRecorder*, masks: const DisplayListRecorderMaskInfo[]):
+    for mask in masks:
+        display_list_recorder_save(this)
+        display_list_recorder_add_clip_rect(this, mask.rect)
+        display_list_recorder_save_layer(this)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:108 Web::Painting::DisplayListRecorder::end_masks.
+pub func display_list_recorder_end_masks(this: DisplayListRecorder*, masks: const DisplayListRecorderMaskInfo[]):
+    var i = masks.length
+    while i > 0:
+        i -= 1
+        let mask = masks[i]
+        let mask_kind: gfx.MaskKind? = gfx.MaskKind.luminance if mask.kind == gfx.MaskKind.luminance else none
+        display_list_recorder_apply_effects(this, 1.0, gfx.CompositingAndBlendingOperator.destination_in, none, mask_kind)
+        display_list_recorder_paint_nested_display_list(this, mask.display_list, mask.rect)
+        display_list_recorder_restore(this) # DstIn layer
+        display_list_recorder_restore(this) # content layer
+        display_list_recorder_restore(this) # clip save
+
+# mark: Rects, paths and ellipses ==============================================================
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:121 Web::Painting::DisplayListRecorder::fill_rect.
+pub func display_list_recorder_fill_rect(this: DisplayListRecorder*, rect: gfx.DevicePixelRect, color: gfx.Color):
+    if gfx.device_pixel_rect_is_empty(&rect) or gfx.color_alpha(&color) == 0:
+        return
+    display_list_recorder_append(this, .fill_rect(value = FillRect(rect = rect, color = color)))
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:128 Web::Painting::DisplayListRecorder::fill_rect_transparent.
+pub func display_list_recorder_fill_rect_transparent(this: DisplayListRecorder*, rect: gfx.DevicePixelRect):
+    if gfx.device_pixel_rect_is_empty(&rect):
+        return
+    display_list_recorder_append(this, .fill_rect(value = FillRect(rect = rect, color = color_transparent())))
+
+## Whether a PaintStyleOrColor is a fully transparent color: C++'s
+## `paint_style_or_color.has<Gfx::Color>() && paint_style_or_color.get<Gfx::Color>().alpha() == 0`.
+func paint_style_or_color_is_transparent_color(paint_style_or_color: const PaintStyleOrColor*) -> bool:
+    match *paint_style_or_color:
+        .color(color): return gfx.color_alpha(&color) == 0
+        _: return false
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:135 Web::Painting::DisplayListRecorder::fill_path.
+pub func display_list_recorder_fill_path(this: DisplayListRecorder*, params: DisplayListRecorderFillPathParams):
+    if paint_style_or_color_is_transparent_color(&params.paint_style_or_color):
+        return
+    let path_bounding_rect = gfx.path_bounding_box(&params.path)
+    let path_bounding_int_rect = gfx.enclosing_int_rect(path_bounding_rect)
+    if gfx.device_pixel_rect_is_empty(&path_bounding_int_rect):
+        return
+    display_list_recorder_append(this, .fill_path(value = FillPath(
+        path_bounding_rect = path_bounding_int_rect,
+        path = params.path,
+        opacity = params.opacity,
+        paint_style_or_color = params.paint_style_or_color,
+        winding_rule = params.winding_rule,
+        should_anti_alias = params.should_anti_alias)))
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:152 Web::Painting::DisplayListRecorder::stroke_path.
+pub func display_list_recorder_stroke_path(this: DisplayListRecorder*, params: DisplayListRecorderStrokePathParams):
+    # Skia treats zero thickness as a special case and will draw a hairline, while we want to draw nothing.
+    if params.thickness == 0.0:
+        return
+    if paint_style_or_color_is_transparent_color(&params.paint_style_or_color):
+        return
+    var path_bounding_rect = gfx.path_bounding_box(&params.path)
+    # Increase path bounding box by `thickness` to account for stroke.
+    gfx.float_rect_inflate_f32_f32(&path_bounding_rect, params.thickness, params.thickness)
+    let path_bounding_int_rect = gfx.enclosing_int_rect(path_bounding_rect)
+    if gfx.device_pixel_rect_is_empty(&path_bounding_int_rect):
+        return
+    display_list_recorder_append(this, .stroke_path(value = StrokePath(
+        cap_style = params.cap_style,
+        join_style = params.join_style,
+        miter_limit = params.miter_limit,
+        dash_array = params.dash_array,
+        dash_offset = params.dash_offset,
+        path_bounding_rect = path_bounding_int_rect,
+        path = params.path,
+        opacity = params.opacity,
+        paint_style_or_color = params.paint_style_or_color,
+        thickness = params.thickness,
+        should_anti_alias = params.should_anti_alias)))
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:179 Web::Painting::DisplayListRecorder::draw_ellipse.
+pub func display_list_recorder_draw_ellipse(this: DisplayListRecorder*, a_rect: gfx.DevicePixelRect, color: gfx.Color, thickness: i32):
+    if gfx.device_pixel_rect_is_empty(&a_rect) or gfx.color_alpha(&color) == 0 or thickness == 0:
+        return
+    display_list_recorder_append(this, .draw_ellipse(value = DrawEllipse(rect = a_rect, color = color, thickness = thickness)))
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:190 Web::Painting::DisplayListRecorder::fill_ellipse.
+pub func display_list_recorder_fill_ellipse(this: DisplayListRecorder*, a_rect: gfx.DevicePixelRect, color: gfx.Color):
+    if gfx.device_pixel_rect_is_empty(&a_rect) or gfx.color_alpha(&color) == 0:
+        return
+    display_list_recorder_append(this, .fill_ellipse(value = FillEllipse(rect = a_rect, color = color)))
+
+# mark: Gradients ==============================================================================
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:197 Web::Painting::DisplayListRecorder::fill_rect_with_linear_gradient.
+pub func display_list_recorder_fill_rect_with_linear_gradient(this: DisplayListRecorder*, gradient_rect: gfx.DevicePixelRect, data: LinearGradientData):
+    if gfx.device_pixel_rect_is_empty(&gradient_rect):
+        return
+    display_list_recorder_append(this, .paint_linear_gradient(value = PaintLinearGradient(gradient_rect = gradient_rect, linear_gradient_data = data)))
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:204 Web::Painting::DisplayListRecorder::fill_rect_with_conic_gradient.
+pub func display_list_recorder_fill_rect_with_conic_gradient(this: DisplayListRecorder*, rect: gfx.DevicePixelRect, data: ConicGradientData, position: gfx.IntPoint):
+    if gfx.device_pixel_rect_is_empty(&rect):
+        return
+    display_list_recorder_append(this, .paint_conic_gradient(value = PaintConicGradient(rect = rect, conic_gradient_data = data, position = position)))
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:214 Web::Painting::DisplayListRecorder::fill_rect_with_radial_gradient.
+pub func display_list_recorder_fill_rect_with_radial_gradient(this: DisplayListRecorder*, rect: gfx.DevicePixelRect, data: RadialGradientData, center: gfx.IntPoint, size: gfx.IntSize):
+    if gfx.device_pixel_rect_is_empty(&rect):
+        return
+    display_list_recorder_append(this, .paint_radial_gradient(value = PaintRadialGradient(rect = rect, radial_gradient_data = data, center = center, size = size)))
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:225 Web::Painting::DisplayListRecorder::draw_rect.
+pub func display_list_recorder_draw_rect(this: DisplayListRecorder*, rect: gfx.DevicePixelRect, color: gfx.Color, rough: bool = false):
+    if gfx.device_pixel_rect_is_empty(&rect) or gfx.color_alpha(&color) == 0:
+        return
+    display_list_recorder_append(this, .draw_rect(value = DrawRect(rect = rect, color = color, rough = rough)))
+
+# mark: Bitmaps and external content ===========================================================
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:235 Web::Painting::DisplayListRecorder::draw_external_content.
+pub func display_list_recorder_draw_external_content(this: DisplayListRecorder*, dst_rect: gfx.DevicePixelRect, source: ExternalContentSource*, scaling_mode: gfx.ScalingMode = gfx.ScalingMode.nearest_neighbor):
+    if gfx.device_pixel_rect_is_empty(&dst_rect):
+        return
+    display_list_recorder_append(this, .draw_external_content(value = DrawExternalContent(dst_rect = dst_rect, source = source, scaling_mode = scaling_mode)))
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:242 Web::Painting::DisplayListRecorder::draw_scaled_immutable_bitmap.
+pub func display_list_recorder_draw_scaled_immutable_bitmap(this: DisplayListRecorder*, dst_rect: gfx.DevicePixelRect, clip_rect: gfx.DevicePixelRect, bitmap: const gfx.ImmutableBitmap*, scaling_mode: gfx.ScalingMode = gfx.ScalingMode.nearest_neighbor):
+    if gfx.device_pixel_rect_is_empty(&dst_rect):
+        return
+    display_list_recorder_append(this, .draw_scaled_immutable_bitmap(value = DrawScaledImmutableBitmap(dst_rect = dst_rect, clip_rect = clip_rect, bitmap = bitmap, scaling_mode = scaling_mode)))
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:254 Web::Painting::DisplayListRecorder::draw_repeated_immutable_bitmap.
+pub func display_list_recorder_draw_repeated_immutable_bitmap(this: DisplayListRecorder*, dst_rect: gfx.DevicePixelRect, clip_rect: gfx.DevicePixelRect, bitmap: const gfx.ImmutableBitmap*, scaling_mode: gfx.ScalingMode, repeat_x: bool, repeat_y: bool):
+    display_list_recorder_append(this, .draw_repeated_immutable_bitmap(value = DrawRepeatedImmutableBitmap(dst_rect = dst_rect, clip_rect = clip_rect, bitmap = bitmap,
+        scaling_mode = scaling_mode, repeat = DrawRepeatedImmutableBitmapRepeat(x = repeat_x, y = repeat_y))))
+
+# mark: Lines and text =========================================================================
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:265 Web::Painting::DisplayListRecorder::draw_line.
+pub func display_list_recorder_draw_line(this: DisplayListRecorder*, from_: gfx.IntPoint, to: gfx.IntPoint, color: gfx.Color, thickness: i32 = 1, style: gfx.LineStyle = gfx.LineStyle.solid, alternate_color: gfx.Color = gfx.Color(m_value = 0)):
+    if gfx.color_alpha(&color) == 0 or thickness == 0:
+        return
+    display_list_recorder_append(this, .draw_line(value = DrawLine(color = color, from_ = from_, to = to, thickness = thickness, style = style, alternate_color = alternate_color)))
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:279 Web::Painting::DisplayListRecorder::draw_text.
+pub func display_list_recorder_draw_text(this: DisplayListRecorder*, rect: gfx.DevicePixelRect, raw_text: const ak.Utf16String*, font: const web_fonts.Font*, alignment: gfx.TextAlignment, color: gfx.Color):
+    if gfx.device_pixel_rect_is_empty(&rect) or gfx.color_alpha(&color) == 0:
+        return
+
+    let glyph_run = web_fonts.shape_text_f32(gfx.FloatPoint(m_x = 0.0, m_y = 0.0), 0.0, ak.utf16_string_base_utf16_view(&raw_text.utf16_string_base), font, web_fonts.GlyphRunTextType.ltr)
+    var baseline_x: f32 = 0.0
+    if alignment == gfx.TextAlignment.center_left:
+        baseline_x = (f32)gfx.device_pixel_rect_x(&rect)
+    elif alignment == gfx.TextAlignment.center:
+        baseline_x = (f32)gfx.device_pixel_rect_x(&rect) + ((f32)gfx.device_pixel_rect_width(&rect) - web_fonts.glyph_run_width(glyph_run)) / 2.0
+    elif alignment == gfx.TextAlignment.center_right:
+        baseline_x = (f32)gfx.device_pixel_rect_right(&rect) - web_fonts.glyph_run_width(glyph_run)
+    else:
+        # Unimplemented alignment.
+        trap("TODO")
+    let metrics = web_fonts.font_pixel_metrics(font)
+    let baseline_y = (f32)gfx.device_pixel_rect_y(&rect) + metrics.ascent + ((f32)gfx.device_pixel_rect_height(&rect) - (metrics.ascent + metrics.descent)) / 2.0
+    display_list_recorder_draw_glyph_run(this, gfx.FloatPoint(m_x = baseline_x, m_y = baseline_y), glyph_run, color, rect, 1.0, gfx.Orientation.horizontal)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:301 Web::Painting::DisplayListRecorder::draw_glyph_run.
+# Streamlined text drawing routine that does no wrapping/elision/alignment.
+pub func display_list_recorder_draw_glyph_run(this: DisplayListRecorder*, baseline_start: gfx.FloatPoint, glyph_run: const web_fonts.GlyphRun*, color: gfx.Color, rect: gfx.DevicePixelRect, scale: f64, orientation: gfx.Orientation):
+    if gfx.color_alpha(&color) == 0:
+        return
+    web_fonts.glyph_run_ensure_text_blob(glyph_run, (f32)scale)
+    display_list_recorder_append(this, .draw_glyph_run(value = DrawGlyphRun(glyph_run = glyph_run, rect = rect, translation = baseline_start, color = color, orientation = orientation)))
+
+# mark: State ==================================================================================
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:315 Web::Painting::DisplayListRecorder::add_clip_rect.
+pub func display_list_recorder_add_clip_rect(this: DisplayListRecorder*, rect: gfx.DevicePixelRect):
+    display_list_recorder_append(this, .add_clip_rect(value = AddClipRect(rect = rect)))
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:320 Web::Painting::DisplayListRecorder::translate.
+pub func display_list_recorder_translate(this: DisplayListRecorder*, delta: gfx.IntPoint):
+    display_list_recorder_append(this, .translate(value = Translate(delta = delta)))
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.h:90 Web::Painting::DisplayListRecorder::set_accumulated_visual_context.
+pub func display_list_recorder_set_accumulated_visual_context(this: DisplayListRecorder*, index: u64):
+    this.m_accumulated_visual_context_index = index
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.h:91 Web::Painting::DisplayListRecorder::accumulated_visual_context.
+pub func display_list_recorder_accumulated_visual_context(this: const DisplayListRecorder*) -> u64:
+    return this.m_accumulated_visual_context_index
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:325 Web::Painting::DisplayListRecorder::save.
+pub func display_list_recorder_save(this: DisplayListRecorder*):
+    display_list_recorder_append(this, .save(value = Save()))
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:330 Web::Painting::DisplayListRecorder::save_layer.
+pub func display_list_recorder_save_layer(this: DisplayListRecorder*):
+    display_list_recorder_append(this, .save_layer(value = SaveLayer()))
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:335 Web::Painting::DisplayListRecorder::restore.
+pub func display_list_recorder_restore(this: DisplayListRecorder*):
+    display_list_recorder_append(this, .restore(value = Restore()))
+
+# mark: Filters, shadows and effects ===========================================================
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:340 Web::Painting::DisplayListRecorder::apply_backdrop_filter.
+pub func display_list_recorder_apply_backdrop_filter(this: DisplayListRecorder*, backdrop_region: gfx.DevicePixelRect, corner_radii: CornerRadii, backdrop_filter: gfx.Filter):
+    if gfx.device_pixel_rect_is_empty(&backdrop_region):
+        return
+    display_list_recorder_append(this, .apply_backdrop_filter(value = ApplyBackdropFilter(backdrop_region = backdrop_region, corner_radii = corner_radii, backdrop_filter = backdrop_filter)))
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:351 Web::Painting::DisplayListRecorder::paint_outer_box_shadow.
+pub func display_list_recorder_paint_outer_box_shadow(this: DisplayListRecorder*, outer_box_shadow: PaintOuterBoxShadow):
+    display_list_recorder_append(this, .paint_outer_box_shadow(value = outer_box_shadow))
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:356 Web::Painting::DisplayListRecorder::paint_inner_box_shadow.
+pub func display_list_recorder_paint_inner_box_shadow(this: DisplayListRecorder*, inner_box_shadow: PaintInnerBoxShadow):
+    display_list_recorder_append(this, .paint_inner_box_shadow(value = inner_box_shadow))
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:361 Web::Painting::DisplayListRecorder::paint_text_shadow.
+pub func display_list_recorder_paint_text_shadow(this: DisplayListRecorder*, blur_radius: i32, bounding_rect: gfx.DevicePixelRect, text_rect: gfx.DevicePixelRect, glyph_run: const web_fonts.GlyphRun*, glyph_run_scale: f64, color: gfx.Color, draw_location: gfx.FloatPoint):
+    web_fonts.glyph_run_ensure_text_blob(glyph_run, (f32)glyph_run_scale)
+    display_list_recorder_append(this, .paint_text_shadow(value = PaintTextShadow(glyph_run = glyph_run, shadow_bounding_rect = bounding_rect, text_rect = text_rect,
+        draw_location = draw_location, blur_radius = blur_radius, color = color)))
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:373 Web::Painting::DisplayListRecorder::fill_rect_with_rounded_corners.
+pub func display_list_recorder_fill_rect_with_rounded_corners_corner_radii(this: DisplayListRecorder*, rect: gfx.DevicePixelRect, color: gfx.Color, corner_radii: CornerRadii):
+    if gfx.device_pixel_rect_is_empty(&rect) or gfx.color_alpha(&color) == 0:
+        return
+
+    if not corner_radii_has_any_radius(&corner_radii):
+        display_list_recorder_fill_rect(this, rect, color)
+        return
+
+    display_list_recorder_append(this, .fill_rect_with_rounded_corners(value = FillRectWithRoundedCorners(rect = rect, color = color, corner_radii = corner_radii)))
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:390 Web::Painting::DisplayListRecorder::fill_rect_with_rounded_corners.
+pub func display_list_recorder_fill_rect_with_rounded_corners_i32(this: DisplayListRecorder*, a_rect: gfx.DevicePixelRect, color: gfx.Color, radius: i32):
+    display_list_recorder_fill_rect_with_rounded_corners_i32_i32(this, a_rect, color, radius, radius, radius, radius)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:395 Web::Painting::DisplayListRecorder::fill_rect_with_rounded_corners.
+pub func display_list_recorder_fill_rect_with_rounded_corners_i32_i32(this: DisplayListRecorder*, a_rect: gfx.DevicePixelRect, color: gfx.Color, top_left_radius: i32, top_right_radius: i32, bottom_right_radius: i32, bottom_left_radius: i32):
+    display_list_recorder_fill_rect_with_rounded_corners_corner_radii(this, a_rect, color, CornerRadii(
+        top_left = CornerRadius(horizontal_radius = top_left_radius, vertical_radius = top_left_radius),
+        top_right = CornerRadius(horizontal_radius = top_right_radius, vertical_radius = top_right_radius),
+        bottom_right = CornerRadius(horizontal_radius = bottom_right_radius, vertical_radius = bottom_right_radius),
+        bottom_left = CornerRadius(horizontal_radius = bottom_left_radius, vertical_radius = bottom_left_radius)))
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:404 Web::Painting::DisplayListRecorder::paint_scrollbar.
+pub func display_list_recorder_paint_scrollbar(this: DisplayListRecorder*, scroll_frame_index: u64, gutter_rect: gfx.DevicePixelRect, thumb_rect: gfx.DevicePixelRect, scroll_size: f64, thumb_color: gfx.Color, track_color: gfx.Color, vertical: bool):
+    display_list_recorder_append(this, .paint_scroll_bar(value = PaintScrollBar(scroll_frame_index = scroll_frame_index, gutter_rect = gutter_rect, thumb_rect = thumb_rect,
+        scroll_size = scroll_size, thumb_color = thumb_color, track_color = track_color, vertical = vertical)))
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:416 Web::Painting::DisplayListRecorder::apply_effects.
+pub func display_list_recorder_apply_effects(this: DisplayListRecorder*, opacity: f32 = 1.0, compositing_and_blending_operator: gfx.CompositingAndBlendingOperator = gfx.CompositingAndBlendingOperator.normal, filter: gfx.Filter? = none, mask_kind: gfx.MaskKind? = none):
+    display_list_recorder_append(this, .apply_effects(value = ApplyEffects(opacity = opacity, compositing_and_blending_operator = compositing_and_blending_operator, filter = filter, mask_kind = mask_kind)))
+
+# mark: DisplayListRecorderStateSaver ==========================================================
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.h:161 Web::Painting::DisplayListRecorderStateSaver::DisplayListRecorderStateSaver.
+pub func display_list_recorder_state_saver_construct(this: DisplayListRecorderStateSaver*, recorder: DisplayListRecorder*):
+    this.m_recorder = recorder
+    display_list_recorder_save(this.m_recorder)
+
+## A saver over `recorder`, having saved: `DisplayListRecorderStateSaver saver(recorder)`.
+pub func display_list_recorder_state_saver_new(recorder: DisplayListRecorder*) -> DisplayListRecorderStateSaver:
+    var saver = DisplayListRecorderStateSaver(m_recorder = recorder)
+    display_list_recorder_state_saver_construct(&saver, recorder)
+    return saver
+
+## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.h:167 Web::Painting::DisplayListRecorderStateSaver::~DisplayListRecorderStateSaver:
+## call where the C++ saver goes out of scope.
+pub func display_list_recorder_state_saver_destroy(this: DisplayListRecorderStateSaver*):
+    display_list_recorder_restore(this.m_recorder)
+
+# mark: Support ================================================================================
+
+## `Gfx::Color::Transparent` (Color(NamedColor::Transparent)): all four channels zero.
+func color_transparent() -> gfx.Color:
+    return gfx.Color(m_value = 0)

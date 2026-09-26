@@ -1,0 +1,304 @@
+#==============================================================================================
+#
+#   accumulated_visual_context - the tree of scroll, clip, transform and effect contexts
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibWeb/Painting/AccumulatedVisualContext.h (lines 1-109) and
+#       AccumulatedVisualContext.cpp (lines 1-255). Every display-list command is recorded
+#       against a node of this tree; the player walks from the node it has applied to the
+#       node of the next command, restoring and applying contexts on the way (DisplayList.cpp).
+#       VisualContextIndex is a u64 (AK_TYPEDEF_DISTINCT_ORDERED_ID(size_t)); index 0 is the
+#       null context, a sentinel node that is never read.
+#
+#       Copyright (c) 2026, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
+#       Copyright (c) 2026, Jelle Raaijmakers <jelle@ladybird.org>
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+# mark: ClipData, EffectsData ==================================================================
+
+## Ported from Libraries/LibWeb/Painting/AccumulatedVisualContext.h:39 Web::Painting::ClipData::ClipData.
+pub func clip_data_construct(this: ClipData*, r: gfx.DevicePixelRect, radii: CornerRadii):
+    this.rect = r
+    this.corner_radii = radii
+
+## Ported from Libraries/LibWeb/Painting/AccumulatedVisualContext.cpp:15 Web::Painting::ClipData::contains.
+pub func clip_data_contains(this: const ClipData*, point: gfx.IntPoint) -> bool:
+    # DevicePixelPoint and DevicePixelRect are IntPoint and IntRect in the port, so both
+    # to_type<int>() conversions are the identity.
+    return corner_radii_contains(&this.corner_radii, point, this.rect)
+
+## Ported from Libraries/LibWeb/Painting/AccumulatedVisualContext.h:68 Web::Painting::EffectsData::needs_layer.
+pub func effects_data_needs_layer(this: const EffectsData*) -> bool:
+    return this.opacity < 1.0 or this.blend_mode != gfx.CompositingAndBlendingOperator.normal or this.gfx_filter != none
+
+# mark: AccumulatedVisualContextTree ===========================================================
+
+## Ported from Libraries/LibWeb/Painting/AccumulatedVisualContext.cpp:20 Web::Painting::AccumulatedVisualContextTree::create.
+pub func accumulated_visual_context_tree_create() -> AccumulatedVisualContextTree*:
+    let visual_context_tree = new AccumulatedVisualContextTree else trap("out of memory")
+    # Sentinel at index 0 (null context). Data type doesn't matter; it's never accessed.
+    ak.vector_append_t(&visual_context_tree.m_nodes, AccumulatedVisualContextNode(
+        data = .scroll_data(value = ScrollData(scroll_frame_index = 0, is_sticky = false)),
+        parent_index = 0, depth = 0, has_empty_effective_clip = false))
+    return visual_context_tree
+
+## Ported from Libraries/LibWeb/Painting/AccumulatedVisualContext.cpp:28 Web::Painting::AccumulatedVisualContextTree::append.
+pub func accumulated_visual_context_tree_append(this: AccumulatedVisualContextTree*, data: VisualContextData, parent_index: u64) -> u64:
+    let depth: usize = accumulated_visual_context_tree_node_at(this, parent_index).depth + 1 if parent_index != 0 else 1
+
+    var empty_clip = false
+    if parent_index != 0 and accumulated_visual_context_tree_node_at(this, parent_index).has_empty_effective_clip:
+        empty_clip = true
+    else:
+        match data:
+            .clip_data(clip):
+                empty_clip = gfx.device_pixel_rect_is_empty(&clip.rect)
+            .clip_path_data(clip_path):
+                let bounding_box = gfx.path_bounding_box(&clip_path.path)
+                empty_clip = gfx.float_rect_is_empty(&bounding_box)
+            _:
+                empty_clip = false
+
+    let index = (u64)ak.vector_size(&this.m_nodes)
+    ak.vector_append_t(&this.m_nodes, AccumulatedVisualContextNode(data = data, parent_index = parent_index, depth = depth, has_empty_effective_clip = empty_clip))
+    return index
+
+## Ported from Libraries/LibWeb/Painting/AccumulatedVisualContext.h:91 Web::Painting::AccumulatedVisualContextTree::node_at.
+pub func accumulated_visual_context_tree_node_at(this: const AccumulatedVisualContextTree*, index: u64) -> const AccumulatedVisualContextNode*:
+    return ak.vector_at_const(&this.m_nodes, (usize)index)
+
+## Ported from Libraries/LibWeb/Painting/AccumulatedVisualContext.cpp:46 Web::Painting::AccumulatedVisualContextTree::find_common_ancestor.
+pub func accumulated_visual_context_tree_find_common_ancestor(this: const AccumulatedVisualContextTree*, a: u64, b: u64) -> u64:
+    if a == 0 or b == 0:
+        return 0
+    var a_index = a
+    var b_index = b
+    while accumulated_visual_context_tree_node_at(this, a_index).depth > accumulated_visual_context_tree_node_at(this, b_index).depth:
+        a_index = accumulated_visual_context_tree_node_at(this, a_index).parent_index
+    while accumulated_visual_context_tree_node_at(this, b_index).depth > accumulated_visual_context_tree_node_at(this, a_index).depth:
+        b_index = accumulated_visual_context_tree_node_at(this, b_index).parent_index
+    while a_index != b_index:
+        a_index = accumulated_visual_context_tree_node_at(this, a_index).parent_index
+        b_index = accumulated_visual_context_tree_node_at(this, b_index).parent_index
+    return a_index
+
+## Ported from Libraries/LibWeb/Painting/AccumulatedVisualContext.cpp:63 Web::Painting::AccumulatedVisualContextTree::build_ancestor_chain.
+## The chain runs from `index` up to (not including) the null context.
+func accumulated_visual_context_tree_build_ancestor_chain(this: const AccumulatedVisualContextTree*, index: u64) -> ak.Vector[u64]:
+    let node = accumulated_visual_context_tree_node_at(this, index)
+    var chain: ak.Vector[u64]
+    ak.vector_ensure_capacity(&chain, node.depth)
+    var i = index
+    while i != 0:
+        ak.vector_append_t(&chain, i)
+        i = accumulated_visual_context_tree_node_at(this, i).parent_index
+    return chain
+
+## The inverse of a 2D affine transform applied to `point` about `origin`: C++'s
+## `inverse->map(point - origin) + origin`.
+func map_about_origin(inverse: const gfx.AffineTransform*, point: gfx.FloatPoint, origin: gfx.FloatPoint) -> gfx.FloatPoint:
+    let offset_point = gfx.float_point_sub(&point, origin)
+    let transformed = gfx.affine_transform_map_f32_float_point(inverse, offset_point)
+    return gfx.float_point_add(&transformed, origin)
+
+## Ported from Libraries/LibWeb/Painting/AccumulatedVisualContext.cpp:73 Web::Painting::AccumulatedVisualContextTree::transform_point_for_hit_test.
+pub func accumulated_visual_context_tree_transform_point_for_hit_test(this: const AccumulatedVisualContextTree*, index: u64, screen_point: gfx.FloatPoint, scroll_state: const ScrollStateSnapshot*) -> gfx.FloatPoint?:
+    if index == 0:
+        return screen_point
+
+    var chain = accumulated_visual_context_tree_build_ancestor_chain(this, index)
+
+    var point = screen_point
+    var i = ak.vector_size(&chain)
+    while i > 0:
+        let node = accumulated_visual_context_tree_node_at(this, *ak.vector_at(&chain, i - 1))
+        # The C++ visits the node's data with a lambda per alternative, each answering the
+        # point or nothing; nothing ends the walk.
+        match node.data:
+            .perspective_data(perspective):
+                let affine = gfx.extract_2d_affine_transform(&perspective.matrix)
+                let inverse = gfx.affine_transform_inverse(&affine) else return none
+                point = gfx.affine_transform_map_f32_float_point(&inverse, point)
+            .scroll_data(scroll):
+                let offset = scroll_state_snapshot_device_offset_for_index(scroll_state, scroll.scroll_frame_index)
+                gfx.float_point_translate_by_float_point(&point, gfx.float_point_neg(&offset))
+            .transform_data(transform):
+                let affine = gfx.extract_2d_affine_transform(&transform.matrix)
+                let inverse = gfx.affine_transform_inverse(&affine) else return none
+                point = map_about_origin(&inverse, point, transform.origin)
+            .clip_data(clip):
+                # NOTE: The clip rect is in absolute device-pixel coordinates. After inverse-transforming, `point`
+                #       is also in device-pixel coordinates, so we compare them directly.
+                if not clip_data_contains(&clip, float_point_to_int_point(point)):
+                    return none
+            .clip_path_data(clip_path):
+                # NOTE: The clip path is in absolute device-pixel coordinates. After inverse-transforming, `point`
+                #       is also in device-pixel coordinates, so we compare them directly.
+                if not gfx.device_pixel_rect_contains_int_point(&clip_path.bounding_rect, float_point_to_int_point(point)):
+                    return none
+                if not gfx.path_contains(&clip_path.path, point, clip_path.fill_rule):
+                    return none
+            .effects_data(_):
+                # Effects don't affect coordinate transforms
+                discard(0)
+        i -= 1
+
+    return point
+
+## Ported from Libraries/LibWeb/Painting/AccumulatedVisualContext.cpp:136 Web::Painting::AccumulatedVisualContextTree::inverse_transform_point.
+pub func accumulated_visual_context_tree_inverse_transform_point(this: const AccumulatedVisualContextTree*, index: u64, screen_point: gfx.FloatPoint) -> gfx.FloatPoint:
+    if index == 0:
+        return screen_point
+
+    var chain = accumulated_visual_context_tree_build_ancestor_chain(this, index)
+
+    var point = screen_point
+    var i = ak.vector_size(&chain)
+    while i > 0:
+        let node = accumulated_visual_context_tree_node_at(this, *ak.vector_at(&chain, i - 1))
+        match node.data:
+            .perspective_data(perspective):
+                let affine = gfx.extract_2d_affine_transform(&perspective.matrix)
+                if let inverse = gfx.affine_transform_inverse(&affine):
+                    point = gfx.affine_transform_map_f32_float_point(&inverse, point)
+            .transform_data(transform):
+                let affine = gfx.extract_2d_affine_transform(&transform.matrix)
+                if let inverse = gfx.affine_transform_inverse(&affine):
+                    point = map_about_origin(&inverse, point, transform.origin)
+            _:
+                discard(0)
+        i -= 1
+
+    return point
+
+## Ported from Libraries/LibWeb/Painting/AccumulatedVisualContext.cpp:169 Web::Painting::AccumulatedVisualContextTree::transform_rect_to_viewport.
+pub func accumulated_visual_context_tree_transform_rect_to_viewport(this: const AccumulatedVisualContextTree*, index: u64, source_rect: gfx.FloatRect, scroll_state: const ScrollStateSnapshot*) -> gfx.FloatRect:
+    if index == 0:
+        return source_rect
+
+    var rect = source_rect
+    var i = index
+    while i != 0:
+        let node = accumulated_visual_context_tree_node_at(this, i)
+        match node.data:
+            .transform_data(transform):
+                let affine = gfx.extract_2d_affine_transform(&transform.matrix)
+                gfx.float_rect_translate_by_float_point(&rect, gfx.float_point_neg(&transform.origin))
+                rect = gfx.affine_transform_map_f32_float_rect(&affine, rect)
+                gfx.float_rect_translate_by_float_point(&rect, transform.origin)
+            .perspective_data(perspective):
+                let affine = gfx.extract_2d_affine_transform(&perspective.matrix)
+                rect = gfx.affine_transform_map_f32_float_rect(&affine, rect)
+            .scroll_data(scroll):
+                gfx.float_rect_translate_by_float_point(&rect, scroll_state_snapshot_device_offset_for_index(scroll_state, scroll.scroll_frame_index))
+            .clip_data(_):
+                # clips don't affect rect coordinates
+                discard(0)
+            .clip_path_data(_):
+                # clip paths don't affect rect coordinates
+                discard(0)
+            .effects_data(_):
+                # effects don't affect rect coordinates
+                discard(0)
+        i = node.parent_index
+
+    return rect
+
+## Ported from Libraries/LibWeb/Painting/AccumulatedVisualContext.cpp:199 Web::Painting::AccumulatedVisualContextTree::dump.
+pub func accumulated_visual_context_tree_dump(this: const AccumulatedVisualContextTree*, index: u64, builder: ak.StringBuilder*):
+    if index == 0:
+        return
+
+    let node = accumulated_visual_context_tree_node_at(this, index)
+    match node.data:
+        .perspective_data(_):
+            ak.string_builder_append(builder, "perspective")
+        .scroll_data(scroll):
+            ak.string_builder_append(builder, "scroll_frame_id=")
+            ak.format_u64(builder, scroll.scroll_frame_index)
+            if scroll.is_sticky:
+                ak.string_builder_append(builder, " (sticky)")
+        .transform_data(transform):
+            let matrix = transform.matrix.m_elements
+            let origin = transform.origin
+            # "transform=[{},{},{},{},{},{}] origin=({},{})"
+            ak.string_builder_append(builder, "transform=[")
+            ak.format_f32(builder, matrix[0][0])
+            ak.string_builder_append(builder, ",")
+            ak.format_f32(builder, matrix[0][1])
+            ak.string_builder_append(builder, ",")
+            ak.format_f32(builder, matrix[1][0])
+            ak.string_builder_append(builder, ",")
+            ak.format_f32(builder, matrix[1][1])
+            ak.string_builder_append(builder, ",")
+            ak.format_f32(builder, matrix[0][3])
+            ak.string_builder_append(builder, ",")
+            ak.format_f32(builder, matrix[1][3])
+            ak.string_builder_append(builder, "] origin=(")
+            ak.format_f32(builder, gfx.float_point_x(&origin))
+            ak.string_builder_append(builder, ",")
+            ak.format_f32(builder, gfx.float_point_y(&origin))
+            ak.string_builder_append(builder, ")")
+        .clip_data(clip):
+            let rect = clip.rect
+            # "clip=[{},{} {}x{}]"
+            ak.string_builder_append(builder, "clip=[")
+            append_rect_bounds(builder, &rect)
+            ak.string_builder_append(builder, "]")
+
+            if corner_radii_has_any_radius(&clip.corner_radii):
+                let corner_radii = clip.corner_radii
+                # " radii=({},{},{},{})"
+                ak.string_builder_append(builder, " radii=(")
+                ak.format_i64(builder, corner_radii.top_left.horizontal_radius)
+                ak.string_builder_append(builder, ",")
+                ak.format_i64(builder, corner_radii.top_right.horizontal_radius)
+                ak.string_builder_append(builder, ",")
+                ak.format_i64(builder, corner_radii.bottom_right.horizontal_radius)
+                ak.string_builder_append(builder, ",")
+                ak.format_i64(builder, corner_radii.bottom_left.horizontal_radius)
+                ak.string_builder_append(builder, ")")
+        .clip_path_data(clip_path):
+            let rect = clip_path.bounding_rect
+            # "clip_path=[bounds: {},{} {}x{}, path: {}]"
+            ak.string_builder_append(builder, "clip_path=[bounds: ")
+            append_rect_bounds(builder, &rect)
+            ak.string_builder_append(builder, ", path: ")
+            let svg = gfx.path_to_svg_string(&clip_path.path)
+            ak.string_builder_append_string_view(builder, ak.string_bytes_as_string_view(&svg))
+            ak.string_builder_append(builder, "]")
+        .effects_data(effects):
+            ak.string_builder_append(builder, "effects=[")
+            var has_content = false
+            if effects.opacity < 1.0:
+                ak.string_builder_append(builder, "opacity=")
+                ak.format_f32(builder, effects.opacity)
+                has_content = true
+            if effects.blend_mode != gfx.CompositingAndBlendingOperator.normal:
+                if has_content:
+                    ak.string_builder_append_u8(builder, ' ')
+                ak.string_builder_append(builder, "blend_mode=")
+                ak.format_i64(builder, (i32)effects.blend_mode)
+                has_content = true
+            if effects.gfx_filter != none:
+                if has_content:
+                    ak.string_builder_append_u8(builder, ' ')
+                ak.string_builder_append(builder, "filter")
+                has_content = true
+            ak.string_builder_append(builder, "]")
+
+## `appendff("{},{} {}x{}", rect.x(), rect.y(), rect.width(), rect.height())`.
+func append_rect_bounds(builder: ak.StringBuilder*, rect: const gfx.DevicePixelRect*):
+    ak.format_i64(builder, gfx.device_pixel_rect_x(rect))
+    ak.string_builder_append(builder, ",")
+    ak.format_i64(builder, gfx.device_pixel_rect_y(rect))
+    ak.string_builder_append(builder, " ")
+    ak.format_i64(builder, gfx.device_pixel_rect_width(rect))
+    ak.string_builder_append(builder, "x")
+    ak.format_i64(builder, gfx.device_pixel_rect_height(rect))
+
+## Ported from Libraries/LibWeb/Painting/AccumulatedVisualContext.h:99 Web::Painting::AccumulatedVisualContextTree::has_empty_effective_clip.
+pub func accumulated_visual_context_tree_has_empty_effective_clip(this: const AccumulatedVisualContextTree*, i: u64) -> bool:
+    return accumulated_visual_context_tree_node_at(this, i).has_empty_effective_clip

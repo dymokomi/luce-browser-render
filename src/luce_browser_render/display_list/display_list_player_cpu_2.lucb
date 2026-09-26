@@ -1,0 +1,567 @@
+#==============================================================================================
+#
+#   display_list_player_cpu_2 - the CPU display-list player (2): shadows, paths, effects
+#
+#   DESCRIPTION:
+#       The second half of DisplayListPlayerCpu (see display_list_player_cpu.lucb), in the
+#       order of DisplayListPlayerSkia.cpp: box and text shadows, rounded rectangles, the
+#       SVG paint servers (gradients and patterns, `paint_style_to_skia_paint`), paths,
+#       ellipses, lines, backdrop filters, rectangles, rounded-rectangle clips, nested
+#       display lists, scrollbars, effects, transforms, clip paths and culling.
+#
+#       A blurred shape (SkMaskFilter::MakeBlur) is drawn as Skia's raster backend draws
+#       it: the shape's anti-aliased coverage, blurred with the mask filter's sigma mapped by
+#       the transform (SkMatrix::mapRadius), then filled with the paint through the clip.
+#       The inner shadow's path difference (SkPathOps' kDifference) is the outer coverage
+#       times the inverse of the inner one.
+#
+#       Copyright (c) 2024-2026, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
+#       Copyright (c) 2025, Jelle Raaijmakers <jelle@ladybird.org>
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+# mark: Blurred shapes =========================================================================
+
+## SkMatrix::mapRadius: a local length scaled by the transform's average scale.
+func cpu_map_radius(transform: raster.Transform, radius: f32) -> f32:
+    let determinant = transform.sx * transform.sy - transform.kx * transform.ky
+    return radius * math32.sqrt(math32.abs(determinant))
+
+## The anti-aliased device coverage of `path` in the current transform.
+func cpu_canvas_path_coverage(canvas: CpuCanvas*, path: const raster.Path*, fill_rule: raster.FillRule, anti_alias: bool) -> raster.Mask:
+    var mask = raster.Mask.new_(canvas.width, canvas.height) else trap("CpuCanvas: empty size")
+    mask.fill_path(path, fill_rule, anti_alias, cpu_canvas_transform(canvas))
+    return mask
+
+## Fills `path` with `paint` under SkMaskFilter::MakeBlur(kNormal_SkBlurStyle, sigma).
+func cpu_canvas_fill_path_blurred(canvas: CpuCanvas*, path: const raster.Path*, paint: const raster.Paint*, sigma: f32):
+    if not (sigma > 0.0):
+        cpu_canvas_fill_path(canvas, path, paint, raster.FillRule.winding)
+        return
+    if cpu_canvas_is_clip_empty(canvas):
+        return
+    var coverage = cpu_canvas_path_coverage(canvas, path, raster.FillRule.winding, paint.anti_alias)
+    defer coverage.release()
+    cpu_blur_mask(&coverage, cpu_map_radius(cpu_canvas_transform(canvas), sigma))
+    cpu_canvas_fill_coverage(canvas, &coverage, paint)
+
+# mark: Shadows and rounded rectangles =========================================================
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:36 Web::Painting::DisplayListPlayerSkia::paint_outer_box_shadow (override).
+func display_list_player_cpu_paint_outer_box_shadow_impl(base: DisplayListPlayer*, command: PaintOuterBoxShadow):
+    var content_rrect = cpu_rrect_path_for(command.device_content_rect, &command.content_corner_radii) else return
+    defer content_rrect.release()
+
+    let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
+    cpu_canvas_save(canvas)
+    cpu_canvas_clip_path(canvas, &content_rrect, raster.FillRule.winding, true, true)
+    let paint = cpu_color_paint(command.color, true)
+    if let shadow_path = cpu_rrect_path_for(command.shadow_rect, &command.shadow_corner_radii):
+        var shadow_rounded_rect = shadow_path
+        cpu_canvas_fill_path_blurred(canvas, &shadow_rounded_rect, &paint, (f32)(command.blur_radius // 2))
+        shadow_rounded_rect.release()
+    cpu_canvas_restore(canvas)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:37 Web::Painting::DisplayListPlayerSkia::paint_inner_box_shadow (override).
+func display_list_player_cpu_paint_inner_box_shadow_impl(base: DisplayListPlayer*, command: PaintInnerBoxShadow):
+    var outer_path = cpu_rrect_path_for(command.outer_shadow_rect, &command.content_corner_radii) else return
+    defer outer_path.release()
+    var inner_path = cpu_rrect_path_for(command.inner_shadow_rect, &command.inner_shadow_corner_radii) else return
+    defer inner_path.release()
+    var clip_path = cpu_rrect_path_for(command.device_content_rect, &command.content_corner_radii) else return
+    defer clip_path.release()
+
+    let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
+    if cpu_canvas_is_clip_empty(canvas):
+        return
+    # Op(outer_path, inner_path, kDifference_SkPathOp, &result_path), filled anti-aliased.
+    var result = cpu_canvas_path_coverage(canvas, &outer_path, raster.FillRule.winding, true)
+    defer result.release()
+    var inner = cpu_canvas_path_coverage(canvas, &inner_path, raster.FillRule.winding, true)
+    defer inner.release()
+    let result_data = result.data_mut()
+    let inner_data = inner.data()
+    for i in 0..<result_data.length:
+        result_data[i] = raster.premultiply_u8(result_data[i], 255 - inner_data[i])
+
+    let path_paint = cpu_color_paint(command.color, true)
+    let sigma = (f32)(command.blur_radius // 2)
+    if sigma > 0.0:
+        cpu_blur_mask(&result, cpu_map_radius(cpu_canvas_transform(canvas), sigma))
+    cpu_canvas_save(canvas)
+    cpu_canvas_clip_path(canvas, &clip_path, raster.FillRule.winding, true, false)
+    cpu_canvas_fill_coverage(canvas, &result, &path_paint)
+    cpu_canvas_restore(canvas)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:38 Web::Painting::DisplayListPlayerSkia::paint_text_shadow (override).
+func display_list_player_cpu_paint_text_shadow_impl(base: DisplayListPlayer*, command: PaintTextShadow):
+    let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
+    # SkImageFilters::Blur's sigma is in local coordinates; the layer is in device pixels.
+    let sigma = cpu_map_radius(cpu_canvas_transform(canvas), (f32)(command.blur_radius // 2))
+    cpu_canvas_save_layer(canvas, CpuLayerEffects(blur_sigma = sigma))
+    let text_location = int_point_to_float_point(command.text_rect.m_location)
+    display_list_player_cpu_draw_glyph_run_impl(base, DrawGlyphRun(glyph_run = command.glyph_run, rect = command.text_rect,
+        translation = gfx.FloatPoint(m_x = command.draw_location.m_x + text_location.m_x, m_y = command.draw_location.m_y + text_location.m_y),
+        color = command.color, orientation = gfx.Orientation.horizontal))
+    cpu_canvas_restore(canvas)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:39 Web::Painting::DisplayListPlayerSkia::fill_rect_with_rounded_corners (override).
+func display_list_player_cpu_fill_rect_with_rounded_corners_impl(base: DisplayListPlayer*, command: FillRectWithRoundedCorners):
+    let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
+    let paint = cpu_color_paint(command.color, true)
+
+    var rounded_rect = cpu_rrect_path_for(command.rect, &command.corner_radii) else return
+    defer rounded_rect.release()
+    cpu_canvas_fill_path(canvas, &rounded_rect, &paint, raster.FillRule.winding)
+
+# mark: SVG paint servers ======================================================================
+
+## What a paint style paints with (the SkPaint `paint_style_to_skia_paint` answers).
+enum CpuShader:
+    ## A solid color: the default SkPaint is opaque black.
+    color(value: gfx.Color)
+    ## A gradient shader.
+    gradient(value: CpuGradient)
+    ## An image shader repeating `pixmap` (owned: release it), placed by `transform`.
+    pattern(pixmap: raster.Pixmap, transform: raster.Transform)
+
+## `SkPaint {}`: opaque black.
+func cpu_default_shader() -> CpuShader:
+    return .color(value = gfx.Color(m_value = 0xff000000))
+
+## Frees what a shader owns.
+func cpu_shader_release(shader: CpuShader*):
+    match *shader:
+        .pattern(pixmap, _):
+            var p = pixmap
+            p.release()
+        _:
+            discard(0)
+
+## `to_skia_matrix`: a Gfx::AffineTransform (a, b, c, d, e, f) as a raster transform.
+func cpu_transform_of_affine(transform: const gfx.AffineTransform*) -> raster.Transform:
+    return raster.Transform.from_row(gfx.affine_transform_a(transform), gfx.affine_transform_b(transform), gfx.affine_transform_c(transform),
+        gfx.affine_transform_d(transform), gfx.affine_transform_e(transform), gfx.affine_transform_f(transform))
+
+## `to_skia_tile_mode`.
+func cpu_tile_mode(spread_method: SvgGradientPaintStyleSpreadMethod) -> CpuTileMode:
+    match spread_method:
+        .pad_: return CpuTileMode.clamp
+        .reflect: return CpuTileMode.mirror
+        .repeat: return CpuTileMode.repeat
+        _: trap("VERIFY_NOT_REACHED")
+
+## `gradient_paint_style_to_skia_paint`.
+func cpu_gradient_paint_style_shader(paint_style: const SvgGradientPaintStyle*, bounding_rect: gfx.FloatRect) -> CpuShader:
+    let color_stops = svg_gradient_paint_style_color_stops(paint_style)
+
+    var stops: ak.Vector[CpuGradientStop]
+    ak.vector_ensure_capacity(&stops, color_stops.length)
+    for color_stop in color_stops:
+        ak.vector_append_t(&stops, CpuGradientStop(position = color_stop.position, color = cpu_color4(color_stop.color)))
+
+    # Skia makes no shader from no colors, leaving the default paint.
+    if color_stops.length == 0:
+        return cpu_default_shader()
+
+    var matrix = raster.Transform.from_translate(bounding_rect.m_location.m_x, bounding_rect.m_location.m_y)
+    if let gradient_transform = svg_gradient_paint_style_gradient_transform(paint_style):
+        matrix = matrix.pre_concat(cpu_transform_of_affine(&gradient_transform))
+
+    let tile_mode = cpu_tile_mode(svg_gradient_paint_style_spread_method(paint_style))
+
+    let geometry = cpu_svg_gradient_geometry(paint_style) else return cpu_default_shader()
+
+    # Flags 0: interpolate unpremultiplied sRGB. A linearRGB gradient adds
+    # SkColorFilters::LinearToSRGBGamma.
+    return .gradient(value = CpuGradient(geometry = geometry, stops = stops, tile_mode = tile_mode, premul = false, local_matrix = matrix,
+        linear_to_srgb = svg_gradient_paint_style_color_space(paint_style) == gfx.InterpolationColorSpace.linear_rgb))
+
+## The geometry of an SVG gradient: `SkGradientShader::MakeLinear` of a linear gradient's
+## points, `MakeTwoPointConical` of a radial gradient's circles; none for any other.
+func cpu_svg_gradient_geometry(paint_style: const SvgGradientPaintStyle*) -> CpuGradientGeometry?:
+    # The cast helpers take a mutable pointer; they only read the class id.
+    let style = (SvgGradientPaintStyle*)paint_style
+    if is_svg_linear_gradient_paint_style(style):
+        let linear_gradient_paint_style = (const SvgLinearGradientPaintStyle*)paint_style
+        let start = svg_linear_gradient_paint_style_start_point(linear_gradient_paint_style)
+        let end = svg_linear_gradient_paint_style_end_point(linear_gradient_paint_style)
+        return .linear(x0 = start.m_x, y0 = start.m_y, x1 = end.m_x, y1 = end.m_y)
+    if is_svg_radial_gradient_paint_style(style):
+        let radial_gradient_paint_style = (const SvgRadialGradientPaintStyle*)paint_style
+        let start_center = svg_radial_gradient_paint_style_start_center(radial_gradient_paint_style)
+        let end_center = svg_radial_gradient_paint_style_end_center(radial_gradient_paint_style)
+        let start_radius = svg_radial_gradient_paint_style_start_radius(radial_gradient_paint_style)
+        let end_radius = svg_radial_gradient_paint_style_end_radius(radial_gradient_paint_style)
+        return .two_point_conical(x0 = start_center.m_x, y0 = start_center.m_y, r0 = start_radius, x1 = end_center.m_x, y1 = end_center.m_y, r1 = end_radius)
+    return none
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:59 Web::Painting::DisplayListPlayerSkia::paint_style_to_skia_paint.
+func display_list_player_cpu_paint_style_to_shader(this: DisplayListPlayerCpu*, paint_style: SvgPaintServerPaintStyle*, bounding_rect: gfx.FloatRect) -> CpuShader:
+    if let gradient = as_if_svg_gradient_paint_style(paint_style):
+        return cpu_gradient_paint_style_shader(gradient, bounding_rect)
+
+    if let pattern = as_if_svg_pattern_paint_style(paint_style):
+        let tile_rect = svg_pattern_paint_style_tile_rect(pattern)
+        let tile_width = (i32)math32.ceil(tile_rect.m_size.m_width)
+        let tile_height = (i32)math32.ceil(tile_rect.m_size.m_height)
+        if tile_width <= 0 or tile_height <= 0:
+            return cpu_default_shader()
+
+        let tile_size = gfx.IntSize(m_width = tile_width, m_height = tile_height)
+        let tile_surface = gfx.painting_surface_create_with_size(tile_size, gfx.BitmapFormat.bgra8888, gfx.AlphaType.premultiplied)
+        display_list_player_cpu_attach_canvas(this, tile_surface, cpu_canvas_create((u32)tile_width, (u32)tile_height))
+
+        display_list_player_execute_display_list_into_surface(this.display_list_player(), svg_pattern_paint_style_tile_display_list(pattern), tile_surface)
+
+        # tile_surface->sk_surface().makeImageSnapshot()
+        let tile_canvas = display_list_player_cpu_detach_canvas(this, tile_surface) else trap("CpuPlayer: lost the tile canvas")
+        let image = cpu_canvas_pixmap(tile_canvas).clone()
+        cpu_canvas_release(tile_canvas)
+
+        var matrix = raster.Transform.from_translate(tile_rect.m_location.m_x, tile_rect.m_location.m_y)
+        matrix = matrix.pre_scale(tile_rect.m_size.m_width / (f32)tile_width, tile_rect.m_size.m_height / (f32)tile_height)
+        if let transform = svg_pattern_paint_style_pattern_transform(pattern):
+            matrix = matrix.pre_concat(cpu_transform_of_affine(&transform))
+
+        return .pattern(pixmap = image, transform = matrix)
+
+    return cpu_default_shader()
+
+## Fills `path` with `shader` at `opacity` (SkPaint::setAlphaf on a shader's paint).
+func cpu_canvas_fill_path_with_shader(canvas: CpuCanvas*, path: const raster.Path*, fill_rule: raster.FillRule, anti_alias: bool, shader: const CpuShader*, opacity: f32):
+    match *shader:
+        .color(color):
+            var paint = cpu_color_paint(color, anti_alias)
+            var c = cpu_color(color)
+            c.set_alpha(cpu_clamp_unit(opacity))
+            paint.set_color(c)
+            cpu_canvas_fill_path(canvas, path, &paint, fill_rule)
+        .gradient(gradient):
+            cpu_canvas_fill_path_with_gradient(canvas, path, fill_rule, anti_alias, &gradient, opacity)
+        .pattern(pixmap, transform):
+            var paint = raster.Paint()
+            paint.anti_alias = anti_alias
+            paint.shader = raster.Pattern.new_(pixmap.as_ref(), raster.SpreadMode.repeat, raster.FilterQuality.bilinear, opacity, transform)
+            cpu_canvas_fill_path(canvas, path, &paint, fill_rule)
+
+# mark: Paths ==================================================================================
+
+## `to_skia_path_fill_type`.
+func cpu_fill_rule(winding_rule: gfx.WindingRule) -> raster.FillRule:
+    match winding_rule:
+        .nonzero: return raster.FillRule.winding
+        .even_odd: return raster.FillRule.even_odd
+        _: trap("VERIFY_NOT_REACHED")
+
+## `to_skia_cap`.
+func cpu_line_cap(cap_style: gfx.PathCapStyle) -> raster.LineCap:
+    match cap_style:
+        .round: return raster.LineCap.round
+        .square: return raster.LineCap.square
+        .butt: return raster.LineCap.butt
+        _: trap("VERIFY_NOT_REACHED")
+
+## `to_skia_join`.
+func cpu_line_join(join_style: gfx.PathJoinStyle) -> raster.LineJoin:
+    match join_style:
+        .round: return raster.LineJoin.round
+        .bevel: return raster.LineJoin.bevel
+        .miter: return raster.LineJoin.miter
+        _: trap("VERIFY_NOT_REACHED")
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:40 Web::Painting::DisplayListPlayerSkia::fill_path (override).
+func display_list_player_cpu_fill_path_impl(base: DisplayListPlayer*, command: FillPath):
+    var cpu_path = to_raster_path(&command.path) else return
+    defer cpu_path.path.release()
+    cpu_path.fill_rule = cpu_fill_rule(command.winding_rule)
+
+    let anti_alias = command.should_anti_alias == ShouldAntiAlias.yes
+    let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
+    match command.paint_style_or_color:
+        .svg_paint_server_paint_style(paint_style):
+            let style = paint_style else trap("VERIFY: a null paint style")
+            var shader = display_list_player_cpu_paint_style_to_shader((DisplayListPlayerCpu*)base, style, int_rect_to_float_rect(fill_path_bounding_rect(&command)))
+            defer cpu_shader_release(&shader)
+            cpu_canvas_fill_path_with_shader(canvas, &cpu_path.path, cpu_path.fill_rule, anti_alias, &shader, command.opacity)
+        .color(color):
+            let paint = cpu_color_paint(color, anti_alias)
+            cpu_canvas_fill_path(canvas, &cpu_path.path, &paint, cpu_path.fill_rule)
+
+## The raster stroke of a StrokePath command (setStrokeWidth, setStrokeCap, setStrokeJoin,
+## setStrokeMiter, and SkDashPathEffect::Make, which makes no effect from an invalid dash
+## array); the caller releases its dash.
+func cpu_stroke_of(command: const StrokePath*) -> raster.Stroke:
+    let dash = raster.StrokeDash.new_(ak.vector_span_const(&command.dash_array), command.dash_offset)
+    return raster.Stroke(width = command.thickness, miter_limit = command.miter_limit, line_cap = cpu_line_cap(command.cap_style),
+        line_join = cpu_line_join(command.join_style), dash = dash)
+
+## Frees a stroke's dash.
+func cpu_stroke_release(stroke: raster.Stroke*):
+    if let dash = stroke.dash:
+        var d = dash
+        d.release()
+    stroke.dash = none
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:41 Web::Painting::DisplayListPlayerSkia::stroke_path (override).
+func display_list_player_cpu_stroke_path_impl(base: DisplayListPlayer*, command: StrokePath):
+    var cpu_path = to_raster_path(&command.path) else return
+    defer cpu_path.path.release()
+    var stroke = cpu_stroke_of(&command)
+    defer cpu_stroke_release(&stroke)
+
+    let anti_alias = command.should_anti_alias == ShouldAntiAlias.yes
+    let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
+    match command.paint_style_or_color:
+        .svg_paint_server_paint_style(paint_style):
+            let style = paint_style else trap("VERIFY: a null paint style")
+            var shader = display_list_player_cpu_paint_style_to_shader((DisplayListPlayerCpu*)base, style, int_rect_to_float_rect(stroke_path_bounding_rect(&command)))
+            defer cpu_shader_release(&shader)
+            # A shader paints the stroke's outline: dash, then stroke, then fill.
+            let resolution_scale = raster.PathStroker.compute_resolution_scale(cpu_canvas_transform(canvas))
+            var dashed: raster.Path? = none
+            if let dash = stroke.dash:
+                dashed = cpu_path.path.dash(&dash, resolution_scale)
+            var source = dashed else cpu_path.path.clone()
+            defer source.release()
+            var outline = source.stroke(&stroke, resolution_scale) else return
+            defer outline.release()
+            cpu_canvas_fill_path_with_shader(canvas, &outline, raster.FillRule.winding, anti_alias, &shader, command.opacity)
+        .color(color):
+            let paint = cpu_color_paint(color, anti_alias)
+            cpu_canvas_stroke_path(canvas, &cpu_path.path, &paint, &stroke)
+
+# mark: Ellipses and lines =====================================================================
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:42 Web::Painting::DisplayListPlayerSkia::draw_ellipse (override).
+func display_list_player_cpu_draw_ellipse_impl(base: DisplayListPlayer*, command: DrawEllipse):
+    let rect = cpu_rect(command.rect) else return
+    var oval = cpu_oval_path(rect) else return
+    defer oval.release()
+    let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
+    let paint = cpu_color_paint(command.color, true)
+    let stroke = raster.Stroke(width = (f32)command.thickness)
+    cpu_canvas_stroke_path(canvas, &oval, &paint, &stroke)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:43 Web::Painting::DisplayListPlayerSkia::fill_ellipse (override).
+func display_list_player_cpu_fill_ellipse_impl(base: DisplayListPlayer*, command: FillEllipse):
+    let rect = cpu_rect(command.rect) else return
+    var oval = cpu_oval_path(rect) else return
+    defer oval.release()
+    let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
+    let paint = cpu_color_paint(command.color, true)
+    cpu_canvas_fill_path(canvas, &oval, &paint, raster.FillRule.winding)
+
+## SkPoint::normalize: the unit vector of (x, y), or (0, 0) when it has no length.
+func cpu_normalize(x: f32, y: f32) -> (f32, f32):
+    let length = math32.sqrt(x * x + y * y)
+    if not (length > 0.0) or not math32.is_finite(length):
+        return (0.0, 0.0)
+    return (x / length, y / length)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:44 Web::Painting::DisplayListPlayerSkia::draw_line (override).
+func display_list_player_cpu_draw_line_impl(base: DisplayListPlayer*, command: DrawLine):
+    var from_x = (f32)command.from_.m_x
+    var from_y = (f32)command.from_.m_y
+    var to_x = (f32)command.to.m_x
+    var to_y = (f32)command.to.m_y
+    let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
+
+    let paint = cpu_color_paint(command.color, true)
+    var stroke = raster.Stroke(width = (f32)command.thickness)
+
+    match command.style:
+        .dotted:
+            let length = gfx.int_point_distance_from(&command.to, command.from_)
+            let dot_count = math32.floor(length / ((f32)command.thickness * 2.0))
+            let interval = length / dot_count
+            let intervals: f32[2] = [0.0, interval]
+            stroke.dash = raster.StrokeDash.new_(intervals, 0.0)
+            stroke.line_cap = raster.LineCap.round
+
+            # NOTE: As Skia doesn't render a dot exactly at the end of a line, we need
+            #       to extend it by less then an interval.
+            let (dx, dy) = cpu_normalize(to_x - from_x, to_y - from_y)
+            to_x += dx * (interval / 2.0)
+            to_y += dy * (interval / 2.0)
+        .dashed:
+            let length = gfx.int_point_distance_from(&command.to, command.from_) + (f32)command.thickness
+            let dash_count = math32.floor(length / (f32)command.thickness / 4.0) * 2.0 + 1.0
+            let interval = length / dash_count
+            let intervals: f32[2] = [interval, interval]
+            stroke.dash = raster.StrokeDash.new_(intervals, 0.0)
+
+            let (dx, dy) = cpu_normalize(to_x - from_x, to_y - from_y)
+            from_x -= dx * ((f32)command.thickness / 2.0)
+            from_y -= dy * ((f32)command.thickness / 2.0)
+            to_x += dx * ((f32)command.thickness / 2.0)
+            to_y += dy * ((f32)command.thickness / 2.0)
+        _:
+            discard(0)
+    defer cpu_stroke_release(&stroke)
+
+    # canvas.drawLine(from, to, paint)
+    var builder = raster.PathBuilder.new_()
+    builder.move_to(from_x, from_y)
+    builder.line_to(to_x, to_y)
+    var line = builder.finish() else return
+    defer line.release()
+    cpu_canvas_stroke_path(canvas, &line, &paint, &stroke)
+
+# mark: Backdrop filters, rects, clips, nesting ================================================
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:45 Web::Painting::DisplayListPlayerSkia::apply_backdrop_filter (override).
+func display_list_player_cpu_apply_backdrop_filter_impl(base: DisplayListPlayer*, command: ApplyBackdropFilter):
+    let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
+
+    let rect = cpu_rect(command.backdrop_region) else return
+    cpu_canvas_save(canvas)
+    cpu_canvas_clip_rect(canvas, rect, true)
+    defer cpu_canvas_restore(canvas)
+
+    if let backdrop_filter = command.backdrop_filter:
+        cpu_canvas_save_layer_with_backdrop(canvas, &backdrop_filter)
+        cpu_canvas_restore(canvas)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:46 Web::Painting::DisplayListPlayerSkia::draw_rect (override).
+func display_list_player_cpu_draw_rect_impl(base: DisplayListPlayer*, command: DrawRect):
+    let rect = cpu_rect(command.rect) else return
+    let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
+    let paint = cpu_color_paint(command.color, true)
+    cpu_canvas_stroke_rect(canvas, rect, &paint, 1.0)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:49 Web::Painting::DisplayListPlayerSkia::add_rounded_rect_clip (override).
+func display_list_player_cpu_add_rounded_rect_clip_impl(base: DisplayListPlayer*, command: AddRoundedRectClip):
+    var rounded_rect = cpu_rrect_path_for(command.border_rect, &command.corner_radii) else return
+    defer rounded_rect.release()
+    let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
+    let difference = command.corner_clip == CornerClip.inside
+    cpu_canvas_clip_path(canvas, &rounded_rect, raster.FillRule.winding, true, difference)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:51 Web::Painting::DisplayListPlayerSkia::paint_nested_display_list (override).
+func display_list_player_cpu_paint_nested_display_list_impl(base: DisplayListPlayer*, command: PaintNestedDisplayList):
+    let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
+    cpu_canvas_translate(canvas, (f32)command.rect.m_location.m_x, (f32)command.rect.m_location.m_y)
+    var empty_scroll_state: ScrollStateSnapshot
+    let nested = command.display_list else trap("VERIFY: a null nested display list")
+    display_list_player_execute_impl(base, nested, &empty_scroll_state)
+
+# mark: Scrollbars and effects =================================================================
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:50 Web::Painting::DisplayListPlayerSkia::paint_scrollbar (override).
+func display_list_player_cpu_paint_scrollbar_impl(base: DisplayListPlayer*, command: PaintScrollBar):
+    let gutter_rect = cpu_rect(command.gutter_rect) else return
+
+    let thumb_rect = cpu_rect(command.thumb_rect) else return
+    let radius = thumb_rect.width() / 2.0
+    var thumb_rrect = cpu_rrect_path(thumb_rect, cpu_uniform_radii(radius, radius))
+    defer thumb_rrect.release()
+
+    let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
+
+    let gutter_fill_color = command.track_color
+    let gutter_fill_paint = cpu_color_paint(gutter_fill_color, false)
+    cpu_canvas_fill_rect(canvas, gutter_rect, &gutter_fill_paint)
+
+    var thumb_fill_color = command.thumb_color
+    if gfx.device_pixel_rect_is_empty(&command.gutter_rect) and thumb_fill_color == initial_values_scrollbar_color().thumb_color:
+        thumb_fill_color = gfx.color_with_alpha(&thumb_fill_color, 128)
+
+    let thumb_fill_paint = cpu_color_paint(thumb_fill_color, false)
+    cpu_canvas_fill_path(canvas, &thumb_rrect, &thumb_fill_paint, raster.FillRule.winding)
+
+    let stroke_color = gfx.color_lightened(&thumb_fill_color)
+    let stroke_paint = cpu_color_paint(stroke_color, true)
+    let stroke = raster.Stroke(width = 1.0)
+    cpu_canvas_stroke_path(canvas, &thumb_rrect, &stroke_paint, &stroke)
+
+## `Gfx::to_skia_blender`: the raster blend mode of a compositing operator; plus-darker is
+## composited by hand (CpuLayerEffects.plus_darker), so it answers source-over.
+func cpu_blend_mode(compositing_and_blending_operator: gfx.CompositingAndBlendingOperator) -> raster.BlendMode:
+    match compositing_and_blending_operator:
+        .normal: return raster.BlendMode.source_over
+        .multiply: return raster.BlendMode.multiply
+        .screen: return raster.BlendMode.screen
+        .overlay: return raster.BlendMode.overlay
+        .darken: return raster.BlendMode.darken
+        .lighten: return raster.BlendMode.lighten
+        .color_dodge: return raster.BlendMode.color_dodge
+        .color_burn: return raster.BlendMode.color_burn
+        .hard_light: return raster.BlendMode.hard_light
+        .soft_light: return raster.BlendMode.soft_light
+        .difference: return raster.BlendMode.difference
+        .exclusion: return raster.BlendMode.exclusion
+        .hue: return raster.BlendMode.hue
+        .saturation: return raster.BlendMode.saturation
+        .color: return raster.BlendMode.color
+        .luminosity: return raster.BlendMode.luminosity
+        .clear: return raster.BlendMode.clear
+        .copy: return raster.BlendMode.source
+        .source_over: return raster.BlendMode.source_over
+        .destination_over: return raster.BlendMode.destination_over
+        .source_in: return raster.BlendMode.source_in
+        .destination_in: return raster.BlendMode.destination_in
+        .source_out: return raster.BlendMode.source_out
+        .destination_out: return raster.BlendMode.destination_out
+        .source_a_top: return raster.BlendMode.source_atop
+        .destination_a_top: return raster.BlendMode.destination_atop
+        .xor: return raster.BlendMode.xor
+        .lighter: return raster.BlendMode.plus
+        # https://drafts.fxtf.org/compositing/#porterduffcompositingoperators_plus_lighter:
+        # saturate(source + destination), which is kPlus.
+        .plus_lighter: return raster.BlendMode.plus
+        .plus_darker: return raster.BlendMode.source_over
+        _: trap("VERIFY_NOT_REACHED")
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:52 Web::Painting::DisplayListPlayerSkia::apply_effects (override).
+func display_list_player_cpu_apply_effects_impl(base: DisplayListPlayer*, command: ApplyEffects):
+    let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
+    var effects = CpuLayerEffects()
+
+    if command.opacity < 1.0:
+        effects.opacity = command.opacity
+
+    if command.compositing_and_blending_operator != gfx.CompositingAndBlendingOperator.normal:
+        effects.blend_mode = cpu_blend_mode(command.compositing_and_blending_operator)
+        # https://drafts.fxtf.org/compositing/#porterduffcompositingoperators_plus_darker
+        # FIXME: This does not match the spec, however it looks like Safari, the only popular browser supporting this operator.
+        effects.plus_darker = command.compositing_and_blending_operator == gfx.CompositingAndBlendingOperator.plus_darker
+
+    if let filter = command.filter:
+        effects.filter = filter
+
+    if let mask_kind = command.mask_kind:
+        if mask_kind == gfx.MaskKind.luminance:
+            effects.luminance_to_alpha = true
+
+    cpu_canvas_save_layer(canvas, effects)
+
+## `to_skia_matrix4x4` for a 2D canvas: the affine part of a 4x4 matrix (rows and columns
+## 0, 1 and 3, as SkM44::asM33 takes them, without the perspective row).
+# FIXME: The raster module draws with affine transforms only; a perspective row is dropped.
+func cpu_transform_of_matrix4x4(matrix: const gfx.FloatMatrix4X4*) -> raster.Transform:
+    let m = matrix.m_elements
+    return raster.Transform.from_row(m[0][0], m[1][0], m[0][1], m[1][1], m[0][3], m[1][3])
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:53 Web::Painting::DisplayListPlayerSkia::apply_transform (override).
+func display_list_player_cpu_apply_transform_impl(base: DisplayListPlayer*, origin: gfx.FloatPoint, matrix: gfx.FloatMatrix4X4):
+    # translation_matrix(origin) * matrix * translation_matrix(-origin)
+    var new_transform = raster.Transform.from_translate(origin.m_x, origin.m_y)
+    new_transform = new_transform.pre_concat(cpu_transform_of_matrix4x4(&matrix))
+    new_transform = new_transform.pre_concat(raster.Transform.from_translate(-origin.m_x, -origin.m_y))
+    cpu_canvas_concat(display_list_player_cpu_canvas((DisplayListPlayerCpu*)base), new_transform)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:55 Web::Painting::DisplayListPlayerSkia::add_clip_path (override).
+func display_list_player_cpu_add_clip_path_impl(base: DisplayListPlayer*, path: gfx.Path):
+    let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
+    var cpu_path = to_raster_path(&path) else return
+    defer cpu_path.path.release()
+    cpu_canvas_clip_path(canvas, &cpu_path.path, cpu_path.fill_rule, true, false)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:57 Web::Painting::DisplayListPlayerSkia::would_be_fully_clipped_by_painter (override).
+func display_list_player_cpu_would_be_fully_clipped_by_painter_impl(base: DisplayListPlayer*, rect: gfx.DevicePixelRect) -> bool:
+    let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
+    let r = cpu_rect(rect) else return true
+    return cpu_canvas_quick_reject(canvas, r)

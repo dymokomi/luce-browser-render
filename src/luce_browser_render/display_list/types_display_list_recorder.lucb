@@ -21,21 +21,41 @@ pub struct DisplayListRecorder:
     pub var m_is_capturing: bool  # C++ default: { false }
     pub var m_captured_commands: ak.Vector[DisplayListCommand]
 
-## Web::Painting::DisplayListRecorder::FillPathParams (Libraries/LibWeb/Painting/DisplayListRecorder.h:41): opaque in this phase (not in the phase-1 closure).
+## Web::Painting::DisplayListRecorder::FillPathParams (Libraries/LibWeb/Painting/DisplayListRecorder.h:41).
+## Fields filled by hand (region r51a): the generator left the struct opaque.
 pub struct DisplayListRecorderFillPathParams:
-    pub var opaque_: u8
+    pub var path: gfx.Path
+    pub var opacity: f32 = 1.0
+    pub var paint_style_or_color: PaintStyleOrColor
+    pub var winding_rule: gfx.WindingRule = gfx.WindingRule.even_odd
+    pub var should_anti_alias: ShouldAntiAlias = ShouldAntiAlias.yes
 
-## Web::Painting::DisplayListRecorder::StrokePathParams (Libraries/LibWeb/Painting/DisplayListRecorder.h:50): opaque in this phase (not in the phase-1 closure).
+## Web::Painting::DisplayListRecorder::StrokePathParams (Libraries/LibWeb/Painting/DisplayListRecorder.h:50).
+## Fields filled by hand (region r51a): the generator left the struct opaque.
 pub struct DisplayListRecorderStrokePathParams:
-    pub var opaque_: u8
+    pub var cap_style: gfx.PathCapStyle
+    pub var join_style: gfx.PathJoinStyle
+    pub var miter_limit: f32
+    pub var dash_array: ak.Vector[f32]
+    pub var dash_offset: f32
+    pub var path: gfx.Path
+    pub var opacity: f32 = 1.0
+    pub var paint_style_or_color: PaintStyleOrColor
+    pub var thickness: f32
+    pub var should_anti_alias: ShouldAntiAlias = ShouldAntiAlias.yes
 
-## Web::Painting::DisplayListRecorder::CommandCapture (Libraries/LibWeb/Painting/DisplayListRecorder.h:95): opaque in this phase (not in the phase-1 closure).
+## Web::Painting::DisplayListRecorder::CommandCapture (Libraries/LibWeb/Painting/DisplayListRecorder.h:95).
+## Fields filled by hand (region r51a). C++ ends a capture in the destructor; here the owner calls
+## `display_list_recorder_command_capture_destroy` where the C++ capture goes out of scope.
 pub struct DisplayListRecorderCommandCapture:
-    pub var opaque_: u8
+    pub var m_recorder: DisplayListRecorder*?  # C++ default: { nullptr }
 
-## Web::Painting::DisplayListRecorder::MaskInfo (Libraries/LibWeb/Painting/DisplayListRecorder.h:122): opaque in this phase (not in the phase-1 closure).
+## Web::Painting::DisplayListRecorder::MaskInfo (Libraries/LibWeb/Painting/DisplayListRecorder.h:122).
+## Fields filled by hand (region r51a): the generator left the struct opaque.
 pub struct DisplayListRecorderMaskInfo:
-    pub var opaque_: u8
+    pub var display_list: DisplayList*?
+    pub var rect: gfx.DevicePixelRect
+    pub var kind: gfx.MaskKind
 
 # mark: DisplayListRecorderStateSaver ===========================================================
 

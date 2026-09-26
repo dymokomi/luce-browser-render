@@ -305,7 +305,8 @@ test "affine_transform: extract_2d_affine_transform":
 # C++: fb(t.a()); fb(t.b()); fb(t.c()); fb(t.d()); fb(t.e()); fb(t.f())
 noinline func test_affine_transform_extract_2d_affine_transform():
     let source = test_affine(1.0, 2.0, 3.0, 4.0, 5.0, 6.0)
-    let t = extract_2d_affine_transform(affine_transform_to_matrix(&source))
+    let matrix = affine_transform_to_matrix(&source)
+    let t = extract_2d_affine_transform(&matrix)
     assert((i64)(affine_transform_a(&t).bits()) == 1065353216)
     assert((i64)(affine_transform_b(&t).bits()) == 1073741824)
     assert((i64)(affine_transform_c(&t).bits()) == 1077936128)

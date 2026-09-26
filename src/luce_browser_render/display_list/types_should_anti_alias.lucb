@@ -11,6 +11,7 @@
 #==============================================================================================
 
 ## Web::Painting::ShouldAntiAlias (Libraries/LibWeb/Painting/ShouldAntiAlias.h:11).
-pub enum ShouldAntiAlias as i64:
+# Fixed by hand (region r51a): C++ `enum class ShouldAntiAlias : bool { Yes, No }`.
+pub enum ShouldAntiAlias as u8:
     yes = 0
-    no = -1
+    no = 1

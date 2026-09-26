@@ -1,0 +1,157 @@
+#==============================================================================================
+#
+#   cpu_shapes - rectangles, rounded rectangles, ovals and colors for the CPU player
+#
+#   DESCRIPTION:
+#       New code for DisplayListPlayerCpu (DESIGN.md §7.3): the SkiaUtils conversions the
+#       Skia player uses (`to_skia_rect`, `to_skia_color`, `to_skia_rrect`), producing
+#       raster values. A rounded rectangle follows SkRRect::setRectRadii (a corner with a
+#       zero radius is square; radii that do not fit a side are scaled down together, as
+#       SkRRect::scaleRadii does) and SkPath::addRRect's contour (clockwise from the end of
+#       the top-left corner); the elliptical corners are cubic Bézier quarter arcs, where
+#       Skia uses conics of weight sqrt(2)/2 (a difference under 0.03% of the radius).
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+# mark: Colors =================================================================================
+
+## `to_skia_color`: a Gfx::Color (ARGB, unpremultiplied) as a raster color.
+func cpu_color(color: gfx.Color) -> raster.Color:
+    let v = color.m_value
+    return raster.Color.from_rgba8((u8)((v >> 16) & 0xff), (u8)((v >> 8) & 0xff), (u8)(v & 0xff), (u8)((v >> 24) & 0xff))
+
+## `to_skia_color4f`: a Gfx::Color as four unpremultiplied floats (r, g, b, a).
+func cpu_color4(color: gfx.Color) -> CpuColor4:
+    let v = color.m_value
+    return [(f32)((v >> 16) & 0xff) / 255.0, (f32)((v >> 8) & 0xff) / 255.0, (f32)(v & 0xff) / 255.0, (f32)((v >> 24) & 0xff) / 255.0]
+
+## A solid-color paint (SkPaint::setColor) with the given anti-aliasing.
+func cpu_color_paint(color: gfx.Color, anti_alias: bool) -> raster.Paint:
+    var paint = raster.Paint()
+    paint.set_color(cpu_color(color))
+    paint.anti_alias = anti_alias
+    return paint
+
+# mark: Rectangles =============================================================================
+
+## `to_skia_rect` of an integer rectangle: (x, y, width, height) as floats. None for a
+## rectangle with a negative size.
+func cpu_rect(rect: gfx.DevicePixelRect) -> raster.Rect?:
+    return raster.Rect.from_xywh((f32)rect.m_location.m_x, (f32)rect.m_location.m_y, (f32)rect.m_size.m_width, (f32)rect.m_size.m_height)
+
+## `to_skia_rect` of a float rectangle.
+func cpu_float_rect(rect: gfx.FloatRect) -> raster.Rect?:
+    return raster.Rect.from_xywh(rect.m_location.m_x, rect.m_location.m_y, rect.m_size.m_width, rect.m_size.m_height)
+
+## A rectangle as a closed path.
+func cpu_rect_path(rect: raster.Rect) -> raster.Path:
+    return raster.PathBuilder.from_rect(rect)
+
+# mark: Rounded rectangles =====================================================================
+
+## The four corner radii of a rounded rectangle, SkVector radii[4]: top-left, top-right,
+## bottom-right, bottom-left, each (x, y).
+struct CpuRadii:
+    var x: f32[4]
+    var y: f32[4]
+
+## `to_skia_rrect`'s radii: CornerRadii's horizontal and vertical radii per corner.
+func cpu_radii(corner_radii: const CornerRadii*) -> CpuRadii:
+    return CpuRadii(
+        x = [(f32)corner_radii.top_left.horizontal_radius, (f32)corner_radii.top_right.horizontal_radius, (f32)corner_radii.bottom_right.horizontal_radius, (f32)corner_radii.bottom_left.horizontal_radius],
+        y = [(f32)corner_radii.top_left.vertical_radius, (f32)corner_radii.top_right.vertical_radius, (f32)corner_radii.bottom_right.vertical_radius, (f32)corner_radii.bottom_left.vertical_radius])
+
+## SkRRect::MakeRectXY's radii: the same (rx, ry) at every corner.
+func cpu_uniform_radii(rx: f32, ry: f32) -> CpuRadii:
+    return CpuRadii(x = [rx, rx, rx, rx], y = [ry, ry, ry, ry])
+
+## SkRRect's `compute_min_scale`.
+func cpu_rrect_min_scale(rad1: f64, rad2: f64, limit: f64, current: f64) -> f64:
+    if rad1 + rad2 > limit:
+        let scale = limit / (rad1 + rad2)
+        return scale if scale < current else current
+    return current
+
+## SkScaleToSides::AdjustRadii: scales two radii sharing a side so they fit it.
+func cpu_rrect_adjust_radii(limit: f64, scale: f64, a: f32*, b: f32*):
+    *a = (f32)((f64)*a * scale)
+    *b = (f32)((f64)*b * scale)
+    if (f64)*a + (f64)*b > limit:
+        # Take the excess off the larger radius, as SkScaleToSides nudges it.
+        if *a > *b:
+            *a = (f32)(limit - (f64)*b)
+        else:
+            *b = (f32)(limit - (f64)*a)
+
+## SkRRect::setRectRadii's normalization of `radii` for `rect`.
+func cpu_normalize_radii(rect: raster.Rect, radii0: CpuRadii) -> CpuRadii:
+    var radii = radii0
+    for i in 0..<4usize:
+        if not (radii.x[i] > 0.0) or not (radii.y[i] > 0.0) or not math32.is_finite(radii.x[i]) or not math32.is_finite(radii.y[i]):
+            radii.x[i] = 0.0
+            radii.y[i] = 0.0
+    let width = (f64)rect.right() - (f64)rect.left()
+    let height = (f64)rect.bottom() - (f64)rect.top()
+    var scale: f64 = 1.0
+    scale = cpu_rrect_min_scale((f64)radii.x[0], (f64)radii.x[1], width, scale)
+    scale = cpu_rrect_min_scale((f64)radii.y[1], (f64)radii.y[2], height, scale)
+    scale = cpu_rrect_min_scale((f64)radii.x[2], (f64)radii.x[3], width, scale)
+    scale = cpu_rrect_min_scale((f64)radii.y[3], (f64)radii.y[0], height, scale)
+    if scale < 1.0:
+        cpu_rrect_adjust_radii(width, scale, &radii.x[0], &radii.x[1])
+        cpu_rrect_adjust_radii(height, scale, &radii.y[1], &radii.y[2])
+        cpu_rrect_adjust_radii(width, scale, &radii.x[2], &radii.x[3])
+        cpu_rrect_adjust_radii(height, scale, &radii.y[3], &radii.y[0])
+    return radii
+
+## The cubic Bézier constant for a quarter ellipse.
+let cpu_arc_kappa: f32 = 0.5522847498
+
+## The contour of the rounded rectangle `rect` with `radii` (SkPath::addRRect): a plain
+## rectangle when no corner is rounded.
+func cpu_rrect_path(rect: raster.Rect, radii0: CpuRadii) -> raster.Path:
+    let radii = cpu_normalize_radii(rect, radii0)
+    var any_radius = false
+    for i in 0..<4usize:
+        if radii.x[i] > 0.0:
+            any_radius = true
+    if not any_radius:
+        return raster.PathBuilder.from_rect(rect)
+
+    let l = rect.left()
+    let t = rect.top()
+    let r = rect.right()
+    let b = rect.bottom()
+    let k = cpu_arc_kappa
+    var builder = raster.PathBuilder.new_()
+    # Top edge, from the end of the top-left corner.
+    builder.move_to(l + radii.x[0], t)
+    builder.line_to(r - radii.x[1], t)
+    if radii.x[1] > 0.0:
+        builder.cubic_to(r - radii.x[1] + radii.x[1] * k, t, r, t + radii.y[1] - radii.y[1] * k, r, t + radii.y[1])
+    # Right edge.
+    builder.line_to(r, b - radii.y[2])
+    if radii.x[2] > 0.0:
+        builder.cubic_to(r, b - radii.y[2] + radii.y[2] * k, r - radii.x[2] + radii.x[2] * k, b, r - radii.x[2], b)
+    # Bottom edge.
+    builder.line_to(l + radii.x[3], b)
+    if radii.x[3] > 0.0:
+        builder.cubic_to(l + radii.x[3] - radii.x[3] * k, b, l, b - radii.y[3] + radii.y[3] * k, l, b - radii.y[3])
+    # Left edge.
+    builder.line_to(l, t + radii.y[0])
+    if radii.x[0] > 0.0:
+        builder.cubic_to(l, t + radii.y[0] - radii.y[0] * k, l + radii.x[0] - radii.x[0] * k, t, l + radii.x[0], t)
+    builder.close()
+    return builder.finish() else raster.PathBuilder.from_rect(rect)
+
+## `to_skia_rrect(rect, corner_radii)` as a path.
+func cpu_rrect_path_for(rect: gfx.DevicePixelRect, corner_radii: const CornerRadii*) -> raster.Path?:
+    let r = cpu_rect(rect) else return none
+    return cpu_rrect_path(r, cpu_radii(corner_radii))
+
+## SkPath::addOval of `rect`; none for an empty rectangle.
+func cpu_oval_path(rect: raster.Rect) -> raster.Path?:
+    return raster.PathBuilder.from_oval(rect)

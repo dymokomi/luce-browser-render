@@ -1,0 +1,153 @@
+#==============================================================================================
+#
+#   border_radii_data - corner radii in CSS and device pixels
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibWeb/Painting/BorderRadiiData.h (lines 1-161) and
+#       BorderRadiiData.cpp (lines 1-54): CornerRadius and CornerRadii (device pixels, with
+#       the point-in-rounded-rect test and the box-shadow spread adjustment), BorderRadiusData
+#       and BorderRadiiData (CSS pixels). The conversions to device pixels (`as_corner`,
+#       `as_corners`) read a DevicePixelConverter and stay in the engine (DESIGN.md §4.1.3).
+#
+#       Copyright (c) 2020, Andreas Kling <andreas@ladybird.org>
+#       Copyright (c) 2021-2023, Sam Atkins <atkinssj@serenityos.org>
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+# mark: CornerRadius, BorderRadiusData =========================================================
+
+## Ported from Libraries/LibWeb/Painting/BorderRadiiData.h:21 Web::Painting::CornerRadius::operator bool.
+pub func corner_radius_to_bool(this: const CornerRadius*) -> bool:
+    return this.horizontal_radius > 0 and this.vertical_radius > 0
+
+## Ported from Libraries/LibWeb/Painting/BorderRadiiData.cpp:22 Web::Painting::add_spread_distance_to_border_radius.
+# https://drafts.csswg.org/css-backgrounds/#shadow-shape
+func add_spread_distance_to_border_radius(border_radius: i32*, spread_distance: i32):
+    if *border_radius == 0 or spread_distance == 0:
+        return
+
+    # To preserve the box's shape when spread is applied, the corner radii of the shadow are also increased (decreased,
+    # for inner shadows) from the border-box (padding-box) radii by adding (subtracting) the spread distance (and flooring
+    # at zero). However, in order to create a sharper corner when the border radius is small (and thus ensure continuity
+    # between round and sharp corners), when the border radius is less than the spread distance (or in the case of an inner
+    # shadow, less than the absolute value of a negative spread distance), the spread distance is first multiplied by the
+    # proportion 1 + (r-1)^3, where r is the ratio of the border radius to the spread distance, in calculating the corner
+    # radii of the spread shadow shape.
+    if *border_radius > ak.abs_i32(spread_distance):
+        *border_radius += spread_distance
+    else:
+        let r = (f32)*border_radius / (f32)ak.abs_i32(spread_distance)
+        # C++ `int += float`: the sum is computed in float and truncated back to int.
+        *border_radius = (i32)((f32)*border_radius + (f32)spread_distance * (1.0 + ak.pow_f32(r - 1.0, 3.0)))
+
+## Ported from Libraries/LibWeb/Painting/BorderRadiiData.h:33 Web::Painting::BorderRadiusData::operator bool.
+pub func border_radius_data_to_bool(this: const BorderRadiusData*) -> bool:
+    let zero = gfx.CssPixels(m_value = 0)
+    return gfx.css_pixels_cmp(&this.horizontal_radius, zero) > 0 and gfx.css_pixels_cmp(&this.vertical_radius, zero) > 0
+
+## Ported from Libraries/LibWeb/Painting/BorderRadiiData.h:38 Web::Painting::BorderRadiusData::shrink.
+pub func border_radius_data_shrink(this: BorderRadiusData*, horizontal: gfx.CssPixels, vertical: gfx.CssPixels):
+    let zero = gfx.CssPixels(m_value = 0)
+    if gfx.css_pixels_cmp(&this.horizontal_radius, zero) != 0:
+        this.horizontal_radius = css_pixels_max(zero, gfx.css_pixels_sub(&this.horizontal_radius, horizontal))
+    if gfx.css_pixels_cmp(&this.vertical_radius, zero) != 0:
+        this.vertical_radius = css_pixels_max(zero, gfx.css_pixels_sub(&this.vertical_radius, vertical))
+
+## AK::max(a, b) for CSSPixels: `a < b ? b : a`.
+func css_pixels_max(a: gfx.CssPixels, b: gfx.CssPixels) -> gfx.CssPixels:
+    return b if gfx.css_pixels_cmp(&a, b) < 0 else a
+
+# mark: CornerRadii ============================================================================
+
+## Ported from Libraries/LibWeb/Painting/BorderRadiiData.h:53 Web::Painting::CornerRadii::has_any_radius.
+pub func corner_radii_has_any_radius(this: const CornerRadii*) -> bool:
+    return corner_radius_to_bool(&this.top_left) or corner_radius_to_bool(&this.top_right) or corner_radius_to_bool(&this.bottom_right) or corner_radius_to_bool(&this.bottom_left)
+
+## Ported from Libraries/LibWeb/Painting/BorderRadiiData.cpp:42 Web::Painting::CornerRadii::adjust_corners_for_spread_distance.
+pub func corner_radii_adjust_corners_for_spread_distance(this: CornerRadii*, spread_distance: i32):
+    add_spread_distance_to_border_radius(&this.top_left.horizontal_radius, spread_distance)
+    add_spread_distance_to_border_radius(&this.top_left.vertical_radius, spread_distance)
+    add_spread_distance_to_border_radius(&this.top_right.horizontal_radius, spread_distance)
+    add_spread_distance_to_border_radius(&this.top_right.vertical_radius, spread_distance)
+    add_spread_distance_to_border_radius(&this.bottom_right.horizontal_radius, spread_distance)
+    add_spread_distance_to_border_radius(&this.bottom_right.vertical_radius, spread_distance)
+    add_spread_distance_to_border_radius(&this.bottom_left.horizontal_radius, spread_distance)
+    add_spread_distance_to_border_radius(&this.bottom_left.vertical_radius, spread_distance)
+
+## The C++ `outside_ellipse` lambda of CornerRadii::contains: whether (px, py) lies outside
+## the ellipse of radii `r` centred at (cx, cy).
+func corner_radii_outside_ellipse(r: const CornerRadius*, px: i32, py: i32, cx: i32, cy: i32) -> bool:
+    let dx = (f32)(px - cx) / (f32)r.horizontal_radius
+    let dy = (f32)(py - cy) / (f32)r.vertical_radius
+    return dx * dx + dy * dy > 1.0
+
+## Ported from Libraries/LibWeb/Painting/BorderRadiiData.h:60 Web::Painting::CornerRadii::contains.
+pub func corner_radii_contains(this: const CornerRadii*, point: gfx.IntPoint, rect: gfx.DevicePixelRect) -> bool:
+    if not gfx.device_pixel_rect_contains_int_point(&rect, point):
+        return false
+
+    if not corner_radii_has_any_radius(this):
+        return true
+
+    let px = gfx.int_point_x(&point)
+    let py = gfx.int_point_y(&point)
+
+    if corner_radius_to_bool(&this.top_left):
+        let cx = gfx.device_pixel_rect_left(&rect) + this.top_left.horizontal_radius
+        let cy = gfx.device_pixel_rect_top(&rect) + this.top_left.vertical_radius
+        if px < cx and py < cy and corner_radii_outside_ellipse(&this.top_left, px, py, cx, cy):
+            return false
+
+    if corner_radius_to_bool(&this.top_right):
+        let cx = gfx.device_pixel_rect_right(&rect) - this.top_right.horizontal_radius
+        let cy = gfx.device_pixel_rect_top(&rect) + this.top_right.vertical_radius
+        if px > cx and py < cy and corner_radii_outside_ellipse(&this.top_right, px, py, cx, cy):
+            return false
+
+    if corner_radius_to_bool(&this.bottom_right):
+        let cx = gfx.device_pixel_rect_right(&rect) - this.bottom_right.horizontal_radius
+        let cy = gfx.device_pixel_rect_bottom(&rect) - this.bottom_right.vertical_radius
+        if px > cx and py > cy and corner_radii_outside_ellipse(&this.bottom_right, px, py, cx, cy):
+            return false
+
+    if corner_radius_to_bool(&this.bottom_left):
+        let cx = gfx.device_pixel_rect_left(&rect) + this.bottom_left.horizontal_radius
+        let cy = gfx.device_pixel_rect_bottom(&rect) - this.bottom_left.vertical_radius
+        if px < cx and py > cy and corner_radii_outside_ellipse(&this.bottom_left, px, py, cx, cy):
+            return false
+
+    return true
+
+# mark: BorderRadiiData ========================================================================
+
+## Ported from Libraries/LibWeb/Painting/BorderRadiiData.h:115 Web::Painting::BorderRadiiData::has_any_radius.
+pub func border_radii_data_has_any_radius(this: const BorderRadiiData*) -> bool:
+    return border_radius_data_to_bool(&this.top_left) or border_radius_data_to_bool(&this.top_right) or border_radius_data_to_bool(&this.bottom_right) or border_radius_data_to_bool(&this.bottom_left)
+
+## The C++ `to_corner` lambda of BorderRadiiData::contains.
+func border_radius_data_to_corner(r: const BorderRadiusData*) -> CornerRadius:
+    return CornerRadius(horizontal_radius = (i32)gfx.css_pixels_to_float_const(&r.horizontal_radius), vertical_radius = (i32)gfx.css_pixels_to_float_const(&r.vertical_radius))
+
+## Ported from Libraries/LibWeb/Painting/BorderRadiiData.h:120 Web::Painting::BorderRadiiData::contains.
+pub func border_radii_data_contains(this: const BorderRadiiData*, point: gfx.CssPixelPoint, rect: gfx.CssPixelRect) -> bool:
+    if not gfx.css_pixel_rect_contains_css_pixel_point(&rect, point):
+        return false
+
+    if not border_radii_data_has_any_radius(this):
+        return true
+
+    let corners = CornerRadii(top_left = border_radius_data_to_corner(&this.top_left), top_right = border_radius_data_to_corner(&this.top_right),
+        bottom_right = border_radius_data_to_corner(&this.bottom_right), bottom_left = border_radius_data_to_corner(&this.bottom_left))
+    return corner_radii_contains(&corners, css_pixel_point_to_int_point(point), css_pixel_rect_to_int_rect(rect))
+
+## Ported from Libraries/LibWeb/Painting/BorderRadiiData.h:135 Web::Painting::BorderRadiiData::shrink.
+pub func border_radii_data_shrink(this: BorderRadiiData*, top: gfx.CssPixels, right: gfx.CssPixels, bottom: gfx.CssPixels, left: gfx.CssPixels):
+    border_radius_data_shrink(&this.top_left, left, top)
+    border_radius_data_shrink(&this.top_right, right, top)
+    border_radius_data_shrink(&this.bottom_right, right, bottom)
+    border_radius_data_shrink(&this.bottom_left, left, bottom)
+
+## Ported from Libraries/LibWeb/Painting/BorderRadiiData.h:143 Web::Painting::BorderRadiiData::inflate.
+pub func border_radii_data_inflate(this: BorderRadiiData*, top: gfx.CssPixels, right: gfx.CssPixels, bottom: gfx.CssPixels, left: gfx.CssPixels):
+    border_radii_data_shrink(this, gfx.css_pixels_neg(&top), gfx.css_pixels_neg(&right), gfx.css_pixels_neg(&bottom), gfx.css_pixels_neg(&left))

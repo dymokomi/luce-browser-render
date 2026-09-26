@@ -1,0 +1,152 @@
+#==============================================================================================
+#
+#   scroll_state - scroll frames, their offsets, and the snapshot the player reads
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibWeb/Painting/ScrollFrame.h (lines 1-67), ScrollState.h (lines
+#       1-113) and ScrollState.cpp (lines 1-24). ScrollFrameIndex is a u64
+#       (AK_TYPEDEF_DISTINCT_ORDERED_ID(size_t)); 0 means "no frame", and index 0 of the
+#       frame vector is a sentinel. The ScrollFrame constructor and the ScrollState members
+#       that take a PaintableBox (`create_scroll_frame_for`, `create_sticky_frame_for`,
+#       `paintable_box()`) stay in the engine, which owns PaintableBox (DESIGN.md §4.1.3).
+#       The `for_each_scroll_frame`/`for_each_sticky_frame` templates return iterators
+#       (DESIGN.md §2.9): `for entry in scroll_state_for_each_scroll_frame(state)`.
+#
+#       Copyright (c) 2024-2025, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+# mark: ScrollFrame ============================================================================
+
+## Ported from Libraries/LibWeb/Painting/ScrollFrame.h:41 Web::Painting::ScrollFrame::is_sticky.
+pub func scroll_frame_is_sticky(this: const ScrollFrame*) -> bool:
+    return this.m_sticky
+
+## Ported from Libraries/LibWeb/Painting/ScrollFrame.h:43 Web::Painting::ScrollFrame::own_offset.
+pub func scroll_frame_own_offset(this: const ScrollFrame*) -> gfx.CssPixelPoint:
+    return this.m_own_offset
+
+## Ported from Libraries/LibWeb/Painting/ScrollFrame.h:45 Web::Painting::ScrollFrame::set_own_offset.
+pub func scroll_frame_set_own_offset(this: ScrollFrame*, offset: gfx.CssPixelPoint):
+    this.m_own_offset = offset
+
+## Ported from Libraries/LibWeb/Painting/ScrollFrame.h:50 Web::Painting::ScrollFrame::parent_index.
+pub func scroll_frame_parent_index(this: const ScrollFrame*) -> u64:
+    return this.m_parent_index
+
+## Ported from Libraries/LibWeb/Painting/ScrollFrame.h:52 Web::Painting::ScrollFrame::set_sticky_constraints.
+pub func scroll_frame_set_sticky_constraints(this: ScrollFrame*, constraints: StickyConstraints):
+    this.m_sticky_constraints = constraints
+
+## Ported from Libraries/LibWeb/Painting/ScrollFrame.h:53 Web::Painting::ScrollFrame::has_sticky_constraints.
+pub func scroll_frame_has_sticky_constraints(this: const ScrollFrame*) -> bool:
+    return this.m_sticky_constraints != none
+
+## Ported from Libraries/LibWeb/Painting/ScrollFrame.h:54 Web::Painting::ScrollFrame::sticky_constraints.
+pub func scroll_frame_sticky_constraints(this: const ScrollFrame*) -> StickyConstraints:
+    return this.m_sticky_constraints else trap("VERIFY: Optional::value() without a value")
+
+# mark: ScrollStateSnapshot ====================================================================
+
+## Ported from Libraries/LibWeb/Painting/ScrollState.cpp:12 Web::Painting::ScrollStateSnapshot::create.
+pub func scroll_state_snapshot_create(scroll_frames: const ak.Vector[ScrollFrame]*, device_pixels_per_css_pixel: f64) -> ScrollStateSnapshot:
+    var snapshot: ScrollStateSnapshot
+    let scale = (f32)device_pixels_per_css_pixel
+    ak.vector_ensure_capacity(&snapshot.m_device_offsets, ak.vector_size(scroll_frames))
+    for scroll_frame in ak.vector_span_const(scroll_frames):
+        let offset = scroll_frame_own_offset(&scroll_frame)
+        let float_offset = gfx.FloatPoint(m_x = gfx.css_pixels_to_float_const(&offset.m_x), m_y = gfx.css_pixels_to_float_const(&offset.m_y))
+        ak.vector_unchecked_append_u(&snapshot.m_device_offsets, gfx.float_point_mul(&float_offset, scale))
+    return snapshot
+
+## Ported from Libraries/LibWeb/Painting/ScrollState.h:18 Web::Painting::ScrollStateSnapshot::device_offset_for_index.
+pub func scroll_state_snapshot_device_offset_for_index(this: const ScrollStateSnapshot*, index: u64) -> gfx.FloatPoint:
+    if index >= (u64)ak.vector_size(&this.m_device_offsets):
+        return gfx.FloatPoint(m_x = 0.0, m_y = 0.0)
+    return *ak.vector_at_const(&this.m_device_offsets, (usize)index)
+
+# mark: ScrollState ============================================================================
+
+## Ported from Libraries/LibWeb/Painting/ScrollState.h:34 Web::Painting::ScrollState::ScrollState.
+# ScrollFrameIndex is 1-based: value 0 means "no frame".
+# Index 0 in m_scroll_frames is a sentinel (never accessed by callers).
+# Value N maps directly to m_scroll_frames[N].
+pub func scroll_state_construct(this: ScrollState*):
+    var sentinel: ScrollFrame
+    ak.vector_append_t(&this.m_scroll_frames, sentinel) # Sentinel at index 0
+
+## Ported from Libraries/LibWeb/Painting/ScrollState.h:53 Web::Painting::ScrollState::frame_at.
+pub func scroll_state_frame_at_const(this: const ScrollState*, index: u64) -> const ScrollFrame*:
+    return ak.vector_at_const(&this.m_scroll_frames, (usize)index)
+
+## Ported from Libraries/LibWeb/Painting/ScrollState.h:54 Web::Painting::ScrollState::frame_at.
+pub func scroll_state_frame_at(this: ScrollState*, index: u64) -> ScrollFrame*:
+    return ak.vector_at(&this.m_scroll_frames, (usize)index)
+
+## Ported from Libraries/LibWeb/Painting/ScrollState.h:56 Web::Painting::ScrollState::cumulative_offset.
+pub func scroll_state_cumulative_offset(this: const ScrollState*, index0: u64) -> gfx.CssPixelPoint:
+    var offset: gfx.CssPixelPoint
+    var index = index0
+    while index != 0:
+        discard(gfx.css_pixel_point_add_assign(&offset, scroll_frame_own_offset(scroll_state_frame_at_const(this, index))))
+        index = scroll_frame_parent_index(scroll_state_frame_at_const(this, index))
+    return offset
+
+## Ported from Libraries/LibWeb/Painting/ScrollState.h:66 Web::Painting::ScrollState::nearest_scrolling_ancestor.
+pub func scroll_state_nearest_scrolling_ancestor(this: const ScrollState*, index: u64) -> u64:
+    var ancestor = scroll_frame_parent_index(scroll_state_frame_at_const(this, index))
+    while ancestor != 0:
+        if not scroll_frame_is_sticky(scroll_state_frame_at_const(this, ancestor)):
+            return ancestor
+        ancestor = scroll_frame_parent_index(scroll_state_frame_at_const(this, ancestor))
+    return 0
+
+## One step of `for_each_scroll_frame`/`for_each_sticky_frame`: the callback's arguments.
+pub struct ScrollFrameEntry:
+    ## The frame's ScrollFrameIndex.
+    pub var index: u64
+    ## The frame.
+    pub var frame: ScrollFrame*
+
+## The loop of `for_each_scroll_frame` (`sticky` false) or `for_each_sticky_frame` (`sticky`
+## true), as an iterator: the frames after the sentinel whose stickiness is `sticky`.
+pub struct ScrollFrameIterator: luce.Iterable[ScrollFrameEntry, ScrollFrameIterator], luce.Iterator[ScrollFrameEntry]:
+    var state: ScrollState*
+    var i: usize
+    var sticky: bool
+
+    ## The iterator itself.
+    pub func iterator() -> ScrollFrameIterator: return self
+
+    ## The next frame, or none after the last.
+    pub mutating func next() -> ScrollFrameEntry?: return scroll_frame_iterator_next(&self)
+
+## `for (size_t i = 1; i < m_scroll_frames.size(); ++i) { if (m_scroll_frames[i].is_sticky() != sticky) continue; callback(...) }`.
+func scroll_frame_iterator_next(this: ScrollFrameIterator*) -> ScrollFrameEntry?:
+    while this.i < ak.vector_size(&this.state.m_scroll_frames):
+        let i = this.i
+        this.i += 1
+        let frame = ak.vector_at(&this.state.m_scroll_frames, i)
+        if scroll_frame_is_sticky(frame) != this.sticky:
+            continue
+        return ScrollFrameEntry(index = (u64)i, frame = frame)
+    return none
+
+## Ported from Libraries/LibWeb/Painting/ScrollState.h:78 Web::Painting::ScrollState::for_each_scroll_frame:
+## the scrolling (non-sticky) frames.
+pub func scroll_state_for_each_scroll_frame(this: ScrollState*) -> ScrollFrameIterator:
+    return ScrollFrameIterator(state = this, i = 1, sticky = false)
+
+## Ported from Libraries/LibWeb/Painting/ScrollState.h:88 Web::Painting::ScrollState::for_each_sticky_frame:
+## the sticky frames.
+pub func scroll_state_for_each_sticky_frame(this: ScrollState*) -> ScrollFrameIterator:
+    return ScrollFrameIterator(state = this, i = 1, sticky = true)
+
+## Ported from Libraries/LibWeb/Painting/ScrollState.h:97 Web::Painting::ScrollState::clear.
+pub func scroll_state_clear(this: ScrollState*):
+    ak.vector_resize_and_keep_capacity(&this.m_scroll_frames, 1) # Keep sentinel at index 0
+
+## Ported from Libraries/LibWeb/Painting/ScrollState.h:105 Web::Painting::ScrollState::snapshot.
+pub func scroll_state_snapshot(this: const ScrollState*, device_pixels_per_css_pixel: f64) -> ScrollStateSnapshot:
+    return scroll_state_snapshot_create(&this.m_scroll_frames, device_pixels_per_css_pixel)

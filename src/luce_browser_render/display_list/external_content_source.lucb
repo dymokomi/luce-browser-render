@@ -1,0 +1,34 @@
+#==============================================================================================
+#
+#   external_content_source - a bitmap another thread may replace between frames
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibWeb/Painting/ExternalContentSource.cpp (lines 1-42) and
+#       ExternalContentSource.h (lines 1-31). The C++ guards the bitmap with a
+#       Threading::Mutex; the port runs on one thread (DESIGN.md §3.3 rule 6), so the lock
+#       scopes are kept as comments. The C++ moves the old bitmap out under the lock so its
+#       last reference drops outside it; with managed memory there is nothing to release.
+#
+#       Copyright (c) 2026, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+## Ported from Libraries/LibWeb/Painting/ExternalContentSource.cpp:12 Web::Painting::ExternalContentSource::create.
+pub func external_content_source_create() -> ExternalContentSource*:
+    return new ExternalContentSource else trap("out of memory")
+
+## Ported from Libraries/LibWeb/Painting/ExternalContentSource.cpp:17 Web::Painting::ExternalContentSource::update.
+pub func external_content_source_update(this: ExternalContentSource*, bitmap: gfx.ImmutableBitmap*?):
+    # Threading::MutexLocker const locker { m_mutex };
+    this.m_bitmap = bitmap
+
+## Ported from Libraries/LibWeb/Painting/ExternalContentSource.cpp:27 Web::Painting::ExternalContentSource::clear.
+pub func external_content_source_clear(this: ExternalContentSource*):
+    # Threading::MutexLocker const locker { m_mutex };
+    this.m_bitmap = none
+
+## Ported from Libraries/LibWeb/Painting/ExternalContentSource.cpp:36 Web::Painting::ExternalContentSource::current_bitmap.
+pub func external_content_source_current_bitmap(this: const ExternalContentSource*) -> gfx.ImmutableBitmap*?:
+    # Threading::MutexLocker const locker { m_mutex };
+    return this.m_bitmap
