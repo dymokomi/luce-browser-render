@@ -174,3 +174,61 @@ noinline func test_cpu_color_spaces_round_trip():
                 if not near(back[c], color[c], 0.0005):
                     print(f"space {s} channel {c}: {color[c]} -> {back[c]}")
                     trap("round trip")
+
+test "cpu shaders: an SVG linear gradient paint style":
+    test_cpu_svg_gradient_shader()
+
+noinline func test_cpu_svg_gradient_shader():
+    let style = svg_linear_gradient_paint_style_create(gfx.FloatPoint(m_x = 0.0, m_y = 0.0), gfx.FloatPoint(m_x = 8.0, m_y = 0.0))
+    let gradient = style.svg_gradient_paint_style()
+    svg_gradient_paint_style_add_color_stop_f32(gradient, 0.0, test_color(255, 0, 0, 255))
+    svg_gradient_paint_style_add_color_stop_f32(gradient, 1.0, test_color(0, 0, 255, 255))
+    svg_gradient_paint_style_set_spread_method(gradient, SvgGradientPaintStyleSpreadMethod.repeat)
+    let bounds = gfx.FloatRect(m_location = gfx.FloatPoint(m_x = 2.0, m_y = 0.0), m_size = gfx.FloatSize(m_width = 8.0, m_height = 2.0))
+    var shader = cpu_gradient_paint_style_shader(gradient, bounds)
+    defer cpu_shader_release(&shader)
+    match shader:
+        .gradient(g):
+            # Unpremultiplied sRGB (flags 0), the spread method's tile mode, placed at the bounds.
+            assert(not g.premul and g.tile_mode == CpuTileMode.repeat and not g.linear_to_srgb)
+            assert(g.local_matrix.tx == 2.0 and g.local_matrix.ty == 0.0)
+            assert(ak.vector_size(&g.stops) == 2)
+        _: trap("expected a gradient shader")
+
+    # Painted: t runs over [2, 10) horizontally, then repeats.
+    let canvas = cpu_canvas_create(12, 1)
+    defer cpu_canvas_release(canvas)
+    var path = cpu_rect_path(test_raster_rect(0.0, 0.0, 12.0, 1.0))
+    defer path.release()
+    cpu_canvas_fill_path_with_shader(canvas, &path, raster.FillRule.winding, true, &shader, 1.0)
+    expect_pixel(canvas, 2, 0, 0xffef0010)
+    expect_pixel(canvas, 9, 0, 0xff1000ef)
+    expect_pixel(canvas, 10, 0, 0xffef0010)
+    # Before the start the repeat comes round from the end.
+    expect_pixel(canvas, 1, 0, 0xff1000ef)
+
+test "cpu shaders: a solid default paint and a pattern":
+    test_cpu_shader_pattern()
+
+noinline func test_cpu_shader_pattern():
+    let canvas = cpu_canvas_create(4, 2)
+    defer cpu_canvas_release(canvas)
+    var path = cpu_rect_path(test_raster_rect(0.0, 0.0, 4.0, 1.0))
+    defer path.release()
+    # The default SkPaint is black; setAlphaf sets its alpha.
+    let black = cpu_default_shader()
+    cpu_canvas_fill_path_with_shader(canvas, &path, raster.FillRule.winding, true, &black, 0.5)
+    expect_pixel(canvas, 0, 0, 0x80000000)
+
+    var tile = raster.Pixmap.new_(2, 1) else trap("pixmap")
+    tile.pixels_mut()[0] = raster.PremultipliedColorU8.from_rgba(255, 0, 0, 255) else trap("color")
+    tile.pixels_mut()[1] = raster.PremultipliedColorU8.from_rgba(0, 255, 0, 255) else trap("color")
+    var pattern: CpuShader = .pattern(pixmap = tile, transform = raster.Transform.identity())
+    defer cpu_shader_release(&pattern)
+    var row = cpu_rect_path(test_raster_rect(0.0, 1.0, 4.0, 1.0))
+    defer row.release()
+    cpu_canvas_fill_path_with_shader(canvas, &row, raster.FillRule.winding, true, &pattern, 1.0)
+    expect_pixel(canvas, 0, 1, 0xffff0000)
+    expect_pixel(canvas, 1, 1, 0xff00ff00)
+    expect_pixel(canvas, 2, 1, 0xffff0000)
+    expect_pixel(canvas, 3, 1, 0xff00ff00)

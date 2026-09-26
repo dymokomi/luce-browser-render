@@ -41,13 +41,21 @@ struct CpuPath:
 func to_raster_path(path: const gfx.Path*) -> CpuPath?:
     trap("unported: seam to_raster_path (r10: gfx.Path as a raster.Path)")
 
-## Seam to regions r09 and r10 (LibGfx/TextLayout's GlyphRun::ensure_text_blob and
-## `cached_skia_text_blob`): the glyph outlines of `glyph_run`'s cached text blob, in blob
-## coordinates, the path SkCanvas::drawTextBlob fills: glyph i's outline at the font size
-## times the blob's scale, placed at (position.x * scale, (position.y + ascent) * scale).
-## None when the run has no blob or no outlines.
+## The glyph outlines of `glyph_run`'s cached text blob (LibGfx/TextLayout's
+## GlyphRun::ensure_text_blob and `cached_skia_text_blob`) in blob coordinates: the path
+## SkCanvas::drawTextBlob fills, glyph i's outline placed at (position.x, position.y + ascent)
+## times the blob's scale. None when the run has no outlines. The outlines come from
+## Path::glyph_run (web_fonts, regions r09 and r10), which places the glyphs exactly so at
+## scale 1.
+# FIXME: The blob's scale (the device pixels per CSS pixel the recorder passed to
+#        ensure_text_blob) lives in r09's CachedTextBlob; the CPU player needs it to scale the
+#        outlines. At 1, the only scale the test runner uses (DESIGN.md §6.1), nothing changes.
 func text_blob_path(glyph_run: const web_fonts.GlyphRun*) -> raster.Path?:
-    trap("unported: seam text_blob_path (r09/r10: a GlyphRun's cached text blob as a raster.Path)")
+    var path = gfx.Path(m_impl = none)
+    web_fonts.path_construct(&path, web_fonts.path_impl_create())
+    web_fonts.path_glyph_run(&path, *glyph_run)
+    let outlines = to_raster_path(&path) else return none
+    return outlines.path
 
 ## Seam to region r10 (LibGfx/Filter, replacing SkiaUtils' `to_skia_image_filter`): runs
 ## the image filter `filter` over `pixmap` in place.
