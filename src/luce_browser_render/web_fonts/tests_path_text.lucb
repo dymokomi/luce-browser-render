@@ -93,7 +93,9 @@ test "path text: Path::place_text_along":
         gfx.path_move_to(&curve, test_path_text_point(10.0, 80.0))
         gfx.path_cubic_bezier_curve_to(&curve, test_path_text_point(40.0, 10.0), test_path_text_point(90.0, 150.0), test_path_text_point(140.0, 60.0))
         let along_curve = path_place_text_along_utf8_view(&curve, test_path_text_utf8("Along a curve"), serenity)
-        test_path_text_expect("place_text_along utf8 SerenitySans 20", &along_curve, TestPathTextExpected(length = 2506, digest = 17076763671110205307, prefix = "M5.903513 67.874672L8.3381538 62.458279L2.114774", bounds = [0xc09e2ca0, 0x423099ab, 0x430ee7a7, 0x42424a39]))
+        # each glyph's placement turns by the curve's angle, which the C library's atan2, sin and
+        # cos compute: glibc's last bits give another path than the reference build's macOS
+        test_path_text_expect("place_text_along utf8 SerenitySans 20", &along_curve, TestPathTextExpected(length = 2506, digest = 17076763671110205307 if os.macos else 4680078089004123668, prefix = "M5.903513 67.874672L8.3381538 62.458279L2.114774", bounds = [0xc09e2ca0, 0x423099ab, 0x430ee7a7, 0x42424a39]))
 
         let lato = typeface_font(test_typeface("Lato-Bold.ttf"), 13.5)
         var line: gfx.Path
