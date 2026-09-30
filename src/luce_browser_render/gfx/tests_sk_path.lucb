@@ -70,22 +70,107 @@ func test_sk_text(string: const ak.String*) -> str:
 func test_sk_check_svg(this: const TestSkGfxPath*, expected: str):
     let svg = sk_parse_path_to_svg_string(&this.path)
     let text = test_sk_text(&svg)
-    if text != expected:
+    if text != expected and not test_sk_svg_within_libm_ulps(text, expected):
         # a trap's message reaches stderr even when buffered stdout is lost with the process
         trap(f"svg: {text}\nexpected: {expected}")
 
-# PathImplSkia::bounding_box: x, y, width, height as bits.
+## Whether two SVG path strings have the same commands and numbers whose f32 values are at most
+## libm_ulps apart (tests_color_1): an arc's points come from the C library's atan2, sin and
+## cos, whose last bits differ between C libraries, so only macOS, where the expected strings
+## were printed, compares exactly (libm_ulps is 0 there).
+func test_sk_svg_within_libm_ulps(text: str, expected: str) -> bool:
+    let a = text.bytes
+    let b = expected.bytes
+    var i: usize = 0
+    var j: usize = 0
+    while i < a.length and j < b.length:
+        if test_sk_starts_number(a[i]) and test_sk_starts_number(b[j]):
+            let end_a = test_sk_number_end(a, i)
+            let end_b = test_sk_number_end(b, j)
+            if not test_sk_within_libm_ulps((f32)test_sk_decimal(a[i..<end_a]), (f32)test_sk_decimal(b[j..<end_b])):
+                return false
+            i = end_a
+            j = end_b
+        elif a[i] == b[j]:
+            i += 1
+            j += 1
+        else:
+            return false
+    return i == a.length and j == b.length
+
+func test_sk_starts_number(byte: u8) -> bool:
+    return byte == '-' or byte == '.' or (byte >= '0' and byte <= '9')
+
+## The end of the number `%.8g` wrote at `start`: digits, a sign, a point, an exponent.
+func test_sk_number_end(text: const u8[], start: usize) -> usize:
+    var end = start
+    while end < text.length and (test_sk_starts_number(text[end]) or text[end] == 'e' or text[end] == '+'):
+        end += 1
+    return end
+
+## A `%.8g` number's value, to well within an f32's precision.
+func test_sk_decimal(text: const u8[]) -> f64:
+    var i: usize = 0
+    var negative = false
+    if i < text.length and text[i] == '-':
+        negative = true
+        i += 1
+    var value: f64 = 0.0
+    while i < text.length and text[i] >= '0' and text[i] <= '9':
+        value = value * 10.0 + (f64)(text[i] - '0')
+        i += 1
+    if i < text.length and text[i] == '.':
+        i += 1
+        var scale: f64 = 0.1
+        while i < text.length and text[i] >= '0' and text[i] <= '9':
+            value += (f64)(text[i] - '0') * scale
+            scale /= 10.0
+            i += 1
+    if i < text.length and text[i] == 'e':
+        i += 1
+        var exponent_negative = false
+        if i < text.length and (text[i] == '-' or text[i] == '+'):
+            exponent_negative = text[i] == '-'
+            i += 1
+        var exponent: i32 = 0
+        while i < text.length and text[i] >= '0' and text[i] <= '9':
+            exponent = exponent * 10 + (i32)(text[i] - '0')
+            i += 1
+        while exponent > 0:
+            value = value / 10.0 if exponent_negative else value * 10.0
+            exponent -= 1
+    return -value if negative else value
+
+# PathImplSkia::bounding_box: x, y, width, height as bits, within libm_ulps (an arc's points
+# come from the C library's atan2, sin and cos).
 func test_sk_check_bounds(this: const TestSkGfxPath*, x: u32, y: u32, width: u32, height: u32):
     let bounds = sk_path_get_bounds(&this.path)
-    assert(bounds.left.bits() == x)
-    assert(bounds.top.bits() == y)
-    assert((bounds.right - bounds.left).bits() == width)
-    assert((bounds.bottom - bounds.top).bits() == height)
+    assert(test_sk_bits_within_libm_ulps(bounds.left, x))
+    assert(test_sk_bits_within_libm_ulps(bounds.top, y))
+    assert(test_sk_bits_within_libm_ulps(bounds.right - bounds.left, width))
+    assert(test_sk_bits_within_libm_ulps(bounds.bottom - bounds.top, height))
 
 func test_sk_check_last_point(this: const TestSkGfxPath*, x: u32, y: u32):
     let last = test_sk_last_point(this)
-    assert(last.x.bits() == x)
-    assert(last.y.bits() == y)
+    assert(test_sk_bits_within_libm_ulps(last.x, x))
+    assert(test_sk_bits_within_libm_ulps(last.y, y))
+
+## Whether `value`'s bits are those expected or, of the same sign, at most libm_ulps apart.
+func test_sk_bits_within_libm_ulps(value: f32, expected: u32) -> bool:
+    return test_sk_within_libm_ulps(value, f32.bits(expected))
+
+## Whether `value` is `expected`, or of the same sign at most libm_ulps apart, or both within
+## libm_ulps of 1's unit in the last place of 0: a coordinate or a tangent's component that
+## is 0 in one C library can be a last-bit residue, of either sign, in another.
+func test_sk_within_libm_ulps(value: f32, expected: f32) -> bool:
+    let bits = value.bits()
+    let wanted = expected.bits()
+    if bits == wanted:
+        return true
+    if (bits >> 31) == (wanted >> 31) and within_libm_ulps((u64)bits, (u64)wanted):
+        return true
+    let near_zero = (f32)libm_ulps * 1.1920929e-7
+    return math32.abs(value) <= near_zero and math32.abs(expected) <= near_zero
 
 # PathImplSkia::contains under nonzero and even-odd.
 func test_sk_check_contains(this: const TestSkGfxPath*, x: f32, y: f32, nonzero: bool, even_odd: bool):
@@ -180,12 +265,13 @@ test "sk conic: quads":
 
 # mark: Path measure ============================================================================
 
-# SkPathMeasure::getPosTan(distance) against the donor's answer (all as bits).
+# SkPathMeasure::getPosTan(distance) against the donor's answer (all as bits, within
+# libm_ulps: the measured segments come from arcs and square roots of the C library's).
 func test_sk_check_pos_tan(m: const SkPathMeasure*, distance: u32, ok: bool, px: u32, py: u32, tx: u32, ty: u32):
     if let result = sk_path_measure_get_pos_tan(m, f32.bits(distance)):
         let (pos, tangent) = result
         assert(ok)
-        assert(pos.x.bits() == px and pos.y.bits() == py)
-        assert(tangent.x.bits() == tx and tangent.y.bits() == ty)
+        if not (test_sk_bits_within_libm_ulps(pos.x, px) and test_sk_bits_within_libm_ulps(pos.y, py) and test_sk_bits_within_libm_ulps(tangent.x, tx) and test_sk_bits_within_libm_ulps(tangent.y, ty)):
+            trap(f"pos_tan at {hex(distance)}: {hex(pos.x.bits())} {hex(pos.y.bits())} {hex(tangent.x.bits())} {hex(tangent.y.bits())}, expected {hex(px)} {hex(py)} {hex(tx)} {hex(ty)}")
     else:
         assert(not ok)
