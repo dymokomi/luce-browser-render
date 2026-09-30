@@ -29,9 +29,6 @@ func test_visual_context_tree() -> AccumulatedVisualContextTree*:
     return tree
 
 test "visual context tree: the sentinel":
-    test_visual_context_tree_sentinel()
-
-noinline func test_visual_context_tree_sentinel():
     let tree = accumulated_visual_context_tree_create()
     assert(ak.vector_size(&tree.m_nodes) == 1)
     let sentinel = accumulated_visual_context_tree_node_at(tree, 0)
@@ -43,9 +40,6 @@ noinline func test_visual_context_tree_sentinel():
     assert(accumulated_visual_context_tree_find_common_ancestor(tree, 0, 0) == 0)
 
 test "visual context tree: append, depths and common ancestors":
-    test_visual_context_tree_append()
-
-noinline func test_visual_context_tree_append():
     let tree = test_visual_context_tree()
     let p = accumulated_visual_context_tree_append(tree, .perspective_data(value = PerspectiveData(matrix = test_identity_matrix())), 3)
     let e2 = accumulated_visual_context_tree_append(tree, .effects_data(value = EffectsData(opacity = 1.0, blend_mode = gfx.CompositingAndBlendingOperator.normal)), p)
@@ -67,9 +61,6 @@ noinline func test_visual_context_tree_append():
         assert(*ak.vector_at(&chain, i) == (u64)(5 - i))
 
 test "visual context tree: an empty clip empties every descendant":
-    test_visual_context_tree_empty_clip_inherited()
-
-noinline func test_visual_context_tree_empty_clip_inherited():
     let tree = test_visual_context_tree()
     # A node whose effective clip is empty (what appending an empty ClipData makes).
     ak.vector_append_t(&tree.m_nodes, AccumulatedVisualContextNode(data = .effects_data(value = EffectsData(opacity = 1.0, blend_mode = gfx.CompositingAndBlendingOperator.normal)),
@@ -86,9 +77,6 @@ noinline func test_visual_context_tree_empty_clip_inherited():
     assert(ak.vector_size(display_list_commands(display_list_)) == 2)
 
 test "visual context tree: dump (scroll, effects, perspective)":
-    test_visual_context_tree_dump()
-
-noinline func test_visual_context_tree_dump():
     let tree = test_visual_context_tree()
     let p = accumulated_visual_context_tree_append(tree, .perspective_data(value = PerspectiveData(matrix = test_identity_matrix())), 3)
     let e2 = accumulated_visual_context_tree_append(tree, .effects_data(value = EffectsData(opacity = 1.0, blend_mode = gfx.CompositingAndBlendingOperator.normal)), p)
@@ -106,9 +94,6 @@ noinline func test_visual_context_tree_dump():
     expect_text(test_builder_text(&builder), "effects=[]")
 
 test "visual context tree: dump, clips and hit testing (gated on r08)":
-    test_visual_context_tree_gated()
-
-noinline func test_visual_context_tree_gated():
     if not gfx_geometry_is_ported:
         return
     let tree = test_visual_context_tree()
@@ -156,9 +141,6 @@ func test_command_loop_tree() -> AccumulatedVisualContextTree*:
     return tree
 
 test "command loop: context switches around commands without bounds":
-    test_command_loop_context_switches()
-
-noinline func test_command_loop_context_switches():
     let tree = test_command_loop_tree()
     let display_list_ = display_list_create(tree)
     discard(display_list_append(display_list_, .save(value = Save()), 0))
@@ -177,9 +159,6 @@ noinline func test_command_loop_context_switches():
     expect_text(test_builder_text(&player.log), "save;apply_effects(0.5);save;apply_transform;save;add_clip_rect;translate(1,2);restore;save;add_rounded_rect_clip;save_layer;restore;restore;restore;save;apply_transform;restore;restore;apply_effects(0.75);restore;apply_effects(0.5);restore;restore;flush;")
 
 test "command loop: the donor's recorded display list (gated on r08)":
-    test_command_loop_recorded()
-
-noinline func test_command_loop_recorded():
     if not gfx_geometry_is_ported:
         return
     let tree = test_command_loop_tree()
@@ -230,9 +209,6 @@ noinline func test_command_loop_recorded():
 # mark: Commands ===============================================================================
 
 test "commands: dumps and bounding rects (gated on r08)":
-    test_commands_gated()
-
-noinline func test_commands_gated():
     if not gfx_geometry_is_ported:
         return
     var builder = ak.string_builder_new()
@@ -261,9 +237,6 @@ noinline func test_commands_gated():
     assert(draw_line_bounding_rect(&diagonal) == test_rect(0, 1, 7, 10))
 
 test "commands: bounds and clips of the command variant":
-    test_commands_variant()
-
-noinline func test_commands_variant():
     let fill: DisplayListCommand = .fill_rect(value = FillRect(rect = test_rect(1, 2, 3, 4), color = test_color(1, 2, 3, 4)))
     assert(command_bounding_rectangle(&fill) == test_rect(1, 2, 3, 4))
     assert(not command_is_clip(&fill))
@@ -312,9 +285,6 @@ func test_command_names(display_list_: const DisplayList*) -> ak.StringBuilder:
     return builder
 
 test "recorder: nesting, capture, replay and masks":
-    test_recorder_capture_and_masks()
-
-noinline func test_recorder_capture_and_masks():
     let tree = accumulated_visual_context_tree_create()
     let display_list_ = display_list_create(tree)
     var recorder = display_list_recorder_new(display_list_)
@@ -346,9 +316,6 @@ noinline func test_recorder_capture_and_masks():
     expect_text(test_builder_text(&names), "Save Translate SaveLayer ApplyEffects(0.5,1,-1) Translate SaveLayer ApplyEffects(0.5,1,-1) Save AddClipRect SaveLayer Save AddClipRect SaveLayer ApplyEffects(1,22,1) PaintNestedDisplayList Restore Restore Restore ApplyEffects(1,22,-1) PaintNestedDisplayList Restore Restore Restore ")
 
 test "recorder: an abandoned capture ends":
-    test_recorder_abandoned_capture()
-
-noinline func test_recorder_abandoned_capture():
     let display_list_ = display_list_create(accumulated_visual_context_tree_create())
     var recorder = display_list_recorder_new(display_list_)
     var capture = display_list_recorder_begin_command_capture(&recorder)
@@ -362,9 +329,6 @@ noinline func test_recorder_abandoned_capture():
     assert(ak.vector_size(display_list_commands(display_list_)) == 2)
 
 test "recorder: the state saver":
-    test_recorder_state_saver()
-
-noinline func test_recorder_state_saver():
     let display_list_ = display_list_create(accumulated_visual_context_tree_create())
     var recorder = display_list_recorder_new(display_list_)
     var saver = display_list_recorder_state_saver_new(&recorder)
@@ -375,9 +339,6 @@ noinline func test_recorder_state_saver():
     expect_text(test_builder_text(&names), "Save Restore ")
 
 test "recorder: commands are dropped under an empty clip":
-    test_recorder_empty_clip()
-
-noinline func test_recorder_empty_clip():
     let tree = accumulated_visual_context_tree_create()
     ak.vector_append_t(&tree.m_nodes, AccumulatedVisualContextNode(data = .clip_data(value = ClipData(rect = test_rect(0, 0, 0, 0))), parent_index = 0, depth = 1, has_empty_effective_clip = true))
     let display_list_ = display_list_create(tree)
@@ -392,9 +353,6 @@ noinline func test_recorder_empty_clip():
 # mark: Borders and radii ======================================================================
 
 test "corner radii: operator bool and has_any_radius":
-    test_corner_radii_bool()
-
-noinline func test_corner_radii_bool():
     let both = CornerRadius(horizontal_radius = 2, vertical_radius = 3)
     let one = CornerRadius(horizontal_radius = 2, vertical_radius = 0)
     assert(corner_radius_to_bool(&both))
@@ -407,7 +365,13 @@ noinline func test_corner_radii_bool():
     assert(corner_radii_has_any_radius(&radii))
 
 test "corner radii: adjust_corners_for_spread_distance":
-    test_corner_radii_spread()
+    # The donor's results.
+    assert(test_spread_radii(-7) == [-2, 0, -1, 0, 1, 1, -2, 5])
+    assert(test_spread_radii(-3) == [1, 3, -1, 0, 5, 5, 0, 9])
+    assert(test_spread_radii(0) == [4, 6, 1, 0, 8, 8, 3, 12])
+    assert(test_spread_radii(2) == [6, 8, 2, 0, 10, 10, 5, 14])
+    assert(test_spread_radii(5) == [8, 11, 3, 0, 13, 13, 7, 17])
+    assert(test_spread_radii(10) == [11, 15, 3, 0, 17, 17, 9, 22])
 
 ## CornerRadii { { 4, 6 }, { 1, 0 }, { 8, 8 }, { 3, 12 } } adjusted by `spread`.
 func test_spread_radii(spread: i32) -> i32[8]:
@@ -417,19 +381,7 @@ func test_spread_radii(spread: i32) -> i32[8]:
     return [radii.top_left.horizontal_radius, radii.top_left.vertical_radius, radii.top_right.horizontal_radius, radii.top_right.vertical_radius,
             radii.bottom_right.horizontal_radius, radii.bottom_right.vertical_radius, radii.bottom_left.horizontal_radius, radii.bottom_left.vertical_radius]
 
-noinline func test_corner_radii_spread():
-    # The donor's results.
-    assert(test_spread_radii(-7) == [-2, 0, -1, 0, 1, 1, -2, 5])
-    assert(test_spread_radii(-3) == [1, 3, -1, 0, 5, 5, 0, 9])
-    assert(test_spread_radii(0) == [4, 6, 1, 0, 8, 8, 3, 12])
-    assert(test_spread_radii(2) == [6, 8, 2, 0, 10, 10, 5, 14])
-    assert(test_spread_radii(5) == [8, 11, 3, 0, 13, 13, 7, 17])
-    assert(test_spread_radii(10) == [11, 15, 3, 0, 17, 17, 9, 22])
-
 test "corner radii: contains (gated on r08)":
-    test_corner_radii_contains()
-
-noinline func test_corner_radii_contains():
     if not gfx_geometry_is_ported:
         return
     let radii = CornerRadii(top_left = CornerRadius(horizontal_radius = 5, vertical_radius = 5), top_right = CornerRadius(horizontal_radius = 0, vertical_radius = 0),
@@ -442,9 +394,6 @@ noinline func test_corner_radii_contains():
         assert(corner_radii_contains(&radii, points[i], rect) == expected[i])
 
 test "borders: for_edge":
-    test_borders_for_edge()
-
-noinline func test_borders_for_edge():
     var borders: BordersDataDevicePixels
     borders_data_device_pixels_for_edge(&borders, BorderEdge.top).width = 1
     borders_data_device_pixels_for_edge(&borders, BorderEdge.right).width = 2

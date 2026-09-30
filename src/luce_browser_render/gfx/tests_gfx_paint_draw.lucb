@@ -13,9 +13,6 @@
 #       These go through region r08's functions and run once tests_gfx_paint_r08_is_ported
 #       is set, except the filter graph tests.
 #
-#       Each test's body is a noinline function the test block calls (# workaround:
-#       compiler-issues/ranges_facts_cubic).
-#
 #==============================================================================================
 
 # mark: Helpers ================================================================================
@@ -34,9 +31,6 @@ func test_gfx_paint_point(x: f32, y: f32) -> FloatPoint:
 # mark: Bitmap::scaled =========================================================================
 
 test "gfx paint: bitmap scaled":
-    test_gfx_paint_bitmap_scaled()
-
-noinline func test_gfx_paint_bitmap_scaled():
     if not tests_gfx_paint_r08_is_ported:
         return
     let source = bitmap_create_alpha_type(BitmapFormat.bgra8888, AlphaType.premultiplied, IntSize(m_width = 4, m_height = 4)) else trap("create")
@@ -79,9 +73,6 @@ noinline func test_gfx_paint_bitmap_scaled():
 # mark: Painter ================================================================================
 
 test "gfx paint: painter fill_rect and clear_rect":
-    test_gfx_paint_painter_rects()
-
-noinline func test_gfx_paint_painter_rects():
     if not tests_gfx_paint_r08_is_ported:
         return
     # Opaque colors: no blending arithmetic.
@@ -123,9 +114,6 @@ noinline func test_gfx_paint_painter_rects():
     ])
 
 test "gfx paint: painter clear_rect":
-    test_gfx_paint_painter_clear_rect()
-
-noinline func test_gfx_paint_painter_clear_rect():
     if not tests_gfx_paint_r08_is_ported:
         return
     let (cleared, clearing) = test_gfx_paint_canvas(BitmapFormat.bgra8888)
@@ -143,9 +131,6 @@ noinline func test_gfx_paint_painter_clear_rect():
     ])
 
 test "gfx paint: painter fill_path and stroke_path":
-    test_gfx_paint_painter_paths()
-
-noinline func test_gfx_paint_painter_paths():
     if not tests_gfx_paint_r08_is_ported:
         return
     test_gfx_paint_painter_stroke()
@@ -189,9 +174,6 @@ func test_gfx_paint_painter_stroke():
     ])
 
 test "gfx paint: painter clip, save, restore, reset":
-    test_gfx_paint_painter_clip()
-
-noinline func test_gfx_paint_painter_clip():
     if not tests_gfx_paint_r08_is_ported:
         return
     let (bitmap, painter) = test_gfx_paint_canvas(BitmapFormat.bgra8888)
@@ -220,9 +202,6 @@ noinline func test_gfx_paint_painter_clip():
     ])
 
 test "gfx paint: painter draw_bitmap":
-    test_gfx_paint_painter_draw_bitmap()
-
-noinline func test_gfx_paint_painter_draw_bitmap():
     if not tests_gfx_paint_r08_is_ported:
         return
     let (bitmap, painter) = test_gfx_paint_canvas(BitmapFormat.bgra8888)
@@ -245,9 +224,6 @@ noinline func test_gfx_paint_painter_draw_bitmap():
 # mark: PaintingSurface ========================================================================
 
 test "gfx paint: painting surface read and snapshot":
-    test_gfx_paint_painting_surface()
-
-noinline func test_gfx_paint_painting_surface():
     if not tests_gfx_paint_r08_is_ported:
         return
     let (bitmap, painter) = test_gfx_paint_canvas(BitmapFormat.rgba8888)
@@ -270,9 +246,6 @@ noinline func test_gfx_paint_painting_surface():
 # mark: Path ===================================================================================
 
 test "gfx paint: path":
-    test_gfx_paint_path()
-
-noinline func test_gfx_paint_path():
     if not tests_gfx_paint_r08_is_ported:
         return
     # A zero Path is the empty path PathImpl::create makes.
@@ -344,9 +317,6 @@ func test_gfx_paint_filter_matrix(filter: Filter) -> (f32[20], bool):
         _: trap("not a color filter")
 
 test "gfx paint: filter graphs":
-    test_gfx_paint_filters()
-
-noinline func test_gfx_paint_filters():
     # Filter::color(Saturate, 0.25): the donor's matrix, clamp off.
     let (saturate, saturate_clamp) = test_gfx_paint_filter_matrix(filter_color(ColorFilterType.saturate, 0.25))
     assert(not saturate_clamp)

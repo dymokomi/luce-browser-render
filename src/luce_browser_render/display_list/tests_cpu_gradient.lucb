@@ -30,9 +30,6 @@ func test_gradient_pixel(prepared: const CpuPreparedGradient*, t: f32) -> u32:
     return ((u32)p.alpha() << 24) | ((u32)p.red() << 16) | ((u32)p.green() << 8) | (u32)p.blue()
 
 test "cpu gradient: missing end stops are added and positions pinned":
-    test_cpu_gradient_normalization()
-
-noinline func test_cpu_gradient_normalization():
     let stops: (f32, u32)[3] = [(0.5, 0xff0000ff), (0.3, 0x00ff00ff), (1.2, 0x0000ffff)]
     let gradient = test_gradient(stops, CpuColorSpace.srgb, false)
     let prepared = cpu_gradient_prepare(&gradient)
@@ -43,9 +40,6 @@ noinline func test_cpu_gradient_normalization():
     assert(colors[0][0] == 1.0 and colors[1][0] == 1.0 and colors[2][1] == 1.0 and colors[3][2] == 1.0 and colors[4][2] == 1.0)
 
 test "cpu gradient: interpolation and hard stops":
-    test_cpu_gradient_interpolation()
-
-noinline func test_cpu_gradient_interpolation():
     let stops: (f32, u32)[4] = [(0.0, 0xff0000ff), (0.5, 0x0000ffff), (0.5, 0x00ff00ff), (1.0, 0x00ff00ff)]
     let gradient = test_gradient(stops, CpuColorSpace.srgb, false)
     let prepared = cpu_gradient_prepare(&gradient)
@@ -57,9 +51,6 @@ noinline func test_cpu_gradient_interpolation():
     assert(test_gradient_pixel(&prepared, 1.0) == 0xff00ff00)
 
 test "cpu gradient: premultiplied and unpremultiplied interpolation":
-    test_cpu_gradient_premul()
-
-noinline func test_cpu_gradient_premul():
     let stops: (f32, u32)[2] = [(0.0, 0xff0000ff), (1.0, 0x0000ff00)]
     let premul = test_gradient(stops, CpuColorSpace.srgb, true)
     let prepared_premul = cpu_gradient_prepare(&premul)
@@ -70,9 +61,6 @@ noinline func test_cpu_gradient_premul():
     assert(test_gradient_pixel(&prepared_plain, 0.5) == 0x80400040)
 
 test "cpu gradient: tile modes":
-    test_cpu_gradient_tiling()
-
-noinline func test_cpu_gradient_tiling():
     assert(cpu_tile(-0.25, CpuTileMode.clamp) == 0.0 and cpu_tile(1.5, CpuTileMode.clamp) == 1.0)
     assert(cpu_tile(1.25, CpuTileMode.repeat) == 0.25 and cpu_tile(-0.25, CpuTileMode.repeat) == 0.75)
     assert(cpu_tile(1.25, CpuTileMode.mirror) == 0.75 and cpu_tile(-0.25, CpuTileMode.mirror) == 0.25 and cpu_tile(2.25, CpuTileMode.mirror) == 0.25)
@@ -80,9 +68,6 @@ noinline func test_cpu_gradient_tiling():
     assert(cpu_tile(math32.nan, CpuTileMode.clamp) == none)
 
 test "cpu gradient: t of each geometry":
-    test_cpu_gradient_geometry()
-
-noinline func test_cpu_gradient_geometry():
     let linear: CpuGradientGeometry = .linear(x0 = 2.0, y0 = 0.0, x1 = 6.0, y1 = 0.0)
     assert(cpu_gradient_t(&linear, 4.0, 7.0) == 0.5)
     let radial: CpuGradientGeometry = .radial(cx = 1.0, cy = 1.0, radius = 10.0)
@@ -106,9 +91,6 @@ noinline func test_cpu_gradient_geometry():
     assert(not cpu_gradient_is_degenerate(&linear))
 
 test "cpu gradient: a degenerate gradient":
-    test_cpu_gradient_degenerate()
-
-noinline func test_cpu_gradient_degenerate():
     let stops: (f32, u32)[2] = [(0.0, 0xff0000ff), (1.0, 0x0000ffff)]
     let gradient = test_gradient(stops, CpuColorSpace.srgb, false)
     let prepared = cpu_gradient_prepare(&gradient)
@@ -119,7 +101,14 @@ noinline func test_cpu_gradient_degenerate():
     assert(cpu_degenerate_color(&prepared, CpuTileMode.decal) == none)
 
 test "cpu gradient: hue methods":
-    test_cpu_gradient_hue_methods()
+    let (s1, s2) = test_prepared_hues(CpuHueMethod.shorter)
+    assert(near(s1, 349.88, 0.1) and near(s2, 370.12, 0.1))
+    let (l1, l2) = test_prepared_hues(CpuHueMethod.longer)
+    assert(near(l1, 349.88, 0.1) and near(l2, 10.12, 0.1))
+    let (i1, i2) = test_prepared_hues(CpuHueMethod.increasing)
+    assert(near(i1, 349.88, 0.1) and near(i2, 370.12, 0.1))
+    let (d1, d2) = test_prepared_hues(CpuHueMethod.decreasing)
+    assert(near(d1, 349.88, 0.1) and near(d2, 10.12, 0.1))
 
 ## The prepared hues of HSL stops of hues 350 and 10 (fully saturated) under `method`.
 func test_prepared_hues(method: CpuHueMethod) -> (f32, f32):
@@ -131,20 +120,7 @@ func test_prepared_hues(method: CpuHueMethod) -> (f32, f32):
     let colors = ak.vector_span_const(&prepared.colors)
     return (colors[0][0], colors[1][0])
 
-noinline func test_cpu_gradient_hue_methods():
-    let (s1, s2) = test_prepared_hues(CpuHueMethod.shorter)
-    assert(near(s1, 349.88, 0.1) and near(s2, 370.12, 0.1))
-    let (l1, l2) = test_prepared_hues(CpuHueMethod.longer)
-    assert(near(l1, 349.88, 0.1) and near(l2, 10.12, 0.1))
-    let (i1, i2) = test_prepared_hues(CpuHueMethod.increasing)
-    assert(near(i1, 349.88, 0.1) and near(i2, 370.12, 0.1))
-    let (d1, d2) = test_prepared_hues(CpuHueMethod.decreasing)
-    assert(near(d1, 349.88, 0.1) and near(d2, 10.12, 0.1))
-
 test "cpu color spaces: sRGB red in Lab, OkLab and the polar spaces":
-    test_cpu_color_spaces_red()
-
-noinline func test_cpu_color_spaces_red():
     let red: CpuColor4 = [1.0, 0.0, 0.0, 1.0]
     # CSS Color 4: lab(54.29 80.8 69.89), oklab(0.62796 0.22486 0.12585), oklch(0.62796 0.25768 29.2339).
     let lab = cpu_color_from_srgb(CpuColorSpace.lab, red)
@@ -161,9 +137,6 @@ noinline func test_cpu_color_spaces_red():
     assert(near(linear[0], 0.21404, 0.00001) and linear[2] == 1.0)
 
 test "cpu color spaces: every space round-trips":
-    test_cpu_color_spaces_round_trip()
-
-noinline func test_cpu_color_spaces_round_trip():
     let spaces: CpuColorSpace[12] = [CpuColorSpace.srgb, CpuColorSpace.srgb_linear, CpuColorSpace.lab, CpuColorSpace.oklab, CpuColorSpace.display_p3,
                                      CpuColorSpace.a98_rgb, CpuColorSpace.prophoto_rgb, CpuColorSpace.rec2020, CpuColorSpace.hsl, CpuColorSpace.hwb, CpuColorSpace.lch, CpuColorSpace.oklch]
     let colors: CpuColor4[4] = [[0.2, 0.4, 0.6, 1.0], [1.0, 1.0, 1.0, 0.5], [0.9, 0.1, 0.05, 1.0], [0.0, 0.7, 0.3, 0.25]]
@@ -176,9 +149,6 @@ noinline func test_cpu_color_spaces_round_trip():
                     trap("round trip")
 
 test "cpu shaders: an SVG linear gradient paint style":
-    test_cpu_svg_gradient_shader()
-
-noinline func test_cpu_svg_gradient_shader():
     let style = svg_linear_gradient_paint_style_create(gfx.FloatPoint(m_x = 0.0, m_y = 0.0), gfx.FloatPoint(m_x = 8.0, m_y = 0.0))
     let gradient = style.svg_gradient_paint_style()
     svg_gradient_paint_style_add_color_stop_f32(gradient, 0.0, test_color(255, 0, 0, 255))
@@ -208,9 +178,6 @@ noinline func test_cpu_svg_gradient_shader():
     expect_pixel(canvas, 1, 0, 0xff1000ef)
 
 test "cpu shaders: a solid default paint and a pattern":
-    test_cpu_shader_pattern()
-
-noinline func test_cpu_shader_pattern():
     let canvas = cpu_canvas_create(4, 2)
     defer cpu_canvas_release(canvas)
     var path = cpu_rect_path(test_raster_rect(0.0, 0.0, 4.0, 1.0))

@@ -35,9 +35,6 @@ func test_fill_everything(canvas: CpuCanvas*, color: gfx.Color):
 # mark: States and clips =======================================================================
 
 test "cpu canvas: save, restore and the save count":
-    test_cpu_canvas_save_restore()
-
-noinline func test_cpu_canvas_save_restore():
     let canvas = cpu_canvas_create(8, 8)
     defer cpu_canvas_release(canvas)
     assert(cpu_canvas_save_count(canvas) == 1)
@@ -55,9 +52,6 @@ noinline func test_cpu_canvas_save_restore():
     assert(cpu_canvas_save_count(canvas) == 1)
 
 test "cpu canvas: an integer clip narrows the bounds, restore widens them":
-    test_cpu_canvas_integer_clip()
-
-noinline func test_cpu_canvas_integer_clip():
     let canvas = cpu_canvas_create(8, 8)
     defer cpu_canvas_release(canvas)
     assert(cpu_canvas_draw_mask(canvas) == none)
@@ -77,9 +71,6 @@ noinline func test_cpu_canvas_integer_clip():
     expect_pixel(canvas, 3, 5, 0)
 
 test "cpu canvas: an anti-aliased fractional clip":
-    test_cpu_canvas_fractional_clip()
-
-noinline func test_cpu_canvas_fractional_clip():
     let canvas = cpu_canvas_create(8, 8)
     defer cpu_canvas_release(canvas)
     cpu_canvas_clip_rect(canvas, test_raster_rect(1.5, 1.0, 3.0, 4.0), true)
@@ -94,9 +85,6 @@ noinline func test_cpu_canvas_fractional_clip():
     expect_pixel(canvas, 2, 0, 0)
 
 test "cpu canvas: an empty clip draws nothing and rejects everything":
-    test_cpu_canvas_empty_clip()
-
-noinline func test_cpu_canvas_empty_clip():
     let canvas = cpu_canvas_create(8, 8)
     defer cpu_canvas_release(canvas)
     cpu_canvas_save(canvas)
@@ -111,9 +99,6 @@ noinline func test_cpu_canvas_empty_clip():
     assert(not cpu_canvas_quick_reject(canvas, test_raster_rect(0.0, 0.0, 8.0, 8.0)))
 
 test "cpu canvas: a difference clip keeps the outside":
-    test_cpu_canvas_difference_clip()
-
-noinline func test_cpu_canvas_difference_clip():
     let canvas = cpu_canvas_create(8, 8)
     defer cpu_canvas_release(canvas)
     var path = cpu_rect_path(test_raster_rect(2.0, 2.0, 4.0, 4.0))
@@ -125,9 +110,6 @@ noinline func test_cpu_canvas_difference_clip():
     expect_pixel(canvas, 6, 6, 0xff00ff00)
 
 test "cpu canvas: quick reject outsets the clip by one pixel":
-    test_cpu_canvas_quick_reject()
-
-noinline func test_cpu_canvas_quick_reject():
     let canvas = cpu_canvas_create(16, 16)
     defer cpu_canvas_release(canvas)
     cpu_canvas_clip_rect(canvas, test_raster_rect(4.0, 4.0, 4.0, 4.0), true)
@@ -144,9 +126,6 @@ noinline func test_cpu_canvas_quick_reject():
 # mark: Layers =================================================================================
 
 test "cpu canvas: a layer's opacity and the clip it is composited through":
-    test_cpu_canvas_layer_opacity()
-
-noinline func test_cpu_canvas_layer_opacity():
     let canvas = cpu_canvas_create(8, 8)
     defer cpu_canvas_release(canvas)
     cpu_canvas_save(canvas)
@@ -160,9 +139,6 @@ noinline func test_cpu_canvas_layer_opacity():
     expect_pixel(canvas, 5, 1, 0)
 
 test "cpu canvas: the luminance color filter":
-    test_cpu_canvas_luminance()
-
-noinline func test_cpu_canvas_luminance():
     var pixmap = raster.Pixmap.new_(3, 1) else trap("pixmap")
     defer pixmap.release()
     let pixels = pixmap.pixels_mut()
@@ -178,9 +154,6 @@ noinline func test_cpu_canvas_luminance():
     assert(out[2].alpha() == 46)
 
 test "cpu canvas: plus-darker":
-    test_cpu_canvas_plus_darker()
-
-noinline func test_cpu_canvas_plus_darker():
     var target = raster.Pixmap.new_(1, 1) else trap("pixmap")
     defer target.release()
     var source = raster.Pixmap.new_(1, 1) else trap("pixmap")
@@ -198,9 +171,6 @@ noinline func test_cpu_canvas_plus_darker():
 # mark: Blur ===================================================================================
 
 test "cpu blur: box widths":
-    test_cpu_blur_box_widths()
-
-noinline func test_cpu_blur_box_widths():
     assert(cpu_blur_box_width(0.0) == 0)
     assert(cpu_blur_box_width(0.2) == 0)
     assert(cpu_blur_box_width(1.0) == 2)
@@ -209,9 +179,6 @@ noinline func test_cpu_blur_box_widths():
     assert(cpu_blur_box_width(10.0) == 19)
 
 test "cpu blur: a point spreads symmetrically and keeps its weight":
-    test_cpu_blur_point()
-
-noinline func test_cpu_blur_point():
     var mask = raster.Mask.new_(21, 21) else trap("mask")
     defer mask.release()
     mask.data_mut()[10 * 21 + 10] = 255
@@ -229,9 +196,6 @@ noinline func test_cpu_blur_point():
     assert(data[0] == 0)
 
 test "cpu blur: a flat area stays flat":
-    test_cpu_blur_flat()
-
-noinline func test_cpu_blur_flat():
     var mask = raster.Mask.new_(30, 30) else trap("mask")
     defer mask.release()
     cpu_mask_fill_rect(&mask, 0, 0, 30, 30, 200)
@@ -243,9 +207,6 @@ noinline func test_cpu_blur_flat():
 # mark: Rounded rectangles =====================================================================
 
 test "cpu shapes: rounded-rect radii are scaled to fit, as SkRRect does":
-    test_cpu_rrect_radii()
-
-noinline func test_cpu_rrect_radii():
     let rect = test_raster_rect(0.0, 0.0, 10.0, 20.0)
     let fitting = cpu_normalize_radii(rect, cpu_uniform_radii(3.0, 4.0))
     assert(fitting.x == [3.0, 3.0, 3.0, 3.0] and fitting.y == [4.0, 4.0, 4.0, 4.0])
@@ -257,9 +218,6 @@ noinline func test_cpu_rrect_radii():
     assert(corners.x == [2.0, 0.0, 0.0, 1.0] and corners.y == [2.0, 0.0, 0.0, 1.0])
 
 test "gfx conversions: to_type and to_rounded":
-    test_gfx_conversions()
-
-noinline func test_gfx_conversions():
     let point = float_point_to_int_point(gfx.FloatPoint(m_x = -1.7, m_y = 2.9))
     assert(point.m_x == -1 and point.m_y == 2)
     let rect = float_rect_to_rounded_int_rect(gfx.FloatRect(m_location = gfx.FloatPoint(m_x = 1.5, m_y = 2.5), m_size = gfx.FloatSize(m_width = 3.4, m_height = -0.6)))

@@ -11,9 +11,6 @@
 #==============================================================================================
 
 test "cpu filter: images":
-    test_cpu_filter_images()
-
-noinline func test_cpu_filter_images():
     let image = test_filter_pattern_bitmap(10, 8)
     let nearest = gfx.filter_image(image, test_filter_rect(1, 1, 6, 5), test_filter_rect(3, 2, 12, 10), gfx.ScalingMode.nearest_neighbor)
     test_filter_expect("image_nearest", TestFilterScene(), test_filter_graph(&nearest), filter_skia_image_nearest, 0, 0)
@@ -26,9 +23,6 @@ noinline func test_cpu_filter_images():
     test_filter_expect("image_offset", TestFilterScene(), test_filter_graph(&offset), filter_skia_image_offset, 0, 0)
 
 test "cpu filter: arithmetic":
-    test_cpu_filter_arithmetic()
-
-noinline func test_cpu_filter_arithmetic():
     let flood = gfx.filter_flood(test_filter_color(200, 100, 50, 255), 0.8)
     let arithmetic = gfx.filter_arithmetic(none, &flood, 0.5, 0.3, 0.6, 0.0)
     test_filter_expect("arithmetic", TestFilterScene(), test_filter_graph(&arithmetic), filter_skia_arithmetic, 0, 0)
@@ -44,9 +38,6 @@ func test_cpu_filter_blend_mode(name: str, mode: gfx.CompositingAndBlendingOpera
     test_filter_expect(name, TestFilterScene(), test_filter_graph(&blend), expected, max_difference, max_pixels)
 
 test "cpu filter: Porter-Duff blends":
-    test_cpu_filter_blend_porter_duff()
-
-noinline func test_cpu_filter_blend_porter_duff():
     test_cpu_filter_blend_mode("blend_normal", gfx.CompositingAndBlendingOperator.normal, filter_skia_blend_normal, 0, 0)
     test_cpu_filter_blend_mode("blend_source_in", gfx.CompositingAndBlendingOperator.source_in, filter_skia_blend_source_in, 0, 0)
     test_cpu_filter_blend_mode("blend_destination_out", gfx.CompositingAndBlendingOperator.destination_out, filter_skia_blend_destination_out, 0, 0)
@@ -58,9 +49,6 @@ noinline func test_cpu_filter_blend_porter_duff():
     test_cpu_filter_blend_mode("blend_plus_lighter", gfx.CompositingAndBlendingOperator.plus_lighter, filter_skia_blend_plus_lighter, 0, 0)
 
 test "cpu filter: separable blends":
-    test_cpu_filter_blend_separable()
-
-noinline func test_cpu_filter_blend_separable():
     test_cpu_filter_blend_mode("blend_multiply", gfx.CompositingAndBlendingOperator.multiply, filter_skia_blend_multiply, 0, 0)
     test_cpu_filter_blend_mode("blend_screen", gfx.CompositingAndBlendingOperator.screen, filter_skia_blend_screen, 0, 0)
     test_cpu_filter_blend_mode("blend_overlay", gfx.CompositingAndBlendingOperator.overlay, filter_skia_blend_overlay, 0, 0)
@@ -74,9 +62,6 @@ noinline func test_cpu_filter_blend_separable():
     test_cpu_filter_blend_mode("blend_exclusion", gfx.CompositingAndBlendingOperator.exclusion, filter_skia_blend_exclusion, 0, 0)
 
 test "cpu filter: non-separable blends":
-    test_cpu_filter_blend_non_separable()
-
-noinline func test_cpu_filter_blend_non_separable():
     test_cpu_filter_blend_mode("blend_hue", gfx.CompositingAndBlendingOperator.hue, filter_skia_blend_hue, 0, 0)
     test_cpu_filter_blend_mode("blend_saturation", gfx.CompositingAndBlendingOperator.saturation, filter_skia_blend_saturation, 0, 0)
     test_cpu_filter_blend_mode("blend_color", gfx.CompositingAndBlendingOperator.color, filter_skia_blend_color, 0, 0)

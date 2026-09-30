@@ -9,16 +9,9 @@
 #       cases is an exact small integer, so the float instantiation computes what the integer
 #       ones do.
 #
-#       Each test's body is a noinline function the test block calls, so that the test
-#       runner's `main` does not inline every body (# workaround:
-#       compiler-issues/ranges_facts_cubic).
-#
 #==============================================================================================
 
 test "quad: quad_points":
-    test_quad_quad_points()
-
-noinline func test_quad_quad_points():
     let quad_x_left: f32 = 1.0
     let quad_x_right: f32 = 5.0
     let quad_y_top: f32 = 10.0
@@ -37,9 +30,6 @@ noinline func test_quad_quad_points():
     assert(float_point_eq(&right_top, float_quad_p4(&quad)))
 
 test "quad: quad_bounding_rect":
-    test_quad_quad_bounding_rect()
-
-noinline func test_quad_quad_bounding_rect():
     let quad_width: f32 = 5.0
     let quad_height: f32 = 4.0
     let quad_x_left: f32 = 0.0
@@ -62,9 +52,6 @@ noinline func test_quad_quad_bounding_rect():
     assert(float_rect_height(&bounding_rect) == quad_height)
 
 test "quad: quad_contains":
-    test_quad_quad_contains()
-
-noinline func test_quad_quad_contains():
     let quad_width: f32 = 5.0
     let quad_height: f32 = 4.0
     let quad_x_left: f32 = 0.0
@@ -87,9 +74,6 @@ noinline func test_quad_quad_contains():
     assert(float_quad_contains(&quad, out_bounds_point) == false)
 
 test "quad: quad_contains_boundary_points":
-    test_quad_quad_contains_boundary_points()
-
-noinline func test_quad_quad_contains_boundary_points():
     let p1 = FloatPoint(0.0, 0.0)
     let p2 = FloatPoint(2.0, 0.0)
     let p3 = FloatPoint(2.0, 2.0)

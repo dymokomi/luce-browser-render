@@ -14,9 +14,6 @@
 #       gated test was run locally against scratch stand-ins of those functions (never
 #       committed) and passed.
 #
-#       Every test body is a `noinline` function (# workaround: compiler-issues/
-#       ranges_facts_cubic, as the foundation's tests do).
-#
 #==============================================================================================
 
 # mark: Gates ==================================================================================

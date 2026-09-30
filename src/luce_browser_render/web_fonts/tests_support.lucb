@@ -8,8 +8,7 @@
 #       runs from the repository root (test.sh). tests_oracle.lucb holds the expectations,
 #       printed by a local program over the reference build's LibGfx (Skia's FreeType
 #       backend with the FontConfig font manager, as Ladybird's test mode forces, and
-#       HarfBuzz; DESIGN.md §6.7). The test bodies are `noinline` functions (# workaround:
-#       compiler-issues/ranges_facts_cubic).
+#       HarfBuzz; DESIGN.md §6.7).
 #
 #==============================================================================================
 
@@ -63,7 +62,7 @@ struct ShapedGlyph:
 # mark: Test bodies =================================================================================
 
 ## A face's names and numbers.
-noinline func test_body_face(file: str, family: str, weight: u16, width: u16, slope: u8, units_per_em: u16, glyph_count: u32):
+func test_body_face(file: str, family: str, weight: u16, width: u16, slope: u8, units_per_em: u16, glyph_count: u32):
     # The test fonts and what is made from them outlive the test (the typeface cache),
     # so they come from the C heap, not the per-test buffer.
     with memory.heap:
@@ -77,7 +76,7 @@ noinline func test_body_face(file: str, family: str, weight: u16, width: u16, sl
         assert(typeface_is_skia(typeface))
 
 ## Glyph ids of code points.
-noinline func test_body_glyph_ids(file: str, code_points: u32[12], glyphs: u32[12]):
+func test_body_glyph_ids(file: str, code_points: u32[12], glyphs: u32[12]):
     # The test fonts and what is made from them outlive the test (the typeface cache),
     # so they come from the C heap, not the per-test buffer.
     with memory.heap:
@@ -92,7 +91,7 @@ noinline func test_body_glyph_ids(file: str, code_points: u32[12], glyphs: u32[1
 
 ## FontPixelMetrics (size, x_height, advance_of_ascii_zero, ascent, descent, line_gap) and
 ## ScaledFontMetrics (ascender, descender, line_gap, x_height) with preferred_line_height.
-noinline func test_body_metrics(file: str, point_size: f32, pixel: u32[6], scaled: u32[5]):
+func test_body_metrics(file: str, point_size: f32, pixel: u32[6], scaled: u32[5]):
     # The test fonts and what is made from them outlive the test (the typeface cache),
     # so they come from the C heap, not the per-test buffer.
     with memory.heap:
@@ -115,7 +114,7 @@ noinline func test_body_metrics(file: str, point_size: f32, pixel: u32[6], scale
 
 ## shape_text(baseline_start = (3.5, 20.25), letter_spacing, text, font, Common) and
 ## measure_text_width.
-noinline func test_body_shape(file: str, point_size: f32, text: str, letter_spacing: f32, expected: const ShapedGlyph[], run_width: u32, measured_width: u32):
+func test_body_shape(file: str, point_size: f32, text: str, letter_spacing: f32, expected: const ShapedGlyph[], run_width: u32, measured_width: u32):
     # The test fonts and what is made from them outlive the test (the typeface cache),
     # so they come from the C heap, not the per-test buffer.
     with memory.heap:
@@ -144,7 +143,7 @@ noinline func test_body_shape(file: str, point_size: f32, text: str, letter_spac
         test_expect_bits("cached run width", glyph_run_width(again), run_width)
 
 ## SkFont::getPath of the glyph of `code_point` at the font's size times `scale`.
-noinline func test_body_path(file: str, point_size: f32, code_point: u32, scale: f32, glyph: u32, verbs: const u8[], points: const u32[]):
+func test_body_path(file: str, point_size: f32, code_point: u32, scale: f32, glyph: u32, verbs: const u8[], points: const u32[]):
     # The test fonts and what is made from them outlive the test (the typeface cache),
     # so they come from the C heap, not the per-test buffer.
     with memory.heap:
@@ -164,7 +163,7 @@ noinline func test_body_path(file: str, point_size: f32, code_point: u32, scale:
             test_expect_bits("path y", point.m_y, points[index * 2 + 1])
 
 ## GlyphRun::ensure_text_blob and cached_blob_bounds (Skia's conservative text-blob bounds).
-noinline func test_body_blob_bounds(file: str, point_size: f32, text: str, scale: f32, bounds: u32[4]):
+func test_body_blob_bounds(file: str, point_size: f32, text: str, scale: f32, bounds: u32[4]):
     # The test fonts and what is made from them outlive the test (the typeface cache),
     # so they come from the C heap, not the per-test buffer.
     with memory.heap:
@@ -181,7 +180,7 @@ noinline func test_body_blob_bounds(file: str, point_size: f32, text: str, scale
 
 ## GlyphRun::get_glyph_intercepts for the band 14..16 (times the scale): the port solves
 ## curves by subdivision, so the intervals match Skia's to a small tolerance.
-noinline func test_body_intercepts(file: str, point_size: f32, text: str, scale: f32, expected: const f32[]):
+func test_body_intercepts(file: str, point_size: f32, text: str, scale: f32, expected: const f32[]):
     # The test fonts and what is made from them outlive the test (the typeface cache),
     # so they come from the C heap, not the per-test buffer.
     with memory.heap:
@@ -200,7 +199,7 @@ noinline func test_body_intercepts(file: str, point_size: f32, text: str, scale:
             assert(difference <= 0.05 and difference >= -0.05)
 
 ## WOFF::try_load_from_bytes of HashSans.woff: the face, its metrics at 12pt and a shaping.
-noinline func test_body_woff(family: str, glyph_count: u32, units_per_em: u16, pixel: u32[6], text: str, run_glyphs: usize, run_width: u32):
+func test_body_woff(family: str, glyph_count: u32, units_per_em: u16, pixel: u32[6], text: str, run_glyphs: usize, run_width: u32):
     with memory.heap:
         let bytes = test_read_file("tests/web_fonts/fonts/HashSans.woff")
         let typeface = woff_try_load_from_bytes(ak.byte_buffer_bytes_const(&bytes)) else trap("cannot load HashSans.woff")

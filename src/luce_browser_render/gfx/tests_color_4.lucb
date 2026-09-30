@@ -10,10 +10,6 @@
 #       Palette over a SystemTheme in an AnonymousBuffer: every named accessor reads its own role,
 #       and the setters copy the theme before writing (see palette_1).
 #
-#       Each test's body is a noinline function the test block calls, so that the test
-#       runner's `main` does not inline every body (# workaround:
-#       compiler-issues/ranges_facts_cubic).
-#
 #==============================================================================================
 
 # mark: ColorSpace ==============================================================================
@@ -382,9 +378,6 @@ func color_space_bits(color_space: const SkColorSpace*) -> u32[16]:
     return bits
 
 test "from_cicp":
-    test_from_cicp()
-
-noinline func test_from_cicp():
     for test_case in cicp_cases:
         let cicp = MediaCodingIndependentCodePoints(
             m_color_primaries = (MediaColorPrimaries)test_case.primaries,
@@ -411,9 +404,6 @@ noinline func test_from_cicp():
         assert(bits == test_case.bits)
 
 test "color space constructors":
-    test_color_space_constructors()
-
-noinline func test_color_space_constructors():
     var color_space: ColorSpace = ---
     color_space_construct(&color_space)
     assert(*color_space_color_space_sk_sp(&color_space) == none)
@@ -434,9 +424,6 @@ noinline func test_color_space_constructors():
 # mark: Palette and AnonymousBuffer =============================================================
 
 test "anonymous buffer":
-    test_anonymous_buffer()
-
-noinline func test_anonymous_buffer():
     let invalid = CoreAnonymousBuffer(m_impl = none)
     assert(not core_anonymous_buffer_is_valid(&invalid))
     assert(core_anonymous_buffer_size(&invalid) == 0 and core_anonymous_buffer_data(&invalid) == none)
@@ -467,9 +454,6 @@ func palette_with_role_values() -> Palette:
     return palette
 
 test "palette accessors":
-    test_palette_accessors()
-
-noinline func test_palette_accessors():
     let palette = palette_with_role_values()
     let c0 = palette_accent(&palette)
     assert(color_value(&c0) == (0xff000000 | (u32)ColorRole.accent))
@@ -690,9 +674,6 @@ noinline func test_palette_accessors():
     assert(palette_theme(&palette).metric[5] == 50)
 
 test "palette setters":
-    test_palette_setters()
-
-noinline func test_palette_setters():
     var palette = palette_with_role_values()
     let original = palette_impl(&palette)
     palette_set_color(&palette, ColorRole.accent, color_new_u8_u8_u8(1, 2, 3))

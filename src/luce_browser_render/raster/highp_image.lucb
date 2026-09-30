@@ -99,26 +99,21 @@ func highp_gather(p: HighpPipeline*):
 # surrounding (x,y) at (0.5,0.5) off-center.
 
 ## One tap of a sampler: tile (x, y), gather, and accumulate its color scaled by
-## scalex * scaley into `acc` (Skia's accumulate: mad(scale, c, d)).
-func sampler_tap(p: HighpPipeline*, x0: F8, y0: F8, scalex: F8, scaley: F8, acc: Rgba8*):
+## scalex * scaley into `r`, `g`, `b`, `a` (Skia's accumulate: mad(scale, c, d)).
+func sampler_tap(p: HighpPipeline*, x0: F8, y0: F8, scalex: F8, scaley: F8, r: F8*, g: F8*, b: F8*, a: F8*):
     let mode = p.ctx.sampler.spread_mode
     let x = highp_tile(x0, mode, &p.ctx.limit_x)
     let y = highp_tile(y0, mode, &p.ctx.limit_y)
-    var c = Rgba8(r = f8_splat(0.0), g = f8_splat(0.0), b = f8_splat(0.0), a = f8_splat(0.0))
-    gather_8888(p.pixmap_src, &p.ctx.gather, x, y, &c.r, &c.g, &c.b, &c.a)
+    var rr = f8_splat(0.0)
+    var gg = f8_splat(0.0)
+    var bb = f8_splat(0.0)
+    var aa = f8_splat(0.0)
+    gather_8888(p.pixmap_src, &p.ctx.gather, x, y, &rr, &gg, &bb, &aa)
     let scale = f8_mul(scalex, scaley)
-    acc.r = highp_mad(scale, c.r, acc.r)
-    acc.g = highp_mad(scale, c.g, acc.g)
-    acc.b = highp_mad(scale, c.b, acc.b)
-    acc.a = highp_mad(scale, c.a, acc.a)
-
-# The r, g, b, a accumulators of the samplers (a struct is a workaround:
-# compiler-issues/c_backend_address_of_local_array).
-struct Rgba8:
-    var r: F8
-    var g: F8
-    var b: F8
-    var a: F8
+    *r = highp_mad(scale, rr, *r)
+    *g = highp_mad(scale, gg, *g)
+    *b = highp_mad(scale, bb, *b)
+    *a = highp_mad(scale, aa, *a)
 
 ## bilinear_setup, then the (nx, ny), (px, ny), (nx, py), (px, py) taps, then move_dst_src.
 ## In bilinear interpolation, the 4 pixels at +/- 0.5 offsets from the sample pixel center
@@ -135,19 +130,22 @@ func highp_bilinear(p: HighpPipeline*):
     let wx: F8[2] = [f8_sub(one, fx), fx]
     let wy: F8[2] = [f8_sub(one, fy), fy]
 
-    var acc = Rgba8(r = f8_splat(0.0), g = f8_splat(0.0), b = f8_splat(0.0), a = f8_splat(0.0))
+    var r = f8_splat(0.0)
+    var g = f8_splat(0.0)
+    var b = f8_splat(0.0)
+    var a = f8_splat(0.0)
     for j: usize in 0..<2:
         for i: usize in 0..<2:
-            sampler_tap(p, xs[i], ys[j], wx[i], wy[j], &acc)
+            sampler_tap(p, xs[i], ys[j], wx[i], wy[j], &r, &g, &b, &a)
 
-    p.r = acc.r
-    p.g = acc.g
-    p.b = acc.b
-    p.a = acc.a
-    p.dr = acc.r
-    p.dg = acc.g
-    p.db = acc.b
-    p.da = acc.a
+    p.r = r
+    p.g = g
+    p.b = b
+    p.a = a
+    p.dr = r
+    p.dg = g
+    p.db = b
+    p.da = a
 
     highp_next_stage(p)
 
@@ -172,20 +170,23 @@ func highp_bicubic(p: HighpPipeline*):
     let wy = bicubic_weights(fy, p.ctx.gather.weights)
     let offsets: f32[4] = [-1.5, -0.5, 0.5, 1.5]
 
-    var acc = Rgba8(r = f8_splat(0.0), g = f8_splat(0.0), b = f8_splat(0.0), a = f8_splat(0.0))
+    var r = f8_splat(0.0)
+    var g = f8_splat(0.0)
+    var b = f8_splat(0.0)
+    var a = f8_splat(0.0)
     for j: usize in 0..<4:
         let y = f8_add(cy, f8_splat(offsets[j]))
         for i: usize in 0..<4:
-            sampler_tap(p, f8_add(cx, f8_splat(offsets[i])), y, wx[i], wy[j], &acc)
+            sampler_tap(p, f8_add(cx, f8_splat(offsets[i])), y, wx[i], wy[j], &r, &g, &b, &a)
 
-    p.r = acc.r
-    p.g = acc.g
-    p.b = acc.b
-    p.a = acc.a
-    p.dr = acc.r
-    p.dg = acc.g
-    p.db = acc.b
-    p.da = acc.a
+    p.r = r
+    p.g = g
+    p.b = b
+    p.a = a
+    p.dr = r
+    p.dg = g
+    p.db = b
+    p.da = a
 
     highp_next_stage(p)
 
@@ -201,24 +202,30 @@ func highp_bilerp_clamp_8888(p: HighpPipeline*):
     let fx = f8_sub(f8_add(cx, half_), f8_vfloor(f8_add(cx, half_)))
     let fy = f8_sub(f8_add(cy, half_), f8_vfloor(f8_add(cy, half_)))
 
-    var acc = Rgba8(r = f8_splat(0.0), g = f8_splat(0.0), b = f8_splat(0.0), a = f8_splat(0.0))
+    var r = f8_splat(0.0)
+    var g = f8_splat(0.0)
+    var b = f8_splat(0.0)
+    var a = f8_splat(0.0)
     let offsets: f32[2] = [-0.5, 0.5]
     for py in offsets:
         for px in offsets:
-            var c = Rgba8(r = f8_splat(0.0), g = f8_splat(0.0), b = f8_splat(0.0), a = f8_splat(0.0))
-            gather_8888(p.pixmap_src, &p.ctx.gather, f8_add(cx, f8_splat(px)), f8_add(cy, f8_splat(py)), &c.r, &c.g, &c.b, &c.a)
+            var rr = f8_splat(0.0)
+            var gg = f8_splat(0.0)
+            var bb = f8_splat(0.0)
+            var aa = f8_splat(0.0)
+            gather_8888(p.pixmap_src, &p.ctx.gather, f8_add(cx, f8_splat(px)), f8_add(cy, f8_splat(py)), &rr, &gg, &bb, &aa)
             let sx = fx if px > 0.0 else f8_sub(one, fx)
             let sy = fy if py > 0.0 else f8_sub(one, fy)
             let area = f8_mul(sx, sy)
-            acc.r = f8_add(acc.r, f8_mul(c.r, area))
-            acc.g = f8_add(acc.g, f8_mul(c.g, area))
-            acc.b = f8_add(acc.b, f8_mul(c.b, area))
-            acc.a = f8_add(acc.a, f8_mul(c.a, area))
+            r = f8_add(r, f8_mul(rr, area))
+            g = f8_add(g, f8_mul(gg, area))
+            b = f8_add(b, f8_mul(bb, area))
+            a = f8_add(a, f8_mul(aa, area))
 
-    p.r = acc.r
-    p.g = acc.g
-    p.b = acc.b
-    p.a = acc.a
+    p.r = r
+    p.g = g
+    p.b = b
+    p.a = a
 
     highp_next_stage(p)
 
@@ -233,24 +240,30 @@ func highp_bicubic_clamp_8888(p: HighpPipeline*):
     let scaley = bicubic_weights(fy, p.ctx.gather.weights)
     let scalex = bicubic_weights(fx, p.ctx.gather.weights)
 
-    var acc = Rgba8(r = f8_splat(0.0), g = f8_splat(0.0), b = f8_splat(0.0), a = f8_splat(0.0))
+    var r = f8_splat(0.0)
+    var g = f8_splat(0.0)
+    var b = f8_splat(0.0)
+    var a = f8_splat(0.0)
     var sample_y = f8_sub(cy, f8_splat(1.5))
     for yy: usize in 0..<4:
         var sample_x = f8_sub(cx, f8_splat(1.5))
         for xx: usize in 0..<4:
             let scale = f8_mul(scalex[xx], scaley[yy])
-            var c = Rgba8(r = f8_splat(0.0), g = f8_splat(0.0), b = f8_splat(0.0), a = f8_splat(0.0))
-            gather_8888(p.pixmap_src, &p.ctx.gather, sample_x, sample_y, &c.r, &c.g, &c.b, &c.a)
-            acc.r = highp_mad(scale, c.r, acc.r)
-            acc.g = highp_mad(scale, c.g, acc.g)
-            acc.b = highp_mad(scale, c.b, acc.b)
-            acc.a = highp_mad(scale, c.a, acc.a)
+            var rr = f8_splat(0.0)
+            var gg = f8_splat(0.0)
+            var bb = f8_splat(0.0)
+            var aa = f8_splat(0.0)
+            gather_8888(p.pixmap_src, &p.ctx.gather, sample_x, sample_y, &rr, &gg, &bb, &aa)
+            r = highp_mad(scale, rr, r)
+            g = highp_mad(scale, gg, g)
+            b = highp_mad(scale, bb, b)
+            a = highp_mad(scale, aa, a)
             sample_x = f8_add(sample_x, one)
         sample_y = f8_add(sample_y, one)
 
-    p.r = acc.r
-    p.g = acc.g
-    p.b = acc.b
-    p.a = acc.a
+    p.r = r
+    p.g = g
+    p.b = b
+    p.a = a
 
     highp_next_stage(p)

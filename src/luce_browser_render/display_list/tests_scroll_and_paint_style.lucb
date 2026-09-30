@@ -27,9 +27,6 @@ func test_scroll_state() -> ScrollState:
     return state
 
 test "scroll state: the sentinel, frames and ancestors":
-    test_scroll_state_frames()
-
-noinline func test_scroll_state_frames():
     var state = test_scroll_state()
     assert(ak.vector_size(&state.m_scroll_frames) == 5)
     assert(scroll_frame_is_sticky(scroll_state_frame_at_const(&state, 2)))
@@ -56,9 +53,6 @@ noinline func test_scroll_state_frames():
         trap("a cleared scroll state has no frames")
 
 test "scroll state: offsets and sticky constraints":
-    test_scroll_frame_offsets()
-
-noinline func test_scroll_frame_offsets():
     var frame: ScrollFrame
     assert(not scroll_frame_has_sticky_constraints(&frame))
     let offset = gfx.CssPixelPoint(m_x = gfx.CssPixels(m_value = 64), m_y = gfx.CssPixels(m_value = -32))
@@ -77,9 +71,6 @@ noinline func test_scroll_frame_offsets():
     assert(scroll_state_snapshot_device_offset_for_index(&snapshot, 7) == gfx.FloatPoint(m_x = 0.0, m_y = 0.0))
 
 test "scroll state: cumulative offsets and snapshots (gated on r08)":
-    test_scroll_state_gated()
-
-noinline func test_scroll_state_gated():
     if not gfx_geometry_is_ported:
         return
     var state = test_scroll_state()
@@ -94,9 +85,6 @@ noinline func test_scroll_state_gated():
 # mark: Paint styles ===========================================================================
 
 test "paint styles: gradients, their stops and their class":
-    test_paint_style_gradients()
-
-noinline func test_paint_style_gradients():
     let linear = svg_linear_gradient_paint_style_create(gfx.FloatPoint(m_x = 1.0, m_y = 2.0), gfx.FloatPoint(m_x = 3.0, m_y = 4.0))
     let gradient = linear.svg_gradient_paint_style()
     assert(is_svg_gradient_paint_style(linear) and is_svg_linear_gradient_paint_style(linear) and not is_svg_radial_gradient_paint_style(linear))
@@ -140,9 +128,6 @@ noinline func test_paint_style_gradients():
     assert(svg_radial_gradient_paint_style_end_center(radial) == gfx.FloatPoint(m_x = 2.0, m_y = 2.0))
 
 test "paint styles: patterns":
-    test_paint_style_pattern()
-
-noinline func test_paint_style_pattern():
     let tile = display_list_create(accumulated_visual_context_tree_create())
     let rect = gfx.FloatRect(m_location = gfx.FloatPoint(m_x = 1.0, m_y = 2.0), m_size = gfx.FloatSize(m_width = 3.0, m_height = 4.0))
     let pattern = svg_pattern_paint_style_create(tile, rect, none)
@@ -155,9 +140,6 @@ noinline func test_paint_style_pattern():
 # mark: External content =======================================================================
 
 test "external content source: update, current and clear":
-    test_external_content_source()
-
-noinline func test_external_content_source():
     let source = external_content_source_create()
     assert(external_content_source_current_bitmap(source) == none)
     # Only the pointer matters here: storage the size of an ImmutableBitmap stands in for one.
@@ -171,9 +153,6 @@ noinline func test_external_content_source():
 # mark: Initial values =========================================================================
 
 test "initial values: the scrollbar colors":
-    test_initial_scrollbar_color()
-
-noinline func test_initial_scrollbar_color():
     # Color(DarkGray).with_alpha(192) and Color(WarmGray).with_alpha(192).
     let colors = initial_values_scrollbar_color()
     assert(colors.thumb_color == test_color(64, 64, 64, 192))

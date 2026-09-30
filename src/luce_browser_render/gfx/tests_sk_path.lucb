@@ -11,9 +11,6 @@
 #       both fill rules, with the values Ladybird's Gfx::Path (built at Build/release)
 #       printed. The helpers below mirror those Gfx::Path functions.
 #
-#       Each test's body is a noinline function the test block calls (# workaround:
-#       compiler-issues/ranges_facts_cubic).
-#
 #==============================================================================================
 
 # mark: Gfx::Path as PathImplSkia drives SkPath =================================================
@@ -108,9 +105,6 @@ func test_sk_scalar_text(value: f32) -> str:
     return test_sk_text(&string)
 
 test "sk scalar: SkStrAppendScalar":
-    test_sk_append_scalar()
-
-noinline func test_sk_append_scalar():
     assert(test_sk_scalar_text(0.0) == "0")
     assert(test_sk_scalar_text(-0.0) == "-0")
     assert(test_sk_scalar_text(1234567.25) == "1234567.2")
@@ -122,9 +116,6 @@ noinline func test_sk_append_scalar():
     assert(test_sk_scalar_text(-math32.infinity) == "-inf")
 
 test "sk matrix: type masks and concatenation":
-    test_sk_matrix_types()
-
-noinline func test_sk_matrix_types():
     var m = sk_matrix_identity()
     assert(sk_matrix_is_identity(&m))
     sk_matrix_set_translate(&m, 1.0, 0.0)
@@ -151,9 +142,6 @@ noinline func test_sk_matrix_types():
 # mark: Geometry ================================================================================
 
 test "sk geometry: quad roots and chops":
-    test_sk_geometry()
-
-noinline func test_sk_geometry():
     var roots: f32[2] = [0.0, 0.0]
     # (t - 0.25)(t - 0.75) = t^2 - t + 0.1875
     assert(sk_find_unit_quad_roots(1.0, -1.0, 0.1875, roots[0..]) == 2)
@@ -180,9 +168,6 @@ noinline func test_sk_geometry():
     assert(sk_cubic_clipper_chop_mono_at_y(cdst[0..], 11.25, &t))
 
 test "sk conic: quads":
-    test_sk_conic_quads()
-
-noinline func test_sk_conic_quads():
     # A quarter circle of radius 10: weight sqrt(2)/2.
     let pts = [SkPoint(x = 10.0, y = 0.0), SkPoint(x = 10.0, y = 10.0), SkPoint(x = 0.0, y = 10.0)]
     let conic = sk_conic_from_points(pts[0..], 0.70710677)

@@ -8,8 +8,7 @@
 #       and advances by glyph id (sk_font_glyph_advance, SkFont::getWidths). The expectations
 #       were printed by a local program over the reference build's LibGfx (PathImplSkia under
 #       the FontConfig font manager); each path's SVG string (SkParsePath, `%.8g`) is compared
-#       by its length and FNV-1a 64 hash, and its bounds bit for bit. The test bodies are
-#       `noinline` functions (# workaround: compiler-issues/ranges_facts_cubic).
+#       by its length and FNV-1a 64 hash, and its bounds bit for bit.
 #
 #==============================================================================================
 
@@ -48,9 +47,6 @@ func test_path_text_utf8(text: str) -> ak.Utf8View:
     return utf8
 
 test "path text: Path::text":
-    test_body_path_text()
-
-noinline func test_body_path_text():
     with memory.heap:
         let serenity = typeface_font(test_typeface("SerenitySans-Regular.ttf"), 20.0)
         var utf8_path: gfx.Path
@@ -73,9 +69,6 @@ noinline func test_body_path_text():
         test_path_text_expect("text utf16 Tifinagh 30 (CFF)", &cff_path, TestPathTextExpected(length = 2009, digest = 2641944460900550303, prefix = "M9.6777344 40.400391C14.160156 40.400391 17.3632", bounds = [0x40002000, 0x412ff000, 0x42da6300, 0x41eb3c00]))
 
 test "path text: Path::glyph_run":
-    test_body_path_glyph_run()
-
-noinline func test_body_path_glyph_run():
     with memory.heap:
         let lato = typeface_font(test_typeface("Lato-Bold.ttf"), 13.5)
         let hello = test_utf16("Hello, AV world")
@@ -94,9 +87,6 @@ noinline func test_body_path_glyph_run():
         test_path_text_expect("glyph_run Tifinagh 30 after a line", &after_line, TestPathTextExpected(length = 1439, digest = 2914325057913589961, prefix = "M0 0L1 1M10.677734 2.4003906C15.160156 2.4003906", bounds = [0x00000000, 0xc1d48400, 0x42357400, 0x41e7b800]))
 
 test "path text: Path::place_text_along":
-    test_body_path_place_text_along()
-
-noinline func test_body_path_place_text_along():
     with memory.heap:
         let serenity = typeface_font(test_typeface("SerenitySans-Regular.ttf"), 20.0)
         var curve: gfx.Path

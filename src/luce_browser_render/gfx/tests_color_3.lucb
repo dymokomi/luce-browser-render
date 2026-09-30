@@ -12,10 +12,6 @@
 #       (Build/release, clang -ffp-contract=off as the donor builds) and are compared exactly:
 #       colors by value, floats by their bits.
 #
-#       Each test's body is a noinline function the test block calls, so that the test
-#       runner's `main` does not inline every body (# workaround:
-#       compiler-issues/ranges_facts_cubic).
-#
 #==============================================================================================
 
 # mark: Helpers =================================================================================
@@ -316,9 +312,6 @@ let alpha_serializations: str[256] = [
 ]
 
 test "serialize_a_srgb_value of every alpha":
-    test_serialize_a_srgb_value_of_every_alpha()
-
-noinline func test_serialize_a_srgb_value_of_every_alpha():
     var alpha: u32 = 0
     while alpha < 256:
         let color = color_new_u8_u8_u8_u8(0, 0, 0, (u8)alpha)
@@ -327,9 +320,6 @@ noinline func test_serialize_a_srgb_value_of_every_alpha():
         alpha += 1
 
 test "to_string":
-    test_to_string()
-
-noinline func test_to_string():
     let color0 = color_new_u8_u8_u8_u8(10, 200, 255, 0)
     let serialized0 = color_serialize_a_srgb_value(&color0)
     expect_string(&serialized0, "rgba(10, 200, 255, 0)", "serialize 0")
@@ -407,9 +397,6 @@ noinline func test_to_string():
     expect_string(&built, "color: rgba(10, 200, 255, 0.2)", "serialize into a builder")
 
 test "string variants":
-    test_string_variants()
-
-noinline func test_string_variants():
     let color = color_new_u8_u8_u8_u8(1, 171, 255, 3)
     let without_alpha = color_to_string_without_alpha(&color)
     expect_string(&without_alpha, "#01abff", "to_string_without_alpha")
@@ -423,9 +410,6 @@ noinline func test_string_variants():
 # mark: Parsing =================================================================================
 
 test "from_string":
-    test_from_string()
-
-noinline func test_from_string():
     expect_optional_color(color_from_string(ak.sv("#abc")), 0xffaabbcc, "from_string [#abc]")
     expect_optional_color(color_from_string(ak.sv("#ABCD")), 0xddaabbcc, "from_string [#ABCD]")
     expect_optional_color(color_from_string(ak.sv("#aabbcc")), 0xffaabbcc, "from_string [#aabbcc]")
@@ -466,9 +450,6 @@ noinline func test_from_string():
 # mark: TextAlignment and Cursor ================================================================
 
 test "text alignment":
-    test_text_alignment()
-
-noinline func test_text_alignment():
     assert(text_alignment_from_string(ak.sv("Center")) == TextAlignment.center)
     assert(c_string_equals(to_string(TextAlignment.center), "Center"))
     assert(text_alignment_from_string(ak.sv("CenterLeft")) == TextAlignment.center_left)
@@ -510,9 +491,6 @@ noinline func test_text_alignment():
     assert(is_vertically_centered_text_alignment(TextAlignment.bottom_right) == false)
 
 test "standard_cursor_to_string":
-    test_standard_cursor_to_string()
-
-noinline func test_standard_cursor_to_string():
     assert(string_view_is(standard_cursor_to_string((StandardCursor)0), "None"))
     assert(string_view_is(standard_cursor_to_string((StandardCursor)1), "Hidden"))
     assert(string_view_is(standard_cursor_to_string((StandardCursor)2), "Arrow"))

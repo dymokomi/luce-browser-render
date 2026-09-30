@@ -10,10 +10,6 @@
 #       (Build/release, clang -ffp-contract=off as the donor builds) and are compared exactly:
 #       colors by value, floats by their bits.
 #
-#       Each test's body is a noinline function the test block calls, so that the test
-#       runner's `main` does not inline every body (# workaround:
-#       compiler-issues/ranges_facts_cubic).
-#
 #==============================================================================================
 
 # mark: Helpers =================================================================================
@@ -36,9 +32,6 @@ func expect_components(actual: ColorComponents, expected: u32[4], what: str):
 # mark: HSV, HSL, YUV and Oklab ==================================================================
 
 test "hsv and hsl":
-    test_hsv_and_hsl()
-
-noinline func test_hsv_and_hsl():
     let a = color_new_u8_u8_u8_u8(200, 100, 50, 128)
     let b = color_new_u8_u8_u8_u8(10, 20, 30, 200)
     let op = color_new_u8_u8_u8_u8(12, 34, 56, 255)
@@ -89,9 +82,6 @@ noinline func test_hsv_and_hsl():
     expect_color(color_from_hsla(-30.0, 2.0, -1.0, 3.0), 0xff000000, "from_hsla_clamped")
 
 test "yuv and oklab":
-    test_yuv_and_oklab()
-
-noinline func test_yuv_and_oklab():
     let a = color_new_u8_u8_u8_u8(200, 100, 50, 128)
     let yuv = color_to_yuv(&a)
     expect_f32_bits(yuv.y, 0x3ef95fc6, "yuv_y")
@@ -112,9 +102,6 @@ noinline func test_yuv_and_oklab():
     expect_color(color_from_oklab(1.2, 0.4, 0.4), 0xffff0000, "from_oklab_out")
 
 test "color-space factories":
-    test_color_space_factories()
-
-noinline func test_color_space_factories():
     expect_color(color_from_a98rgb(0.3, 0.6, 0.9), 0xff009ae9, "from_a98rgb")
     expect_color(color_from_display_p3(0.3, 0.6, 0.9, 0.5), 0x80249bec, "from_display_p3")
     expect_color(color_from_linear_display_p3(0.3, 0.6, 0.9), 0xff84cdf8, "from_linear_display_p3")
@@ -129,9 +116,6 @@ noinline func test_color_space_factories():
 # mark: ColorConversion ========================================================================
 
 test "color conversions of input 0":
-    test_color_conversions_0()
-
-noinline func test_color_conversions_0():
     let input = color_components_new(0.2, 0.5, 0.8, 0.9)
     expect_components(srgb_to_linear_srgb(input), [0x3d0798dd, 0x3e5b2d9b, 0x3f1a946f, 0x3f666666], "srgb_to_linear_srgb 0")
     expect_components(linear_srgb_to_srgb(input), [0x3ef81436, 0x3f3c405b, 0x3f68055c, 0x3f666666], "linear_srgb_to_srgb 0")
@@ -178,9 +162,6 @@ noinline func test_color_conversions_0():
     expect_components(xyz65_to_linear_rec2020(input), [0xbd185d20, 0x3f300138, 0x3f3c5f0b, 0x3f666666], "xyz65_to_linear_rec2020 0")
 
 test "color conversions of input 1":
-    test_color_conversions_1()
-
-noinline func test_color_conversions_1():
     let input = color_components_new(-0.3, 0.01, 1.5)
     expect_components(srgb_to_linear_srgb(input), [0xbd95fe51, 0x3a4ae5d8, 0x402260c1, 0x3f800000], "srgb_to_linear_srgb 1")
     expect_components(linear_srgb_to_srgb(input), [0xbf1575fb, 0x3dcc7fa3, 0x3f98dac7, 0x3f800000], "linear_srgb_to_srgb 1")
@@ -227,9 +208,6 @@ noinline func test_color_conversions_1():
     expect_components(xyz65_to_linear_rec2020(input), [0xbf660ac0, 0x3e759425, 0x3fb426d5, 0x3f800000], "xyz65_to_linear_rec2020 1")
 
 test "color conversions of input 2":
-    test_color_conversions_2()
-
-noinline func test_color_conversions_2():
     let input = color_components_new(0.5, -0.2, 0.1, 0.4)
     expect_components(srgb_to_linear_srgb(input), [0x3e5b2d9b, 0xbd0798dd, 0x3c2436c9, 0x3ecccccd], "srgb_to_linear_srgb 2")
     expect_components(linear_srgb_to_srgb(input), [0x3f3c405b, 0xbef81436, 0x3eb2c90f, 0x3ecccccd], "linear_srgb_to_srgb 2")
@@ -276,9 +254,6 @@ noinline func test_color_conversions_2():
     expect_components(xyz65_to_linear_rec2020(input), [0x3f67749d, 0xbf27b21d, 0x3de48658, 0x3ecccccd], "xyz65_to_linear_rec2020 2")
 
 test "color conversion edge cases":
-    test_color_conversion_edge_cases()
-
-noinline func test_color_conversion_edge_cases():
     expect_components(hsv_to_srgb(color_components_new(300.0, 0.5, 0.8)), [0x3f4ccccd, 0x3ecccccd, 0x3f4ccccd, 0x3f800000], "hsv_to_srgb 300")
     expect_components(hsl_to_srgb(color_components_new(725.0, 1.5, 0.3, 2.0)), [0x3f400000, 0xbd999988, 0xbe19999a, 0x3f800000], "hsl_to_srgb big")
     expect_components(lab_to_xyz50(color_components_new(90.0, -10.0, 40.0)), [0x3f304354, 0x3f43562b, 0x3e99a315, 0x3f800000], "lab_to_xyz50 bright")

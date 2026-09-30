@@ -5,15 +5,11 @@
 #   DESCRIPTION:
 #       getLength and getPosTan at nine distances for paths of every verb, closed and empty
 #       first contours and a degenerate path, with the values Skia m144 (the library Ladybird
-#       47c82b38d0 links) printed, all as bits. Generated test vectors; each test body is a
-#       noinline function (# workaround: compiler-issues/ranges_facts_cubic).
+#       47c82b38d0 links) printed, all as bits. Generated test vectors.
 #
 #==============================================================================================
 
 test "sk path measure: lines":
-    test_sk_measure_lines()
-
-noinline func test_sk_measure_lines():
     var p = sk_path_create()
     sk_path_move_to(&p, 0.0, 0.0)
     sk_path_line_to(&p, 30.0, 40.0)
@@ -31,9 +27,6 @@ noinline func test_sk_measure_lines():
     test_sk_check_pos_tan(&m, 0x41200000, true, 0x40c00000, 0x41000000, 0x3f19999a, 0x3f4ccccd)
 
 test "sk path measure: quad":
-    test_sk_measure_quad()
-
-noinline func test_sk_measure_quad():
     var p = sk_path_create()
     sk_path_move_to(&p, 0.0, 0.0)
     sk_path_quad_to(&p, 50.0, 100.0, 100.0, 0.0)
@@ -50,9 +43,6 @@ noinline func test_sk_measure_quad():
     test_sk_check_pos_tan(&m, 0x41200000, true, 0x40969697, 0x410f8072, 0x3ef7699d, 0x3f60206d)
 
 test "sk path measure: cubic":
-    test_sk_measure_cubic()
-
-noinline func test_sk_measure_cubic():
     var p = sk_path_create()
     sk_path_move_to(&p, 10.0, 10.0)
     sk_path_cubic_to(&p, 100.0, 0.0, -50.0, 120.0, 60.0, 80.0)
@@ -69,9 +59,6 @@ noinline func test_sk_measure_cubic():
     test_sk_check_pos_tan(&m, 0x41200000, true, 0x41a0fbf5, 0x4116814f, 0x3f7ffecf, 0x3bc5999f)
 
 test "sk path measure: conic":
-    test_sk_measure_conic()
-
-noinline func test_sk_measure_conic():
     var p = sk_path_create()
     sk_path_move_to(&p, 0.0, 50.0)
     sk_path_arc_to_rotated(&p, 50.0, 50.0, 0.0, .small, .cw, 100.0, 50.0)
@@ -88,9 +75,6 @@ noinline func test_sk_measure_conic():
     test_sk_check_pos_tan(&m, 0x41200000, true, 0x3f7ed223, 0x42204a96, 0x3e4b4eef, 0xbf7ae751)
 
 test "sk path measure: closed_first":
-    test_sk_measure_closed_first()
-
-noinline func test_sk_measure_closed_first():
     var p = sk_path_create()
     sk_path_move_to(&p, 0.0, 0.0)
     sk_path_line_to(&p, 10.0, 0.0)
@@ -111,9 +95,6 @@ noinline func test_sk_measure_closed_first():
     test_sk_check_pos_tan(&m, 0x41200000, true, 0x41200000, 0x0, 0x3f800000, 0x0)
 
 test "sk path measure: empty_first":
-    test_sk_measure_empty_first()
-
-noinline func test_sk_measure_empty_first():
     var p = sk_path_create()
     sk_path_move_to(&p, 5.0, 5.0)
     sk_path_move_to(&p, 6.0, 6.0)
@@ -133,9 +114,6 @@ noinline func test_sk_measure_empty_first():
     test_sk_check_pos_tan(&m, 0x41200000, true, 0x40400000, 0x40800000, 0x3f19999a, 0x3f4ccccd)
 
 test "sk path measure: degenerate":
-    test_sk_measure_degenerate()
-
-noinline func test_sk_measure_degenerate():
     var p = sk_path_create()
     sk_path_move_to(&p, 1.0, 2.0)
     sk_path_quad_to(&p, 1.0, 2.0, 1.0, 2.0)
@@ -152,9 +130,6 @@ noinline func test_sk_measure_degenerate():
     test_sk_check_pos_tan(&m, 0x41200000, false, 0x0, 0x0, 0x0, 0x0)
 
 test "sk path measure: mixed":
-    test_sk_measure_mixed()
-
-noinline func test_sk_measure_mixed():
     var p = sk_path_create()
     sk_path_line_to(&p, 3.5, -7.25)
     sk_path_cubic_to(&p, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0)

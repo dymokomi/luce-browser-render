@@ -12,10 +12,6 @@
 #       (Build/release, clang -ffp-contract=off as the donor builds) and are compared exactly:
 #       colors by value, floats by their bits.
 #
-#       Each test's body is a noinline function the test block calls, so that the test
-#       runner's `main` does not inline every body (# workaround:
-#       compiler-issues/ranges_facts_cubic).
-#
 #==============================================================================================
 
 # mark: Helpers =================================================================================
@@ -62,9 +58,6 @@ func within_libm_ulps(bits: u64, expected: u64) -> bool:
 # mark: TestColor.cpp ===========================================================================
 
 test "color":
-    test_color()
-
-noinline func test_color():
     var i: u16 = 0
     while i < 256:
         let gray = color_new_u8_u8_u8((u8)i, (u8)i, (u8)i)
@@ -72,9 +65,6 @@ noinline func test_color():
         i += 1
 
 test "from_bgrx":
-    test_from_bgrx()
-
-noinline func test_from_bgrx():
     expect_eq_color(color_from_bgrx(0x000000ff), color_new_u8_u8_u8(0x00, 0x00, 0xff))
     expect_eq_color(color_from_bgrx(0x0000ff00), color_new_u8_u8_u8(0x00, 0xff, 0x00))
     expect_eq_color(color_from_bgrx(0x00ff0000), color_new_u8_u8_u8(0xff, 0x00, 0x00))
@@ -86,9 +76,6 @@ noinline func test_from_bgrx():
     expect_eq_color(color_from_bgrx(0x00aabbcc), color_new_u8_u8_u8(0xaa, 0xbb, 0xcc))
 
 test "from_bgra":
-    test_from_bgra()
-
-noinline func test_from_bgra():
     expect_eq_color(color_from_bgra(0xff000000), color_new_u8_u8_u8_u8(0x00, 0x00, 0x00, 0xff))
     expect_eq_color(color_from_bgra(0x000000ff), color_new_u8_u8_u8_u8(0x00, 0x00, 0xff, 0x00))
     expect_eq_color(color_from_bgra(0x0000ff00), color_new_u8_u8_u8_u8(0x00, 0xff, 0x00, 0x00))
@@ -97,9 +84,6 @@ noinline func test_from_bgra():
     expect_eq_color(color_from_bgra(0xddaabbcc), color_new_u8_u8_u8_u8(0xaa, 0xbb, 0xcc, 0xdd))
 
 test "from_rgbx":
-    test_from_rgbx()
-
-noinline func test_from_rgbx():
     expect_eq_color(color_from_rgbx(0x00ff0000), color_new_u8_u8_u8(0x00, 0x00, 0xff))
     expect_eq_color(color_from_rgbx(0x0000ff00), color_new_u8_u8_u8(0x00, 0xff, 0x00))
     expect_eq_color(color_from_rgbx(0x000000ff), color_new_u8_u8_u8(0xff, 0x00, 0x00))
@@ -111,9 +95,6 @@ noinline func test_from_rgbx():
     expect_eq_color(color_from_rgbx(0x00ccbbaa), color_new_u8_u8_u8(0xaa, 0xbb, 0xcc))
 
 test "from_rgba":
-    test_from_rgba()
-
-noinline func test_from_rgba():
     expect_eq_color(color_from_rgba(0xff000000), color_new_u8_u8_u8_u8(0x00, 0x00, 0x00, 0xff))
     expect_eq_color(color_from_rgba(0x00ff0000), color_new_u8_u8_u8_u8(0x00, 0x00, 0xff, 0x00))
     expect_eq_color(color_from_rgba(0x0000ff00), color_new_u8_u8_u8_u8(0x00, 0xff, 0x00, 0x00))
@@ -122,26 +103,17 @@ noinline func test_from_rgba():
     expect_eq_color(color_from_rgba(0xddccbbaa), color_new_u8_u8_u8_u8(0xaa, 0xbb, 0xcc, 0xdd))
 
 test "all_green":
-    test_all_green()
-
-noinline func test_all_green():
     expect_eq_color(color_from_lab(87.8185, -79.2711, 80.9946), color_new_named_color(ColorNamedColor.green))
     expect_eq_color(color_from_xyz50(0.385152, 0.716887, 0.097081), color_new_named_color(ColorNamedColor.green))
     expect_eq_color(color_from_xyz65(0.357584, 0.715169, 0.119195), color_new_named_color(ColorNamedColor.green))
 
 test "hsv":
-    test_hsv()
-
-noinline func test_hsv():
     expect_eq_color(color_from_hsv_f64(120.0, 0.714285714, 0.7), color_new_u8_u8_u8(51, 179, 51))
     let half = color_from_hsv_f64(120.0, 0.714285714, 0.7)
     expect_eq_color(color_with_opacity(&half, 0.5), color_new_u8_u8_u8_u8(51, 179, 51, 128))
     expect_eq_color(color_from_hsv_f64(108.0, 0.4, 0.5), color_new_u8_u8_u8(87, 128, 77))
 
 test "hsl":
-    test_hsl()
-
-noinline func test_hsl():
     expect_eq_color(color_from_hsl(-300.0, 1.0, 0.375), color_new_u8_u8_u8(191, 191, 0))
     expect_eq_color(color_from_hsl(400.0, 0.25, 0.5), color_new_u8_u8_u8(159, 138, 96))
     expect_eq_color(color_from_hsl(330.0, 0.25, 0.5), color_new_u8_u8_u8(159, 96, 128))
@@ -157,9 +129,6 @@ noinline func test_hsl():
 # mark: Channels, blending and filters ==========================================================
 
 test "blend":
-    test_blend()
-
-noinline func test_blend():
     let a = color_new_u8_u8_u8_u8(200, 100, 50, 128)
     let b = color_new_u8_u8_u8_u8(10, 20, 30, 200)
     let op = color_new_u8_u8_u8_u8(12, 34, 56, 255)
@@ -171,9 +140,6 @@ noinline func test_blend():
     expect_color(color_blend(&tr, a), 0x80c86432, "blend_tr_a")
 
 test "mixed_with and interpolate":
-    test_mixed_with_and_interpolate()
-
-noinline func test_mixed_with_and_interpolate():
     let a = color_new_u8_u8_u8_u8(200, 100, 50, 128)
     let b = color_new_u8_u8_u8_u8(10, 20, 30, 200)
     let a40 = color_with_alpha(&a, 40)
@@ -197,9 +163,6 @@ noinline func test_mixed_with_and_interpolate():
     expect_color(color_mixed_with(&a, a40, 0.3), 0x66c86432, "mixed_a_op 0.3")
 
 test "multiply, distance, luminosity and contrast":
-    test_multiply_distance_luminosity_contrast()
-
-noinline func test_multiply_distance_luminosity_contrast():
     let a = color_new_u8_u8_u8_u8(200, 100, 50, 128)
     let b = color_new_u8_u8_u8_u8(10, 20, 30, 200)
     let op = color_new_u8_u8_u8_u8(12, 34, 56, 255)
@@ -213,9 +176,6 @@ noinline func test_multiply_distance_luminosity_contrast():
     expect_f32_bits(color_contrast_ratio(&white, color_new_named_color(ColorNamedColor.black)), 0x41a80000, "contrast_white_black")
 
 test "filters":
-    test_filters()
-
-noinline func test_filters():
     let a = color_new_u8_u8_u8_u8(200, 100, 50, 128)
     let b = color_new_u8_u8_u8_u8(10, 20, 30, 200)
     let op = color_new_u8_u8_u8_u8(12, 34, 56, 255)
@@ -235,9 +195,6 @@ noinline func test_filters():
     expect_color(color_xored(&a, b), 0x80c2702c, "xored_ab")
 
 test "alpha, setters, shades and tints":
-    test_alpha_setters_shades_tints()
-
-noinline func test_alpha_setters_shades_tints():
     let a = color_new_u8_u8_u8_u8(200, 100, 50, 128)
     let b = color_new_u8_u8_u8_u8(10, 20, 30, 200)
     let white = color_new_named_color(ColorNamedColor.white)
@@ -267,9 +224,6 @@ noinline func test_alpha_setters_shades_tints():
     expect_color(*ak.vector_at(&tints, 2), 0xc8122538, "tint 2")
 
 test "named and branded colors":
-    test_named_and_branded_colors()
-
-noinline func test_named_and_branded_colors():
     expect_color(color_new_named_color(ColorNamedColor.transparent), 0x00000000, "named 0")
     expect_color(color_new_named_color(ColorNamedColor.black), 0xff000000, "named 1")
     expect_color(color_new_named_color(ColorNamedColor.white), 0xffffffff, "named 2")

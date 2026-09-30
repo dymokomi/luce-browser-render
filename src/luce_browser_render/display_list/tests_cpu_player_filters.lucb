@@ -10,8 +10,7 @@
 #       compared with DisplayListPlayerSkia's pixels (tests_skia_reference_data_2.lucb) under
 #       Ladybird's fuzzy reftest rule. Every scene matches exactly but the text shadow, whose
 #       glyphs differ as tests_cpu_player_2.lucb's do (hinted masks against unhinted
-#       outlines), softened by the blur. The test bodies are `noinline` functions (# workaround:
-#       compiler-issues/ranges_facts_cubic).
+#       outlines), softened by the blur.
 #
 #==============================================================================================
 
@@ -20,9 +19,6 @@ func test_effects_with_filter(opacity: f32, operator_: gfx.CompositingAndBlendin
     return ApplyEffects(opacity = opacity, compositing_and_blending_operator = operator_, filter = filter)
 
 test "cpu player filters: blur":
-    test_cpu_player_filter_blur()
-
-noinline func test_cpu_player_filter_blur():
     let scene = test_scene_new(24, 24)
     defer test_scene_release(&scene)
     let player = test_scene_player(&scene)
@@ -32,9 +28,6 @@ noinline func test_cpu_player_filter_blur():
     expect_like_skia(&scene, "filter_blur", skia_filter_blur, 0, 0)
 
 test "cpu player filters: drop shadow under opacity":
-    test_cpu_player_filter_drop_shadow()
-
-noinline func test_cpu_player_filter_drop_shadow():
     let scene = test_scene_new(24, 24)
     defer test_scene_release(&scene)
     let player = test_scene_player(&scene)
@@ -45,9 +38,6 @@ noinline func test_cpu_player_filter_drop_shadow():
     expect_like_skia(&scene, "filter_drop_shadow_opacity", skia_filter_drop_shadow_opacity, 0, 0)
 
 test "cpu player filters: a color filter chain under multiply":
-    test_cpu_player_filter_color_chain()
-
-noinline func test_cpu_player_filter_color_chain():
     let scene = test_scene_new(16, 16)
     defer test_scene_release(&scene)
     let player = test_scene_player(&scene)
@@ -59,9 +49,6 @@ noinline func test_cpu_player_filter_color_chain():
     expect_like_skia(&scene, "filter_color_chain", skia_filter_color_chain, 0, 0)
 
 test "cpu player filters: blur under a scale and a clip":
-    test_cpu_player_filter_blur_clipped_scaled()
-
-noinline func test_cpu_player_filter_blur_clipped_scaled():
     let scene = test_scene_new(24, 24)
     defer test_scene_release(&scene)
     let player = test_scene_player(&scene)
@@ -77,9 +64,6 @@ noinline func test_cpu_player_filter_blur_clipped_scaled():
     expect_like_skia(&scene, "filter_blur_clipped_scaled", skia_filter_blur_clipped_scaled, 0, 0)
 
 test "cpu player filters: text shadow":
-    test_cpu_player_text_shadow()
-
-noinline func test_cpu_player_text_shadow():
     with memory.heap:
         let scene = test_scene_new(40, 24)
         defer test_scene_release(&scene)
@@ -89,9 +73,6 @@ noinline func test_cpu_player_text_shadow():
         expect_like_skia(&scene, "text_shadow", skia_text_shadow, 20, 500)
 
 test "cpu player filters: backdrop blur":
-    test_cpu_player_backdrop_blur()
-
-noinline func test_cpu_player_backdrop_blur():
     let scene = test_scene_new(24, 24)
     defer test_scene_release(&scene)
     let player = test_scene_player(&scene)

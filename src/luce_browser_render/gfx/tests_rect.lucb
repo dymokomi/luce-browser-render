@@ -8,10 +8,6 @@
 #       points, transforms and matrices as the C++ initializers do; tests_geometry.lucb and
 #       tests_affine_transform.lucb use them too.
 #
-#       Each test's body is a noinline function the test block calls, so that the test
-#       runner's `main` does not inline every body (# workaround:
-#       compiler-issues/ranges_facts_cubic).
-#
 #==============================================================================================
 
 # mark: Helpers =================================================================================
@@ -57,34 +53,22 @@ func test_sample_matrix() -> FloatMatrix4X4:
 # mark: TestRect.cpp ============================================================================
 
 test "rect: int_rect_right_and_bottom":
-    test_rect_int_rect_right_and_bottom()
-
-noinline func test_rect_int_rect_right_and_bottom():
     let rect = test_irect(2, 3, 4, 5)
     assert(device_pixel_rect_right(&rect) == 6)
     assert(device_pixel_rect_bottom(&rect) == 8)
 
 test "rect: float_rect_right_and_bottom":
-    test_rect_float_rect_right_and_bottom()
-
-noinline func test_rect_float_rect_right_and_bottom():
     let rect = test_frect(1.0, 2.0, 3.5, 4.5)
     # EXPECT_APPROXIMATE: within 0.0000005.
     assert(ak.abs_f32(float_rect_right(&rect) - 4.5) < 0.0000005)
     assert(ak.abs_f32(float_rect_bottom(&rect) - 6.5) < 0.0000005)
 
 test "rect: rect_contains_vertically":
-    test_rect_rect_contains_vertically()
-
-noinline func test_rect_rect_contains_vertically():
     let rect = test_frect(0.0, 0.0, 100.0, 100.0)
     assert(float_rect_contains_vertically(&rect, 99.0))
     assert(not float_rect_contains_vertically(&rect, 100.0))
 
 test "rect: rect_unite":
-    test_rect_rect_unite()
-
-noinline func test_rect_rect_unite():
     var rect_a = test_irect(10, 10, 100, 100)
     let rect_b = test_irect(50, 50, 60, 70)
 
@@ -96,9 +80,6 @@ noinline func test_rect_rect_unite():
     assert(device_pixel_rect_bottom(&rect_a) == 120)
 
 test "rect: rect_unite_horizontally":
-    test_rect_rect_unite_horizontally()
-
-noinline func test_rect_rect_unite_horizontally():
     var rect_a = test_irect(10, 10, 1000, 100)
     let rect_b = test_irect(0, 0, 100, 1000)
 
@@ -110,9 +91,6 @@ noinline func test_rect_rect_unite_horizontally():
     assert(device_pixel_rect_bottom(&rect_a) == 110)
 
 test "rect: rect_unite_vertically":
-    test_rect_rect_unite_vertically()
-
-noinline func test_rect_rect_unite_vertically():
     var rect_a = test_irect(10, 10, 1000, 1000)
     let rect_b = test_irect(0, 0, 100, 100)
 
@@ -126,9 +104,6 @@ noinline func test_rect_rect_unite_vertically():
 # mark: Container overloads =====================================================================
 
 test "rect: contains_container":
-    test_rect_contains_container()
-
-noinline func test_rect_contains_container():
     let rect = test_irect(0, 0, 10, 10)
     let inside = [test_irect(1, 1, 2, 2), test_irect(0, 0, 10, 10)]
     let partly_outside = [test_irect(1, 1, 2, 2), test_irect(5, 5, 10, 10)]
@@ -139,9 +114,6 @@ noinline func test_rect_contains_container():
     assert(not device_pixel_rect_contains_t_container(&rect, none_))
 
 test "rect: intersects_container":
-    test_rect_intersects_container()
-
-noinline func test_rect_intersects_container():
     let rect = test_crect(0.0, 0.0, 1.0, 1.0)
     let apart = [test_crect(1.0, 0.0, 1.0, 1.0), test_crect(-1.0, -1.0, 1.0, 1.0)]
     let one_overlapping = [test_crect(1.0, 0.0, 1.0, 1.0), test_crect(0.984375, 0.5, 1.0, 1.0)]

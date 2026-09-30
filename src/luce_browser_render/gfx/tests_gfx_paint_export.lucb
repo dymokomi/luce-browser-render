@@ -8,9 +8,6 @@
 #       expected bytes. `Premultiplied::Yes` is `true` below. Goes through region r08's Color
 #       and geometry functions, so it runs once tests_gfx_paint_r08_is_ported is set.
 #
-#       Each test's body is a noinline function the test block calls (# workaround:
-#       compiler-issues/ranges_facts_cubic).
-#
 #==============================================================================================
 
 # The body of TestImmutableBitmap's loop for one subtest: for each source format, flip flag,
@@ -52,9 +49,6 @@ func test_gfx_paint_export_subtest(source_formats: const BitmapFormat[], source_
                         assert(bytes[i] == expected[i])
 
 test "gfx paint: export_to_byte_buffer":
-    test_gfx_paint_export_to_byte_buffer()
-
-noinline func test_gfx_paint_export_to_byte_buffer():
     if not tests_gfx_paint_r08_is_ported:
         return
     let all_bitmap_formats: BitmapFormat[4] = [BitmapFormat.bg_rx8888, BitmapFormat.bgra8888, BitmapFormat.rg_bx8888, BitmapFormat.rgba8888]
@@ -87,9 +81,6 @@ noinline func test_gfx_paint_export_to_byte_buffer():
     test_gfx_paint_export_subtest(non_alpha_bitmap_formats, both, [0x00112233, 0x44556677, 0x8899AABB, 0xCCDDEEFF], ExportFormat.rgba8888, both, [0x11, 0x22, 0x33, 0xFF, 0x55, 0x66, 0x77, 0xFF, 0x99, 0xAA, 0xBB, 0xFF, 0xDD, 0xEE, 0xFF, 0xFF])
 
 test "gfx paint: export names and sizes":
-    test_gfx_paint_export_names()
-
-noinline func test_gfx_paint_export_names():
     assert(ak.string_view_text(export_format_name(ExportFormat.rgba5551)) == "RGBA5551")
     assert(ak.string_view_text(export_format_name(ExportFormat.gray8)) == "Gray8")
     assert(bytes_per_pixel_for_export_format(ExportFormat.rgb888) == 3)

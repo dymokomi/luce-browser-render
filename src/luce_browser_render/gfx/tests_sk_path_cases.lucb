@@ -6,15 +6,11 @@
 #       Each case replays Gfx::Path calls with the helpers of tests_sk_path and checks the
 #       to_svg_string, bounding_box (as bits), last_point (as bits), is_empty and contains
 #       (nonzero, even-odd) answers that Ladybird 47c82b38d0 (Build/release) printed for the same
-#       calls. Generated test vectors; each test body is a noinline function (# workaround:
-#       compiler-issues/ranges_facts_cubic).
+#       calls. Generated test vectors.
 #
 #==============================================================================================
 
 test "sk path: basic":
-    test_sk_case_basic()
-
-noinline func test_sk_case_basic():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, 10.0, 20.0)
     sk_path_line_to(&p.path, 30.5, 40.25)
@@ -30,9 +26,6 @@ noinline func test_sk_case_basic():
     test_sk_check_contains(&p, 40.0, 40.0, true, true)
 
 test "sk path: every_verb":
-    test_sk_case_every_verb()
-
-noinline func test_sk_case_every_verb():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, 0.0, 0.0)
     sk_path_line_to(&p.path, 10.0, 0.0)
@@ -55,9 +48,6 @@ noinline func test_sk_case_every_verb():
     test_sk_check_contains(&p, 15.0, 18.5, false, false)
 
 test "sk path: move_collapse":
-    test_sk_case_move_collapse()
-
-noinline func test_sk_case_move_collapse():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, 1.0, 1.0)
     test_sk_move_to(&p, 2.0, 2.0)
@@ -69,9 +59,6 @@ noinline func test_sk_case_move_collapse():
     assert(sk_path_is_empty(&p.path) == false)
 
 test "sk path: close_continue":
-    test_sk_case_close_continue()
-
-noinline func test_sk_case_close_continue():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, 0.0, 0.0)
     sk_path_line_to(&p.path, 10.0, 0.0)
@@ -88,9 +75,6 @@ noinline func test_sk_case_close_continue():
     test_sk_check_contains(&p, 25.0, 24.0, true, true)
 
 test "sk path: line_first":
-    test_sk_case_line_first()
-
-noinline func test_sk_case_line_first():
     var p = test_sk_gfx_path()
     sk_path_line_to(&p.path, 5.0, 5.0)
     sk_path_line_to(&p.path, 5.0, 0.0)
@@ -101,9 +85,6 @@ noinline func test_sk_case_line_first():
     test_sk_check_contains(&p, 4.0, 2.0, true, true)
 
 test "sk path: arc_ff":
-    test_sk_case_arc_ff()
-
-noinline func test_sk_case_arc_ff():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, 0.0, 0.0)
     test_sk_elliptical_arc_to(&p, 100.0, 0.0, 50.0, 50.0, 0.0, false, false)
@@ -116,9 +97,6 @@ noinline func test_sk_case_arc_ff():
     test_sk_check_contains(&p, 50.0, 0.0, true, true)
 
 test "sk path: arc_ft":
-    test_sk_case_arc_ft()
-
-noinline func test_sk_case_arc_ft():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, 0.0, 0.0)
     test_sk_elliptical_arc_to(&p, 100.0, 0.0, 50.0, 50.0, 0.0, false, true)
@@ -130,9 +108,6 @@ noinline func test_sk_case_arc_ft():
     test_sk_check_contains(&p, 50.0, -10.0, true, true)
 
 test "sk path: arc_tf":
-    test_sk_case_arc_tf()
-
-noinline func test_sk_case_arc_tf():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, 0.0, 0.0)
     test_sk_elliptical_arc_to(&p, 100.0, 0.0, 60.0, 60.0, 0.0, true, false)
@@ -144,9 +119,6 @@ noinline func test_sk_case_arc_tf():
     test_sk_check_contains(&p, 50.0, -40.0, false, false)
 
 test "sk path: arc_tt":
-    test_sk_case_arc_tt()
-
-noinline func test_sk_case_arc_tt():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, 0.0, 0.0)
     test_sk_elliptical_arc_to(&p, 100.0, 0.0, 60.0, 60.0, 0.0, true, true)
@@ -158,9 +130,6 @@ noinline func test_sk_case_arc_tt():
     test_sk_check_contains(&p, 50.0, -40.0, true, true)
 
 test "sk path: arc_rotated_scaled":
-    test_sk_case_arc_rotated_scaled()
-
-noinline func test_sk_case_arc_rotated_scaled():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, 0.0, 0.0)
     test_sk_elliptical_arc_to(&p, 100.0, 50.0, 10.0, 5.0, 0.5, false, true)
@@ -172,9 +141,6 @@ noinline func test_sk_case_arc_rotated_scaled():
     test_sk_check_contains(&p, 60.0, 10.0, true, true)
 
 test "sk path: arc_rotated_large":
-    test_sk_case_arc_rotated_large()
-
-noinline func test_sk_case_arc_rotated_large():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, 3.5, 7.25)
     test_sk_elliptical_arc_to(&p, -40.0, 12.5, 30.0, 17.0, -1.2, true, false)
@@ -187,9 +153,6 @@ noinline func test_sk_case_arc_rotated_large():
     test_sk_check_contains(&p, 0.0, 20.0, false, false)
 
 test "sk path: arc_zero_radius":
-    test_sk_case_arc_zero_radius()
-
-noinline func test_sk_case_arc_zero_radius():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, 0.0, 0.0)
     test_sk_elliptical_arc_to(&p, 10.0, 10.0, 0.0, 5.0, 0.0, false, false)
@@ -199,9 +162,6 @@ noinline func test_sk_case_arc_zero_radius():
     assert(sk_path_is_empty(&p.path) == false)
 
 test "sk path: arc_same_point":
-    test_sk_case_arc_same_point()
-
-noinline func test_sk_case_arc_same_point():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, 3.0, 3.0)
     test_sk_elliptical_arc_to(&p, 3.0, 3.0, 5.0, 5.0, 0.0, false, false)
@@ -211,9 +171,6 @@ noinline func test_sk_case_arc_same_point():
     assert(sk_path_is_empty(&p.path) == false)
 
 test "sk path: arc_tiny":
-    test_sk_case_arc_tiny()
-
-noinline func test_sk_case_arc_tiny():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, 0.0, 0.0)
     test_sk_elliptical_arc_to(&p, 0.000001, 0.0, 1000.0, 1000.0, 0.0, false, true)
@@ -223,9 +180,6 @@ noinline func test_sk_case_arc_tiny():
     assert(sk_path_is_empty(&p.path) == false)
 
 test "sk path: arc_integers":
-    test_sk_case_arc_integers()
-
-noinline func test_sk_case_arc_integers():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, 0.0, 0.0)
     test_sk_elliptical_arc_to(&p, 10.0, 10.0, 10.0, 10.0, 0.0, false, true)
@@ -238,9 +192,6 @@ noinline func test_sk_case_arc_integers():
     test_sk_check_contains(&p, 9.0, 10.0, true, true)
 
 test "sk path: arc_to":
-    test_sk_case_arc_to()
-
-noinline func test_sk_case_arc_to():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, 0.0, 0.0)
     test_sk_elliptical_arc_to(&p, 50.0, 50.0, 25.0, 25.0, 0.0, true, false)
@@ -253,9 +204,6 @@ noinline func test_sk_case_arc_to():
     test_sk_check_contains(&p, 10.0, 40.0, false, false)
 
 test "sk path: circle":
-    test_sk_case_circle()
-
-noinline func test_sk_case_circle():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, 0.0, 50.0)
     test_sk_elliptical_arc_to(&p, 100.0, 50.0, 50.0, 50.0, 0.0, false, true)
@@ -275,9 +223,6 @@ noinline func test_sk_case_circle():
     test_sk_check_contains(&p, 86.0, 86.0, false, false)
 
 test "sk path: hv":
-    test_sk_case_hv()
-
-noinline func test_sk_case_hv():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, 1.0, 2.0)
     test_sk_horizontal_line_to(&p, 7.0)
@@ -291,9 +236,6 @@ noinline func test_sk_case_hv():
     test_sk_check_contains(&p, 3.0, 3.0, true, true)
 
 test "sk path: offset":
-    test_sk_case_offset()
-
-noinline func test_sk_case_offset():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, 0.0, 0.0)
     sk_path_line_to(&p.path, 10.0, 10.0)
@@ -307,9 +249,6 @@ noinline func test_sk_case_offset():
     test_sk_check_contains(&p, 10.0, 5.0, false, false)
 
 test "sk path: transform_affine":
-    test_sk_case_transform_affine()
-
-noinline func test_sk_case_transform_affine():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, 0.0, 0.0)
     sk_path_line_to(&p.path, 10.0, 0.0)
@@ -324,9 +263,6 @@ noinline func test_sk_case_transform_affine():
     test_sk_check_contains(&p, 12.0, 22.0, true, true)
 
 test "sk path: transform_scale":
-    test_sk_case_transform_scale()
-
-noinline func test_sk_case_transform_scale():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, 1.0, 1.0)
     sk_path_quad_to(&p.path, 5.0, 0.0, 3.0, 3.0)
@@ -339,9 +275,6 @@ noinline func test_sk_case_transform_scale():
     test_sk_check_contains(&p, 4.0, 6.0, true, true)
 
 test "sk path: transform_translate":
-    test_sk_case_transform_translate()
-
-noinline func test_sk_case_transform_translate():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, 1.0, 1.0)
     sk_path_line_to(&p.path, 4.0, 4.0)
@@ -352,9 +285,6 @@ noinline func test_sk_case_transform_translate():
     assert(sk_path_is_empty(&p.path) == false)
 
 test "sk path: append":
-    test_sk_case_append()
-
-noinline func test_sk_case_append():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, 0.0, 0.0)
     sk_path_line_to(&p.path, 10.0, 0.0)
@@ -373,9 +303,6 @@ noinline func test_sk_case_append():
     test_sk_check_contains(&p, 29.0, 25.0, true, true)
 
 test "sk path: append_to_empty":
-    test_sk_case_append_to_empty()
-
-noinline func test_sk_case_append_to_empty():
     var p = test_sk_gfx_path()
     var sub0 = test_sk_gfx_path()
     test_sk_move_to(&sub0, 1.0, 2.0)
@@ -389,9 +316,6 @@ noinline func test_sk_case_append_to_empty():
     assert(sk_path_is_empty(&p.path) == false)
 
 test "sk path: append_self":
-    test_sk_case_append_self()
-
-noinline func test_sk_case_append_self():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, 0.0, 0.0)
     sk_path_line_to(&p.path, 10.0, 0.0)
@@ -406,9 +330,6 @@ noinline func test_sk_case_append_self():
     test_sk_check_contains(&p, 5.0, 2.0, true, false)
 
 test "sk path: append_after_move":
-    test_sk_case_append_after_move()
-
-noinline func test_sk_case_append_after_move():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, 7.0, 7.0)
     var sub0 = test_sk_gfx_path()
@@ -421,9 +342,6 @@ noinline func test_sk_case_append_after_move():
     assert(sk_path_is_empty(&p.path) == false)
 
 test "sk path: bounds_empty":
-    test_sk_case_bounds_empty()
-
-noinline func test_sk_case_bounds_empty():
     var p = test_sk_gfx_path()
     test_sk_check_svg(&p, "")
     test_sk_check_bounds(&p, 0x0, 0x0, 0x0, 0x0)
@@ -432,9 +350,6 @@ noinline func test_sk_case_bounds_empty():
     test_sk_check_contains(&p, 0.0, 0.0, false, false)
 
 test "sk path: bounds_nan":
-    test_sk_case_bounds_nan()
-
-noinline func test_sk_case_bounds_nan():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, 0.0, 0.0)
     sk_path_line_to(&p.path, math32.nan, 5.0)
@@ -446,9 +361,6 @@ noinline func test_sk_case_bounds_nan():
     test_sk_check_contains(&p, 1.0, 1.0, false, false)
 
 test "sk path: format_edges":
-    test_sk_case_format_edges()
-
-noinline func test_sk_case_format_edges():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, 0.0000001, 123456789.0)
     sk_path_line_to(&p.path, 1234567.25, 0.1)
@@ -462,9 +374,6 @@ noinline func test_sk_case_format_edges():
     assert(sk_path_is_empty(&p.path) == false)
 
 test "sk path: format_more":
-    test_sk_case_format_more()
-
-noinline func test_sk_case_format_more():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, -1.5, 1234.5678)
     sk_path_line_to(&p.path, 99999999.0, 0.000012345678)
@@ -475,9 +384,6 @@ noinline func test_sk_case_format_more():
     assert(sk_path_is_empty(&p.path) == false)
 
 test "sk path: evenodd_nested":
-    test_sk_case_evenodd_nested()
-
-noinline func test_sk_case_evenodd_nested():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, 0.0, 0.0)
     sk_path_line_to(&p.path, 100.0, 0.0)
@@ -502,9 +408,6 @@ noinline func test_sk_case_evenodd_nested():
     test_sk_check_contains(&p, 101.0, 50.0, false, false)
 
 test "sk path: reverse_nested":
-    test_sk_case_reverse_nested()
-
-noinline func test_sk_case_reverse_nested():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, 0.0, 0.0)
     sk_path_line_to(&p.path, 100.0, 0.0)
@@ -525,9 +428,6 @@ noinline func test_sk_case_reverse_nested():
     test_sk_check_contains(&p, 25.0, 50.0, true, true)
 
 test "sk path: cubic_loop":
-    test_sk_case_cubic_loop()
-
-noinline func test_sk_case_cubic_loop():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, 0.0, 0.0)
     sk_path_cubic_to(&p.path, 100.0, 100.0, -50.0, 100.0, 50.0, 0.0)
@@ -544,9 +444,6 @@ noinline func test_sk_case_cubic_loop():
     test_sk_check_contains(&p, 20.0, 40.0, true, true)
 
 test "sk path: coincident":
-    test_sk_case_coincident()
-
-noinline func test_sk_case_coincident():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, 0.0, 0.0)
     sk_path_line_to(&p.path, 10.0, 0.0)
@@ -565,9 +462,6 @@ noinline func test_sk_case_coincident():
     test_sk_check_contains(&p, 15.0, 0.0, true, true)
 
 test "sk path: quad_extrema":
-    test_sk_case_quad_extrema()
-
-noinline func test_sk_case_quad_extrema():
     var p = test_sk_gfx_path()
     test_sk_move_to(&p, 0.0, 0.0)
     sk_path_quad_to(&p.path, 50.0, 100.0, 100.0, 0.0)

@@ -11,8 +11,7 @@
 #       oracle's unfiltered scenes on a 48x48 canvas ("content" and, under the scale-and-translate
 #       CTM, "content_scale"), restricted to what the filter reads (cpu_filter_input_bounds) as the
 #       layer bounds restrict it. A backdrop scene filters the whole prior canvas (the content
-#       drawn through the clip), clamped at its edges. The test bodies are `noinline` functions (# workaround:
-#       compiler-issues/ranges_facts_cubic).
+#       drawn through the clip), clamped at its edges.
 #
 #==============================================================================================
 
