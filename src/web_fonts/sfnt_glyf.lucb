@@ -67,10 +67,13 @@ pub func ft_pix_round(x: i64) -> i64:
     return (x + 32) & ~(i64)63
 
 ## The 16.16 scale FreeType uses for a face at `pixel_size` pixels per em (FT_Set_Char_Size at
-## 72 dpi, then tt_size_reset's integer ppem when the head table's flag bit 3 asks for it).
+## 72 dpi, which does not go below 1 px, then tt_size_reset's integer ppem when the head
+## table's flag bit 3 asks for it).
 pub func sfnt_face_ft_scale(face: const SfntFace*, pixel_size: f32) -> i64:
     # SkScalarToFDot6: a truncating conversion to 26.6.
-    let char_size = (i64)(pixel_size * 64.0)
+    var char_size = (i64)(pixel_size * 64.0)
+    if char_size < 1 * 64:
+        char_size = 1 * 64
     if (face.head_flags & 8) != 0 and face.outline_format == SfntOutlineFormat.true_type:
         let ppem = (char_size + 32) >> 6
         return ft_div_fix(ppem << 6, (i64)face.units_per_em)

@@ -609,3 +609,51 @@ test "intercepts_lato_bold_92":
 
 test "woff_hash_sans":
     test_body_woff("HashSans", 98, 1024, [0x41800000, 0x41098000, 0x41500000, 0x414cc000, 0x404d0000, 0x3fbc0000], "Hash #1", 7, 0x42b32800)
+
+test "metrics_serenity_sans_93":
+    test_body_metrics("SerenitySans-Regular.ttf", f32.bits(0x00000000), [0x00000000, 0x3f098000, 0x00000000, 0x3f4cc000, 0x3e4d0000, 0x3dbc0000], [0x3f4cc000, 0x3e4d0000, 0x3dbc0000, 0x3f098000, 0x3f8bc000])
+
+test "metrics_serenity_sans_94":
+    test_body_metrics("SerenitySans-Regular.ttf", f32.bits(0x38d1b717), [0x390bcf65, 0x3f098000, 0x00000000, 0x3f4cc000, 0x3e4d0000, 0x3dbc0000], [0x3f4cc000, 0x3e4d0000, 0x3dbc0000, 0x3f098000, 0x3f8bc000])
+
+test "metrics_serenity_sans_95":
+    test_body_metrics("SerenitySans-Regular.ttf", f32.bits(0x3a83126f), [0x3aaec33f, 0x3a3bbbbd, 0x00000000, 0x3a8bc6a9, 0x398bf259, 0x39005762], [0x3a8bc6a9, 0x398bf259, 0x39005762, 0x3a3bbbbd, 0x3abece2b])
+
+test "metrics_serenity_sans_96":
+    test_body_metrics("SerenitySans-Regular.ttf", f32.bits(0x3f000000), [0x3f2aaaab, 0x3eb75556, 0x3f2c0000, 0x3f088000, 0x3e08aaab, 0x3d7aaaab], [0x3f088000, 0x3e08aaab, 0x3d7aaaab, 0x3eb75556, 0x3f3a5556])
+
+test "metrics_lato_bold_97":
+    test_body_metrics("Lato-Bold.ttf", f32.bits(0x00000000), [0x00000000, 0x3f0353f8, 0x00000000, 0x3f7cac08, 0x3e5a1cac, 0x00000000], [0x3f7cac08, 0x3e5a1cac, 0x00000000, 0x3f0353f8, 0x3f99999a])
+
+test "metrics_lato_bold_98":
+    test_body_metrics("Lato-Bold.ttf", f32.bits(0x38d1b717), [0x390bcf65, 0x3f0353f8, 0x00000000, 0x3f7cac08, 0x3e5a1cac, 0x00000000], [0x3f7cac08, 0x3e5a1cac, 0x00000000, 0x3f0353f8, 0x3f99999a])
+
+test "metrics_lato_bold_99":
+    test_body_metrics("Lato-Bold.ttf", f32.bits(0x3a83126f), [0x3aaec33f, 0x3a334e78, 0x00000000, 0x3aac7da3, 0x3994e5d6, 0x00000000], [0x3aac7da3, 0x3994e5d6, 0x00000000, 0x3a334e78, 0x3ad1b718])
+
+test "metrics_lato_bold_100":
+    test_body_metrics("Lato-Bold.ttf", f32.bits(0x3f000000), [0x3f2aaaab, 0x3eaf1aa0, 0x3f2c0000, 0x3f2872b0, 0x3e116873, 0x00000000], [0x3f2872b0, 0x3e116873, 0x00000000, 0x3eaf1aa0, 0x3f4ccccd])
+
+test "metrics_noto_emoji_101":
+    test_body_metrics("NotoEmoji.ttf", f32.bits(0x00000000), [0x00000000, 0x3f6d8000, 0x00000000, 0x3f6d8000, 0x3e7a0000, 0x00000000], [0x3f6d8000, 0x3e7a0000, 0x00000000, 0x3f6d8000, 0x3f960000])
+
+test "metrics_noto_emoji_102":
+    test_body_metrics("NotoEmoji.ttf", f32.bits(0x38d1b717), [0x390bcf65, 0x3f6d8000, 0x00000000, 0x3f6d8000, 0x3e7a0000, 0x00000000], [0x3f6d8000, 0x3e7a0000, 0x00000000, 0x3f6d8000, 0x3f960000])
+
+test "metrics_noto_emoji_103":
+    test_body_metrics("NotoEmoji.ttf", f32.bits(0x3a83126f), [0x3aaec33f, 0x3aa22223, 0x00000000, 0x3aa22223, 0x39aaaaac, 0x00000000], [0x3aa22223, 0x39aaaaac, 0x00000000, 0x3aa22223, 0x3accccce])
+
+test "metrics_noto_emoji_104":
+    test_body_metrics("NotoEmoji.ttf", f32.bits(0x3f000000), [0x3f2aaaab, 0x3f1e5556, 0x3f2c0000, 0x3f1e5556, 0x3e26aaab, 0x00000000], [0x3f1e5556, 0x3e26aaab, 0x00000000, 0x3f1e5556, 0x3f480001])
+
+test "metrics_noto_sans_tifinagh_105":
+    test_body_metrics("NotoSansTifinagh-Regular.otf", f32.bits(0x00000000), [0x00000000, 0x3f09374c, 0x00000000, 0x3f88d4fe, 0x3e960419, 0x00000000], [0x3f88d4fe, 0x3e960419, 0x00000000, 0x3f09374c, 0x3fae5604])
+
+test "metrics_noto_sans_tifinagh_106":
+    test_body_metrics("NotoSansTifinagh-Regular.otf", f32.bits(0x38d1b717), [0x390bcf65, 0x3f09374c, 0x00000000, 0x3f88d4fe, 0x3e960419, 0x00000000], [0x3f88d4fe, 0x3e960419, 0x00000000, 0x3f09374c, 0x3fae5604])
+
+test "metrics_noto_sans_tifinagh_107":
+    test_body_metrics("NotoSansTifinagh-Regular.otf", f32.bits(0x3a83126f), [0x3aaec33f, 0x3a3b5879, 0x00000000, 0x3abad241, 0x39ccd266, 0x00000000], [0x3abad241, 0x39ccd266, 0x00000000, 0x3a3b5879, 0x3aee06da])
+
+test "metrics_noto_sans_tifinagh_108":
+    test_body_metrics("NotoSansTifinagh-Regular.otf", f32.bits(0x3f000000), [0x3f2aaaab, 0x3eb6f466, 0x3f2c0000, 0x3f367153, 0x3e480577, 0x00000000], [0x3f367153, 0x3e480577, 0x00000000, 0x3eb6f466, 0x3f6872b1])

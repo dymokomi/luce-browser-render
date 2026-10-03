@@ -16,6 +16,8 @@
 #         x-height from OS/2 or from the 'x' glyph's box;
 #       - SkStrikeSpec::MakeCanonicalized: text larger than 256 px is measured at 64 px
 #         unhinted and scaled back (SkFont::setupForAsPaths);
+#       - SkScalerContextRec::computeMatrices: text of at most 1/4096 px (a zero font-size) is
+#         measured at 1 px;
 #       - glyph advances with Skia's default hinting (FT_LOAD_TARGET_NORMAL): the phantom
 #         points rounded to whole pixels, or the linear advance when unhinted.
 #
@@ -44,6 +46,19 @@ let sk_max_size_for_glyph_cache: f32 = 256.0
 ## The size of SkFontPriv::kCanonicalTextSizeForPaths.
 let sk_canonical_text_size_for_paths: f32 = 64.0
 
+## SK_ScalarNearlyZero (SkScalar.h): 1 / 4096.
+let sk_scalar_nearly_zero: f32 = 1.0 / 4096.0
+
+## The vertical scale of SkScalerContextRec::computeMatrices (kFull, no device matrix) for text
+## of `size` pixels: the size, or 1 when the total matrix is singular or not finite. "All
+## underlying ports have issues with zero text size, so use the matrices to zero": the
+## remaining matrix becomes zero, so glyphs and advances vanish, but the scaler context, and so
+## generateFontMetrics, measures the face at size 1.
+func sk_scaler_context_scale(size: f32) -> f32:
+    if math32.abs(size) <= sk_scalar_nearly_zero or not math32.is_finite(size):
+        return 1.0
+    return math32.abs(size)
+
 ## An SkFont over `typeface` at `size` pixels.
 pub func sk_font_make(typeface: const SkTypeface*, size: f32) -> SkFont:
     return SkFont(typeface = typeface, size = size)
@@ -71,7 +86,7 @@ pub func sk_font_get_metrics(font: const SkFont*) -> SkFontMetrics:
         metrics.strikeout_thickness *= scale
         metrics.strikeout_position *= scale
         return metrics
-    return sk_scaler_font_metrics(typeface.face, font.size, true)
+    return sk_scaler_font_metrics(typeface.face, sk_scaler_context_scale(font.size), true)
 
 ## The top of a glyph's box in pixels (getCBoxForLetter: the control box of the outline loaded
 ## at the size, yMax in 26.6 over 64), or none when the face has no such glyph.
@@ -172,8 +187,9 @@ func sk_scaler_font_metrics(face: const SfntFace*, size: f32, hinted: bool) -> S
 
 ## The advance of `glyph` in pixels as Skia's glyph cache has it for the font:
 ## SkScalerContext_FreeType::generateMetrics with hinting (the phantom points rounded to
-## whole pixels, FT_LOAD_TARGET_NORMAL) at sizes up to 256 px, the linear advance of the
-## unhinted canonical font scaled back above that.
+## whole pixels, FT_LOAD_TARGET_NORMAL) at sizes up to 256 px (below 1 px, the advance at
+## 1 px scaled down; none at a zero size), the linear advance of the unhinted canonical font
+## scaled back above that.
 pub func sk_font_glyph_advance(font: const SkFont*, glyph: u32) -> f32:
     let typeface = font.typeface else return 0.0
     let face = typeface.face
@@ -183,7 +199,12 @@ pub func sk_font_glyph_advance(font: const SkFont*, glyph: u32) -> f32:
         let linear = ft_mul_div(advance_units, sfnt_face_ft_scale(face, sk_canonical_text_size_for_paths), 64)
         let advance = (f32)linear / 65536.0
         return advance * (font.size / sk_canonical_text_size_for_paths)
-    let scale = sfnt_face_ft_scale(face, font.size)
+    # SkScalerContext_FreeType's constructor: computeMatrices zeroes the matrices of text of
+    # at most 1/4096 px, and with them every advance.
+    if math32.abs(font.size) <= sk_scalar_nearly_zero or not math32.is_finite(font.size):
+        return 0.0
+    let size = sk_scaler_context_scale(font.size)
+    let scale = sfnt_face_ft_scale(face, size)
     var pp1_units: i64 = 0
     if face.outline_format == SfntOutlineFormat.true_type:
         if let range = sfnt_glyf_range(face, glyph):
@@ -191,7 +212,15 @@ pub func sk_font_glyph_advance(font: const SkFont*, glyph: u32) -> f32:
             pp1_units = x_min - (i64)sfnt_face_left_side_bearing(face, glyph)
     let pp1 = ft_pix_round(ft_mul_fix(pp1_units, scale))
     let pp2 = ft_pix_round(ft_mul_fix(pp1_units + advance_units, scale))
-    return (f32)(pp2 - pp1) * 0.015625
+    var advance = pp2 - pp1
+    # "FreeType currently does not allow requesting sizes less than 1, this allow for
+    # scaling": below 1 px the face is at 1 px and fMatrix22 scales by size / ppem, a transform
+    # FT_Load_Glyph applies to the advance (FT_Vector_Transform).
+    if size < 1.0:
+        let x_ppem = (f32)face.units_per_em * ((f32)scale * 1.52587890625e-5) / 64.0
+        let xx = (i64)(size / x_ppem * 65536.0)  # SkScalarToFixed
+        advance = ft_mul_fix(advance, xx)
+    return (f32)advance * 0.015625
 
 ## SkFont::measureText of `text` (UTF-8 bytes of ASCII here): the sum of the glyph advances.
 pub func sk_font_measure_ascii(font: const SkFont*, text: const u8[]) -> f32:
