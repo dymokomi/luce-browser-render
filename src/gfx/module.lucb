@@ -13,10 +13,9 @@
 #
 #==============================================================================================
 
-import luce_browser_foundation.ak
+from luce_browser_foundation import ak
 import luce
-import luce_std.math
-import luce_std.math32
+from luce_std import math, math32
 import memory
 import os
 import c as libc

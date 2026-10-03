@@ -13,7 +13,7 @@
 #==============================================================================================
 
 import harness
-import luce_browser_render.raster
+from luce_browser_render import raster
 from harness import Test, TestCase
 from luce_browser_render.raster import Paint, PathBuilder, Pixmap, PixmapPaint, Transform, Rect, Point, Color, ColorU8, Stroke, StrokeDash, LineCap, LineJoin, FillRule, BlendMode, SpreadMode, FilterQuality, GradientStop, LinearGradient, RadialGradient, SweepGradient, Pattern, Mask, MaskType, IntRect, ColorSpace, Shader
 

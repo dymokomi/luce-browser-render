@@ -13,13 +13,12 @@
 #
 #==============================================================================================
 
-import luce_browser_foundation.ak
+from luce_browser_foundation import ak
 import gfx
 import c
-import luce_compress.flate
-import luce_browser_foundation.gc
-import luce_std.math
-import luce_std.math32
+from luce_compress import flate
+from luce_browser_foundation import gc
+from luce_std import math, math32
 import memory
 import os
-import luce_browser_foundation.web_unicode
+from luce_browser_foundation import web_unicode

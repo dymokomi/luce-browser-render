@@ -13,13 +13,11 @@
 #
 #==============================================================================================
 
-import luce_browser_foundation.ak
-import luce_browser_foundation.gc
-import luce_browser_css.css_data
+from luce_browser_foundation import ak, gc
+from luce_browser_css import css_data
 import gfx
 import web_fonts
 import raster
 import luce
-import luce_std.math
-import luce_std.math32
+from luce_std import math, math32
 import memory

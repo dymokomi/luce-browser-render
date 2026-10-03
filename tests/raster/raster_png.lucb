@@ -13,7 +13,7 @@
 #==============================================================================================
 
 import memory
-import luce_compress.compress
+from luce_compress import compress
 
 ## A decoded PNG: straight (not premultiplied) RGBA8 in `memory.heap`.
 pub struct DecodedPng:
