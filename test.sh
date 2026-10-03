@@ -16,8 +16,8 @@ done
 # check MODULE: `luce-base check -W`, which reports warnings without failing, so any output at
 # all fails the run.
 check() {
-    echo "== luce-base check src/luce_browser_render/$1 -W"
-    output=$(luce-base check "src/luce_browser_render/$1" -W 2>&1) || { echo "$output"; exit 1; }
+    echo "== luce-base check src/$1 -W"
+    output=$(luce-base check "src/$1" -W 2>&1) || { echo "$output"; exit 1; }
     if [ -n "$output" ]; then
         echo "$output"
         exit 1
@@ -30,22 +30,22 @@ done
 
 # gfx: the region tests (geometry, CSSPixels, color, transforms; bitmaps, paths, painter,
 # filters).
-echo "== luce-base test src/luce_browser_render/gfx"
-luce-base test src/luce_browser_render/gfx
+echo "== luce-base test src/gfx"
+luce-base test src/gfx
 
 # web_fonts: its unit tests and the expectations of the reference build (tests_oracle,
 # tests_path_text), with the test fonts of tests/web_fonts.
-echo "== luce-base test src/luce_browser_render/web_fonts"
-luce-base test src/luce_browser_render/web_fonts
+echo "== luce-base test src/web_fonts"
+luce-base test src/web_fonts
 
 # display_list: the module's tests (the CPU player against Skia's pixels, the ported LibWeb
 # logic).
-echo "== luce-base test src/luce_browser_render/display_list"
-luce-base test src/luce_browser_render/display_list --native
+echo "== luce-base test src/display_list"
+luce-base test src/display_list --native
 
 # raster: its unit tests.
-echo "== luce-base test src/luce_browser_render/raster"
-luce-base test src/luce_browser_render/raster
+echo "== luce-base test src/raster"
+luce-base test src/raster
 
 # raster: tiny-skia's integration suite against its reference images (tests/raster).
 echo "== tests/run_raster.py"

@@ -13,8 +13,8 @@
 #==============================================================================================
 
 import time
-import math32
-from raster import Paint, PathBuilder, Path, Pixmap, PixmapPaint, Transform, Rect, Point, Color, Stroke, StrokeDash, LineJoin, FillRule, SpreadMode, FilterQuality, GradientStop, LinearGradient, RadialGradient
+import luce_std.math32
+from luce_browser_render.raster import Paint, PathBuilder, Path, Pixmap, PixmapPaint, Transform, Rect, Point, Color, Stroke, StrokeDash, LineJoin, FillRule, SpreadMode, FilterQuality, GradientStop, LinearGradient, RadialGradient
 
 func circle_path() -> Path:
     return PathBuilder.from_circle(500.0, 500.0, 400.0) else trap("circle")

@@ -17,9 +17,9 @@
 
 import c
 import memory
-import files
+import luce_std.files
 import raster_png
-import raster
+import luce_browser_render.raster
 
 ## One test: a name and a function that records failures in the Test.
 pub struct TestCase:

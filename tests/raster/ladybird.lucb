@@ -17,7 +17,7 @@
 
 import harness
 from harness import Test, TestCase
-from raster import Paint, Path, PathBuilder, Pixmap, PixmapPaint, Transform, Rect, Point, Color, Stroke, StrokeDash, LineCap, LineJoin, FillRule, SpreadMode, FilterQuality, GradientStop, LinearGradient, RadialGradient, Pattern, Mask
+from luce_browser_render.raster import Paint, Path, PathBuilder, Pixmap, PixmapPaint, Transform, Rect, Point, Color, Stroke, StrokeDash, LineCap, LineJoin, FillRule, SpreadMode, FilterQuality, GradientStop, LinearGradient, RadialGradient, Pattern, Mask
 
 # mark: helpers --------------------------------------------------------------------------------
 

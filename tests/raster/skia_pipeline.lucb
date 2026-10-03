@@ -18,8 +18,8 @@
 
 import harness
 from harness import Test, TestCase
-import raster
-from raster import PathBuilder, FillRule, Paint, Pixmap, Transform, Rect, Point, Color, BlendMode, SpreadMode, FilterQuality, GradientStop, LinearGradient, RadialGradient, SweepGradient, Pattern, Shader
+import luce_browser_render.raster
+from luce_browser_render.raster import PathBuilder, FillRule, Paint, Pixmap, Transform, Rect, Point, Color, BlendMode, SpreadMode, FilterQuality, GradientStop, LinearGradient, RadialGradient, SweepGradient, Pattern, Shader
 
 # mark: Helpers ===============================================================================
 

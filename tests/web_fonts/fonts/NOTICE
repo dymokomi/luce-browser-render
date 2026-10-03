@@ -1,4 +1,4 @@
-Fonts used by the web_fonts module's tests (src/luce_browser_render/web_fonts/tests_*.lucb),
+Fonts used by the web_fonts module's tests (src/web_fonts/tests_*.lucb),
 copied from Ladybird at 47c82b38d0 (see PIN at the repository root):
 
 SerenitySans-Regular.ttf  Base/res/fonts/SerenitySans-Regular.ttf; part of Ladybird, under the

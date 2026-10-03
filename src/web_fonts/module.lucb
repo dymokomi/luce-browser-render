@@ -1,6 +1,6 @@
 #==============================================================================================
 #
-#   gfx - LibGfx geometry, color, paths and bitmaps; CSS pixel units
+#   web_fonts - fonts: typefaces, font cascades, text layout
 #
 #   DESCRIPTION:
 #       Part of the luce-browser port of Ladybird (47c82b38d0) to luce-base, DESIGN.md §4.1.
@@ -13,11 +13,13 @@
 #
 #==============================================================================================
 
-import ak
-import luce
-import math
-import math32
+import luce_browser_foundation.ak
+import gfx
+import c
+import luce_compress.flate
+import luce_browser_foundation.gc
+import luce_std.math
+import luce_std.math32
 import memory
 import os
-import c as libc
-import luce_browser_render.raster as raster
+import luce_browser_foundation.web_unicode
