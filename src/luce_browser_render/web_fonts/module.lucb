@@ -17,6 +17,7 @@ import ak
 import luce_browser_render.gfx as gfx
 import c
 import flate
+import gc
 import math
 import math32
 import memory

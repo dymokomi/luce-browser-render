@@ -1,0 +1,62 @@
+#==============================================================================================
+#
+#   font_allocators - where the font database, typefaces and their fonts allocate what they
+#                     keep
+#
+#   DESCRIPTION:
+#       Addition, with no donor counterpart (luce-browser-engine DESIGN.md §3.3 rule 7). In
+#       Ladybird a Typeface, its Fonts and their caches are reference counted: they live as long
+#       as something refers to them, whatever is collected meanwhile. The port allocates with
+#       the current allocator, which in the engine is a VM's collected heap. The font database
+#       is a module global and outlives every VM, so whatever it keeps must not come from one.
+#
+#       The rules:
+#       - FontDatabase::the() and the system font provider (PathFontProvider), with everything
+#         they load, live in the C heap (memory.heap), whatever allocator is current.
+#       - A Typeface records the allocators that were current when it was made. Everything it
+#         or its Fonts allocate later and keep (the Fonts of Typeface::font and their cache
+#         keys, the HarfBuzz face and fonts, TypefaceSkia's glyph pages, the shaping cache)
+#         comes from those, whatever is current then. The system typefaces are made in the C
+#         heap and keep their caches there; a web font's typeface (FontLoader, under a VM's
+#         heap) keeps them in that heap and dies with it.
+#       - ak's atomic storage (bytes, glyph ids, Utf16 data) goes through ak.atomic_allocator,
+#         which the gc module points at the newest heap: a scope sets both.
+#       - Only what is kept is allocated in such a scope. Working memory (HarfBuzz's while
+#         shaping, glyph outlines while measuring) stays in the current allocator: in the C
+#         heap nothing would free it.
+#
+#       So a C-heap structure never refers to collected memory, and collected memory may refer
+#       to C-heap fonts, which are never freed (as the process-wide font cache of the donor).
+#
+#==============================================================================================
+
+## The allocators a typeface (and the fonts it makes) allocates what it keeps from: the
+## current allocator and ak's atomic allocator when the typeface was made. (Addition.)
+pub struct FontAllocators:
+    pub var allocator: memory.Allocator
+    pub var atomic_allocator: memory.Allocator?
+
+## The allocators current now.
+pub func font_allocators_current() -> FontAllocators:
+    return FontAllocators(allocator = memory.allocator, atomic_allocator = ak.atomic_allocator)
+
+## The C heap, for atomic storage too: the allocators of whatever outlives every VM.
+pub func font_allocators_c_heap() -> FontAllocators:
+    return FontAllocators(allocator = memory.heap, atomic_allocator = none)
+
+## Begins a scope of `allocators`: makes their atomic allocator ak's and answers the one it
+## replaces, which font_allocators_leave restores. The caller makes `allocators.allocator`
+## current with `with`:
+##
+##     let previous = font_allocators_enter(&allocators)
+##     defer font_allocators_leave(previous)
+##     with allocators.allocator:
+##         ...
+pub func font_allocators_enter(allocators: const FontAllocators*) -> memory.Allocator?:
+    let previous = ak.atomic_allocator
+    ak.atomic_allocator = allocators.atomic_allocator
+    return previous
+
+## Ends a scope of font_allocators_enter: ak's atomic allocator is `previous` again.
+pub func font_allocators_leave(previous: memory.Allocator?):
+    ak.atomic_allocator = previous

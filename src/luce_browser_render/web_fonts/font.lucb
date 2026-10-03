@@ -8,7 +8,8 @@
 #       are the port's replacements (sk_font.lucb, hb_buffer.lucb), which give the numbers
 #       Skia's FreeType backend and HarfBuzz give (DESIGN.md §6.7). Font is ref-counted in
 #       C++; here it is managed memory (DESIGN.md §3.3), and ~Font's hb_font_destroy has
-#       nothing to release.
+#       nothing to release. What a font keeps comes from its typeface's allocators
+#       (font_allocators.lucb).
 #
 #==============================================================================================
 
@@ -24,14 +25,15 @@ pub func font_pixel_metrics_line_spacing(this: const FontPixelMetrics*) -> f32:
 
 # mark: Construction and metrics ===============================================================
 
-## Ported from Libraries/LibGfx/Font/Font.cpp:25 Gfx::Font::Font.
+## Ported from Libraries/LibGfx/Font/Font.cpp:25 Gfx::Font::Font. The font keeps its copies
+## of the settings in the typeface's allocators (font_allocators.lucb); the metrics are
+## measured in the current allocator.
 pub func font_construct(this: Font*, typeface: Typeface*, point_width: f32, point_height: f32, dpi_x: u32, dpi_y: u32, variations: FontVariationSettings, features: ak.Vector[ShapeFeature]):
     font_init_fields(this)
     this.m_typeface = typeface
     this.m_point_width = point_width
     this.m_point_height = point_height
-    this.m_font_variation_settings = FontVariationSettings(axes = ak.hash_map_clone(&variations.axes) else trap("out of memory"))
-    this.m_shape_features = ak.vector_clone(&features)
+    font_keep_settings(this, &variations, &features)
 
     let units_per_em = (f32)typeface_units_per_em(this.m_typeface)
     this.m_x_scale = (point_width * (f32)dpi_x) / (points_per_inch * units_per_em)
@@ -53,6 +55,16 @@ pub func font_construct(this: Font*, typeface: Typeface*, point_width: f32, poin
     metrics.line_gap = sk_metrics.leading
 
     this.m_pixel_metrics = metrics
+
+## Font::Font's copies of the variation settings and shape features, made with the
+## typeface's allocators.
+func font_keep_settings(this: Font*, variations: const FontVariationSettings*, features: const ak.Vector[ShapeFeature]*):
+    let allocators = &this.m_typeface.m_allocators
+    let previous = font_allocators_enter(allocators)
+    defer font_allocators_leave(previous)
+    with allocators.allocator:
+        this.m_font_variation_settings = FontVariationSettings(axes = ak.hash_map_clone(&variations.axes) else trap("out of memory"))
+        this.m_shape_features = ak.vector_clone(features)
 
 ## Ported from Libraries/LibGfx/Font/Font.cpp:55 Gfx::Font::metrics.
 pub func font_metrics(this: const Font*) -> ScaledFontMetrics:
@@ -155,25 +167,34 @@ pub func font_bold_variant(this: const Font*) -> const Font*:
         mutable_this.m_bold_variant = this
     return mutable_this.m_bold_variant else trap("VERIFY_NOT_REACHED")
 
-## Ported from Libraries/LibGfx/Font/Font.cpp:116 Gfx::Font::harfbuzz_font.
+## Ported from Libraries/LibGfx/Font/Font.cpp:116 Gfx::Font::harfbuzz_font. The HarfBuzz font
+## comes from the typeface's allocators.
 pub func font_harfbuzz_font(this: const Font*) -> HbFontT*?:
     if this.m_harfbuzz_font == none:
-        let mutable_this = (Font*)this
-        let harfbuzz_font = hb_font_create(typeface_harfbuzz_typeface(font_typeface(this)) else trap("VERIFY: no HarfBuzz face"))
-        mutable_this.m_harfbuzz_font = harfbuzz_font
-        hb_font_set_scale(harfbuzz_font, (i32)(font_pixel_size(this) * text_shaping_resolution), (i32)(font_pixel_size(this) * text_shaping_resolution))
-        hb_font_set_ptem(harfbuzz_font, font_point_size(this))
-
-        let variations = this.m_font_variation_settings.axes
-        if not ak.hash_map_is_empty(&variations):
-            var hb_list: ak.Vector[HbVariation]
-            ak.vector_ensure_capacity(&hb_list, ak.hash_map_size(&variations))
-
-            for axis in ak.hash_map_begin_const(&variations):
-                ak.vector_unchecked_append_u(&hb_list, HbVariation(tag = gfx.four_cc_to_u32(&axis.key), value = axis.value))
-
-            hb_font_set_variations(harfbuzz_font, ak.vector_span_const(&hb_list))
+        let allocators = &this.m_typeface.m_allocators
+        let previous = font_allocators_enter(allocators)
+        defer font_allocators_leave(previous)
+        with allocators.allocator:
+            font_create_harfbuzz_font(this)
     return this.m_harfbuzz_font
+
+## The body of harfbuzz_font's `if (!m_harfbuzz_font)`.
+func font_create_harfbuzz_font(this: const Font*):
+    let mutable_this = (Font*)this
+    let harfbuzz_font = hb_font_create(typeface_harfbuzz_typeface(font_typeface(this)) else trap("VERIFY: no HarfBuzz face"))
+    mutable_this.m_harfbuzz_font = harfbuzz_font
+    hb_font_set_scale(harfbuzz_font, (i32)(font_pixel_size(this) * text_shaping_resolution), (i32)(font_pixel_size(this) * text_shaping_resolution))
+    hb_font_set_ptem(harfbuzz_font, font_point_size(this))
+
+    let variations = this.m_font_variation_settings.axes
+    if not ak.hash_map_is_empty(&variations):
+        var hb_list: ak.Vector[HbVariation]
+        ak.vector_ensure_capacity(&hb_list, ak.hash_map_size(&variations))
+
+        for axis in ak.hash_map_begin_const(&variations):
+            ak.vector_unchecked_append_u(&hb_list, HbVariation(tag = gfx.four_cc_to_u32(&axis.key), value = axis.value))
+
+        hb_font_set_variations(harfbuzz_font, ak.vector_span_const(&hb_list))
 
 ## Ported from Libraries/LibGfx/Font/Font.h:87 Gfx::Font::features.
 pub func font_features(this: const Font*) -> ak.Vector[ShapeFeature]:

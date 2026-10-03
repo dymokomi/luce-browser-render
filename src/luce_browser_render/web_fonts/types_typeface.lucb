@@ -51,6 +51,7 @@ pub struct Typeface: IsTypeface:
     pub var m_fonts: ak.HashMap[FontCacheKey, Font*, FontCacheKeyTraits]
     pub var m_harfbuzz_blob: HbBlobT*?  # C++ default: { nullptr }
     pub var m_harfbuzz_face: HbFaceT*?  # C++ default: { nullptr }
+    pub var m_allocators: FontAllocators  # addition: what the typeface and its fonts keep is allocated from (font_allocators.lucb)
 
     func typeface() -> Typeface*: return (Typeface*)&self
 

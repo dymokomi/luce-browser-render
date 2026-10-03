@@ -201,7 +201,7 @@ func sfnt_face_cff2_font(face: const SfntFace*) -> SfntCffFont*?:
     mutable_face.cff_font = font
     return font
 
-## Parses the CFF table of the face once.
+## Parses the CFF table of the face once (sfnt_face_create does, for CFF faces).
 func sfnt_face_cff_font(face: const SfntFace*) -> SfntCffFont*?:
     if let font = face.cff_font:
         return font

@@ -145,7 +145,7 @@ pub struct SfntFace:
     pub var gpos: const u8[]
     pub var gdef: const u8[]
     pub var kern: const u8[]
-    # the CFF outlines' parsed INDEX offsets (sfnt_cff.lucb), filled on first use
+    # the CFF outlines' parsed INDEX offsets (sfnt_cff.lucb), parsed with the face
     pub var cff_font: SfntCffFont*?
 
 ## The TTC tag, 'ttcf'.
@@ -240,6 +240,11 @@ pub func sfnt_face_create(data: const u8[], ttc_index: u32) -> SfntFace*!:
     sfnt_face_compute_style_flags(face)
     face.family_name = sfnt_face_family_name(face)
     sfnt_face_select_cmap(face)
+    # The CFF INDEXes are parsed with the face, as FreeType's CFF driver reads them when it
+    # opens one: a face allocates nothing once it is made, so it never mixes the allocator of
+    # its typeface with whatever is current later (font_allocators.lucb).
+    if face.outline_format == SfntOutlineFormat.cff:
+        discard(sfnt_face_cff_font(face))
     return face
 
 ## The table `tag` of the face, or none when it has no such table.

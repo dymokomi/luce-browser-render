@@ -333,16 +333,30 @@ func shape_text_get_or_create_buffer(string: ak.Utf16View, font: const Font*, te
         let code_unit = ak.utf16_view_code_unit_at(&string, 0)
         if code_unit < 128:
             if shaping_cache.single_ascii_character_map[(usize)code_unit] == none:
-                shaping_cache.single_ascii_character_map[(usize)code_unit] = setup_text_shaping(string, font, text_type)
+                shaping_cache.single_ascii_character_map[(usize)code_unit] = shape_text_keep_buffer(font, setup_text_shaping(string, font, text_type))
             return shaping_cache.single_ascii_character_map[(usize)code_unit] else trap("VERIFY_NOT_REACHED")
     var lookup = ShapeTextCacheLookup(string = string)
     let predicate = ak.Function1[const ak.HashMapEntry[ak.Utf16String, HbBufferT*?]*, bool](call = shape_text_cache_lookup_matches, context = &lookup)
     var it = ak.hash_map_find_u32_tt_unary_predicate(&shaping_cache.map, ak.utf16_view_hash(&string), predicate)
     if ak.hash_table_iterator_ne(&it, ak.hash_map_end(&shaping_cache.map)):
         return ak.hash_table_iterator_deref(&it).value else trap("VERIFY_NOT_REACHED")
-    let buffer = setup_text_shaping(string, font, text_type)
-    discard(ak.hash_map_set(&shaping_cache.map, ak.utf16_string_from_utf16(string), buffer))
+    let buffer = shape_text_keep_buffer(font, setup_text_shaping(string, font, text_type))
+    let allocators = &font.m_typeface.m_allocators
+    let previous = font_allocators_enter(allocators)
+    defer font_allocators_leave(previous)
+    with allocators.allocator:
+        discard(ak.hash_map_set(&shaping_cache.map, ak.utf16_string_from_utf16(string), buffer))
     return buffer
+
+## The copy of a shaped `buffer` that the font's shaping cache keeps, in the typeface's
+## allocators (font_allocators.lucb). HarfBuzz shapes in the current allocator, whose working
+## memory the collector reclaims; only the result is kept.
+func shape_text_keep_buffer(font: const Font*, buffer: const HbBufferT*) -> HbBufferT*:
+    let allocators = &font.m_typeface.m_allocators
+    let previous = font_allocators_enter(allocators)
+    defer font_allocators_leave(previous)
+    with allocators.allocator:
+        return hb_buffer_copy(buffer)
 
 ## Ported from Libraries/LibGfx/TextLayout.cpp:198 Gfx::shape_text.
 pub func shape_text_f32(baseline_start: gfx.FloatPoint, letter_spacing: f32, string: ak.Utf16View, font: const Font*, text_type: GlyphRunTextType) -> GlyphRun*:

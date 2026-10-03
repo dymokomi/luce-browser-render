@@ -9,6 +9,7 @@
 #       are pure. FontDatabase::font_directories keeps the donor's platform branches; the
 #       fontconfig and Haiku branches (USE_FONTCONFIG, AK_OS_HAIKU) are not built on the
 #       platforms the port targets, and Core::StandardPaths is read from the environment.
+#       The database and what it keeps live in the C heap (font_allocators.lucb).
 #
 #==============================================================================================
 
@@ -28,14 +29,15 @@ pub func system_font_provider_get_font_impl(this: SystemFontProvider*, family: a
 pub func system_font_provider_for_each_typeface_with_family_name_impl(this: SystemFontProvider*, family_name: ak.FlyString, arg1: ak.Function1[Typeface*, unit]):
     trap("pure virtual: Gfx::SystemFontProvider::for_each_typeface_with_family_name")
 
-## FontDatabase::the's `static FontDatabase s_the`.
+## FontDatabase::the's `static FontDatabase s_the`: in the C heap, as everything the database
+## keeps (font_allocators.lucb).
 var font_database_s_the: FontDatabase*?
 
 ## Ported from Libraries/LibGfx/Font/FontDatabase.cpp:27 Gfx::FontDatabase::the.
 pub func font_database_the() -> FontDatabase*:
     if let the = font_database_s_the:
         return the
-    let the = new FontDatabase else trap("out of memory")
+    let the = (new FontDatabase in memory.heap) else trap("out of memory")
     font_database_construct(the)
     font_database_s_the = the
     return the
@@ -70,7 +72,7 @@ pub func font_database_get_font_for_code_point(this: FontDatabase*, code_point: 
             recover none
         if let typeface = typeface_or_error:
             new_entry = FontDatabaseCodePointFallbackEntry(family_name = typeface_family(typeface.typeface()), typeface = typeface.typeface())
-        discard(ak.hash_map_set(&this.m_code_point_fallback_cache, key, new_entry))
+        font_database_cache_fallback_entry(this, key, new_entry)
     let entry = ak.hash_map_get_k(&this.m_code_point_fallback_cache, key) else trap("VERIFY_NOT_REACHED")
 
     # FIXME: Does it matter that we don't pass a FontVariationSettings or ShapeFeatures here?
@@ -78,6 +80,14 @@ pub func font_database_get_font_for_code_point(this: FontDatabase*, code_point: 
         return typeface_font(typeface, point_size)
 
     return none
+
+## m_code_point_fallback_cache.ensure's insertion, in the C heap with the database.
+func font_database_cache_fallback_entry(this: FontDatabase*, key: CodePointFallbackKey, entry: FontDatabaseCodePointFallbackEntry):
+    let c_heap = font_allocators_c_heap()
+    let previous = font_allocators_enter(&c_heap)
+    defer font_allocators_leave(previous)
+    with memory.heap:
+        discard(ak.hash_map_set(&this.m_code_point_fallback_cache, key, entry))
 
 ## Ported from Libraries/LibGfx/Font/FontDatabase.cpp:72 Gfx::FontDatabase::for_each_typeface_with_family_name.
 pub func font_database_for_each_typeface_with_family_name(this: FontDatabase*, family_name: ak.FlyString, callback: ak.Function1[Typeface*, unit]):

@@ -149,7 +149,7 @@ nearest sampling's round-down, conics) was merged last, and then:
 
 1. `luce-base fmt --check` on every hand-written `.lucb`;
 2. `luce-base check -W` on raster, gfx, web_fonts and display_list, failing on any output;
-3. `luce-base test` of gfx (359 tests), web_fonts (123), display_list (104, `--native`) and
+3. `luce-base test` of gfx (359 tests), web_fonts (125), display_list (104, `--native`) and
    raster (31), and the raster integration suite (`tests/run_raster.py`, 291 scenes).
 
 ## Remaining traps, stubs and gates

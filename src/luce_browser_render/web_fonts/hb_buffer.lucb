@@ -76,6 +76,11 @@ let hb_attach_type_mark: u8 = 1
 pub func hb_buffer_create() -> HbBufferT*:
     return new HbBufferT(direction = HbDirection.invalid) else trap("out of memory")
 
+## A copy of `buffer` (its glyphs, positions, direction and script) from the current allocator.
+## (Port addition: the shaping cache keeps a copy of what was shaped, font_allocators.lucb.)
+pub func hb_buffer_copy(buffer: const HbBufferT*) -> HbBufferT*:
+    return new HbBufferT(infos = ak.vector_clone(&buffer.infos), positions = ak.vector_clone(&buffer.positions), direction = buffer.direction, script = buffer.script) else trap("out of memory")
+
 ## hb_buffer_add: one character with its cluster.
 func hb_buffer_add(buffer: HbBufferT*, code_point: u32, cluster: u32):
     ak.vector_append_t(&buffer.infos, HbGlyphInfo(codepoint = code_point, cluster = cluster, character = code_point))

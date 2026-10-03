@@ -11,16 +11,22 @@
 #       _findfirst64), and each font file is read with stdio into a ByteBuffer that the
 #       typefaces made from it share. (luce-std's files module would do, but checking it
 #       with Luce 0.8.12 prints warnings of its own.) `resource://` URIs (Ladybird's
-#       resource root) are not supported: the embedder passes file URIs.
+#       resource root) are not supported: the embedder passes file URIs. The provider and
+#       everything it loads live in the C heap (font_allocators.lucb).
 #
 #==============================================================================================
 
 ## make<Gfx::PathFontProvider>(): a provider with its vtable, constructed. (r09 addition:
-## the skeleton has no creation helper for non-cell classes.)
+## the skeleton has no creation helper for non-cell classes.) A system font provider outlives
+## every VM, so it lives in the C heap (font_allocators.lucb).
 pub func path_font_provider_create() -> PathFontProvider*:
-    let this = new PathFontProvider(system_font_provider_base = SystemFontProvider(vtable = &path_font_provider_vtable.system_font_provider_vtable, class_id = path_font_provider_class.first_id)) else trap("out of memory")
-    path_font_provider_construct(this)
-    return this
+    let c_heap = font_allocators_c_heap()
+    let previous = font_allocators_enter(&c_heap)
+    defer font_allocators_leave(previous)
+    with memory.heap:
+        let this = new PathFontProvider(system_font_provider_base = SystemFontProvider(vtable = &path_font_provider_vtable.system_font_provider_vtable, class_id = path_font_provider_class.first_id)) else trap("out of memory")
+        path_font_provider_construct(this)
+        return this
 
 ## Ported from Libraries/LibGfx/Font/PathFontProvider.cpp:18 Gfx::PathFontProvider::PathFontProvider.
 pub func path_font_provider_construct(this: PathFontProvider*):
@@ -28,8 +34,13 @@ pub func path_font_provider_construct(this: PathFontProvider*):
     this.m_name = ak.string_from_str("Path")
 
 ## Ported from Libraries/LibGfx/Font/PathFontProvider.h:25 Gfx::PathFontProvider::set_name_but_fixme_should_create_custom_system_font_provider.
+## The provider keeps a copy in the C heap.
 pub func path_font_provider_set_name_but_fixme_should_create_custom_system_font_provider(this: PathFontProvider*, name: ak.String):
-    this.m_name = name
+    let c_heap = font_allocators_c_heap()
+    let previous = font_allocators_enter(&c_heap)
+    defer font_allocators_leave(previous)
+    with memory.heap:
+        this.m_name = ak.string_from_utf8(ak.string_bytes_as_string_view(&name)) else trap("MUST: String::from_utf8")
 
 ## Ported from Libraries/LibGfx/Font/PathFontProvider.cpp:22 Gfx::number_of_fonts_in_ttc.
 # https://learn.microsoft.com/en-us/typography/opentype/spec/otff#ttc-header
@@ -142,7 +153,17 @@ func path_font_provider_c_string(text: str) -> c.str:
     return (c.str)(str)bytes[0..<text.length]
 
 ## Ported from Libraries/LibGfx/Font/PathFontProvider.cpp:42 Gfx::PathFontProvider::load_all_fonts_from_uri.
+## The fonts' bytes, typefaces and the family table live in the C heap with the provider
+## (font_allocators.lucb), whatever allocator is current.
 pub func path_font_provider_load_all_fonts_from_uri(this: PathFontProvider*, uri: ak.StringView):
+    let c_heap = font_allocators_c_heap()
+    let previous = font_allocators_enter(&c_heap)
+    defer font_allocators_leave(previous)
+    with memory.heap:
+        path_font_provider_load_all_fonts_from_file_uri(this, uri)
+
+## The body of load_all_fonts_from_uri.
+func path_font_provider_load_all_fonts_from_file_uri(this: PathFontProvider*, uri: ak.StringView):
     # Core::Resource::load_from_uri: the port reads file:// URIs.
     let file_scheme = ak.sv("file://")
     if not ak.string_view_starts_with_string_view(&uri, file_scheme):

@@ -1,4 +1,10 @@
 # C++ name	package	module	Luce name	file:line	kind
+(fix/font-cache: a copy of a shaped hb_buffer_t for the shaping cache.)	luce-browser-render	web_fonts	hb_buffer_copy	-	addition
+(fix/font-cache: begins a scope of a typeface's allocators (ak's atomic allocator).)	luce-browser-render	web_fonts	font_allocators_enter	-	addition
+(fix/font-cache: ends a scope of font_allocators_enter.)	luce-browser-render	web_fonts	font_allocators_leave	-	addition
+(fix/font-cache: the C heap, atomic storage too.)	luce-browser-render	web_fonts	font_allocators_c_heap	-	addition
+(fix/font-cache: the allocators a typeface and its fonts keep their memory in.)	luce-browser-render	web_fonts	FontAllocators	-	addition
+(fix/font-cache: the allocators current now.)	luce-browser-render	web_fonts	font_allocators_current	-	addition
 (integration: FontData::create_from_resource(Core::Resource::load_from_filesystem(path)) for a file path.)	luce-browser-render	web_fonts	font_data_create_from_file	-	addition
 (r08: CSSPixels' operators as one-line methods: from_raw, from_int, from_f32, from_f64, raw_value, to_float, to_double, to_int, might_be_saturated, add, sub, mul, mul_fraction, div, div_fraction, neg, abs, cmp, lt, le, gt, ge, compare.)	luce-browser-render	gfx	CssPixels	-	addition
 (r08: `Color(NamedColor)` as an expression.)	luce-browser-render	gfx	color_new_named_color	-	addition

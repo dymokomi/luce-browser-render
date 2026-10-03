@@ -370,18 +370,22 @@ func sk_srgb_singleton() -> SkColorSpace*:
     if let cs = sk_srgb_singleton_cs:
         return cs
     let gamut = sk_named_gamut_srgb()
-    let cs = sk_color_space_new(&sk_named_transfer_fn_srgb, &gamut)
-    sk_srgb_singleton_cs = cs
-    return cs
+    # A process-wide singleton outlives every VM's heap: it lives in the C heap.
+    with memory.heap:
+        let cs = sk_color_space_new(&sk_named_transfer_fn_srgb, &gamut)
+        sk_srgb_singleton_cs = cs
+        return cs
 
 ## Ported from src/core/SkColorSpace.cpp:188 sk_srgb_linear_singleton.
 func sk_srgb_linear_singleton() -> SkColorSpace*:
     if let cs = sk_srgb_linear_singleton_cs:
         return cs
     let gamut = sk_named_gamut_srgb()
-    let cs = sk_color_space_new(&sk_named_transfer_fn_linear, &gamut)
-    sk_srgb_linear_singleton_cs = cs
-    return cs
+    # A process-wide singleton outlives every VM's heap: it lives in the C heap.
+    with memory.heap:
+        let cs = sk_color_space_new(&sk_named_transfer_fn_linear, &gamut)
+        sk_srgb_linear_singleton_cs = cs
+        return cs
 
 ## Ported from src/core/SkColorSpace.cpp:129 SkColorSpace::MakeRGB.
 func sk_color_space_make_rgb(transfer_fn: const SkcmsTransferFunction*, to_xyz: const SkcmsMatrix3x3*) -> SkSpSkColorSpace:

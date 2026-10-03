@@ -1,0 +1,166 @@
+#==============================================================================================
+#
+#   tests_lifetimes - fonts outlive the collected heaps they are used under
+#
+#   DESCRIPTION:
+#       luce-browser-engine runs ported code with a VM's collected heap as the current
+#       allocator and destroys VMs while the font database, a module global, lives on
+#       (font_allocators.lucb). These tests make, shape, measure and draw fonts of the database
+#       under one heap, collect everything and destroy that heap, then use the same cached
+#       fonts under a second heap and expect the same answers. A typeface loaded under a heap
+#       (a web font) keeps its fonts and caches in that heap, through collections that reuse
+#       the freed memory.
+#
+#==============================================================================================
+
+# mark: Heaps ====================================================================================
+
+## A collected heap with no embedder roots, as a VM makes one (gc.heap_construct also points
+## ak's atomic allocator at it).
+func test_lifetimes_create_heap() -> gc.Heap*:
+    let heap = (new gc.Heap in memory.heap) else trap("out of memory")
+    gc.heap_construct(heap, ak.Function1[gc.GcHashMap[gc.HeapRoot]*, unit](call = test_lifetimes_no_roots, context = none))
+    return heap
+
+## The embedder roots of a test heap: none.
+func test_lifetimes_no_roots(context: void*?, roots: gc.GcHashMap[gc.HeapRoot]*):
+    return
+
+## Destroys a test heap: a collection of everything, then its blocks go back to the system.
+func test_lifetimes_destroy_heap(heap: gc.Heap*):
+    gc.heap_destroy(heap)
+    free(heap) in memory.heap
+
+## Fills freed heap memory with new blobs, so that anything a collection freed under a cache
+## reads garbage.
+noinline func test_lifetimes_churn():
+    for i in 0..<4096:
+        let junk = new u8[96] else trap("out of memory")
+        memory.set(junk, 0xA5)
+        discard(i)
+
+# mark: What a font answers ======================================================================
+
+## What a test observes of a font: its shaping of a text, the widths, the metrics, a glyph
+## outline, its bold variant and emoji check.
+struct TestFontAnswers:
+    var glyph_count: usize
+    var glyph_id_sum: u64
+    var run_width: f32
+    var measured_width: f32
+    var glyph_width: f32
+    var ascent: f32
+    var outline_verbs: usize
+    var outline_first_x: f32
+    var bold_variant: const Font*
+    var is_emoji: bool
+
+## The answers of `font` for `text`, made under the current allocator.
+noinline func test_lifetimes_answers(font: const Font*, text: str) -> TestFontAnswers:
+    let string = ak.utf16_string_from_str(text)
+    let view = ak.utf16_string_base_utf16_view(&string.utf16_string_base)
+    let run = shape_text_f32(gfx.FloatPoint(m_x = 0.0, m_y = 0.0), 0.0, view, font, GlyphRunTextType.ltr)
+    var glyph_id_sum: u64 = 0
+    for glyph in ak.vector_span_const(&run.m_glyphs):
+        glyph_id_sum += (u64)glyph.glyph_id
+    let first_glyph = ak.vector_at_const(&run.m_glyphs, 0).glyph_id
+    let outline = font_glyph_path(font, first_glyph, 1.0)
+    let first_point = ak.vector_at_const(&outline.points, 0)
+    # A single ASCII character goes through the shaping cache's own table.
+    let single = ak.utf16_string_from_str("W")
+    discard(shape_text_f32(gfx.FloatPoint(m_x = 0.0, m_y = 0.0), 0.0, ak.utf16_string_base_utf16_view(&single.utf16_string_base), font, GlyphRunTextType.ltr))
+    discard(font_is_emoji_font(font))
+    return TestFontAnswers(
+        glyph_count = ak.vector_size(&run.m_glyphs),
+        glyph_id_sum = glyph_id_sum,
+        run_width = glyph_run_width(run),
+        measured_width = measure_text_width(view, font),
+        glyph_width = font_glyph_width(font, (u32)'W'),
+        ascent = font_pixel_metrics(font).ascent,
+        outline_verbs = ak.vector_size(&outline.verbs),
+        outline_first_x = first_point.m_x,
+        bold_variant = font_bold_variant(font),
+        is_emoji = font_is_emoji_font(font))
+
+## Asserts that two sets of answers are the same, floats bit for bit.
+func test_lifetimes_expect_same(what: str, actual: const TestFontAnswers*, expected: const TestFontAnswers*):
+    if actual.glyph_count != expected.glyph_count or actual.glyph_id_sum != expected.glyph_id_sum or actual.outline_verbs != expected.outline_verbs:
+        print(f"{what}: {actual.glyph_count} glyphs (ids {actual.glyph_id_sum}, {actual.outline_verbs} verbs), expected {expected.glyph_count} ({expected.glyph_id_sum}, {expected.outline_verbs})")
+        assert(false, "a font answers differently")
+    assert(actual.glyph_count > 0 and actual.outline_verbs > 0)
+    test_expect_bits("run width", actual.run_width, expected.run_width.bits())
+    test_expect_bits("measured width", actual.measured_width, expected.measured_width.bits())
+    test_expect_bits("glyph width", actual.glyph_width, expected.glyph_width.bits())
+    test_expect_bits("ascent", actual.ascent, expected.ascent.bits())
+    test_expect_bits("outline", actual.outline_first_x, expected.outline_first_x.bits())
+    assert(actual.bold_variant == expected.bold_variant and actual.is_emoji == expected.is_emoji)
+
+# mark: The font database's fonts ================================================================
+
+## The families, weights and texts of the database test: a TrueType face, a bold one, and a CFF
+## face whose text is past the first glyph page.
+let test_lifetimes_families: (str, u32, str)[3] = [("SerenitySans", 400, "Hello, w\u{F6}rld! fi ffl"), ("Lato", 700, "Kerning AV To."), ("Noto Sans Tifinagh", 400, "\u{2D5C}\u{2D49}\u{2D3C}\u{2D49}\u{2D4F}\u{2D30}\u{2D56}")]
+
+## The fonts of test_lifetimes_families at 17.5 pt (a size no other test asks for, so that the
+## database makes them under the current heap), with their answers.
+noinline func test_lifetimes_database_fonts(database: FontDatabase*, fonts: (const Font*)[3]*, answers: TestFontAnswers[3]*):
+    for (index, family) in test_lifetimes_families.indexed():
+        let font = font_database_get(database, ak.fly_string_from_str(family.0), 17.5, family.1, 5, 0) else trap("no test font")
+        (*fonts)[index] = font
+        (*answers)[index] = test_lifetimes_answers(font, family.2)
+    # The code point fallback cache gets an entry too.
+    assert(font_database_get_font_for_code_point(database, 0x1F602, 17.5, 400, 5, 0) == none)
+
+test "the font database's fonts outlive the heaps they were made and used under":
+    if not tests_r10_four_cc_is_ported:
+        return
+    let database = test_font_database()
+    var fonts: (const Font*)[3] = ---
+    var answers: TestFontAnswers[3] = ---
+    let first_heap = test_lifetimes_create_heap()
+    test_lifetimes_use_database_fonts(first_heap, database, &fonts, &answers)
+    test_lifetimes_destroy_heap(first_heap)
+
+    # A second heap: the database answers the same fonts, which answer as before.
+    let second_heap = test_lifetimes_create_heap()
+    var again: (const Font*)[3] = ---
+    var answers_again: TestFontAnswers[3] = ---
+    test_lifetimes_use_database_fonts(second_heap, database, &again, &answers_again)
+    test_lifetimes_destroy_heap(second_heap)
+    for index in 0..<3:
+        assert(again[index] == fonts[index], "the database caches its fonts")
+        test_lifetimes_expect_same(test_lifetimes_families[index].0, &answers_again[index], &answers[index])
+
+## Uses the database's test fonts with `heap` current, then collects it and fills the freed
+## memory.
+noinline func test_lifetimes_use_database_fonts(heap: gc.Heap*, database: FontDatabase*, fonts: (const Font*)[3]*, answers: TestFontAnswers[3]*):
+    let allocator: memory.Allocator = heap
+    with allocator:
+        test_lifetimes_database_fonts(database, fonts, answers)
+        gc.heap_collect_garbage(heap)
+        test_lifetimes_churn()
+
+# mark: A typeface loaded under a heap ===========================================================
+
+test "a typeface loaded under a heap keeps its fonts and caches there through collections":
+    let heap = test_lifetimes_create_heap()
+    test_lifetimes_web_font(heap)
+    test_lifetimes_destroy_heap(heap)
+
+## Loads Lato Bold under `heap` (as FontLoader loads a web font), uses a font of it, collects
+## and churns the heap, and expects the same answers.
+noinline func test_lifetimes_web_font(heap: gc.Heap*):
+    let allocator: memory.Allocator = heap
+    with allocator:
+        let bytes = test_read_file("tests/web_fonts/fonts/Lato-Bold.ttf")
+        let typeface = typeface_try_load_from_temporary_memory(ak.byte_buffer_bytes_const(&bytes)) else trap("cannot load Lato Bold")
+        # The typeface records the heap's allocators (atomic storage too).
+        assert(typeface.m_allocators.atomic_allocator != none)
+        let font = typeface_font(typeface, 21.0)
+        let before = test_lifetimes_answers(font, "Kerning AV To.")
+        for _ in 0..<2:
+            gc.heap_collect_garbage(heap)
+            test_lifetimes_churn()
+            assert(typeface_font(typeface, 21.0) == font)
+            let after = test_lifetimes_answers(font, "Kerning AV To.")
+            test_lifetimes_expect_same("Lato Bold under a heap", &after, &before)
