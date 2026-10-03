@@ -30,17 +30,7 @@ woff_loader.lucb
 woff2_loader.lucb
 font_cascade_list.lucb
 text_layout.lucb
-sfnt_reader.lucb
-sfnt_cmap.lucb
-sfnt_glyf.lucb
-sfnt_cff.lucb
 sk_font.lucb
-hb_buffer.lucb
-hb_normalize.lucb
-hb_layout.lucb
-hb_position.lucb
-hb_context.lucb
-hb_fallback.lucb
 path.lucb
 tests_support.lucb
 tests_oracle.lucb

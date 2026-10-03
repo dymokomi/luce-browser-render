@@ -1,5 +1,5 @@
 # C++ name	package	module	Luce name	file:line	kind
-(fix/font-cache: a copy of a shaped hb_buffer_t for the shaping cache.)	luce-browser-render	web_fonts	hb_buffer_copy	-	addition
+(fix/font-cache: a copy of a shaped hb_buffer_t for the shaping cache.)	luce-fonts	shaping	hb_buffer_copy	-	addition
 (fix/font-cache: begins a scope of a typeface's allocators (ak's atomic allocator).)	luce-browser-render	web_fonts	font_allocators_enter	-	addition
 (fix/font-cache: ends a scope of font_allocators_enter.)	luce-browser-render	web_fonts	font_allocators_leave	-	addition
 (fix/font-cache: the C heap, atomic storage too.)	luce-browser-render	web_fonts	font_allocators_c_heap	-	addition
@@ -11,78 +11,78 @@
 (r08: `Color(r, g, b)` as an expression.)	luce-browser-render	gfx	color_new_u8_u8_u8	-	addition
 (r08: `Color(r, g, b, a)` as an expression.)	luce-browser-render	gfx	color_new_u8_u8_u8_u8	-	addition
 (r08: `ColorComponents { first, second, third, alpha }` as an expression.)	luce-browser-render	gfx	color_components_new	-	addition
-(r09: FT_DivFix.)	luce-browser-render	web_fonts	ft_div_fix	-	addition
-(r09: FT_Get_Char_Index over FreeType's Unicode charmap, Skia's unicharToGlyph.)	luce-browser-render	web_fonts	sfnt_face_ft_glyph_for_code_point	-	addition
-(r09: FT_Load_Glyph with FT_LOAD_NO_HINTING: the unhinted outline of a glyph.)	luce-browser-render	web_fonts	sfnt_face_load_outline	-	addition
-(r09: FT_MulDiv.)	luce-browser-render	web_fonts	ft_mul_div	-	addition
-(r09: FT_MulFix.)	luce-browser-render	web_fonts	ft_mul_fix	-	addition
-(r09: FT_PIX_ROUND.)	luce-browser-render	web_fonts	ft_pix_round	-	addition
+(r09: FT_DivFix.)	luce-fonts	opentype	ft_div_fix	-	addition
+(r09: FT_Get_Char_Index over FreeType's Unicode charmap, Skia's unicharToGlyph.)	luce-fonts	opentype	sfnt_face_ft_glyph_for_code_point	-	addition
+(r09: FT_Load_Glyph with FT_LOAD_NO_HINTING: the unhinted outline of a glyph.)	luce-fonts	opentype	sfnt_face_load_outline	-	addition
+(r09: FT_MulDiv.)	luce-fonts	opentype	ft_mul_div	-	addition
+(r09: FT_MulFix.)	luce-fonts	opentype	ft_mul_fix	-	addition
+(r09: FT_PIX_ROUND.)	luce-fonts	opentype	ft_pix_round	-	addition
 (r09: Gfx::UnicodeRange { min, max } as an expression.)	luce-browser-render	web_fonts	unicode_range_create	-	addition
-(r09: HB_FEATURE_GLOBAL_END.)	luce-browser-render	web_fonts	hb_feature_global_end	-	addition
-(r09: HB_TAG / FT_MAKE_TAG.)	luce-browser-render	web_fonts	sfnt_tag	-	addition
+(r09: HB_FEATURE_GLOBAL_END.)	luce-fonts	shaping	hb_feature_global_end	-	addition
+(r09: HB_TAG / FT_MAKE_TAG.)	luce-fonts	opentype	sfnt_tag	-	addition
 (r09: SkFont { typeface, size }.)	luce-browser-render	web_fonts	sk_font_make	-	addition
 (r09: SkFont::getMetrics with Skia's FreeType backend's numbers.)	luce-browser-render	web_fonts	sk_font_get_metrics	-	addition
-(r09: SkFont::getPath of a glyph at a pixel size.)	luce-browser-render	web_fonts	sfnt_face_glyph_path	-	addition
+(r09: SkFont::getPath of a glyph at a pixel size.)	luce-fonts	opentype	sfnt_face_glyph_path	-	addition
 (r09: SkFont::getPath.)	luce-browser-render	web_fonts	sk_font_get_path	-	addition
 (r09: SkFont::measureText of ASCII text.)	luce-browser-render	web_fonts	sk_font_measure_ascii	-	addition
-(r09: SkFontMgr::makeFromStream: parses one font of an OpenType file or collection.)	luce-browser-render	web_fonts	sfnt_face_create	-	addition
+(r09: SkFontMgr::makeFromStream: parses one font of an OpenType file or collection.)	luce-fonts	opentype	sfnt_face_create	-	addition
 (r09: SkFontPriv::GetFontBounds.)	luce-browser-render	web_fonts	sk_font_bounds	-	addition
-(r09: SkFontStyle::slant of a face, as TypefaceSkia::slope numbers it.)	luce-browser-render	web_fonts	sfnt_face_slope	-	addition
-(r09: SkFontStyle::weight of a face, as Skia's FreeType scanner gives it.)	luce-browser-render	web_fonts	sfnt_face_weight	-	addition
-(r09: SkFontStyle::width of a face.)	luce-browser-render	web_fonts	sfnt_face_width	-	addition
-(r09: SkPath's verbs of a glyph path.)	luce-browser-render	web_fonts	GlyphPathVerb	-	addition
-(r09: a bounds-checked big-endian i16 read of font data.)	luce-browser-render	web_fonts	sfnt_i16	-	addition
-(r09: a bounds-checked big-endian i32 read of font data.)	luce-browser-render	web_fonts	sfnt_i32	-	addition
-(r09: a bounds-checked big-endian u16 read of font data.)	luce-browser-render	web_fonts	sfnt_u16	-	addition
-(r09: a bounds-checked big-endian u24 read of font data.)	luce-browser-render	web_fonts	sfnt_u24	-	addition
-(r09: a bounds-checked big-endian u32 read of font data.)	luce-browser-render	web_fonts	sfnt_u32	-	addition
-(r09: a bounds-checked byte read of font data.)	luce-browser-render	web_fonts	sfnt_u8	-	addition
-(r09: a clamped slice of font data.)	luce-browser-render	web_fonts	sfnt_slice	-	addition
-(r09: a glyph outline as SkPath holds it, in pixels, y down.)	luce-browser-render	web_fonts	GlyphPath	-	addition
+(r09: SkFontStyle::slant of a face, as TypefaceSkia::slope numbers it.)	luce-fonts	opentype	sfnt_face_slope	-	addition
+(r09: SkFontStyle::weight of a face, as Skia's FreeType scanner gives it.)	luce-fonts	opentype	sfnt_face_weight	-	addition
+(r09: SkFontStyle::width of a face.)	luce-fonts	opentype	sfnt_face_width	-	addition
+(r09: SkPath's verbs of a glyph path.)	luce-fonts	opentype	GlyphPathVerb	-	addition
+(r09: a bounds-checked big-endian i16 read of font data.)	luce-fonts	opentype	sfnt_i16	-	addition
+(r09: a bounds-checked big-endian i32 read of font data.)	luce-fonts	opentype	sfnt_i32	-	addition
+(r09: a bounds-checked big-endian u16 read of font data.)	luce-fonts	opentype	sfnt_u16	-	addition
+(r09: a bounds-checked big-endian u24 read of font data.)	luce-fonts	opentype	sfnt_u24	-	addition
+(r09: a bounds-checked big-endian u32 read of font data.)	luce-fonts	opentype	sfnt_u32	-	addition
+(r09: a bounds-checked byte read of font data.)	luce-fonts	opentype	sfnt_u8	-	addition
+(r09: a clamped slice of font data.)	luce-fonts	opentype	sfnt_slice	-	addition
+(r09: a glyph outline as SkPath holds it, in pixels, y down.)	luce-fonts	opentype	GlyphPath	-	addition
 (r09: a glyph's advance in Skia's glyph cache for the font.)	luce-browser-render	web_fonts	sk_font_glyph_advance	-	addition
-(r09: a table record of an OpenType face.)	luce-browser-render	web_fonts	SfntTable	-	addition
+(r09: a table record of an OpenType face.)	luce-fonts	opentype	SfntTable	-	addition
 (r09: adopt_ref(*new Gfx::GlyphRun(...)).)	luce-browser-render	web_fonts	glyph_run_create	-	addition
-(r09: an FT_Outline in 26.6 fixed point.)	luce-browser-render	web_fonts	SfntOutline	-	addition
-(r09: an INDEX of a CFF table.)	luce-browser-render	web_fonts	SfntCffIndex	-	addition
-(r09: an OpenType face, the Luce replacement of SkTypeface_FreeType and hb_face_t.)	luce-browser-render	web_fonts	SfntFace	-	addition
-(r09: an OpenType table of a face, or none.)	luce-browser-render	web_fonts	sfnt_face_table	-	addition
-(r09: hb_blob_create.)	luce-browser-render	web_fonts	hb_blob_create	-	addition
-(r09: hb_buffer_add_utf16.)	luce-browser-render	web_fonts	hb_buffer_add_utf16	-	addition
-(r09: hb_buffer_add_utf8 of ASCII text.)	luce-browser-render	web_fonts	hb_buffer_add_ascii	-	addition
-(r09: hb_buffer_create.)	luce-browser-render	web_fonts	hb_buffer_create	-	addition
-(r09: hb_buffer_destroy.)	luce-browser-render	web_fonts	hb_buffer_destroy	-	addition
-(r09: hb_buffer_get_glyph_infos.)	luce-browser-render	web_fonts	hb_buffer_get_glyph_infos	-	addition
-(r09: hb_buffer_get_glyph_positions.)	luce-browser-render	web_fonts	hb_buffer_get_glyph_positions	-	addition
-(r09: hb_buffer_guess_segment_properties.)	luce-browser-render	web_fonts	hb_buffer_guess_segment_properties	-	addition
-(r09: hb_buffer_set_direction.)	luce-browser-render	web_fonts	hb_buffer_set_direction	-	addition
-(r09: hb_direction_t, horizontal.)	luce-browser-render	web_fonts	HbDirection	-	addition
-(r09: hb_face_create.)	luce-browser-render	web_fonts	hb_face_create	-	addition
-(r09: hb_face_reference_table's length > 0.)	luce-browser-render	web_fonts	hb_face_has_table_tag	-	addition
-(r09: hb_feature_t.)	luce-browser-render	web_fonts	HbFeature	-	addition
-(r09: hb_font_create.)	luce-browser-render	web_fonts	hb_font_create	-	addition
-(r09: hb_font_get_face.)	luce-browser-render	web_fonts	hb_font_get_face	-	addition
-(r09: hb_font_get_glyph_h_advance.)	luce-browser-render	web_fonts	hb_font_get_glyph_h_advance	-	addition
-(r09: hb_font_get_nominal_glyph.)	luce-browser-render	web_fonts	hb_font_get_nominal_glyph	-	addition
-(r09: hb_font_set_ptem.)	luce-browser-render	web_fonts	hb_font_set_ptem	-	addition
-(r09: hb_font_set_scale.)	luce-browser-render	web_fonts	hb_font_set_scale	-	addition
-(r09: hb_font_set_variations.)	luce-browser-render	web_fonts	hb_font_set_variations	-	addition
-(r09: hb_glyph_info_t with HarfBuzz's private glyph properties.)	luce-browser-render	web_fonts	HbGlyphInfo	-	addition
-(r09: hb_glyph_position_t.)	luce-browser-render	web_fonts	HbGlyphPosition	-	addition
-(r09: hb_shape.)	luce-browser-render	web_fonts	hb_shape	-	addition
-(r09: hb_unicode_funcs_t::is_default_ignorable.)	luce-browser-render	web_fonts	hb_is_default_ignorable	-	addition
-(r09: hb_variation_t.)	luce-browser-render	web_fonts	HbVariation	-	addition
-(r09: hmtx advance of a glyph in font units.)	luce-browser-render	web_fonts	sfnt_face_advance	-	addition
-(r09: hmtx left side bearing of a glyph in font units.)	luce-browser-render	web_fonts	sfnt_face_left_side_bearing	-	addition
+(r09: an FT_Outline in 26.6 fixed point.)	luce-fonts	opentype	SfntOutline	-	addition
+(r09: an INDEX of a CFF table.)	luce-fonts	opentype	SfntCffIndex	-	addition
+(r09: an OpenType face, the Luce replacement of SkTypeface_FreeType and hb_face_t.)	luce-fonts	opentype	SfntFace	-	addition
+(r09: an OpenType table of a face, or none.)	luce-fonts	opentype	sfnt_face_table	-	addition
+(r09: hb_blob_create.)	luce-fonts	shaping	hb_blob_create	-	addition
+(r09: hb_buffer_add_utf16.)	luce-fonts	shaping	hb_buffer_add_utf16	-	addition
+(r09: hb_buffer_add_utf8 of ASCII text.)	luce-fonts	shaping	hb_buffer_add_ascii	-	addition
+(r09: hb_buffer_create.)	luce-fonts	shaping	hb_buffer_create	-	addition
+(r09: hb_buffer_destroy.)	luce-fonts	shaping	hb_buffer_destroy	-	addition
+(r09: hb_buffer_get_glyph_infos.)	luce-fonts	shaping	hb_buffer_get_glyph_infos	-	addition
+(r09: hb_buffer_get_glyph_positions.)	luce-fonts	shaping	hb_buffer_get_glyph_positions	-	addition
+(r09: hb_buffer_guess_segment_properties.)	luce-fonts	shaping	hb_buffer_guess_segment_properties	-	addition
+(r09: hb_buffer_set_direction.)	luce-fonts	shaping	hb_buffer_set_direction	-	addition
+(r09: hb_direction_t, horizontal.)	luce-fonts	shaping	HbDirection	-	addition
+(r09: hb_face_create.)	luce-fonts	shaping	hb_face_create	-	addition
+(r09: hb_face_reference_table's length > 0.)	luce-fonts	shaping	hb_face_has_table_tag	-	addition
+(r09: hb_feature_t.)	luce-fonts	shaping	HbFeature	-	addition
+(r09: hb_font_create.)	luce-fonts	shaping	hb_font_create	-	addition
+(r09: hb_font_get_face.)	luce-fonts	shaping	hb_font_get_face	-	addition
+(r09: hb_font_get_glyph_h_advance.)	luce-fonts	shaping	hb_font_get_glyph_h_advance	-	addition
+(r09: hb_font_get_nominal_glyph.)	luce-fonts	shaping	hb_font_get_nominal_glyph	-	addition
+(r09: hb_font_set_ptem.)	luce-fonts	shaping	hb_font_set_ptem	-	addition
+(r09: hb_font_set_scale.)	luce-fonts	shaping	hb_font_set_scale	-	addition
+(r09: hb_font_set_variations.)	luce-fonts	shaping	hb_font_set_variations	-	addition
+(r09: hb_glyph_info_t with HarfBuzz's private glyph properties.)	luce-fonts	shaping	HbGlyphInfo	-	addition
+(r09: hb_glyph_position_t.)	luce-fonts	shaping	HbGlyphPosition	-	addition
+(r09: hb_shape.)	luce-fonts	shaping	hb_shape	-	addition
+(r09: hb_unicode_funcs_t::is_default_ignorable.)	luce-fonts	shaping	hb_is_default_ignorable	-	addition
+(r09: hb_variation_t.)	luce-fonts	shaping	HbVariation	-	addition
+(r09: hmtx advance of a glyph in font units.)	luce-fonts	opentype	sfnt_face_advance	-	addition
+(r09: hmtx left side bearing of a glyph in font units.)	luce-fonts	opentype	sfnt_face_left_side_bearing	-	addition
 (r09: make<Gfx::PathFontProvider>(): a provider with its vtable, constructed.)	luce-browser-render	web_fonts	path_font_provider_create	-	addition
 (r09: skia_font(scale).getPath(glyph): a glyph outline for the CPU display-list player.)	luce-browser-render	web_fonts	font_glyph_path	-	addition
-(r09: the 16.16 scale FreeType uses for a face at a pixel size.)	luce-browser-render	web_fonts	sfnt_face_ft_scale	-	addition
-(r09: the OS/2 fields FreeType and Skia read, TT_OS2.)	luce-browser-render	web_fonts	SfntOs2	-	addition
-(r09: the cmap glyph of a code point, FT_Get_Char_Index / hb_font_get_nominal_glyph.)	luce-browser-render	web_fonts	sfnt_face_glyph_for_code_point	-	addition
-(r09: the fields of SkFontMetrics LibGfx reads.)	luce-browser-render	web_fonts	SkFontMetrics	-	addition
-(r09: the parsed parts of a CFF font.)	luce-browser-render	web_fonts	SfntCffFont	-	addition
-(r09: the shaping plan: the GSUB and GPOS lookups of the features.)	luce-browser-render	web_fonts	HbLayoutPlan	-	addition
-(r09: whether a face has a non-empty table.)	luce-browser-render	web_fonts	sfnt_face_has_table	-	addition
-(r09: which glyph outlines an OpenType face has.)	luce-browser-render	web_fonts	SfntOutlineFormat	-	addition
+(r09: the 16.16 scale FreeType uses for a face at a pixel size.)	luce-fonts	opentype	sfnt_face_ft_scale	-	addition
+(r09: the OS/2 fields FreeType and Skia read, TT_OS2.)	luce-fonts	opentype	SfntOs2	-	addition
+(r09: the cmap glyph of a code point, FT_Get_Char_Index / hb_font_get_nominal_glyph.)	luce-fonts	opentype	sfnt_face_glyph_for_code_point	-	addition
+(r09: the fields of SkFontMetrics LibGfx reads.)	luce-fonts	opentype	SfntMetrics	-	addition
+(r09: the parsed parts of a CFF font.)	luce-fonts	opentype	SfntCffFont	-	addition
+(r09: the shaping plan: the GSUB and GPOS lookups of the features.)	luce-fonts	shaping	HbLayoutPlan	-	addition
+(r09: whether a face has a non-empty table.)	luce-fonts	opentype	sfnt_face_has_table	-	addition
+(r09: which glyph outlines an OpenType face has.)	luce-fonts	opentype	SfntOutlineFormat	-	addition
 (r10: Class information of PainterRaster (a subclass of Gfx::Painter).)	luce-browser-render	gfx	painter_raster_class	-	addition
 (r10: Converts `bitmap`'s pixels into `target` (width * height * 4 bytes) as premultiplied RGBA, the form the raster module draws with.)	luce-browser-render	gfx	raster_load_bitmap	-	addition
 (r10: Converts premultiplied RGBA `source` (width * height * 4 bytes) into `bitmap`'s format and alpha type.)	luce-browser-render	gfx	raster_store_bitmap	-	addition
@@ -1910,12 +1910,12 @@ WOFF2::WOFF2ByteBufferOut::Write [dispatch]	luce-browser-render	web_fonts	woff2_
 WOFF2::WOFF2ByteBufferOut::Write [dispatch]	luce-browser-render	web_fonts	woff2_byte_buffer_out_write_usize	Libraries/LibGfx/Font/WOFF2/Loader.cpp:13	dispatcher
 WOFF2::convert_to_ttf	luce-browser-render	web_fonts	woff2_convert_to_ttf	Libraries/LibGfx/Font/WOFF2/Loader.cpp:56	ported
 WOFF2::try_load_from_bytes	luce-browser-render	web_fonts	woff2_try_load_from_bytes	Libraries/LibGfx/Font/WOFF2/Loader.cpp:68	ported
-WOFF::Header	luce-browser-render	web_fonts	Header	Libraries/LibGfx/Font/WOFF/Loader.cpp:18	struct
-WOFF::TableDirectory	luce-browser-render	web_fonts	TableDirectory	Libraries/LibGfx/Font/WOFF/Loader.cpp:84	struct
-WOFF::TableDirectoryEntry	luce-browser-render	web_fonts	TableDirectoryEntry	Libraries/LibGfx/Font/WOFF/Loader.cpp:37	struct
-WOFF::TableRecord	luce-browser-render	web_fonts	TableRecord	Libraries/LibGfx/Font/WOFF/Loader.cpp:97	struct
-WOFF::WOFF_SIGNATURE	luce-browser-render	web_fonts	woff_woff_signature	Libraries/LibGfx/Font/WOFF/Loader.cpp:62	variable
-WOFF::pow_2_less_than_or_equal	luce-browser-render	web_fonts	woff_pow_2_less_than_or_equal	Libraries/LibGfx/Font/WOFF/Loader.cpp:64	ported
+WOFF::Header	luce-fonts	opentype	(read and written as bytes by woff_to_sfnt)	Libraries/LibGfx/Font/WOFF/Loader.cpp:18	struct
+WOFF::TableDirectory	luce-fonts	opentype	(read and written as bytes by woff_to_sfnt)	Libraries/LibGfx/Font/WOFF/Loader.cpp:84	struct
+WOFF::TableDirectoryEntry	luce-fonts	opentype	(read and written as bytes by woff_to_sfnt)	Libraries/LibGfx/Font/WOFF/Loader.cpp:37	struct
+WOFF::TableRecord	luce-fonts	opentype	(read and written as bytes by woff_to_sfnt)	Libraries/LibGfx/Font/WOFF/Loader.cpp:97	struct
+WOFF::WOFF_SIGNATURE	luce-fonts	opentype	woff_signature	Libraries/LibGfx/Font/WOFF/Loader.cpp:62	variable
+WOFF::pow_2_less_than_or_equal	luce-fonts	opentype	woff_pow_2_less_than_or_equal	Libraries/LibGfx/Font/WOFF/Loader.cpp:64	ported
 WOFF::try_load_from_bytes	luce-browser-render	web_fonts	woff_try_load_from_bytes	Libraries/LibGfx/Font/WOFF/Loader.cpp:105	ported
 WOFF::try_load_from_resource	luce-browser-render	web_fonts	woff_try_load_from_resource	Libraries/LibGfx/Font/WOFF/Loader.cpp:71	ported
 Web::CSS::BorderData	luce-browser-render	display_list	BorderData	Libraries/LibWeb/CSS/ComputedValues.h:390	struct
@@ -2444,10 +2444,10 @@ eval_cubic_derivative	luce-browser-render	gfx	sk_geometry_eval_cubic_derivative	
 eval_cubic_pts	luce-browser-render	gfx	sk_contains_eval_cubic_pts	skia/src/core/SkPathPriv.cpp:899	ported
 find_minmax<N>	luce-browser-render	gfx	sk_contains_find_minmax	skia/src/core/SkPathPriv.cpp:908	ported
 floor	luce-browser-render	gfx	floor	Libraries/LibWeb/PixelUnits.h:434	ported
-hb_blob_t	luce-browser-render	web_fonts	HbBlobT	Libraries/LibGfx/Font/Typeface.h:22	opaque
-hb_buffer_t	luce-browser-render	web_fonts	HbBufferT	Libraries/LibGfx/Font/Font.h:22	opaque
-hb_face_t	luce-browser-render	web_fonts	HbFaceT	Libraries/LibGfx/Font/Typeface.h:23	opaque
-hb_font_t	luce-browser-render	web_fonts	HbFontT	Libraries/LibGfx/Font/Font.h:21	opaque
+hb_blob_t	luce-fonts	shaping	HbBlobT	Libraries/LibGfx/Font/Typeface.h:22	opaque
+hb_buffer_t	luce-fonts	shaping	HbBufferT	Libraries/LibGfx/Font/Font.h:22	opaque
+hb_face_t	luce-fonts	shaping	HbFaceT	Libraries/LibGfx/Font/Typeface.h:23	opaque
+hb_font_t	luce-fonts	shaping	HbFontT	Libraries/LibGfx/Font/Font.h:21	opaque
 interp	luce-browser-render	gfx	sk_geometry_interp	skia/src/core/SkGeometry.cpp:169	ported
 is_mono_quad	luce-browser-render	gfx	sk_contains_is_mono_quad	skia/src/core/SkPathPriv.cpp:1052	ported
 is_not_monotonic	luce-browser-render	gfx	sk_geometry_is_not_monotonic	skia/src/core/SkGeometry.cpp:43	ported

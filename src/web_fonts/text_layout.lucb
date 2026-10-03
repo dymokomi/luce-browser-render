@@ -130,42 +130,46 @@ pub func glyph_run_cached_skia_text_blob(this: const GlyphRun*) -> SkTextBlob*?:
     let cached = this.m_cached_text_blob else return none
     return cached.blob
 
+## A glyph path's point as a FloatPoint.
+func glyph_path_point(point: opentype.GlyphPoint) -> gfx.FloatPoint:
+    return gfx.FloatPoint(m_x = point.x, m_y = point.y)
+
 ## The x-range of `path` inside the horizontal band [top, bottom] (SkGlyph::ensureIntercepts:
 ## where the outline crosses the band's edges, and its points inside the band), or none.
 ## FIXME: curves are split into 16 line segments, where Skia solves them exactly.
-func glyph_path_intercept(path: const GlyphPath*, top: f32, bottom: f32) -> (f32, f32)?:
+func glyph_path_intercept(path: const opentype.GlyphPath*, top: f32, bottom: f32) -> (f32, f32)?:
     var found = false
     var left: f32 = 0.0
     var right: f32 = 0.0
     var point_index: usize = 0
     var current = gfx.FloatPoint()
     var contour_start = gfx.FloatPoint()
-    let points = ak.vector_span_const(&path.points)
-    for verb in ak.vector_span_const(&path.verbs):
+    let points = path.points.view()
+    for verb in path.verbs.view():
         var segment_points: gfx.FloatPoint[4]
         var count: usize = 0
         match verb:
             .move:
-                current = points[point_index]
+                current = glyph_path_point(points[point_index])
                 contour_start = current
                 point_index += 1
                 continue
             .line:
                 segment_points[0] = current
-                segment_points[1] = points[point_index]
+                segment_points[1] = glyph_path_point(points[point_index])
                 count = 2
                 point_index += 1
             .quad:
                 segment_points[0] = current
-                segment_points[1] = points[point_index]
-                segment_points[2] = points[point_index + 1]
+                segment_points[1] = glyph_path_point(points[point_index])
+                segment_points[2] = glyph_path_point(points[point_index + 1])
                 count = 3
                 point_index += 2
             .cubic:
                 segment_points[0] = current
-                segment_points[1] = points[point_index]
-                segment_points[2] = points[point_index + 1]
-                segment_points[3] = points[point_index + 2]
+                segment_points[1] = glyph_path_point(points[point_index])
+                segment_points[2] = glyph_path_point(points[point_index + 1])
+                segment_points[3] = glyph_path_point(points[point_index + 2])
                 count = 4
                 point_index += 3
             .close:
@@ -206,7 +210,7 @@ func glyph_path_intercept(path: const GlyphPath*, top: f32, bottom: f32) -> (f32
                     if x > right:
                         right = x
             previous = next
-        current = segment_points[count - 1] if verb != GlyphPathVerb.close else contour_start
+        current = segment_points[count - 1] if verb != opentype.GlyphPathVerb.close else contour_start
     if not found:
         return none
     return (left, right)
@@ -237,10 +241,11 @@ pub func glyph_run_get_glyph_intercepts(this: const GlyphRun*, scale: f32, y_top
     # the band, offset by the glyph's position.
     for (index, glyph) in ak.vector_span_const(&blob.glyphs).indexed():
         let position = *ak.vector_at_const(&blob.positions, index)
-        let path = sk_font_get_path(&blob.font, glyph)
+        var path = sk_font_get_path(&blob.font, glyph)
         if let range = glyph_path_intercept(&path, y_top - position.m_y, y_bottom - position.m_y):
             ak.vector_append_t(&intervals, range.0 + position.m_x)
             ak.vector_append_t(&intervals, range.1 + position.m_x)
+        path.release()
     if ak.vector_size(&intervals) < 2:
         ak.vector_clear(&intervals)
     return intervals
@@ -282,38 +287,38 @@ pub func shape_text_utf16_view(baseline_start: gfx.FloatPoint, string: ak.Utf16V
     return runs
 
 ## Ported from Libraries/LibGfx/TextLayout.cpp:154 Gfx::setup_text_shaping.
-func setup_text_shaping(string: ak.Utf16View, font: const Font*, text_type: GlyphRunTextType) -> HbBufferT*:
-    let buffer = hb_buffer_create()
+func setup_text_shaping(string: ak.Utf16View, font: const Font*, text_type: GlyphRunTextType) -> shaping.HbBufferT*:
+    let buffer = shaping.hb_buffer_create()
 
     if ak.utf16_view_has_ascii_storage(&string):
-        hb_buffer_add_ascii(buffer, ak.utf16_view_ascii_span(&string))
+        shaping.hb_buffer_add_ascii(buffer, ak.utf16_view_ascii_span(&string))
         # Fast path for ASCII: we know it's Latin script, LTR direction.
-        buffer.script = sfnt_tag('L', 'a', 't', 'n')
-        hb_buffer_set_direction(buffer, HbDirection.ltr)
+        buffer.script = opentype.sfnt_tag('L', 'a', 't', 'n')
+        shaping.hb_buffer_set_direction(buffer, shaping.HbDirection.ltr)
     else:
-        hb_buffer_add_utf16(buffer, ak.utf16_view_utf16_span(&string))
+        shaping.hb_buffer_add_utf16(buffer, ak.utf16_view_utf16_span(&string))
         # For non-ASCII, set direction from text_type if known, otherwise guess.
         if text_type == GlyphRunTextType.ltr:
-            hb_buffer_set_direction(buffer, HbDirection.ltr)
-            hb_buffer_guess_segment_properties(buffer)
+            shaping.hb_buffer_set_direction(buffer, shaping.HbDirection.ltr)
+            shaping.hb_buffer_guess_segment_properties(buffer)
         elif text_type == GlyphRunTextType.rtl:
-            hb_buffer_set_direction(buffer, HbDirection.rtl)
-            hb_buffer_guess_segment_properties(buffer)
+            shaping.hb_buffer_set_direction(buffer, shaping.HbDirection.rtl)
+            shaping.hb_buffer_guess_segment_properties(buffer)
         else:
-            hb_buffer_guess_segment_properties(buffer)
+            shaping.hb_buffer_guess_segment_properties(buffer)
 
     let hb_font = font_harfbuzz_font(font) else trap("VERIFY: no HarfBuzz font")
-    var hb_features: ak.Vector[HbFeature]
+    var hb_features: ak.Vector[shaping.HbFeature]
     if not ak.vector_is_empty(&font.m_shape_features):
         ak.vector_ensure_capacity(&hb_features, ak.vector_size(&font.m_shape_features))
         for feature in ak.vector_span_const(&font.m_shape_features):
-            ak.vector_unchecked_append_u(&hb_features, HbFeature(
-                tag = sfnt_tag(feature.tag[0], feature.tag[1], feature.tag[2], feature.tag[3]),
+            ak.vector_unchecked_append_u(&hb_features, shaping.HbFeature(
+                tag = opentype.sfnt_tag(feature.tag[0], feature.tag[1], feature.tag[2], feature.tag[3]),
                 value = feature.value,
                 start = 0,
-                end = hb_feature_global_end))
+                end = shaping.hb_feature_global_end))
 
-    hb_shape(hb_font, buffer, ak.vector_span_const(&hb_features))
+    shaping.hb_shape(hb_font, buffer, ak.vector_span_const(&hb_features))
 
     return buffer
 
@@ -321,13 +326,13 @@ func setup_text_shaping(string: ak.Utf16View, font: const Font*, text_type: Glyp
 struct ShapeTextCacheLookup:
     var string: ak.Utf16View
 
-func shape_text_cache_lookup_matches(context: void*?, candidate: const ak.HashMapEntry[ak.Utf16String, HbBufferT*?]*) -> bool:
+func shape_text_cache_lookup_matches(context: void*?, candidate: const ak.HashMapEntry[ak.Utf16String, shaping.HbBufferT*?]*) -> bool:
     let lookup = (const ShapeTextCacheLookup*)(context else trap("VERIFY_NOT_REACHED"))
     return ak.utf16_string_base_eq_utf16_view(&candidate.key.utf16_string_base, &lookup.string)
 
 ## shape_text's get_or_create_buffer: the font's cached shaping of `string`.
 ## FIXME: The cache currently grows unbounded. We should have some limit and LRU mechanism.
-func shape_text_get_or_create_buffer(string: ak.Utf16View, font: const Font*, text_type: GlyphRunTextType) -> HbBufferT*:
+func shape_text_get_or_create_buffer(string: ak.Utf16View, font: const Font*, text_type: GlyphRunTextType) -> shaping.HbBufferT*:
     let shaping_cache = font_shaping_cache(font)
     if ak.utf16_view_length_in_code_units(&string) == 1:
         let code_unit = ak.utf16_view_code_unit_at(&string, 0)
@@ -336,7 +341,7 @@ func shape_text_get_or_create_buffer(string: ak.Utf16View, font: const Font*, te
                 shaping_cache.single_ascii_character_map[(usize)code_unit] = shape_text_keep_buffer(font, setup_text_shaping(string, font, text_type))
             return shaping_cache.single_ascii_character_map[(usize)code_unit] else trap("VERIFY_NOT_REACHED")
     var lookup = ShapeTextCacheLookup(string = string)
-    let predicate = ak.Function1[const ak.HashMapEntry[ak.Utf16String, HbBufferT*?]*, bool](call = shape_text_cache_lookup_matches, context = &lookup)
+    let predicate = ak.Function1[const ak.HashMapEntry[ak.Utf16String, shaping.HbBufferT*?]*, bool](call = shape_text_cache_lookup_matches, context = &lookup)
     var it = ak.hash_map_find_u32_tt_unary_predicate(&shaping_cache.map, ak.utf16_view_hash(&string), predicate)
     if ak.hash_table_iterator_ne(&it, ak.hash_map_end(&shaping_cache.map)):
         return ak.hash_table_iterator_deref(&it).value else trap("VERIFY_NOT_REACHED")
@@ -351,20 +356,20 @@ func shape_text_get_or_create_buffer(string: ak.Utf16View, font: const Font*, te
 ## The copy of a shaped `buffer` that the font's shaping cache keeps, in the typeface's
 ## allocators (font_allocators.lucb). HarfBuzz shapes in the current allocator, whose working
 ## memory the collector reclaims; only the result is kept.
-func shape_text_keep_buffer(font: const Font*, buffer: const HbBufferT*) -> HbBufferT*:
+func shape_text_keep_buffer(font: const Font*, buffer: const shaping.HbBufferT*) -> shaping.HbBufferT*:
     let allocators = &font.m_typeface.m_allocators
     let previous = font_allocators_enter(allocators)
     defer font_allocators_leave(previous)
     with allocators.allocator:
-        return hb_buffer_copy(buffer)
+        return shaping.hb_buffer_copy(buffer)
 
 ## Ported from Libraries/LibGfx/TextLayout.cpp:198 Gfx::shape_text.
 pub func shape_text_f32(baseline_start: gfx.FloatPoint, letter_spacing: f32, string: ak.Utf16View, font: const Font*, text_type: GlyphRunTextType) -> GlyphRun*:
     let metrics = font_pixel_metrics(font)
 
     let buffer = shape_text_get_or_create_buffer(string, font, text_type)
-    let glyph_info = hb_buffer_get_glyph_infos(buffer)
-    let positions = hb_buffer_get_glyph_positions(buffer)
+    let glyph_info = shaping.hb_buffer_get_glyph_infos(buffer)
+    let positions = shaping.hb_buffer_get_glyph_positions(buffer)
     let glyph_count = glyph_info.length
 
     var glyph_run: ak.Vector[DrawGlyph]
@@ -400,7 +405,7 @@ pub func shape_text_f32(baseline_start: gfx.FloatPoint, letter_spacing: f32, str
 
 ## shape_text's glyph_length_in_code_units: the distance to the next glyph of another cluster
 ## (u32 arithmetic, as the donor's; clusters descend in right-to-left runs).
-func shape_text_glyph_length_in_code_units(glyph_info: const HbGlyphInfo[], index: usize, length_in_code_units: usize) -> usize:
+func shape_text_glyph_length_in_code_units(glyph_info: const shaping.HbGlyphInfo[], index: usize, length_in_code_units: usize) -> usize:
     let starting_offset = glyph_info[index].cluster
 
     for i in index + 1..<glyph_info.length:
@@ -414,12 +419,12 @@ func shape_text_glyph_length_in_code_units(glyph_info: const HbGlyphInfo[], inde
 pub func measure_text_width(string: ak.Utf16View, font: const Font*, letter_spacing: f32 = 0.0) -> f32:
     let buffer = setup_text_shaping(string, font, GlyphRunTextType.common)
 
-    let positions = hb_buffer_get_glyph_positions(buffer)
+    let positions = shaping.hb_buffer_get_glyph_positions(buffer)
     let glyph_count = (u32)positions.length
 
     var point_x: i32 = 0
     for position in positions:
         point_x = point_x +% position.x_advance
 
-    hb_buffer_destroy(buffer)
+    shaping.hb_buffer_destroy(buffer)
     return (f32)point_x / text_shaping_resolution + (f32)glyph_count * letter_spacing

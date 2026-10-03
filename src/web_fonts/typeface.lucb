@@ -136,15 +136,15 @@ func typeface_cache_font(this: Typeface*, point_size: f32, variations: const Fon
 
 ## Ported from Libraries/LibGfx/Font/Typeface.cpp:76 Gfx::Typeface::harfbuzz_typeface. The
 ## blob and face come from the typeface's allocators.
-pub func typeface_harfbuzz_typeface(this: Typeface*) -> HbFaceT*?:
+pub func typeface_harfbuzz_typeface(this: Typeface*) -> shaping.HbFaceT*?:
     let previous = font_allocators_enter(&this.m_allocators)
     defer font_allocators_leave(previous)
     with this.m_allocators.allocator:
         if this.m_harfbuzz_blob == none:
-            this.m_harfbuzz_blob = hb_blob_create(typeface_buffer(this))
+            this.m_harfbuzz_blob = shaping.hb_blob_create(typeface_buffer(this))
         if this.m_harfbuzz_face == none:
             let blob = this.m_harfbuzz_blob else trap("VERIFY_NOT_REACHED")
-            this.m_harfbuzz_face = hb_face_create(blob, typeface_ttc_index(this))
+            this.m_harfbuzz_face = shaping.hb_face_create(blob, typeface_ttc_index(this))
     return this.m_harfbuzz_face
 
 ## Ported from Libraries/LibGfx/Font/Typeface.h:85 Gfx::Typeface::is_skia (virtual).

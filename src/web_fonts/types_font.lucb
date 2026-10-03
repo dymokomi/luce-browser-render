@@ -12,32 +12,12 @@
 
 ## SkFont (Libraries/LibGfx/Font/Font.h:20): filled by region r09 with what the port's
 ## replacement of Skia's font needs (sk_font.lucb): the typeface, the size in pixels and
-## whether glyphs are positioned at subpixel offsets.
+## whether glyphs are positioned at subpixel offsets. hb_font_t and hb_buffer_t (Font.h:21-22)
+## are luce-fonts' shaping.HbFontT and shaping.HbBufferT.
 pub struct SkFont:
     pub var typeface: const SkTypeface*?
     pub var size: f32
     pub var subpixel: bool
-
-## hb_font_t (Libraries/LibGfx/Font/Font.h:21): filled by region r09 with what the port's
-## replacement of HarfBuzz needs (hb_buffer.lucb): the face, the scale and hb_font_t's
-## em multipliers, the point size and the variation coordinates.
-pub struct HbFontT:
-    pub var face: HbFaceT*
-    pub var x_scale: i32
-    pub var y_scale: i32
-    pub var x_mult: i64
-    pub var y_mult: i64
-    pub var ptem: f32
-    pub var variations: ak.Vector[HbVariation]
-
-## hb_buffer_t (Libraries/LibGfx/Font/Font.h:22): filled by region r09 (hb_buffer.lucb): the
-## glyph infos and positions, the direction and the script of the text (its ISO 15924 code
-## as a tag, 'Latn'; 0 while unset).
-pub struct HbBufferT:
-    pub var infos: ak.Vector[HbGlyphInfo]
-    pub var positions: ak.Vector[HbGlyphPosition]
-    pub var direction: HbDirection
-    pub var script: u32
 
 # mark: FontPixelMetrics ========================================================================
 
@@ -70,7 +50,7 @@ pub let text_shaping_resolution: f32 = 64.0
 ## Gfx::Font (Libraries/LibGfx/Font/Font.h:58).
 pub struct Font:
     pub var m_bold_variant: const Font*?
-    pub var m_harfbuzz_font: HbFontT*?  # C++ default: { nullptr }
+    pub var m_harfbuzz_font: shaping.HbFontT*?  # C++ default: { nullptr }
     pub var m_shaping_cache: FontShapingCache
     pub var m_is_emoji_font: ak.TriState  # C++ default: { TriState :: Unknown }
     pub var m_typeface: Typeface*
@@ -91,5 +71,5 @@ pub func font_init_fields(this: Font*):
 
 ## Gfx::Font::ShapingCache (Libraries/LibGfx/Font/Font.h:89).
 pub struct FontShapingCache:
-    pub var map: ak.HashMap[ak.Utf16String, HbBufferT*?, ak.Utf16StringTraits]
-    pub var single_ascii_character_map: (HbBufferT*?)[128]
+    pub var map: ak.HashMap[ak.Utf16String, shaping.HbBufferT*?, ak.Utf16StringTraits]
+    pub var single_ascii_character_map: (shaping.HbBufferT*?)[128]

@@ -65,7 +65,7 @@ noinline func test_lifetimes_answers(font: const Font*, text: str) -> TestFontAn
         glyph_id_sum += (u64)glyph.glyph_id
     let first_glyph = ak.vector_at_const(&run.m_glyphs, 0).glyph_id
     let outline = font_glyph_path(font, first_glyph, 1.0)
-    let first_point = ak.vector_at_const(&outline.points, 0)
+    let first_point = outline.points.at(0)
     # A single ASCII character goes through the shaping cache's own table.
     let single = ak.utf16_string_from_str("W")
     discard(shape_text_f32(gfx.FloatPoint(m_x = 0.0, m_y = 0.0), 0.0, ak.utf16_string_base_utf16_view(&single.utf16_string_base), font, GlyphRunTextType.ltr))
@@ -77,8 +77,8 @@ noinline func test_lifetimes_answers(font: const Font*, text: str) -> TestFontAn
         measured_width = measure_text_width(view, font),
         glyph_width = font_glyph_width(font, (u32)'W'),
         ascent = font_pixel_metrics(font).ascent,
-        outline_verbs = ak.vector_size(&outline.verbs),
-        outline_first_x = first_point.m_x,
+        outline_verbs = outline.verbs.length(),
+        outline_first_x = first_point.x,
         bold_variant = font_bold_variant(font),
         is_emoji = font_is_emoji_font(font))
 

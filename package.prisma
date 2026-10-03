@@ -20,10 +20,10 @@ def package "luce-browser-render" {
         str path = "../luce-browser-foundation"
     }
 
-    def dependency "luce-compress" {
+    def dependency "luce-fonts" {
         str owner = "dymokomi"
-        str version = "^0.4.0"
-        str path = "../luce-compress"
+        str version = "^0.3.2"
+        str path = "../luce-fonts"
     }
 
     def dependency "luce-browser-css" {

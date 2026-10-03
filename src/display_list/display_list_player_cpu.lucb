@@ -58,28 +58,29 @@ func text_blob_path(glyph_run: const web_fonts.GlyphRun*) -> raster.Path?:
     for i in 0..<ak.vector_size(&blob.glyphs):
         let glyph = *ak.vector_at_const(&blob.glyphs, i)
         let origin = *ak.vector_at_const(&blob.positions, i)
-        let outline = web_fonts.sk_font_get_path(&blob.font, glyph)
-        let points = ak.vector_span_const(&outline.points)
+        var outline = web_fonts.sk_font_get_path(&blob.font, glyph)
+        let points = outline.points.view()
         var point_index: usize = 0
-        for verb in ak.vector_span_const(&outline.verbs):
+        for verb in outline.verbs.view():
             match verb:
                 .move:
-                    builder.move_to(points[point_index].m_x + origin.m_x, points[point_index].m_y + origin.m_y)
+                    builder.move_to(points[point_index].x + origin.m_x, points[point_index].y + origin.m_y)
                     point_index += 1
                 .line:
-                    builder.line_to(points[point_index].m_x + origin.m_x, points[point_index].m_y + origin.m_y)
+                    builder.line_to(points[point_index].x + origin.m_x, points[point_index].y + origin.m_y)
                     point_index += 1
                 .quad:
-                    builder.quad_to(points[point_index].m_x + origin.m_x, points[point_index].m_y + origin.m_y,
-                                    points[point_index + 1].m_x + origin.m_x, points[point_index + 1].m_y + origin.m_y)
+                    builder.quad_to(points[point_index].x + origin.m_x, points[point_index].y + origin.m_y,
+                                    points[point_index + 1].x + origin.m_x, points[point_index + 1].y + origin.m_y)
                     point_index += 2
                 .cubic:
-                    builder.cubic_to(points[point_index].m_x + origin.m_x, points[point_index].m_y + origin.m_y,
-                                     points[point_index + 1].m_x + origin.m_x, points[point_index + 1].m_y + origin.m_y,
-                                     points[point_index + 2].m_x + origin.m_x, points[point_index + 2].m_y + origin.m_y)
+                    builder.cubic_to(points[point_index].x + origin.m_x, points[point_index].y + origin.m_y,
+                                     points[point_index + 1].x + origin.m_x, points[point_index + 1].y + origin.m_y,
+                                     points[point_index + 2].x + origin.m_x, points[point_index + 2].y + origin.m_y)
                     point_index += 3
                 .close: builder.close()
                 _: trap("VERIFY_NOT_REACHED")
+        outline.release()
     let result = builder.finish()
     builder.release()
     return result

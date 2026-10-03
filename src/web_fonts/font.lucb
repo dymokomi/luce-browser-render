@@ -169,7 +169,7 @@ pub func font_bold_variant(this: const Font*) -> const Font*:
 
 ## Ported from Libraries/LibGfx/Font/Font.cpp:116 Gfx::Font::harfbuzz_font. The HarfBuzz font
 ## comes from the typeface's allocators.
-pub func font_harfbuzz_font(this: const Font*) -> HbFontT*?:
+pub func font_harfbuzz_font(this: const Font*) -> shaping.HbFontT*?:
     if this.m_harfbuzz_font == none:
         let allocators = &this.m_typeface.m_allocators
         let previous = font_allocators_enter(allocators)
@@ -181,20 +181,20 @@ pub func font_harfbuzz_font(this: const Font*) -> HbFontT*?:
 ## The body of harfbuzz_font's `if (!m_harfbuzz_font)`.
 func font_create_harfbuzz_font(this: const Font*):
     let mutable_this = (Font*)this
-    let harfbuzz_font = hb_font_create(typeface_harfbuzz_typeface(font_typeface(this)) else trap("VERIFY: no HarfBuzz face"))
+    let harfbuzz_font = shaping.hb_font_create(typeface_harfbuzz_typeface(font_typeface(this)) else trap("VERIFY: no HarfBuzz face"))
     mutable_this.m_harfbuzz_font = harfbuzz_font
-    hb_font_set_scale(harfbuzz_font, (i32)(font_pixel_size(this) * text_shaping_resolution), (i32)(font_pixel_size(this) * text_shaping_resolution))
-    hb_font_set_ptem(harfbuzz_font, font_point_size(this))
+    shaping.hb_font_set_scale(harfbuzz_font, (i32)(font_pixel_size(this) * text_shaping_resolution), (i32)(font_pixel_size(this) * text_shaping_resolution))
+    shaping.hb_font_set_ptem(harfbuzz_font, font_point_size(this))
 
     let variations = this.m_font_variation_settings.axes
     if not ak.hash_map_is_empty(&variations):
-        var hb_list: ak.Vector[HbVariation]
+        var hb_list: ak.Vector[shaping.HbVariation]
         ak.vector_ensure_capacity(&hb_list, ak.hash_map_size(&variations))
 
         for axis in ak.hash_map_begin_const(&variations):
-            ak.vector_unchecked_append_u(&hb_list, HbVariation(tag = gfx.four_cc_to_u32(&axis.key), value = axis.value))
+            ak.vector_unchecked_append_u(&hb_list, shaping.HbVariation(tag = gfx.four_cc_to_u32(&axis.key), value = axis.value))
 
-        hb_font_set_variations(harfbuzz_font, ak.vector_span_const(&hb_list))
+        shaping.hb_font_set_variations(harfbuzz_font, ak.vector_span_const(&hb_list))
 
 ## Ported from Libraries/LibGfx/Font/Font.h:87 Gfx::Font::features.
 pub func font_features(this: const Font*) -> ak.Vector[ShapeFeature]:
@@ -205,11 +205,11 @@ pub func font_features(this: const Font*) -> ak.Vector[ShapeFeature]:
 ## Ported from Libraries/LibGfx/Font/Font.cpp:151 Gfx::Font::ShapingCache::clear.
 pub func font_shaping_cache_clear(this: FontShapingCache*):
     for it in ak.hash_map_begin(&this.map):
-        hb_buffer_destroy(it.value)
+        shaping.hb_buffer_destroy(it.value)
     ak.hash_map_clear(&this.map)
     for index in 0..<this.single_ascii_character_map.length:
         if let buffer = this.single_ascii_character_map[index]:
-            hb_buffer_destroy(buffer)
+            shaping.hb_buffer_destroy(buffer)
             this.single_ascii_character_map[index] = none
 
 ## Ported from Libraries/LibGfx/Font/Font.h:96 Gfx::Font::shaping_cache.
@@ -217,9 +217,9 @@ pub func font_shaping_cache(this: const Font*) -> FontShapingCache*:
     return &((Font*)this).m_shaping_cache
 
 ## Ported from Libraries/LibGfx/Font/Font.cpp:165 Gfx::hb_face_has_table.
-func hb_face_has_table(face: HbFaceT*?, tag: u32) -> bool:
+func hb_face_has_table(face: shaping.HbFaceT*?, tag: u32) -> bool:
     let hb_face = face else return false
-    return hb_face_has_table_tag(hb_face, tag)
+    return shaping.hb_face_has_table_tag(hb_face, tag)
 
 ## Ported from Libraries/LibGfx/Font/Font.cpp:173 Gfx::Font::is_emoji_font.
 pub func font_is_emoji_font(this: const Font*) -> bool:
@@ -234,19 +234,19 @@ pub func font_is_emoji_font(this: const Font*) -> bool:
 
         # 2. Check for color font tables and absence of regular text glyphs.
         let hb_font = font_harfbuzz_font(this) else trap("VERIFY: no HarfBuzz font")
-        let face = hb_font_get_face(hb_font)
+        let face = shaping.hb_font_get_face(hb_font)
 
         # hb_ot_color_has_layers and hb_ot_color_has_svg: the port checks for the tables.
-        let has_colr = hb_face_has_table(face, sfnt_tag('C', 'O', 'L', 'R'))
-        let has_svg = hb_face_has_table(face, sfnt_tag('S', 'V', 'G', ' '))
+        let has_colr = hb_face_has_table(face, opentype.sfnt_tag('C', 'O', 'L', 'R'))
+        let has_svg = hb_face_has_table(face, opentype.sfnt_tag('S', 'V', 'G', ' '))
 
-        let has_sbix = hb_face_has_table(face, sfnt_tag('s', 'b', 'i', 'x'))
-        let has_cbdt = hb_face_has_table(face, sfnt_tag('C', 'B', 'D', 'T'))
-        let has_cblc = hb_face_has_table(face, sfnt_tag('C', 'B', 'L', 'C'))
+        let has_sbix = hb_face_has_table(face, opentype.sfnt_tag('s', 'b', 'i', 'x'))
+        let has_cbdt = hb_face_has_table(face, opentype.sfnt_tag('C', 'B', 'D', 'T'))
+        let has_cblc = hb_face_has_table(face, opentype.sfnt_tag('C', 'B', 'L', 'C'))
         let has_any_color = has_colr or has_svg or has_sbix or (has_cbdt and has_cblc)
 
-        let has_uppercase_a = hb_font_get_nominal_glyph(hb_font, (u32)'A') != none
-        let has_lowercase_a = hb_font_get_nominal_glyph(hb_font, (u32)'a') != none
+        let has_uppercase_a = shaping.hb_font_get_nominal_glyph(hb_font, (u32)'A') != none
+        let has_lowercase_a = shaping.hb_font_get_nominal_glyph(hb_font, (u32)'a') != none
         let looks_like_text = has_uppercase_a and has_lowercase_a
 
         let mutable_this = (Font*)this
@@ -261,6 +261,6 @@ pub func font_is_emoji_font(this: const Font*) -> bool:
 ## The outline of `glyph` for drawing the font at `scale` (a device pixel ratio): what
 ## `skia_font(scale).getPath(glyph)` gave Skia's painter. (r09 addition: the CPU display-list
 ## player fills these paths with the raster module, DESIGN.md §7.3.)
-pub func font_glyph_path(this: const Font*, glyph: u32, scale: f32) -> GlyphPath:
+pub func font_glyph_path(this: const Font*, glyph: u32, scale: f32) -> opentype.GlyphPath:
     let skia_font = font_skia_font(this, scale)
     return sk_font_get_path(&skia_font, glyph)

@@ -53,7 +53,7 @@ func number_of_fonts_in_ttc(bytes: const u8[]) -> u32:
         return 1
     if bytes[0] != 't' or bytes[1] != 't' or bytes[2] != 'c' or bytes[3] != 'f':
         return 1
-    let num_fonts = sfnt_u32(bytes, 8)
+    let num_fonts = opentype.sfnt_u32(bytes, 8)
 
     # The TTC header is followed by an array of 4-byte offsets, one per font. Reject counts that exceed what the file
     # could physically contain.

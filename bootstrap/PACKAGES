@@ -1,5 +1,6 @@
 luce-std 2347ecb823548c9c692f1d72b09939e2f55e8f82
 luce-regex 3a6bcbd2ecdda0af018a8a2c527a5896890f29e7
 luce-browser-foundation 48d3e1542a06096363c5cf5522c04069cad0017a
-luce-compress 4aa69655ba66adf285e6ad7bb06431fec4a89a29
+luce-compress 14f4a066f0771d3d4b32d4ac93f7104cb3cbf650
 luce-browser-css db1226f7f497aea9c1ecb95a977e032d24c88904
+luce-fonts 06151b119396fda1b9b5a628cdccd75f2f1d3be2

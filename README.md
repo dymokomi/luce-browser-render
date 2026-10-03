@@ -8,11 +8,12 @@ porter follows is [DESIGN.md](../luce-browser-engine/docs/DESIGN.md).
 | Module | Contents |
 | --- | --- |
 | `gfx` | LibGfx geometry, color, paths; CSS pixels |
-| `web_fonts` | fonts and text layout |
+| `web_fonts` | fonts and text layout: LibGfx's Font, Typeface, FontDatabase, FontCascadeList and TextLayout over luce-fonts' portable engine (its `opentype` reader and `shaping`, which replace Skia's FreeType backend and HarfBuzz) |
 | `raster` | the CPU rasterizer: tiny-skia ported and changed to paint exactly as Skia m144 (see its module.lucb) |
 | `display_list` | the display list |
 
-Depends on: luce-std, luce-browser-foundation, luce-browser-css.
+Depends on: luce-std, luce-browser-foundation, luce-browser-css, luce-fonts (and through it
+luce-compress).
 
 ## Status
 
@@ -29,7 +30,8 @@ of this repository.
 `./test.sh` checks the formatting, type-checks every module with warnings as errors and runs
 every module's tests (the CPU display-list player is compared with Skia's pixels, the fonts
 and paths with the reference build's LibGfx, the rasterizer with tiny-skia's reference
-images).
+images). The font oracle's face, metrics, path and shaping cases test the engine and run in
+luce-fonts; its text-blob bounds and glyph intercepts, which test GlyphRun, run here.
 
 ## License
 
