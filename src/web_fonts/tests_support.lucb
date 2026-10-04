@@ -26,12 +26,19 @@ var test_loaded_typefaces: ak.Vector[TestLoadedTypeface]
 func test_read_file(relative_path: str) -> ak.ByteBuffer:
     return path_font_provider_read_file(path_font_provider_c_string(relative_path)) else trap("cannot read a test file")
 
+## The path of the test font `name`, in managed memory.
+func test_font_path(name: str) -> str:
+    let bytes = new u8[test_fonts_directory.length + name.length] else trap("out of memory")
+    memory.copy(bytes, test_fonts_directory.bytes, test_fonts_directory.length)
+    memory.copy(bytes[test_fonts_directory.length..], name.bytes, name.length)
+    return (str)bytes
+
 ## The typeface of the test font `name` (a file of tests/web_fonts/fonts).
 func test_typeface(name: str) -> Typeface*:
     for loaded in ak.vector_span_const(&test_loaded_typefaces):
         if loaded.name == name:
             return loaded.typeface
-    let path = path_font_provider_joined(test_fonts_directory, name)
+    let path = test_font_path(name)
     let font_data = font_data_create_from_byte_buffer(test_read_file(path))
     let typeface = typeface_try_load_from_font_data(font_data, 0) else trap("cannot load a test font")
     ak.vector_append_t(&test_loaded_typefaces, TestLoadedTypeface(name = name, typeface = typeface))

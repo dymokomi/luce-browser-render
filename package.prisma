@@ -10,7 +10,7 @@ def package "luce-browser-render" {
 
     def dependency "luce-std" {
         str owner = "dymokomi"
-        str version = "^0.2.0"
+        str version = "^0.3.2"
         str path = "../luce-std"
     }
 
@@ -22,7 +22,7 @@ def package "luce-browser-render" {
 
     def dependency "luce-fonts" {
         str owner = "dymokomi"
-        str version = "^0.3.2"
+        str version = "^0.3.3"
         str path = "../luce-fonts"
     }
 

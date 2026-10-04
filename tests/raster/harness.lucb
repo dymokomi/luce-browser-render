@@ -49,11 +49,9 @@ func path_buffer(buffer: u8[], text: fmt) -> c.str:
 pub func load_png(image: str) -> raster.Pixmap:
     var buffer: u8[512]
     let path = path_buffer(buffer, f"tests/raster/images/{image}")
-    var bytes: u8[]
-    with memory.heap:
-        bytes = files.read(path) else trap("cannot read the image")
-    defer free(bytes) in memory.heap
-    let decoded = raster_png.decode_rgba8(bytes) else trap("cannot decode the image")
+    let bytes = files.read(path) else trap("cannot read the image")
+    defer bytes.release()
+    let decoded = raster_png.decode_rgba8(bytes.value) else trap("cannot decode the image")
     let data = decoded.rgba
     # Premultiply alpha.
     #

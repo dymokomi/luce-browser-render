@@ -7,10 +7,9 @@
 #       Port of Libraries/LibGfx/Font/PathFontProvider.cpp (lines 1-154) with the inline
 #       functions of Libraries/LibGfx/Font/PathFontProvider.h (lines 1-38).
 #       Core::Resource::load_from_uri and for_each_descendant_file (LibCore, not ported) are
-#       a walk of the directory a `file://` URI names (POSIX nftw, or the Windows C runtime's
-#       _findfirst64), and each font file is read with stdio into a ByteBuffer that the
-#       typefaces made from it share. (luce-std's files module would do, but checking it
-#       with Luce 0.8.12 prints warnings of its own.) `resource://` URIs (Ladybird's
+#       luce-std's walk of the directory a `file://` URI names (files.walk_with, symbolic
+#       links below the root not followed), and each font file is read with files.read into
+#       a ByteBuffer that the typefaces made from it share. `resource://` URIs (Ladybird's
 #       resource root) are not supported: the embedder passes file URIs. The provider and
 #       everything it loads live in the C heap (font_allocators.lucb).
 #
@@ -64,27 +63,12 @@ func number_of_fonts_in_ttc(bytes: const u8[]) -> u32:
 
 # mark: Loading fonts ============================================================================
 
-# The C library calls the walk and the reads use (stdio, and the directory walkers of POSIX and
-# of the Windows C runtime; only the target's walker is linked).
-extern func web_fonts_fopen as "fopen"(path: c.str, mode: c.str) -> void*?
-extern func web_fonts_fclose as "fclose"(stream: void*) -> i32
-extern func web_fonts_fread as "fread"(buffer: void*, size: usize, count: usize, stream: void*) -> usize
-extern func web_fonts_nftw as "nftw"(path: c.str, callback: func(c.str, const void*, i32, void*) -> i32, depth: i32, flags: i32) -> i32
-extern func web_fonts_findfirst64 as "_findfirst64"(spec: c.str, data: void*) -> isize
-extern func web_fonts_findnext64 as "_findnext64"(handle: isize, data: void*) -> i32
-extern func web_fonts_findclose as "_findclose"(handle: isize) -> i32
-
 ## Reads the whole file at `path` (Core::Resource::data of a file resource), or none.
 func path_font_provider_read_file(path: c.str) -> ak.ByteBuffer?:
-    let stream = web_fonts_fopen(path, "rb") else return none
-    defer discard(web_fonts_fclose(stream))
+    let data = files.read(path) else return none
+    defer data.release()
     var buffer: ak.ByteBuffer
-    var chunk: u8[16384]
-    while true:
-        let count = web_fonts_fread(&chunk[0], 1, chunk.length, stream)
-        if count == 0:
-            break
-        ak.byte_buffer_try_append_span_u8(&buffer, chunk[0..<count]) else return none
+    ak.byte_buffer_try_append_span_u8(&buffer, data.value) else return none
     return buffer
 
 ## The FontData of the file at `path` (a file system path), or none when it cannot be read:
@@ -95,23 +79,14 @@ pub func font_data_create_from_file(path: str) -> FontData*?:
     let bytes = path_font_provider_read_file(path_font_provider_c_string(path)) else return none
     return font_data_create_from_byte_buffer(bytes)
 
-## The provider the current walk loads into (nftw's callback has no context).
-local var path_font_provider_walk_target: PathFontProvider*?
+## for_each_descendant_file's walk: loads every regular file of the tree into `provider`.
+struct PathFontProviderWalk: files.WalkVisitor:
+    var provider: PathFontProvider*
 
-## nftw's callback: every regular file (FTW_F) of the tree.
-func path_font_provider_visit(path: c.str, info: const void*, type_flag: i32, ftw: void*) -> i32:
-    let this = path_font_provider_walk_target else return 0
-    if type_flag == 0:
-        let text = str(path) else return 0
-        path_font_provider_load_font_file(this, text)
-    return 0
-
-## `left` followed by `right`, in managed memory.
-func path_font_provider_joined(left: str, right: str) -> str:
-    let bytes = new u8[left.length + right.length] else trap("out of memory")
-    memory.copy(bytes, left.bytes, left.length)
-    memory.copy(bytes[left.length..], right.bytes, right.length)
-    return (str)bytes
+    mutating func visit(path: str, info: files.Metadata, depth: usize) -> bool!:
+        if info.kind == files.FileKind.regular:
+            path_font_provider_load_font_file(self.provider, path)
+        return true
 
 ## Adds `typeface` to its family (m_typeface_by_family.ensure(family, ...).append(font)).
 func path_font_provider_add_typeface(this: PathFontProvider*, font: Typeface*):
@@ -171,42 +146,11 @@ func path_font_provider_load_all_fonts_from_file_uri(this: PathFontProvider*, ur
         return
     let root = ak.string_view_text(ak.string_view_substring_view(&uri, ak.string_view_length(&file_scheme)))
 
-    # root->for_each_descendant_file(...): a missing root (ENOENT) loads nothing.
-    if os.windows:
-        # _findfirst64 over `directory\\*`, depth first. The walk is written inline because
-        # an unreferenced function would still link its Windows-only symbols in test builds.
-        # FIXME: untested; the owner's Windows session should run the font tests.
-        var pending: ak.Vector[str]
-        ak.vector_append_t(&pending, root)
-        while not ak.vector_is_empty(&pending):
-            let directory = ak.vector_take_last(&pending)
-            # struct _finddata64_t: attrib at 0, the three times and the size, name[260] at 40.
-            var data: u8[304]
-            let pattern = path_font_provider_joined(directory, "\\*")
-            let handle = web_fonts_findfirst64(path_font_provider_c_string(pattern), &data[0])
-            if handle == -1:
-                continue
-            while true:
-                let attributes = (u32)data[0] | ((u32)data[1] << 8) | ((u32)data[2] << 16) | ((u32)data[3] << 24)
-                var length: usize = 0
-                while length < 260 and data[40 + length] != 0:
-                    length += 1
-                let name = (str)data[40..<40 + length]
-                if name != "." and name != "..":
-                    let full = path_font_provider_joined(path_font_provider_joined(directory, "\\"), name)
-                    if (attributes & 0x10) != 0:
-                        ak.vector_append_t(&pending, full)
-                    else:
-                        path_font_provider_load_font_file(this, full)
-                if web_fonts_findnext64(handle, &data[0]) != 0:
-                    break
-            discard(web_fonts_findclose(handle))
-    else:
-        let saved = path_font_provider_walk_target
-        path_font_provider_walk_target = this
-        # FTW_PHYS: symbolic links are not followed.
-        discard(web_fonts_nftw(path_font_provider_c_string(root), path_font_provider_visit, 16, 1))
-        path_font_provider_walk_target = saved
+    # root->for_each_descendant_file(...): a missing root (ENOENT) loads nothing, and a
+    # failure stops the walk with what it loaded so far.
+    var walk = PathFontProviderWalk(provider = this)
+    files.walk_with(path_font_provider_c_string(root), &walk) catch:
+        recover ()
 
 # mark: SystemFontProvider ======================================================================
 
