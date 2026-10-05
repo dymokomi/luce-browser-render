@@ -114,8 +114,9 @@ enum Stage as u8:
     gamma_expand_srgb = 80
     gamma_expand_destination_srgb = 81
     gamma_compress_srgb = 82
+    transform_perspective = 83
 
-let stages_count: usize = 83
+let stages_count: usize = 84
 
 ## Skia's gForceHighPrecisionRasterPipeline: every pipeline compiles to highp while set.
 var force_highp: bool = false
@@ -263,11 +264,11 @@ struct RasterPipelineBuilder:
         self.stages[self.stages_len] = stage
         self.stages_len += 1
 
-    ## Skia's appendMatrix: nothing for the identity (the stage computes the same values for
-    ## every other kind of affine matrix).
+    ## Skia's appendMatrix: nothing for the identity, matrix_perspective for a matrix with
+    ## perspective (the affine stage computes the same values for every other kind).
     func push_transform(ts: Transform):
         if ts.is_finite() and not ts.is_identity():
-            self.push(.transform)
+            self.push(.transform_perspective if ts.has_perspective() else .transform)
             self.ctx.transform = ts
 
     ## Skia's appendMatrix of a matrix that only scales and translates x.

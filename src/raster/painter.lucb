@@ -126,6 +126,10 @@ func treat_as_hairline(paint: const Paint*, stroke: const Stroke*, ts0: Transfor
     if not paint.anti_alias:
         return none
 
+    # DrawTreatAAStrokeAsHairline: no hairlines under perspective.
+    if ts0.has_perspective():
+        return none
+
     # We don't care about translate.
     var ts = ts0
     ts.tx = 0.0

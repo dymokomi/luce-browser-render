@@ -62,9 +62,11 @@ donor's PathImplSkia: the SVG strings (by length and hash) and the bounds match 
   `even_odd`; Gfx::WindingRule has no inverse types).
 - Glyph runs are drawn from the run's cached text blob, as `drawTextBlob` draws them on a
   raster device (see *Glyph masks* below): as glyph masks, or, for text too big for Skia's
-  glyph cache, as each glyph's outline from r09's `sk_font_get_path` of the blob's font
-  (already at the blob's scale, which resolves r51a's blob-scale FIXME) placed at the blob's
-  position. A run without a blob draws nothing, as in the donor.
+  glyph cache or under perspective, as drawForBitmapDevice's path branch draws them: each
+  glyph's outline from r09's `sk_font_get_path` at SkStrikeSpec::MakePath's 64 px, drawn
+  under a concatenated scale (the blob font's size / 64, which resolves r51a's blob-scale
+  FIXME) and translation (the run's origin plus the glyph's position). A run without a blob
+  draws nothing, as in the donor.
 - `apply_gfx_filter` is gone: layers with image filters, the text-shadow blur and backdrop
   filters go through `cpu_filter.lucb`'s evaluator (see *Image filters*).
 
@@ -121,6 +123,41 @@ v40 backward-compatibility mode: y moves only) for the instructions FontForge's 
 else. Glyphs of fonts with a font program (Lato) are not hinted (no full bytecode interpreter),
 CFF glyphs are not hinted (no CFF hinter), and fonts that FreeType autohints (no instructions, no
 fpgm/prep and maxSizeOfInstructions 0: Ahem, Noto Emoji) are drawn unhinted (no autohinter).
+
+## 3D transforms (fix/fidelity-3d)
+
+CSS perspective and 3D transforms reach the canvas as Skia's do:
+
+- **The canvas matrix** (`display_list/cpu_m44.lucb`) is an SkM44, as SkCanvas's MCRec keeps it:
+  `apply_transform` builds Ladybird's translation * matrix * translation in Gfx's 4x4
+  arithmetic and concatenates it (SkM44::setConcat's column order), `translate` is
+  SkM44::preTranslate and `rotate` SkMatrix::setRotate's snapped sine and cosine. The top layer
+  derives its local-to-device matrix as SkDevice::setGlobalCTM does (normalizePerspective,
+  then the layer's global-to-device matrix; again after every restore), and draws use its
+  asM33, perspective row included. Layers take SkDevice::setDeviceCoordinateSystem's
+  matrices; skif::Mapping::decomposeCTM decomposes the SkM44 (under perspective, with
+  SkMatrixPriv::DifferentialAreaScale at the clip's center), and the layer is skipped when the
+  matrix cannot be inverted (SkInvert4x4Matrix). quickReject maps with SkMatrixPriv::MapRect's
+  SkM44 version (map_rect_perspective clips at w = 0).
+- **raster.Transform** carries SkMatrix's perspective row (`raster/transform.lucb`): the type
+  mask's rule that perspective sets every other flag, setConcat's rowcol3, the perspective
+  determinant and inverse, Persp_pts, normalizePerspective. A path transformed by a perspective
+  matrix (`raster/path_perspective.lucb`) is first cut at w = 1/16384
+  (SkPathPriv::PerspectiveClip: SkHalfPlane, the path rotated onto y = 0 and clipped by
+  SkEdgeClipper::ClipPath, with SkPathEdgeIter's new-contour flag), then rebuilt with quads and
+  conics as conics of SkConic::TransformW's weight and cubics split in four, and mapped. Fills
+  walk the raw verbs (SkPathBuilder::transform, through SkPathData::MakeTransform), clips
+  SkPath::Iter's (SkPath::transform); mapRect is the bounds of the transformed rect path.
+  Shaders sample through the inverse with the raster pipeline's `matrix_perspective` stage
+  (highp and lowp, NEON's rcp_precise). Rectangles under perspective are paths; strokes are
+  stroked in local space and never hairlines (DrawTreatAAStrokeAsHairline).
+- **Glyphs** under perspective are paths (SkStrikeSpec::ShouldDrawAsPath).
+
+`tests_cpu_player_3d.lucb` compares ten scenes (rotateX/rotateY with perspective, a rect cut at
+w = 0, curves, a stroke, translateZ, a clip, an opacity layer, nearest and bilinear images,
+text) with DisplayListPlayerSkia's pixels: all exact. `raster/tests_perspective.lucb` checks
+the matrices and transformed paths bit for bit against SkMatrix and SkPath. Both come from
+luce-browser-tools' `oracles/luce-browser-render/perspective`.
 
 ## Image filters
 
@@ -221,5 +258,5 @@ The player's 36 scenes against DisplayListPlayerSkia match exactly except:
   Skia's SkMaskBlurFilter: 32 and 29 pixels by 1 level.
 - **draw_rect**: Skia strokes an axis-aligned rectangle with SkScan::AntiFrameRect, the player
   fills the frame's even-odd path: 17 pixels by 1 level.
-- **Transforms** are 2D (the perspective row of a 4x4 matrix is dropped), as r51a noted.
-- The image-filter deviations above.
+- The image-filter deviations above; a layer whose filter needs the whole matrix under
+  perspective evaluates the filter with the affine part only (cpu_filter's CpuFMatrix).

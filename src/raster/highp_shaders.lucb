@@ -25,6 +25,18 @@ func highp_transform(p: HighpPipeline*):
 
     highp_next_stage(p)
 
+# matrix_perspective: the row-major 3x3 matrix, then the divide by its z.
+func highp_transform_perspective(p: HighpPipeline*):
+    let m = p.ctx.transform
+
+    let tr = highp_mad(p.r, f8_splat(m.sx), highp_mad(p.g, f8_splat(m.kx), f8_splat(m.tx)))
+    let tg = highp_mad(p.r, f8_splat(m.ky), highp_mad(p.g, f8_splat(m.sy), f8_splat(m.ty)))
+    let tz = highp_mad(p.r, f8_splat(m.persp0), highp_mad(p.g, f8_splat(m.persp1), f8_splat(m.persp2)))
+    p.r = f8_mul(tr, f8_rcp_precise(tz))
+    p.g = f8_mul(tg, f8_rcp_precise(tz))
+
+    highp_next_stage(p)
+
 # matrix_scale_translate with a unit y scale (y = y * 1 + 0 is y).
 func highp_scale_translate_x(p: HighpPipeline*):
     let m = p.ctx.scale_translate_x

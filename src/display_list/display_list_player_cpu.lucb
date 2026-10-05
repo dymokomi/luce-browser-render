@@ -47,41 +47,31 @@ func to_raster_path(path: const gfx.Path*) -> CpuPath?:
         _: trap("VERIFY_NOT_REACHED")
     return CpuPath(path = outline, fill_rule = fill_rule)
 
-## The path SkCanvas::drawTextBlob fills for `glyph_run`'s cached text blob when its glyphs
-## are too big for the glyph cache (GlyphRun::ensure_text_blob, which the recorder called
-## with the device pixel scale): glyph i's outline at the blob font's size (SkFont::getPath
-## through region r09's font reader, already at the blob's scale) placed at the blob's
-## position i. None when the run has no blob (`cached_skia_text_blob()` is null) or no
-## outlines. The caller releases the path. Smaller glyphs are masks (cpu_glyph_run.lucb).
-func text_blob_path(glyph_run: const web_fonts.GlyphRun*) -> raster.Path?:
-    let blob = web_fonts.glyph_run_cached_skia_text_blob(glyph_run) else return none
+## The outline of `glyph` in `font` (SkFont::getPath through region r09's font reader) as a
+## raster path; none when the glyph has no outline. The caller releases the path.
+func glyph_outline_path(font: const web_fonts.SkFont*, glyph: u32) -> raster.Path?:
+    var outline = web_fonts.sk_font_get_path(font, glyph)
     var builder = raster.PathBuilder.new_()
-    for i in 0..<ak.vector_size(&blob.glyphs):
-        let glyph = *ak.vector_at_const(&blob.glyphs, i)
-        let origin = *ak.vector_at_const(&blob.positions, i)
-        var outline = web_fonts.sk_font_get_path(&blob.font, glyph)
-        let points = outline.points.view()
-        var point_index: usize = 0
-        for verb in outline.verbs.view():
-            match verb:
-                .move:
-                    builder.move_to(points[point_index].x + origin.m_x, points[point_index].y + origin.m_y)
-                    point_index += 1
-                .line:
-                    builder.line_to(points[point_index].x + origin.m_x, points[point_index].y + origin.m_y)
-                    point_index += 1
-                .quad:
-                    builder.quad_to(points[point_index].x + origin.m_x, points[point_index].y + origin.m_y,
-                                    points[point_index + 1].x + origin.m_x, points[point_index + 1].y + origin.m_y)
-                    point_index += 2
-                .cubic:
-                    builder.cubic_to(points[point_index].x + origin.m_x, points[point_index].y + origin.m_y,
-                                     points[point_index + 1].x + origin.m_x, points[point_index + 1].y + origin.m_y,
-                                     points[point_index + 2].x + origin.m_x, points[point_index + 2].y + origin.m_y)
-                    point_index += 3
-                .close: builder.close()
-                _: trap("VERIFY_NOT_REACHED")
-        outline.release()
+    let points = outline.points.view()
+    var point_index: usize = 0
+    for verb in outline.verbs.view():
+        match verb:
+            .move:
+                builder.move_to(points[point_index].x, points[point_index].y)
+                point_index += 1
+            .line:
+                builder.line_to(points[point_index].x, points[point_index].y)
+                point_index += 1
+            .quad:
+                builder.quad_to(points[point_index].x, points[point_index].y, points[point_index + 1].x, points[point_index + 1].y)
+                point_index += 2
+            .cubic:
+                builder.cubic_to(points[point_index].x, points[point_index].y, points[point_index + 1].x, points[point_index + 1].y,
+                                 points[point_index + 2].x, points[point_index + 2].y)
+                point_index += 3
+            .close: builder.close()
+            _: trap("VERIFY_NOT_REACHED")
+    outline.release()
     let result = builder.finish()
     builder.release()
     return result

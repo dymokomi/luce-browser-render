@@ -12,10 +12,14 @@
 #         image filter reads) that `restore` draws into the layer below with the layer's
 #         opacity, blend mode, luminance-to-alpha color filter and image filter
 #         (SkCanvas::saveLayer with an SkPaint);
-#       - a stack of states (SkCanvas's MCRec): the current transform, a 2D affine
-#         transform into the current layer's pixels, and the clip in those pixels, kept as its device bounds plus, when it is not exactly
-#         that rectangle, an 8-bit coverage mask (anti-aliased clips as Skia's raster
-#         backend has them). Clips only narrow; `restore` brings back the saved ones.
+#       - a stack of states (SkCanvas's MCRec): the current matrix, a 4x4 SkM44 (cpu_m44.lucb)
+#         as SkCanvas keeps it; the local-to-device matrix the top layer derives from it
+#         (SkDevice::setGlobalCTM: the matrix with its perspective normalized, then the
+#         layer's global-to-device matrix) and its 3x3 part (asM33, with the perspective row)
+#         that draws use; and the clip in the layer's pixels, kept as its device bounds plus,
+#         when it is not exactly that rectangle, an 8-bit coverage mask (anti-aliased clips
+#         as Skia's raster backend has them). Clips only narrow; `restore` brings back the
+#         saved ones.
 #
 #       Pixels are premultiplied RGBA (raster.Pixmap). Everything the canvas allocates lives
 #       in `memory.heap`, as the raster module's own storage does; `cpu_canvas_release`
@@ -29,8 +33,13 @@
 
 # mark: Types ==================================================================================
 
-## A saved state (SkCanvas's MCRec): the transform, the clip, and the layer drawn into.
+## A saved state (SkCanvas's MCRec): the matrix, the clip, and the layer drawn into.
 struct CpuCanvasState:
+    ## The canvas's matrix (MCRec::fMatrix): local coordinates to the base layer's.
+    var matrix: CpuM44
+    ## Local coordinates to the current layer's pixels (SkDevice::fLocalToDevice).
+    var device_matrix: CpuM44
+    ## `device_matrix` as a 3x3 matrix (SkDevice::localToDevice()), what draws use.
     var transform: raster.Transform
     ## Nothing is visible: every later draw is dropped until the state is restored.
     var clip_empty: bool
@@ -64,8 +73,9 @@ struct CpuCanvas:
 func cpu_canvas_create(width: u32, height: u32) -> CpuCanvas*:
     let canvas = new CpuCanvas(width = width, height = height) else trap("out of memory")
     let pixmap = raster.Pixmap.new_(width, height) else trap("CpuCanvas: empty size")
-    ak.vector_append_t(&canvas.layers, CpuLayer(pixmap = pixmap, effects = CpuLayerEffects(), left = 0, top = 0, layer_matrix = raster.Transform.identity(), layer_to_parent = raster.Transform.identity()))
-    ak.vector_append_t(&canvas.states, CpuCanvasState(transform = raster.Transform.identity(), clip_empty = false,
+    ak.vector_append_t(&canvas.layers, CpuLayer(pixmap = pixmap, effects = CpuLayerEffects(), left = 0, top = 0, layer_matrix = raster.Transform.identity(), layer_to_parent = raster.Transform.identity(),
+                                                global_to_device = cpu_m44_identity()))
+    ak.vector_append_t(&canvas.states, CpuCanvasState(matrix = cpu_m44_identity(), device_matrix = cpu_m44_identity(), transform = raster.Transform.identity(), clip_empty = false,
                                                       clip_left = 0, clip_top = 0, clip_right = (i32)width, clip_bottom = (i32)height, has_clip_mask = false,
                                                       owns_clip_mask = false, layer_index = 0, pushes_layer = false))
     return canvas
@@ -109,23 +119,42 @@ func cpu_canvas_save(canvas: CpuCanvas*):
 
 # mark: Transform ==============================================================================
 
-## SkCanvas::translate.
+## SkCanvas::translate: the matrix pre-translated (nothing for a zero translation).
 func cpu_canvas_translate(canvas: CpuCanvas*, dx: f32, dy: f32):
-    let state = cpu_canvas_state(canvas)
-    state.transform = state.transform.pre_translate(dx, dy)
+    if dx != 0.0 or dy != 0.0:
+        cpu_m44_pre_translate(&cpu_canvas_state(canvas).matrix, dx, dy, 0.0)
+        cpu_canvas_set_global_ctm(canvas)
 
-## SkCanvas::concat: the transform becomes `current * transform`.
+## SkCanvas::concat(SkM44): the matrix becomes `matrix * other`.
+func cpu_canvas_concat44(canvas: CpuCanvas*, other: const CpuM44*):
+    cpu_m44_pre_concat(&cpu_canvas_state(canvas).matrix, other)
+    cpu_canvas_set_global_ctm(canvas)
+
+## SkCanvas::concat(SkMatrix): as an SkM44 (nothing for the identity).
 func cpu_canvas_concat(canvas: CpuCanvas*, transform: raster.Transform):
-    let state = cpu_canvas_state(canvas)
-    state.transform = state.transform.pre_concat(transform)
+    if transform.is_identity():
+        return
+    let other = cpu_m44_from_m33(transform)
+    cpu_canvas_concat44(canvas, &other)
 
 ## SkCanvas::rotate(degrees, px, py).
 func cpu_canvas_rotate(canvas: CpuCanvas*, degrees: f32, px: f32, py: f32):
-    cpu_canvas_concat(canvas, raster.Transform.from_rotate_at(degrees, px, py))
+    cpu_canvas_concat(canvas, cpu_rotate_matrix(degrees, px, py))
 
-## The current transform.
+## The current local-to-device matrix (SkDevice::localToDevice), with its perspective row.
 func cpu_canvas_transform(canvas: CpuCanvas*) -> raster.Transform:
     return cpu_canvas_state(canvas).transform
+
+## SkDevice::setGlobalCTM(matrix) on the current layer: the local-to-device matrix is the
+## canvas's matrix with its perspective normalized, then the layer's global-to-device matrix.
+func cpu_canvas_set_global_ctm(canvas: CpuCanvas*):
+    let state = cpu_canvas_state(canvas)
+    var device = state.matrix
+    cpu_m44_normalize_perspective(&device)
+    let layer = ak.vector_at(&canvas.layers, state.layer_index)
+    cpu_m44_post_concat(&device, &layer.global_to_device)
+    state.device_matrix = device
+    state.transform = cpu_m44_as_m33(&device)
 
 # mark: Clipping ===============================================================================
 
@@ -275,13 +304,17 @@ func cpu_canvas_quick_reject(canvas: CpuCanvas*, rect: raster.Rect) -> bool:
     let state = cpu_canvas_state(canvas)
     if state.clip_empty:
         return true
-    let device_rect = rect.transform(state.transform) else return true
+    # SkMatrixPriv::MapRect of the matrix (here the layer's local-to-device one).
+    let device_rect = cpu_m44_map_rect(&state.device_matrix, rect.left(), rect.top(), rect.right(), rect.bottom())
+    for value in device_rect:
+        if not math32.is_finite(value):
+            return true
     let left = (f32)state.clip_left - 1.0
     let top = (f32)state.clip_top - 1.0
     let right = (f32)state.clip_right + 1.0
     let bottom = (f32)state.clip_bottom + 1.0
     # SkRect::intersects: the intersection has a positive area.
-    let intersects = cpu_max_f32(left, device_rect.left()) < cpu_min_f32(right, device_rect.right()) and cpu_max_f32(top, device_rect.top()) < cpu_min_f32(bottom, device_rect.bottom())
+    let intersects = cpu_max_f32(left, device_rect[0]) < cpu_min_f32(right, device_rect[2]) and cpu_max_f32(top, device_rect[1]) < cpu_min_f32(bottom, device_rect[3])
     return not intersects
 
 # mark: Drawing ================================================================================
@@ -315,7 +348,7 @@ func cpu_canvas_fill_rect(canvas: CpuCanvas*, rect: raster.Rect, paint: const ra
 func cpu_canvas_stroke_rect(canvas: CpuCanvas*, rect: raster.Rect, paint: const raster.Paint*, width: f32):
     let ts = cpu_canvas_transform(canvas)
     let half = width / 2.0
-    if ts.kx == 0.0 and ts.ky == 0.0:
+    if not ts.has_skew():
         if let outer = rect.outset(half, half):
             var builder = raster.PathBuilder.new_()
             builder.push_rect(outer)

@@ -1,0 +1,158 @@
+#==============================================================================================
+#
+#   tests_cpu_player_3d - the CPU player under CSS perspective and 3D transforms, against Skia
+#
+#   DESCRIPTION:
+#       Scenes drawn in a perspective context with a 3D transform below it, as
+#       DisplayList::execute applies them (a save and apply_transform per context), compared
+#       with the pixels Ladybird's DisplayListPlayerSkia renders for the same display lists
+#       (tests_skia_reference_data_4.lucb, from luce-browser-tools'
+#       oracles/luce-browser-render/perspective). They reach the canvas's SkM44 and the raster
+#       module's perspective: paths cut at w = 0 and mapped with the divide by w (quads as
+#       conics, cubics split), clips, layers, images sampled through the inverse perspective
+#       matrix, and glyphs drawn as paths.
+#
+#==============================================================================================
+
+# mark: Helpers ================================================================================
+
+## The perspective matrix ViewportPaintable's compute_perspective_matrix builds for
+## `perspective: d` with its origin at (ox, oy).
+func test_perspective_about(d: f32, ox: f32, oy: f32) -> gfx.FloatMatrix4X4:
+    let p = test_matrix([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, -1.0 / d, 1.0]])
+    var m = gfx.translation_matrix(gfx.FloatVector3([ox, oy, 0.0]))
+    m = gfx.float_matrix4_x4_mul(&m, p)
+    return gfx.float_matrix4_x4_mul(&m, gfx.translation_matrix(gfx.FloatVector3([-ox, -oy, 0.0])))
+
+## CSS rotateX with the given cosine and sine.
+func test_rotate_x(c: f32, s: f32) -> gfx.FloatMatrix4X4:
+    return test_matrix([[1.0, 0.0, 0.0, 0.0], [0.0, c, -s, 0.0], [0.0, s, c, 0.0], [0.0, 0.0, 0.0, 1.0]])
+
+## CSS rotateY with the given cosine and sine.
+func test_rotate_y(c: f32, s: f32) -> gfx.FloatMatrix4X4:
+    return test_matrix([[c, 0.0, s, 0.0], [0.0, 1.0, 0.0, 0.0], [-s, 0.0, c, 0.0], [0.0, 0.0, 0.0, 1.0]])
+
+## A perspective context with a transform context below it, as DisplayList::execute enters
+## them; `test_leave_3d` leaves both.
+func test_enter_3d(player: DisplayListPlayer*, perspective: gfx.FloatMatrix4X4, transform: gfx.FloatMatrix4X4, ox: f32, oy: f32):
+    display_list_player_save(player, Save())
+    display_list_player_apply_transform(player, test_float_point(0.0, 0.0), perspective)
+    display_list_player_save(player, Save())
+    display_list_player_apply_transform(player, test_float_point(ox, oy), transform)
+
+func test_leave_3d(player: DisplayListPlayer*):
+    display_list_player_restore(player, Restore())
+    display_list_player_restore(player, Restore())
+
+# mark: Shapes =================================================================================
+
+test "cpu player 3d: a rectangle under perspective and rotateX":
+    let scene = test_scene_new(32, 32)
+    defer test_scene_release(&scene)
+    let player = test_scene_player(&scene)
+    test_enter_3d(player, test_perspective_about(64.0, 16.0, 16.0), test_rotate_x(0.70710677, 0.70710677), 16.0, 16.0)
+    display_list_player_fill_rect(player, FillRect(rect = test_rect(4, 4, 24, 24), color = test_color(0, 128, 255, 255)))
+    test_leave_3d(player)
+    expect_like_skia(&scene, "persp_rotate_x", skia_persp_rotate_x, 0, 0)
+
+test "cpu player 3d: curves under perspective and rotateY (quads as conics, cubics split)":
+    let scene = test_scene_new(32, 32)
+    defer test_scene_release(&scene)
+    let player = test_scene_player(&scene)
+    test_enter_3d(player, test_perspective_about(32.0, 16.0, 16.0), test_rotate_y(0.5, 0.8660254), 12.0, 12.0)
+    display_list_player_fill_path(player, test_fill_path(test_curves_path(), test_color(200, 30, 60, 255), gfx.WindingRule.nonzero, 1.0))
+    test_leave_3d(player)
+    expect_like_skia(&scene, "persp_rotate_y_curves", skia_persp_rotate_y_curves, 0, 0)
+
+test "cpu player 3d: a rectangle partly behind the viewer is cut at w = 0":
+    let scene = test_scene_new(32, 32)
+    defer test_scene_release(&scene)
+    let player = test_scene_player(&scene)
+    test_enter_3d(player, test_perspective_about(8.0, 16.0, 16.0), test_rotate_y(0.25881904, 0.9659258), 16.0, 16.0)
+    display_list_player_fill_rect(player, FillRect(rect = test_rect(2, 4, 28, 24), color = test_color(0, 160, 80, 255)))
+    test_leave_3d(player)
+    expect_like_skia(&scene, "persp_w_clip", skia_persp_w_clip, 0, 0)
+
+test "cpu player 3d: a stroke is stroked in local space, then projected":
+    let scene = test_scene_new(32, 32)
+    defer test_scene_release(&scene)
+    let player = test_scene_player(&scene)
+    test_enter_3d(player, test_perspective_about(48.0, 16.0, 16.0), test_rotate_x(0.81915206, -0.57357645), 16.0, 16.0)
+    let path = test_star_path()
+    let bounds = gfx.enclosing_int_rect(gfx.path_bounding_box(&path))
+    let command = StrokePath(cap_style = gfx.PathCapStyle.butt, join_style = gfx.PathJoinStyle.miter, miter_limit = 4.0, dash_array = ak.Vector[f32](), dash_offset = 0.0,
+                             path_bounding_rect = bounds, path = path, opacity = 1.0, paint_style_or_color = .color(value = test_color(0, 0, 0, 255)), thickness = 2.0, should_anti_alias = ShouldAntiAlias.yes)
+    display_list_player_stroke_path(player, command)
+    test_leave_3d(player)
+    expect_like_skia(&scene, "persp_stroke", skia_persp_stroke, 0, 0)
+
+test "cpu player 3d: translateZ under perspective scales about the perspective origin":
+    let scene = test_scene_new(32, 32)
+    defer test_scene_release(&scene)
+    let player = test_scene_player(&scene)
+    let translate_z = test_matrix([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 4.0], [0.0, 0.0, 0.0, 1.0]])
+    test_enter_3d(player, test_perspective_about(16.0, 0.0, 16.0), translate_z, 8.0, 8.0)
+    display_list_player_fill_rect(player, FillRect(rect = test_rect(4, 8, 12, 12), color = test_color(0, 128, 0, 255)))
+    test_leave_3d(player)
+    expect_like_skia(&scene, "persp_translate_z", skia_persp_translate_z, 0, 0)
+
+# mark: Clips and layers =======================================================================
+
+test "cpu player 3d: a clip rectangle under perspective":
+    let scene = test_scene_new(32, 32)
+    defer test_scene_release(&scene)
+    let player = test_scene_player(&scene)
+    test_enter_3d(player, test_perspective_about(48.0, 16.0, 16.0), test_rotate_y(0.76604444, 0.64278764), 16.0, 16.0)
+    display_list_player_save(player, Save())
+    display_list_player_add_clip_rect(player, AddClipRect(rect = test_rect(6, 6, 16, 16)))
+    display_list_player_fill_rect(player, FillRect(rect = test_rect(0, 0, 32, 32), color = test_color(255, 100, 0, 255)))
+    display_list_player_restore(player, Restore())
+    test_leave_3d(player)
+    expect_like_skia(&scene, "persp_clip_rect", skia_persp_clip_rect, 0, 0)
+
+test "cpu player 3d: an opacity layer under perspective":
+    let scene = test_scene_new(32, 32)
+    defer test_scene_release(&scene)
+    let player = test_scene_player(&scene)
+    test_enter_3d(player, test_perspective_about(64.0, 16.0, 16.0), test_rotate_x(0.70710677, 0.70710677), 16.0, 16.0)
+    display_list_player_apply_effects(player, ApplyEffects(opacity = 0.5, compositing_and_blending_operator = gfx.CompositingAndBlendingOperator.normal))
+    display_list_player_fill_rect(player, FillRect(rect = test_rect(4, 4, 24, 24), color = test_color(0, 0, 255, 255)))
+    display_list_player_restore(player, Restore())
+    test_leave_3d(player)
+    expect_like_skia(&scene, "persp_opacity", skia_persp_opacity, 0, 0)
+
+# mark: Images and text ========================================================================
+
+## A 6x5 pattern image scaled onto (4, 4, 24, 24) with `scaling_mode`, under perspective and
+## rotateY(30deg).
+func test_perspective_image_scene(scaling_mode: gfx.ScalingMode) -> TestScene:
+    let scene = test_scene_new(32, 32)
+    let player = test_scene_player(&scene)
+    test_enter_3d(player, test_perspective_about(48.0, 16.0, 16.0), test_rotate_y(0.8660254, 0.5), 16.0, 16.0)
+    let command = DrawScaledImmutableBitmap(dst_rect = test_rect(4, 4, 24, 24), clip_rect = test_rect(0, 0, 32, 32), bitmap = test_filter_pattern_bitmap(6, 5), scaling_mode = scaling_mode)
+    display_list_player_draw_scaled_immutable_bitmap(player, command)
+    test_leave_3d(player)
+    return scene
+
+test "cpu player 3d: an image under perspective, nearest neighbor":
+    with memory.heap:
+        let scene = test_perspective_image_scene(gfx.ScalingMode.nearest_neighbor)
+        defer test_scene_release(&scene)
+        expect_like_skia(&scene, "persp_image_nearest", skia_persp_image_nearest, 0, 0)
+
+test "cpu player 3d: an image under perspective, bilinear":
+    with memory.heap:
+        let scene = test_perspective_image_scene(gfx.ScalingMode.bilinear)
+        defer test_scene_release(&scene)
+        expect_like_skia(&scene, "persp_image_bilinear", skia_persp_image_bilinear, 0, 0)
+
+test "cpu player 3d: a glyph run under perspective is drawn as paths":
+    with memory.heap:
+        let scene = test_scene_new(40, 24)
+        defer test_scene_release(&scene)
+        let player = test_scene_player(&scene)
+        test_enter_3d(player, test_perspective_about(64.0, 20.0, 12.0), test_rotate_x(0.8660254, 0.5), 20.0, 12.0)
+        let run = test_glyph_run("Hi", test_font("tests/web_fonts/fonts/SerenitySans-Regular.ttf", 12.0), 1.0)
+        display_list_player_draw_glyph_run(player, DrawGlyphRun(glyph_run = run, rect = test_rect(0, 0, 40, 24), translation = test_float_point(4.0, 16.0), color = test_color(0, 0, 0, 255), orientation = gfx.Orientation.horizontal))
+        test_leave_3d(player)
+        expect_like_skia(&scene, "persp_text", skia_persp_text, 0, 0)

@@ -1,16 +1,21 @@
 #==============================================================================================
 #
-#   transform - an affine transformation matrix
+#   transform - a 3x3 transformation matrix (affine, or with Skia's perspective row)
 #
 #   DESCRIPTION:
 #       Port of tiny-skia-path transform.rs: Transform (sx, kx, ky, sy, tx, ty), its
 #       constructors, classification, pre/post concatenation, point mapping and inversion
-#       (in f64, as Skia does).
+#       (in f64, as Skia does). tiny-skia's Transform is affine; Skia's SkMatrix also has a
+#       perspective row (persp0, persp1, persp2), which CSS 3D transforms reach (SkM44's
+#       asM33). The row is kept here with SkMatrix m144's rules for it (src/core/SkMatrix.cpp:
+#       the type mask that makes every other flag set, setConcat's rowcol3, the perspective
+#       determinant and inverse, Persp_pts with its divide by w, normalizePerspective).
 #
 #==============================================================================================
 
-## An affine transformation matrix. Unlike other types, doesn't guarantee to be valid. This
-## is Skia quirk. Mainly because the Skia's Matrix is 3x3, not 2x3 as ours.
+## A transformation matrix. Unlike other types, doesn't guarantee to be valid. This is Skia
+## quirk. Mapping (x, y) gives (x * sx + y * kx + tx, x * ky + y * sy + ty), divided by
+## x * persp0 + y * persp1 + persp2 when the matrix has perspective.
 pub struct Transform:
     pub var sx: f32 = 1.0
     pub var kx: f32 = 0.0
@@ -18,6 +23,11 @@ pub struct Transform:
     pub var sy: f32 = 1.0
     pub var tx: f32 = 0.0
     pub var ty: f32 = 0.0
+    ## SkMatrix's perspective row (kMPersp0, kMPersp1, kMPersp2): (0, 0, 1) for an affine
+    ## matrix.
+    pub var persp0: f32 = 0.0
+    pub var persp1: f32 = 0.0
+    pub var persp2: f32 = 1.0
 
     ## Creates an identity transform.
     pub static func identity() -> Transform:
@@ -27,6 +37,10 @@ pub struct Transform:
     ## therefore it's ky-kx, not kx-ky.
     pub static func from_row(sx: f32, ky: f32, kx: f32, sy: f32, tx: f32, ty: f32) -> Transform:
         return Transform(sx = sx, kx = kx, ky = ky, sy = sy, tx = tx, ty = ty)
+
+    ## SkMatrix::MakeAll: a matrix from its nine values in row-major order.
+    pub static func from_all(sx: f32, kx: f32, tx: f32, ky: f32, sy: f32, ty: f32, persp0: f32, persp1: f32, persp2: f32) -> Transform:
+        return Transform(sx = sx, kx = kx, ky = ky, sy = sy, tx = tx, ty = ty, persp0 = persp0, persp1 = persp1, persp2 = persp2)
 
     ## Creates a new translating `Transform`.
     pub static func from_translate(tx: f32, ty: f32) -> Transform:
@@ -64,7 +78,7 @@ pub struct Transform:
 
     ## Checks that transform is finite.
     pub func is_finite() -> bool:
-        return math32.is_finite(self.sx) and math32.is_finite(self.ky) and math32.is_finite(self.kx) and math32.is_finite(self.sy) and math32.is_finite(self.tx) and math32.is_finite(self.ty)
+        return math32.is_finite(self.sx) and math32.is_finite(self.ky) and math32.is_finite(self.kx) and math32.is_finite(self.sy) and math32.is_finite(self.tx) and math32.is_finite(self.ty) and math32.is_finite(self.persp0) and math32.is_finite(self.persp1) and math32.is_finite(self.persp2)
 
     ## Checks that transform is finite and has non-zero scale.
     pub func is_valid() -> bool:
@@ -75,7 +89,13 @@ pub struct Transform:
 
     ## Checks that transform is identity.
     pub func is_identity() -> bool:
-        return self.sx == 1.0 and self.kx == 0.0 and self.ky == 0.0 and self.sy == 1.0 and self.tx == 0.0 and self.ty == 0.0
+        return self.sx == 1.0 and self.kx == 0.0 and self.ky == 0.0 and self.sy == 1.0 and self.tx == 0.0 and self.ty == 0.0 and not self.has_perspective()
+
+    ## SkMatrix::hasPerspective: whether the perspective row is not (0, 0, 1). A matrix with
+    ## perspective has every other part too (SkMatrix::computeTypeMask), so it is neither
+    ## identity, a translation nor a scale and translation.
+    pub func has_perspective() -> bool:
+        return self.persp0 != 0.0 or self.persp1 != 0.0 or self.persp2 != 1.0
 
     ## Checks that transform is scale-only.
     pub func is_scale() -> bool:
@@ -95,15 +115,16 @@ pub struct Transform:
 
     ## Checks that transform contains a scale part.
     pub func has_scale() -> bool:
-        return self.sx != 1.0 or self.sy != 1.0
+        return self.sx != 1.0 or self.sy != 1.0 or self.has_perspective()
 
-    ## Checks that transform contains a skew part.
+    ## Checks that transform contains a skew part (or perspective: rectangles do not stay
+    ## rectangles).
     pub func has_skew() -> bool:
-        return self.kx != 0.0 or self.ky != 0.0
+        return self.kx != 0.0 or self.ky != 0.0 or self.has_perspective()
 
     ## Checks that transform contains a translate part.
     pub func has_translate() -> bool:
-        return self.tx != 0.0 or self.ty != 0.0
+        return self.tx != 0.0 or self.ty != 0.0 or self.has_perspective()
 
     ## Returns transform's scale part.
     pub func get_scale() -> (f32, f32):
@@ -156,7 +177,9 @@ pub struct Transform:
 
     ## Transforms a point using the current transform.
     pub func map_point(point: Point*):
-        if self.is_identity():
+        if self.has_perspective():
+            persp_map_point(&self, point)
+        elif self.is_identity():
             # Do nothing.
             return
         elif self.is_translate():
@@ -187,12 +210,23 @@ pub struct Transform:
             for p in &points:
                 p.x = p.x * self.sx + self.tx
                 p.y = p.y * self.sy + self.ty
+        elif self.has_perspective():
+            for p in &points:
+                persp_map_point(&self, p)
         else:
             for p in &points:
                 let x = p.x * self.sx + p.y * self.kx + self.tx
                 let y = p.x * self.ky + p.y * self.sy + self.ty
                 p.x = x
                 p.y = y
+
+    ## SkMatrix::normalizePerspective: a matrix whose perspective row is (0, 0, w) with w
+    ## other than 0 and 1 divided by w, which makes it affine.
+    pub func normalize_perspective() -> Transform:
+        if self.persp2 == 1.0 or self.persp0 != 0.0 or self.persp1 != 0.0 or self.persp2 == 0.0:
+            return self
+        let inv = 1.0 / (f64)self.persp2
+        return Transform.from_row((f32)((f64)self.sx * inv), (f32)((f64)self.ky * inv), (f32)((f64)self.kx * inv), (f32)((f64)self.sy * inv), (f32)((f64)self.tx * inv), (f32)((f64)self.ty * inv))
 
     ## Returns an inverted transform.
     pub func invert() -> Transform?:
@@ -209,6 +243,12 @@ func invert_transform(ts: Transform) -> Transform?:
             return Transform.from_row(inv_x, 0.0, 0.0, inv_y, -ts.tx * inv_x, -ts.ty * inv_y)
         # translate only
         return Transform.from_translate(-ts.tx, -ts.ty)
+    if ts.has_perspective():
+        let inv_det = persp_inv_determinant(ts) else return none
+        let inv_ts = persp_compute_inv(ts, inv_det)
+        if inv_ts.is_finite():
+            return inv_ts
+        return none
     let inv_det = inv_determinant(ts) else return none
     let inv_ts = compute_inv(ts, inv_det)
     if inv_ts.is_finite():
@@ -249,6 +289,8 @@ func concat(a: Transform, b: Transform) -> Transform:
     elif not a.has_skew() and not b.has_skew():
         # just scale and translate
         return Transform.from_row(a.sx * b.sx, 0.0, 0.0, a.sy * b.sy, a.sx * b.tx + a.tx, a.sy * b.ty + a.ty)
+    elif a.has_perspective() or b.has_perspective():
+        return persp_concat(a, b)
     return Transform.from_row(
         mul_add_mul(a.sx, b.sx, a.kx, b.ky),
         mul_add_mul(a.ky, b.sx, a.sy, b.ky),
@@ -260,3 +302,64 @@ func concat(a: Transform, b: Transform) -> Transform:
 
 func mul_add_mul(a: f32, b: f32, c: f32, d: f32) -> f32:
     return (f32)((f64)a * (f64)b + (f64)c * (f64)d)
+
+# mark: Perspective ===========================================================================
+
+## SkMatrix::Persp_pts for one point: the affine part divided by w (unless w is 0).
+func persp_map_point(m: const Transform*, p: Point*):
+    let sx = p.x
+    let sy = p.y
+    let x = sx * m.sx + sy * m.kx + m.tx
+    let y = sx * m.ky + sy * m.sy + m.ty
+    var z = sx * m.persp0 + sy * m.persp1 + m.persp2
+    if z != 0.0:
+        z = 1.0 / z
+    p.y = y * z
+    p.x = x * z
+
+## SkMatrix.cpp's rowcol3: a row of `a` times a column of `b`, in float.
+func rowcol3(r0: f32, r1: f32, r2: f32, c0: f32, c1: f32, c2: f32) -> f32:
+    return r0 * c0 + r1 * c1 + r2 * c2
+
+## SkMatrix::setConcat(a, b) when either has perspective.
+func persp_concat(a: Transform, b: Transform) -> Transform:
+    return Transform.from_all(
+        rowcol3(a.sx, a.kx, a.tx, b.sx, b.ky, b.persp0),
+        rowcol3(a.sx, a.kx, a.tx, b.kx, b.sy, b.persp1),
+        rowcol3(a.sx, a.kx, a.tx, b.tx, b.ty, b.persp2),
+        rowcol3(a.ky, a.sy, a.ty, b.sx, b.ky, b.persp0),
+        rowcol3(a.ky, a.sy, a.ty, b.kx, b.sy, b.persp1),
+        rowcol3(a.ky, a.sy, a.ty, b.tx, b.ty, b.persp2),
+        rowcol3(a.persp0, a.persp1, a.persp2, b.sx, b.ky, b.persp0),
+        rowcol3(a.persp0, a.persp1, a.persp2, b.kx, b.sy, b.persp1),
+        rowcol3(a.persp0, a.persp1, a.persp2, b.tx, b.ty, b.persp2),
+    )
+
+## sk_inv_determinant of a perspective matrix: 1 / det in f64, none when det is nearly zero.
+func persp_inv_determinant(m: Transform) -> f64?:
+    let d0 = (f64)m.sx * dcross((f64)m.sy, (f64)m.persp2, (f64)m.ty, (f64)m.persp1)
+    let d1 = (f64)m.kx * dcross((f64)m.ty, (f64)m.persp0, (f64)m.ky, (f64)m.persp2)
+    let d2 = (f64)m.tx * dcross((f64)m.ky, (f64)m.persp1, (f64)m.sy, (f64)m.persp0)
+    let det = d0 + d1 + d2
+    let tolerance = scalar_nearly_zero * scalar_nearly_zero * scalar_nearly_zero
+    if is_nearly_zero_within_tolerance((f32)det, tolerance):
+        return none
+    return 1.0 / det
+
+## SkMatrix.cpp's scross_dscale: `a * b - c * d` in float, scaled in f64.
+func scross_dscale(a: f32, b: f32, c: f32, d: f32, scale: f64) -> f32:
+    return (f32)((f64)(a * b - c * d) * scale)
+
+## SkMatrix::ComputeInv of a perspective matrix.
+func persp_compute_inv(m: Transform, inv_det: f64) -> Transform:
+    return Transform.from_all(
+        scross_dscale(m.sy, m.persp2, m.ty, m.persp1, inv_det),
+        scross_dscale(m.tx, m.persp1, m.kx, m.persp2, inv_det),
+        scross_dscale(m.kx, m.ty, m.tx, m.sy, inv_det),
+        scross_dscale(m.ty, m.persp0, m.ky, m.persp2, inv_det),
+        scross_dscale(m.sx, m.persp2, m.tx, m.persp0, inv_det),
+        scross_dscale(m.tx, m.ky, m.sx, m.ty, inv_det),
+        scross_dscale(m.ky, m.persp1, m.sy, m.persp0, inv_det),
+        scross_dscale(m.kx, m.persp0, m.sx, m.persp1, inv_det),
+        scross_dscale(m.sx, m.sy, m.kx, m.ky, inv_det),
+    )

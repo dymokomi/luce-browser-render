@@ -1,0 +1,273 @@
+#==============================================================================================
+#
+#   cpu_m44 - the CPU canvas's 4x4 matrix (Skia's SkM44)
+#
+#   DESCRIPTION:
+#       Port of the parts of Skia m144's SkM44 that SkCanvas and SkDevice use
+#       (include/core/SkM44.h, src/core/SkM44.cpp): concatenation, translation and scaling,
+#       normalizePerspective, asM33, map, SkMatrixPriv::MapRect (with the w = 0 clip of
+#       map_rect_perspective) and IsScaleTranslateAsM33, and SkInvert4x4Matrix
+#       (src/core/SkMatrixInvert.cpp). The canvas keeps its matrix as an SkM44, as SkCanvas
+#       does, so that CSS 3D transforms compose with their z row and column before a draw
+#       takes the 3x3 matrix (with its perspective row) out of it.
+#
+#       SkM44 stores its values column-major (fMat[column * 4 + row]) and computes with
+#       skvx::float4 columns; the lane arithmetic is written out here in the same order.
+#
+#       Copyright 2020 Google Inc.
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+## SkPathPriv::kW0PlaneDistance.
+let cpu_w0_plane_distance: f32 = 1.0 / 16384.0
+
+## SkM44: a 4x4 matrix, column-major (m[column * 4 + row]).
+struct CpuM44:
+    var m: f32[16]
+
+# mark: Construction ===========================================================================
+
+## SkM44(): the identity.
+func cpu_m44_identity() -> CpuM44:
+    return CpuM44(m = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0])
+
+## SkM44(m0, m4, m8, m12, m1, ...): a matrix from its 16 values in row-major order.
+func cpu_m44_from_rows(rows: const f32[]) -> CpuM44:
+    var result = CpuM44()
+    for r: usize in 0..<4:
+        for c: usize in 0..<4:
+            result.m[c * 4 + r] = rows[r * 4 + c]
+    return result
+
+## SkM44(const SkMatrix&): a 3x3 matrix with z passed through.
+func cpu_m44_from_m33(t: raster.Transform) -> CpuM44:
+    return cpu_m44_from_rows([t.sx, t.kx, 0.0, t.tx, t.ky, t.sy, 0.0, t.ty, 0.0, 0.0, 1.0, 0.0, t.persp0, t.persp1, 0.0, t.persp2])
+
+## DisplayListPlayerSkia's to_skia_matrix4x4: Gfx's row-major matrix as an SkM44.
+func cpu_m44_of_matrix4x4(matrix: const gfx.FloatMatrix4X4*) -> CpuM44:
+    let e = matrix.m_elements
+    return cpu_m44_from_rows([e[0][0], e[0][1], e[0][2], e[0][3], e[1][0], e[1][1], e[1][2], e[1][3],
+                              e[2][0], e[2][1], e[2][2], e[2][3], e[3][0], e[3][1], e[3][2], e[3][3]])
+
+## SkM44::rc: the value at `row`, `column`.
+func cpu_m44_rc(matrix: const CpuM44*, row: usize, column: usize) -> f32:
+    return matrix.m[column * 4 + row]
+
+## SkMatrix::setRotate(degrees, px, py): the rotation about (px, py) as an SkMatrix, its sine
+## and cosine snapped to zero (setSinCos with a pivot).
+func cpu_rotate_matrix(degrees: f32, px: f32, py: f32) -> raster.Transform:
+    let rad = gfx.sk_degrees_to_radians(degrees)
+    let sin_v = gfx.sk_scalar_sin_snap_to_zero(rad)
+    let cos_v = gfx.sk_scalar_cos_snap_to_zero(rad)
+    let one_minus_cos_v = 1.0 - cos_v
+    return raster.Transform.from_all(cos_v, -sin_v, sin_v * py + one_minus_cos_v * px, sin_v, cos_v, -sin_v * px + one_minus_cos_v * py, 0.0, 0.0, 1.0)
+
+# mark: Arithmetic =============================================================================
+
+## SkM44::setConcat(a, b): a * b, each column of the result `c0*r0 + (c1*r1 + (c2*r2 + c3*r3))`
+## over the columns of `a` and a column `r` of `b`.
+func cpu_m44_concat(a: const CpuM44*, b: const CpuM44*) -> CpuM44:
+    var result = CpuM44()
+    for column: usize in 0..<4:
+        let r0 = b.m[column * 4]
+        let r1 = b.m[column * 4 + 1]
+        let r2 = b.m[column * 4 + 2]
+        let r3 = b.m[column * 4 + 3]
+        for lane: usize in 0..<4:
+            result.m[column * 4 + lane] = a.m[lane] * r0 + (a.m[4 + lane] * r1 + (a.m[8 + lane] * r2 + a.m[12 + lane] * r3))
+    return result
+
+## SkM44::preConcat(m): this * m.
+func cpu_m44_pre_concat(matrix: CpuM44*, other: const CpuM44*):
+    *matrix = cpu_m44_concat(matrix, other)
+
+## SkM44::postConcat(m): m * this.
+func cpu_m44_post_concat(matrix: CpuM44*, other: const CpuM44*):
+    *matrix = cpu_m44_concat(other, matrix)
+
+## SkM44::preTranslate(x, y, z): only the last column changes, `c0*x + (c1*y + (c2*z + c3))`.
+func cpu_m44_pre_translate(matrix: CpuM44*, x: f32, y: f32, z: f32):
+    for lane: usize in 0..<4:
+        matrix.m[12 + lane] = matrix.m[lane] * x + (matrix.m[4 + lane] * y + (matrix.m[8 + lane] * z + matrix.m[12 + lane]))
+
+## SkM44::postTranslate(x, y, z): each column gets t * (its w row) added, t = (x, y, z, 0).
+func cpu_m44_post_translate(matrix: CpuM44*, x: f32, y: f32, z: f32):
+    let t: f32[4] = [x, y, z, 0.0]
+    for column: usize in 0..<4:
+        let w = matrix.m[column * 4 + 3]
+        for lane: usize in 0..<4:
+            matrix.m[column * 4 + lane] = t[lane] * w + matrix.m[column * 4 + lane]
+
+## SkM44::preScale(x, y): the first two columns scaled.
+func cpu_m44_pre_scale(matrix: CpuM44*, x: f32, y: f32):
+    for lane: usize in 0..<4:
+        matrix.m[lane] = matrix.m[lane] * x
+        matrix.m[4 + lane] = matrix.m[4 + lane] * y
+
+## SkM44::normalizePerspective: a bottom row of (0, 0, 0, w) with w not 0 or 1 is divided
+## out, so that the matrix is treated as affine.
+func cpu_m44_normalize_perspective(matrix: CpuM44*):
+    let w = matrix.m[15]
+    if w != 1.0 and w != 0.0 and matrix.m[3] == 0.0 and matrix.m[7] == 0.0 and matrix.m[11] == 0.0:
+        # skvx multiplies the float columns by the double converted to float.
+        let inv = (f32)(1.0 / (f64)w)
+        for i: usize in 0..<16:
+            matrix.m[i] = matrix.m[i] * inv
+        matrix.m[15] = 1.0
+
+## SkM44::asM33: rows and columns 0, 1 and 3 (x, y and w; z dropped) as an SkMatrix.
+func cpu_m44_as_m33(matrix: const CpuM44*) -> raster.Transform:
+    let m = matrix.m
+    return raster.Transform.from_all(m[0], m[4], m[12], m[1], m[5], m[13], m[3], m[7], m[15])
+
+## SkMatrixPriv::IsScaleTranslateAsM33.
+func cpu_m44_is_scale_translate_as_m33(matrix: const CpuM44*) -> bool:
+    return cpu_m44_rc(matrix, 1, 0) == 0.0 and cpu_m44_rc(matrix, 3, 0) == 0.0 and cpu_m44_rc(matrix, 0, 1) == 0.0 and cpu_m44_rc(matrix, 3, 1) == 0.0 and cpu_m44_rc(matrix, 3, 3) == 1.0
+
+## SkM44::map(x, y, z, w): `c0*x + (c1*y + (c2*z + c3*w))`.
+func cpu_m44_map(matrix: const CpuM44*, x: f32, y: f32, z: f32, w: f32) -> f32[4]:
+    var v: f32[4] = ---
+    for lane: usize in 0..<4:
+        v[lane] = matrix.m[lane] * x + (matrix.m[4 + lane] * y + (matrix.m[8 + lane] * z + matrix.m[12 + lane] * w))
+    return v
+
+## SkM44::invert (SkInvert4x4Matrix in doubles): none when the determinant, as a float, is zero
+## or the inverse is not finite.
+func cpu_m44_invert(matrix: const CpuM44*) -> CpuM44?:
+    var a: f64[16] = ---
+    for i: usize in 0..<16:
+        a[i] = (f64)matrix.m[i]
+    var b00 = a[0] * a[5] - a[1] * a[4]
+    var b01 = a[0] * a[6] - a[2] * a[4]
+    var b02 = a[0] * a[7] - a[3] * a[4]
+    var b03 = a[1] * a[6] - a[2] * a[5]
+    var b04 = a[1] * a[7] - a[3] * a[5]
+    var b05 = a[2] * a[7] - a[3] * a[6]
+    var b06 = a[8] * a[13] - a[9] * a[12]
+    var b07 = a[8] * a[14] - a[10] * a[12]
+    var b08 = a[8] * a[15] - a[11] * a[12]
+    var b09 = a[9] * a[14] - a[10] * a[13]
+    var b10 = a[9] * a[15] - a[11] * a[13]
+    var b11 = a[10] * a[15] - a[11] * a[14]
+
+    # Calculate the determinant
+    let determinant = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06
+    let invdet = 1.0 / determinant
+    b00 *= invdet
+    b01 *= invdet
+    b02 *= invdet
+    b03 *= invdet
+    b04 *= invdet
+    b05 *= invdet
+    b06 *= invdet
+    b07 *= invdet
+    b08 *= invdet
+    b09 *= invdet
+    b10 *= invdet
+    b11 *= invdet
+
+    let out: f64[16] = [
+        a[5] * b11 - a[6] * b10 + a[7] * b09,
+        a[2] * b10 - a[1] * b11 - a[3] * b09,
+        a[13] * b05 - a[14] * b04 + a[15] * b03,
+        a[10] * b04 - a[9] * b05 - a[11] * b03,
+        a[6] * b08 - a[4] * b11 - a[7] * b07,
+        a[0] * b11 - a[2] * b08 + a[3] * b07,
+        a[14] * b02 - a[12] * b05 - a[15] * b01,
+        a[8] * b05 - a[10] * b02 + a[11] * b01,
+        a[4] * b10 - a[5] * b08 + a[7] * b06,
+        a[1] * b08 - a[0] * b10 - a[3] * b06,
+        a[12] * b04 - a[13] * b02 + a[15] * b00,
+        a[9] * b02 - a[8] * b04 - a[11] * b00,
+        a[5] * b07 - a[4] * b09 - a[6] * b06,
+        a[0] * b09 - a[1] * b07 + a[2] * b06,
+        a[13] * b01 - a[12] * b03 - a[14] * b00,
+        a[8] * b03 - a[9] * b01 + a[10] * b00,
+    ]
+    var inverse = CpuM44()
+    for i: usize in 0..<16:
+        inverse.m[i] = (f32)out[i]
+        if not math32.is_finite(inverse.m[i]):
+            return none
+    if (f32)determinant == 0.0:
+        return none
+    return inverse
+
+# mark: Rectangles =============================================================================
+
+## SkMatrixPriv::MapRect(SkM44, rect): the bounds of `rect` (at z = 0) mapped by `matrix`,
+## clipped to w >= kW0PlaneDistance when the matrix has perspective, as [left, top, right,
+## bottom].
+func cpu_m44_map_rect(matrix: const CpuM44*, left: f32, top: f32, right: f32, bottom: f32) -> f32[4]:
+    let m = matrix.m
+    let has_perspective = m[3] != 0.0 or m[7] != 0.0 or m[11] != 0.0 or m[15] != 1.0
+    if has_perspective:
+        return cpu_m44_map_rect_perspective(matrix, left, top, right, bottom)
+    # map_rect_affine: the min and the negated max of the corners before translation, then the
+    # translation once.
+    let flip: f32[4] = [1.0, 1.0, -1.0, -1.0]
+    var c0: f32[4] = [m[0], m[1], m[0], m[1]]
+    var c1: f32[4] = [m[4], m[5], m[4], m[5]]
+    let c3: f32[4] = [m[12], m[13], m[12], m[13]]
+    var result: f32[4] = ---
+    for lane: usize in 0..<4:
+        c0[lane] = c0[lane] * flip[lane]
+        c1[lane] = c1[lane] * flip[lane]
+    for lane: usize in 0..<4:
+        let tl = c0[lane] * left + c1[lane] * top
+        let tr = c0[lane] * right + c1[lane] * top
+        let bl = c0[lane] * left + c1[lane] * bottom
+        let br = c0[lane] * right + c1[lane] * bottom
+        result[lane] = c3[lane] + flip[lane] * cpu_vmin(cpu_vmin(tl, tr), cpu_vmin(bl, br))
+    return result
+
+## map_rect_perspective: each corner projected, or, behind the w = kW0PlaneDistance plane,
+## replaced by where its two edges cross the plane.
+func cpu_m44_map_rect_perspective(matrix: const CpuM44*, left: f32, top: f32, right: f32, bottom: f32) -> f32[4]:
+    let m = matrix.m
+    var tl: f32[4] = ---
+    var tr: f32[4] = ---
+    var bl: f32[4] = ---
+    var br: f32[4] = ---
+    for lane: usize in 0..<4:
+        tl[lane] = m[lane] * left + m[4 + lane] * top + m[12 + lane]
+        tr[lane] = m[lane] * right + m[4 + lane] * top + m[12 + lane]
+        bl[lane] = m[lane] * left + m[4 + lane] * bottom + m[12 + lane]
+        br[lane] = m[lane] * right + m[4 + lane] * bottom + m[12 + lane]
+    let a = cpu_vmin4(cpu_m44_project(tl, tr, bl), cpu_m44_project(tr, br, tl))
+    let b = cpu_m44_project(br, bl, tr)
+    let c = cpu_m44_project(bl, tl, br)
+    let min = cpu_vmin4(a, cpu_vmin4(b, c))
+    return [min[0], min[1], -min[2], -min[3]]
+
+## map_rect_perspective's `project`: (x, y, -x, -y) of the projected corner `p0`, or of the
+## crossings of its edges to `p1` and `p2` with the w = kW0PlaneDistance plane.
+func cpu_m44_project(p0: f32[4], p1: f32[4], p2: f32[4]) -> f32[4]:
+    let w0 = p0[3]
+    if w0 >= cpu_w0_plane_distance:
+        # Unclipped, just divide by w
+        return [p0[0] * 1.0 / w0, p0[1] * 1.0 / w0, p0[0] * -1.0 / w0, p0[1] * -1.0 / w0]
+    return cpu_vmin4(cpu_m44_clip_edge(p0, p1), cpu_m44_clip_edge(p0, p2))
+
+## `project`'s `clip`: where the edge from `p0` (behind the plane) to `p` crosses it, as
+## (x, y, -x, -y); infinity when `p` is behind it too.
+func cpu_m44_clip_edge(p0: f32[4], p: f32[4]) -> f32[4]:
+    let w0 = p0[3]
+    let w = p[3]
+    if w >= cpu_w0_plane_distance:
+        let t = (cpu_w0_plane_distance - w0) / (w - w0)
+        let cx = (t * p[0] + (1.0 - t) * p0[0]) / cpu_w0_plane_distance
+        let cy = (t * p[1] + (1.0 - t) * p0[1]) / cpu_w0_plane_distance
+        return [cx, cy, cx * -1.0, cy * -1.0]
+    let infinity = math32.infinity
+    return [infinity, infinity, infinity, infinity]
+
+## skvx::min of one lane: `b < a ? b : a`.
+func cpu_vmin(a: f32, b: f32) -> f32:
+    return b if b < a else a
+
+## skvx::min of four lanes.
+func cpu_vmin4(a: f32[4], b: f32[4]) -> f32[4]:
+    return [cpu_vmin(a[0], b[0]), cpu_vmin(a[1], b[1]), cpu_vmin(a[2], b[2]), cpu_vmin(a[3], b[3])]

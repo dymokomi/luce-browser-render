@@ -195,6 +195,27 @@ func lowp_transform(p: LowpPipeline*):
 
     lowp_next_stage(p)
 
+# matrix_perspective: the row-major 3x3 matrix, then the divide by its z.
+func lowp_transform_perspective(p: LowpPipeline*):
+    let m = p.ctx.transform
+
+    let x = lowp_join(p.r, p.g)
+    let y = lowp_join(p.b, p.a)
+
+    var nx: F16 = ---
+    var ny: F16 = ---
+    for q: usize in 0..<4:
+        let tx = lowp_mad(x[q], f32[4](m.sx), lowp_mad(y[q], f32[4](m.kx), f32[4](m.tx)))
+        let ty = lowp_mad(x[q], f32[4](m.ky), lowp_mad(y[q], f32[4](m.sy), f32[4](m.ty)))
+        let tz = lowp_mad(x[q], f32[4](m.persp0), lowp_mad(y[q], f32[4](m.persp1), f32[4](m.persp2)))
+        nx[q] = tx * f4_rcp_precise(tz)
+        ny[q] = ty * f4_rcp_precise(tz)
+
+    lowp_split(nx, &p.r, &p.g)
+    lowp_split(ny, &p.b, &p.a)
+
+    lowp_next_stage(p)
+
 # matrix_scale_translate with a unit y scale (y = y * 1 + 0 is y).
 func lowp_scale_translate_x(p: LowpPipeline*):
     let m = p.ctx.scale_translate_x

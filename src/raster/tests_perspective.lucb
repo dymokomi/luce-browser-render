@@ -1,0 +1,122 @@
+#==============================================================================================
+#
+#   tests_perspective - matrices and paths with a perspective row against Skia m144
+#
+#   DESCRIPTION:
+#       The values Skia m144 computes (luce-browser-tools' oracles/luce-browser-render/
+#       perspective/matrices.cpp, run against the library Ladybird 47c82b38d0 links), compared
+#       bit for bit: SkMatrix::setConcat with perspective, invert, normalizePerspective,
+#       Persp_pts, mapRect (a path cut at w = 0), and SkPath::transform / SkPathBuilder::
+#       transform of a path that crosses the w = 0 plane (PerspectiveClip, quads and conics
+#       as conics with TransformW's weights, cubics split in four) and of one in front of it.
+#
+#==============================================================================================
+
+## The bits of a transform's nine values in SkMatrix order.
+func transform_bits(ts: Transform) -> u32[9]:
+    return [ts.sx.bits(), ts.kx.bits(), ts.tx.bits(), ts.ky.bits(), ts.sy.bits(), ts.ty.bits(), ts.persp0.bits(), ts.persp1.bits(), ts.persp2.bits()]
+
+func expect_transform_bits(name: str, ts: Transform, expected: u32[9]):
+    let actual = transform_bits(ts)
+    for i in 0..<9usize:
+        if actual[i] != expected[i]:
+            print(f"{name}: value {i} is {actual[i]:x}, Skia's is {expected[i]:x}")
+            trap("transform mismatch")
+
+## The matrices of the oracle.
+func persp_test_a() -> Transform:
+    return Transform.from_all(0.9, 0.3, 12.0, -0.2, 1.1, -7.0, 0.004, -0.0025, 1.2)
+
+func persp_test_b() -> Transform:
+    return Transform.from_all(1.5, 0.0, 3.0, 0.0, 0.75, -2.0, 0.0, 0.0, 1.0)
+
+func persp_test_c() -> Transform:
+    return Transform.from_all(0.70710677, -0.70710677, 5.0, 0.70710677, 0.70710677, 1.0, 0.0, 0.0, 1.0)
+
+## The oracle's w-crossing matrix: w = 0.02 x + 0.001 y + 0.5.
+func persp_test_p() -> Transform:
+    return Transform.from_all(1.0, 0.25, 3.0, 0.1, 1.0, 2.0, 0.02, 0.001, 0.5)
+
+## The oracle's path: a closed cubic and quad, and an open contour with a conic.
+func persp_test_path() -> Path:
+    var builder = PathBuilder.new_()
+    builder.move_to(-40.0, -10.0)
+    builder.cubic_to(-40.0, 30.0, 40.0, 30.0, 40.0, -10.0)
+    builder.quad_to(0.0, -40.0, -40.0, -10.0)
+    builder.close()
+    builder.move_to(-30.0, -5.0)
+    builder.line_to(30.0, -5.0)
+    builder.conic_to(36.0, 0.0, 30.0, 5.0, 0.6)
+    builder.line_to(-30.0, 5.0)
+    return builder.finish() else trap("path")
+
+## `path`'s verbs (raster's numbering), point bits and weight bits against the expected ones.
+func expect_path_bits(name: str, path: const Path*, verbs: const u8[], points: const u32[], weights: const u32[]):
+    let actual_verbs = path.verbs_view()
+    assert(actual_verbs.length == verbs.length)
+    for i in 0..<verbs.length:
+        if (u8)actual_verbs[i] != verbs[i]:
+            print(f"{name}: verb {i} is {(u8)actual_verbs[i]}, Skia's is {verbs[i]}")
+            trap("verb mismatch")
+    let actual_points = path.points_view()
+    assert(actual_points.length * 2 == points.length)
+    for i in 0..<actual_points.length:
+        if actual_points[i].x.bits() != points[2 * i] or actual_points[i].y.bits() != points[2 * i + 1]:
+            print(f"{name}: point {i} is ({actual_points[i].x.bits():x}, {actual_points[i].y.bits():x}), Skia's is ({points[2 * i]:x}, {points[2 * i + 1]:x})")
+            trap("point mismatch")
+    let actual_weights = path.weights_view()
+    assert(actual_weights.length == weights.length)
+    for i in 0..<weights.length:
+        if actual_weights[i].bits() != weights[i]:
+            print(f"{name}: weight {i} is {actual_weights[i].bits():x}, Skia's is {weights[i]:x}")
+            trap("weight mismatch")
+
+test "perspective: concatenation":
+    expect_transform_bits("concat_ab", persp_test_a().pre_concat(persp_test_b()), [0x3faccccc, 0x3e666667, 0x4161999a, 0xbe99999a, 0x3f533334, 0xc11ccccd, 0x3bc49ba6, 0xbaf5c28f, 0x3f9bc6a8])
+    expect_transform_bits("concat_ba", persp_test_b().pre_concat(persp_test_a()), [0x3fae5603, 0x3ee28f5d, 0x41accccd, 0xbe21cac1, 0x3f547ae2, 0xc0f4cccd, 0x3b83126f, 0xbb23d70a, 0x3f99999a])
+    expect_transform_bits("concat_ac", persp_test_a().pre_concat(persp_test_c()), [0x3f593923, 0xbed93922, 0x41866666, 0x3f22eadb, 0x3f6b533d, 0xc0dccccd, 0x3a8b05da, 0xbb969bac, 0x3f9bd70b])
+    expect_transform_bits("concat_aa", persp_test_a().pre_concat(persp_test_a()), [0x3f4c49b9, 0x3f11eb86, 0x41b8cccc, 0xbedb22d1, 0x3f9570a5, 0xc1940000, 0x3c11d14e, 0xbb95182a, 0x3fc0b43a])
+
+test "perspective: inversion and normalization":
+    let inverse = persp_test_a().invert() else trap("invertible")
+    expect_transform_bits("invert_a", inverse, [0x3f8c3678, 0xbea7eeb1, 0xc14de0ef, 0x3e369299, 0x3f5e2ffe, 0x4051ea5b, 0xbb56f416, 0x3b3e26b0, 0x3f621014])
+    let normalized = Transform.from_all(2.0, 0.0, 4.0, 0.0, 2.0, 6.0, 0.0, 0.0, 2.0).normalize_perspective()
+    expect_transform_bits("normalize", normalized, [0x3f800000, 0x00000000, 0x40000000, 0x00000000, 0x3f800000, 0x40400000, 0x00000000, 0x00000000, 0x3f800000])
+
+test "perspective: points and rectangles":
+    var points: Point[3] = [Point.from_xy(0.0, 0.0), Point.from_xy(10.0, -4.0), Point.from_xy(100.0, 50.0)]
+    persp_test_a().map_points(points)
+    let expected: u32[6] = [0x41200000, 0xc0baaaaa, 0x417d70a3, 0xc12b851f, 0x429ea4e2, 0x4197dd4a]
+    for i in 0..<3usize:
+        assert(points[i].x.bits() == expected[2 * i] and points[i].y.bits() == expected[2 * i + 1])
+    let rect = Rect.from_ltrb(-40.0, -20.0, 40.0, 20.0) else trap("rect")
+    let mapped = rect.transform(persp_test_p()) else trap("mapped")
+    let expected_rect: u32[4] = [0xc8cff9c0, 0xc8a33293, 0x4211745d, 0x489b206f]
+    assert(mapped.left().bits() == expected_rect[0] and mapped.top().bits() == expected_rect[1] and mapped.right().bits() == expected_rect[2] and mapped.bottom().bits() == expected_rect[3])
+
+test "perspective: SkPath::transform cuts a path at w = 0":
+    var path = persp_test_path()
+    defer path.release()
+    assert(path.transform_with(persp_test_p(), .path_iter))
+    let verbs: u8[25] = [0, 3, 3, 3, 3, 1, 3, 3, 3, 3, 1, 3, 3, 3, 3, 5, 1, 5, 0, 1, 5, 5, 1, 5, 1]
+    let points: u32[108] = [0xc89a14bc, 0x4851015b, 0xc4027f93, 0x43d475b8, 0xc36221c4, 0x435db92e, 0xc300ac7c, 0x43194aa1, 0xc2a30b1a, 0x42f05da7, 0xc25416ce, 0x42c6a728, 0xc208c1c6, 0x42a9d187, 0xc1a869e8, 0x4295b444, 0xc133c66c, 0x4285c2ad, 0xc06e0e50, 0x427194b6, 0x400c207e, 0x425d300c, 0x40dec8dd, 0x424b7ef0, 0x412d904c, 0x423c0123, 0x412d904c, 0x423c0123, 0x41909491, 0x421f3368, 0x41b731fd, 0x42073b79, 0x41d09169, 0x41e61829, 0x41e43634, 0x41c6d6eb, 0x41f1c438, 0x41a948c0, 0x41fa19f4, 0x418d1e06, 0x4200a12d, 0x4169db47, 0x42028add, 0x41382a61, 0x4202bc36, 0x4104195a, 0x4202e9fc, 0x40a79d32, 0x4201a11a, 0x3ff159d3, 0x41fd0fb6, 0xbffbf343, 0x41fd0fb6, 0xbffbf343, 0x41fce981, 0xc003ea32, 0x41fcc2bc, 0xc009e0f3, 0x41fc9b65, 0xc00fddf5, 0x41fc740c, 0xc015db09, 0x41fc4c24, 0xc01bde74, 0x41fc23a5, 0xc021e842, 0x41fbfb26, 0xc027f239, 0x41fbd213, 0xc02e02a8, 0x41fba86c, 0xc034199e, 0x41fb7ec3, 0xc03a30d1, 0x41fb5484, 0xc0404ea0, 0x41fb29ad, 0xc046731b, 0x41a27b46, 0xc1b01227, 0xbf8944d7, 0xc22b9650, 0xbf8944d7, 0xc22b9650, 0xc257cddf, 0xc2bd1aac, 0xc8cf52b7, 0xc89ff390, 0xc8b7e2c4, 0xc7af1ad1, 0x41e7f6a6, 0x00000000, 0x41f17d22, 0x3feb66ff, 0x41f649cb, 0x409206b6, 0x41f69c90, 0x4097e630, 0x41f6e608, 0x409d9c64, 0x41f6e608, 0x409d9c64, 0x41fadc0c, 0x40ec6f3e, 0x41f7f6bb, 0x4110cbdf, 0xc8a7f9c0, 0x478f35b2]
+    let weights: u32[5] = [0x3f8bf239, 0x4237c289, 0x3f828854, 0x3f800306, 0x3f824ee4]
+    expect_path_bits("path_iter", &path, verbs, points, weights)
+
+test "perspective: SkPathBuilder::transform walks the raw verbs":
+    var path = persp_test_path()
+    defer path.release()
+    assert(path.transform(persp_test_p()))
+    let verbs: u8[25] = [0, 3, 3, 3, 3, 1, 3, 3, 3, 3, 1, 3, 3, 3, 3, 5, 1, 5, 0, 1, 5, 5, 1, 5, 1]
+    let points: u32[108] = [0xc89a14bc, 0x4851015b, 0xc4027f93, 0x43d475b8, 0xc36221c4, 0x435db92e, 0xc300ac7c, 0x43194aa1, 0xc2a30b1a, 0x42f05da7, 0xc25416ce, 0x42c6a728, 0xc208c1c6, 0x42a9d187, 0xc1a869e8, 0x4295b444, 0xc133c66c, 0x4285c2ad, 0xc06e0e50, 0x427194b6, 0x400c207e, 0x425d300c, 0x40dec8dd, 0x424b7ef0, 0x412d904c, 0x423c0123, 0x412d904c, 0x423c0123, 0x41909491, 0x421f3368, 0x41b731fd, 0x42073b79, 0x41d09169, 0x41e61829, 0x41e43634, 0x41c6d6eb, 0x41f1c438, 0x41a948c0, 0x41fa19f4, 0x418d1e06, 0x4200a12d, 0x4169db47, 0x42028add, 0x41382a61, 0x4202bc36, 0x4104195a, 0x4202e9fc, 0x40a79d32, 0x4201a11a, 0x3ff159d3, 0x41fd0fb6, 0xbffbf343, 0x41fd0fb6, 0xbffbf343, 0x41fce981, 0xc003ea32, 0x41fcc2bc, 0xc009e0f3, 0x41fc9b65, 0xc00fddf5, 0x41fc740c, 0xc015db09, 0x41fc4c24, 0xc01bde74, 0x41fc23a5, 0xc021e842, 0x41fbfb26, 0xc027f239, 0x41fbd213, 0xc02e02a8, 0x41fba86c, 0xc034199e, 0x41fb7ec3, 0xc03a30d1, 0x41fb5484, 0xc0404ea0, 0x41fb29ad, 0xc046731b, 0x41a27b46, 0xc1b01227, 0xbf8944d7, 0xc22b9650, 0xbf8944d7, 0xc22b9650, 0xc257cddf, 0xc2bd1aac, 0xc8cf52b7, 0xc89ff390, 0xc8b7e2c4, 0xc7af1ad1, 0x41e7f6a6, 0x00000000, 0x41f17d22, 0x3feb66ff, 0x41f649cb, 0x409206b6, 0x41f69c90, 0x4097e630, 0x41f6e608, 0x409d9c64, 0x41f6e608, 0x409d9c64, 0x41fadc0c, 0x40ec6f3e, 0x41f7f6bb, 0x4110cbdf, 0xc8a7f9c0, 0x478f35b2]
+    let weights: u32[5] = [0x3f8bf239, 0x4237c289, 0x3f828854, 0x3f800306, 0x3f824ee4]
+    expect_path_bits("path_raw", &path, verbs, points, weights)
+
+test "perspective: a path in front of the plane is not cut":
+    var path = persp_test_path()
+    defer path.release()
+    assert(path.transform_with(Transform.from_all(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.001, 0.002, 1.0), .path_iter))
+    let verbs: u8[11] = [0, 3, 3, 3, 3, 5, 4, 0, 1, 5, 1]
+    let points: u32[40] = [0xc22a3678, 0xc12a3678, 0xc226aaac, 0x00000000, 0xc20edb6e, 0x40f4e5e0, 0xc1dc8d27, 0x41488052, 0xc19da2ae, 0x4189ee58, 0xc11b56fe, 0x419b56fe, 0x00000000, 0x4199d89e, 0x41186187, 0x41986187, 0x4197a8a5, 0x4184b391, 0x41d106b1, 0x413e0615, 0x42055556, 0x40e4924a, 0x4219d89e, 0x00000000, 0x421cdcdd, 0xc11cdcdd, 0x00000000, 0xc22de9bd, 0xc22a3678, 0xc12a3678, 0xc1fa0001, 0xc0a6aaac, 0x41eb4b4b, 0xc09cdcdd, 0x420aff03, 0x00000000, 0x41e6c4ed, 0x4099d89e, 0xc1f4e5e0, 0x40a343eb]
+    let weights: u32[2] = [0x3f7086e8, 0x3f1a8086]
+    expect_path_bits("path_front", &path, verbs, points, weights)

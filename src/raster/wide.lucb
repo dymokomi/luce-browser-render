@@ -367,3 +367,15 @@ func f4_rcp_fast(v: F4) -> F4:
 
 func f8_rcp_fast(v: F8) -> F8:
     return [f4_rcp_fast(v[0]), f4_rcp_fast(v[1])]
+
+## rcp_precise of NEON: rcp_approx (the estimate and one Newton-Raphson step), refined by a
+## second step.
+func f4_rcp_precise(v: F4) -> F4:
+    let e = f4_rcp_fast(v)
+    var r: F4 = ---
+    for i: usize in 0..<4:
+        r[i] = f32_frecps(v[i], e[i]) * e[i]
+    return r
+
+func f8_rcp_precise(v: F8) -> F8:
+    return [f4_rcp_precise(v[0]), f4_rcp_precise(v[1])]

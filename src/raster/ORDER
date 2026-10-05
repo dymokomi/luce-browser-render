@@ -22,6 +22,7 @@ edge.lucb
 edge_builder.lucb
 line_clipper.lucb
 edge_clipper.lucb
+path_perspective.lucb
 geometry_chop.lucb
 cubics.lucb
 scan_path.lucb
@@ -60,3 +61,4 @@ ft_grays.lucb
 tests_path.lucb
 tests_core.lucb
 tests_ft_grays.lucb
+tests_perspective.lucb

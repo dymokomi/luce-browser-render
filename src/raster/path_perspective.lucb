@@ -1,0 +1,285 @@
+#==============================================================================================
+#
+#   path_perspective - transforming a path by a matrix with perspective
+#
+#   DESCRIPTION:
+#       Port of the perspective branch of Skia m144's path transforms: SkPath::transform
+#       (src/core/SkPath_pathref.cpp) and SkPathBuilder::transform (src/core/SkPathBuilder.cpp),
+#       SkPathPriv::PerspectiveClip with SkHalfPlane and its `clip` (src/core/SkPath.cpp), and
+#       SkConic::TransformW (src/core/SkGeometry.cpp). The path is first cut to the half-plane
+#       where w >= kW0PlaneDistance (SkEdgeClipper::ClipPath on the path rotated so that the
+#       plane is y = 0), then rebuilt with quads and conics as conics whose weight carries the
+#       projection and cubics split in four, and its points are mapped with the divide by w.
+#
+#       SkPath::transform walks the path with SkPath::Iter, which turns a close into a line
+#       back to the contour's start when the contour is open and drops a trailing move;
+#       SkPathBuilder::transform (drawPath's fills, mapRect) walks the raw verbs.
+#
+#       Copyright 2006 The Android Open Source Project
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+## SkPathPriv::kW0PlaneDistance: how far in front of the w = 0 plane points are kept.
+let w0_plane_distance: f32 = 1.0 / 16384.0
+
+## How SkPath::transform walks the path: SkPath::Iter (closes as lines, no trailing move) or
+## the raw verbs (SkPathBuilder::transform).
+pub enum PerspectiveIteration as u8:
+    path_iter = 0
+    raw = 1
+
+# mark: SkHalfPlane ===========================================================================
+
+## What SkPathPriv::PerspectiveClip leaves of a path.
+enum PerspectiveClipResult:
+    ## The whole path is in front of the plane: nothing to cut.
+    unclipped
+    ## The part of the path in front of the plane.
+    clipped(path: Path)
+    ## Nothing is in front of the plane (or the clip failed).
+    nothing
+
+## SkHalfPlane::Result.
+enum HalfPlaneResult as u8:
+    all_negative = 0
+    all_positive = 1
+    mixed = 2
+
+## SkHalfPlane: the points where a * x + b * y + c >= 0.
+struct HalfPlane:
+    var a: f32
+    var b: f32
+    var c: f32
+
+    func eval(x: f32, y: f32) -> f32:
+        return self.a * x + self.b * y + self.c
+
+    ## SkHalfPlane::normalize: the normal made unit length (in f64). False when it cannot be
+    ## (the plane then contains everything).
+    func normalize() -> bool:
+        var a = (f64)self.a
+        var b = (f64)self.b
+        var c = (f64)self.c
+        let dmag = math.sqrt(a * a + b * b)
+        # length of initial plane normal is zero
+        if dmag == 0.0:
+            self.a = 0.0
+            self.b = 0.0
+            self.c = 1.0
+            return true
+        let dscale = 1.0 / dmag
+        a *= dscale
+        b *= dscale
+        c *= dscale
+        # check if we're not finite, or normal is zero-length
+        if not math.is_finite(a) or not math.is_finite(b) or not math.is_finite(c) or (a == 0.0 and b == 0.0):
+            self.a = 0.0
+            self.b = 0.0
+            self.c = 1.0
+            return false
+        self.a = (f32)a
+        self.b = (f32)b
+        self.c = (f32)c
+        return true
+
+    ## SkHalfPlane::test: whether `bounds` is all on one side of the plane, by the diagonal
+    ## aligned with the normal.
+    func test_bounds(bounds: Rect) -> HalfPlaneResult:
+        var min_x = bounds.left()
+        var max_x = bounds.right()
+        if not (self.a >= 0.0):
+            min_x = bounds.right()
+            max_x = bounds.left()
+        var min_y = bounds.top()
+        var max_y = bounds.bottom()
+        if not (self.b >= 0.0):
+            min_y = bounds.bottom()
+            max_y = bounds.top()
+        let near = self.eval(min_x, min_y)
+        let sign = near * self.eval(max_x, max_y)
+        if sign > 0.0:
+            # the path is either all on one side of the half-plane or the other
+            if near < 0.0:
+                return .all_negative
+            return .all_positive
+        return .mixed
+
+# mark: PerspectiveClip =======================================================================
+
+## SkPath.cpp's `clip`: `path` cut to the (normalized) half-plane, or none when nothing is
+## left or the result is not finite.
+func perspective_clip_path(path: const Path*, plane: HalfPlane) -> Path?:
+    # The matrix that maps y = 0 onto the plane (and y > 0 onto its positive side).
+    let p0 = Point.from_xy(-plane.a * plane.c, -plane.b * plane.c)
+    let mx = Transform.from_all(plane.b, plane.a, p0.x, -plane.a, plane.b, p0.y, 0.0, 0.0, 1.0)
+    let inv = mx.invert() else return none
+
+    var rotated = path.clone()
+    defer rotated.release()
+    if not rotated.transform(inv):
+        return none
+
+    # SkRect {-big, 0, big, big}, whose width does not fit a float (no Rect.from_ltrb).
+    let big = scalar_max
+    let clip = Rect(left_ = -big, top_ = 0.0, right_ = big, bottom_ = big)
+
+    # SkEdgeClipper::ClipPath with the callback that rebuilds the path.
+    var result = PathBuilder.new_()
+    var prev = Point.zero()
+    var iter = edge_iter(&rotated)
+    while let edge = iter.next():
+        let new_contour = iter.is_new_contour
+        var clipper = EdgeClipper.new_(clip, false)
+        match edge:
+            .line_to(e0, e1):
+                if let edges = clipper.clip_line(e0, e1):
+                    perspective_clip_consume(&result, &prev, &edges, new_contour)
+            .quad_to(e0, e1, e2):
+                if let edges = clipper.clip_quad(e0, e1, e2):
+                    perspective_clip_consume(&result, &prev, &edges, new_contour)
+            .cubic_to(e0, e1, e2, e3):
+                if let edges = clipper.clip_cubic(e0, e1, e2, e3):
+                    perspective_clip_consume(&result, &prev, &edges, new_contour)
+            .conic_to(e0, e1, e2, weight):
+                let quads = AutoConicToQuads.compute(e0, e1, e2, weight, 0.25)
+                for i in 0..<quads.len:
+                    let q = quads.quad(i)
+                    var quad_clipper = EdgeClipper.new_(clip, false)
+                    if let edges = quad_clipper.clip_quad(q[0], q[1], q[2]):
+                        perspective_clip_consume(&result, &prev, &edges, new_contour)
+
+    var clipped = result.finish() else return none
+    if not clipped.transform(mx):
+        clipped.release()
+        return none
+    return clipped
+
+## The ClipPath callback of `clip`: the clipped pieces of one edge appended to `result`, a
+## new contour started when the edge starts one, and a line joining pieces that do not meet.
+func perspective_clip_consume(result: PathBuilder*, prev: Point*, edges: const ClippedEdges*, new_contour0: bool):
+    var new_contour = new_contour0
+    var add_line_to = false
+    for i in 0..<edges.len:
+        let edge = edges.edges[i]
+        let start = perspective_edge_start(edge)
+        if new_contour:
+            result.move_to(start.x, start.y)
+            *prev = start
+            new_contour = false
+        if add_line_to or not points_equal(start, *prev):
+            result.line_to(start.x, start.y)
+        match edge:
+            .line_to(_, e1):
+                result.line_to(e1.x, e1.y)
+                *prev = e1
+            .quad_to(_, e1, e2):
+                result.quad_to(e1.x, e1.y, e2.x, e2.y)
+                *prev = e2
+            .cubic_to(_, e1, e2, e3):
+                result.cubic_to(e1.x, e1.y, e2.x, e2.y, e3.x, e3.y)
+                *prev = e3
+            _:
+                _ = 0
+        add_line_to = true
+
+## The first point of a clipped edge.
+func perspective_edge_start(edge: PathEdge) -> Point:
+    var start = Point.zero()
+    match edge:
+        .line_to(e0, _): start = e0
+        .quad_to(e0, _, _): start = e0
+        .cubic_to(e0, _, _, _): start = e0
+        .conic_to(e0, _, _, _): start = e0
+    return start
+
+## SkPathPriv::PerspectiveClip: what is left of `path` in front of the w = kW0PlaneDistance
+## plane of `matrix`.
+func perspective_clip(path: const Path*, matrix: Transform) -> PerspectiveClipResult:
+    var plane = HalfPlane(a = matrix.persp0, b = matrix.persp1, c = matrix.persp2 - w0_plane_distance)
+    if plane.normalize():
+        match plane.test_bounds(path.bounds()):
+            .all_positive:
+                return .unclipped
+            .mixed:
+                if let clipped = perspective_clip_path(path, plane):
+                    return .clipped(path = clipped)
+                return .nothing
+            _:
+                _ = 0
+    # clipped out (or failed)
+    return .nothing
+
+# mark: The transform =========================================================================
+
+## SkConic::TransformW: the weight of the conic (pts, w) once mapped by `matrix`.
+func conic_transform_w(p0: Point, p1: Point, p2: Point, w: f32, matrix: Transform) -> f32:
+    if not matrix.has_perspective():
+        return w
+    # ratquad_mapTo3D, then mapHomogeneousPoints: only the mapped z of each point is needed.
+    let w0 = (f64)(p0.x * 1.0 * matrix.persp0 + p0.y * 1.0 * matrix.persp1 + 1.0 * matrix.persp2)
+    let w1 = (f64)(p1.x * w * matrix.persp0 + p1.y * w * matrix.persp1 + w * matrix.persp2)
+    let w2 = (f64)(p2.x * 1.0 * matrix.persp0 + p2.y * 1.0 * matrix.persp1 + 1.0 * matrix.persp2)
+    # w' = sqrt(w1*w1/w0*w2); doubles handle small numerators and denominators
+    return (f32)math.sqrt((w1 * w1) / (w0 * w2))
+
+## subdivide_cubic_to: the cubic halved twice (four cubics), so that each piece maps close
+## to its projection.
+func subdivide_cubic_to(builder: PathBuilder*, pts: const Point[], level0: i32):
+    let level = level0 - 1
+    if level >= 0:
+        var tmp: Point[7] = ---
+        chop_cubic_at2(pts, 0.5, tmp)
+        subdivide_cubic_to(builder, tmp[0..<4], level)
+        subdivide_cubic_to(builder, tmp[3..<7], level)
+    else:
+        builder.cubic_to(pts[1].x, pts[1].y, pts[2].x, pts[2].y, pts[3].x, pts[3].y)
+
+## The perspective branch of SkPath::transform / SkPathBuilder::transform: `path` clipped to
+## w > 0, rebuilt for the projection and mapped. None when nothing is left.
+pub func path_transform_perspective(path: const Path*, matrix: Transform, iteration: PerspectiveIteration) -> Path?:
+    match perspective_clip(path, matrix):
+        .unclipped:
+            return path_transform_perspective_unclipped(path, matrix, iteration)
+        .clipped(clipped):
+            var owned = clipped
+            let result = path_transform_perspective_unclipped(&owned, matrix, iteration)
+            owned.release()
+            return result
+        .nothing:
+            return none
+
+## The rest of the perspective branch, once the path is in front of the plane.
+func path_transform_perspective_unclipped(source: const Path*, matrix: Transform, iteration: PerspectiveIteration) -> Path?:
+    var builder = PathBuilder.new_()
+    var iter = source.segments()
+    iter.set_auto_close(iteration == .path_iter)
+    var last = Point.zero()
+    while let segment = iter.next():
+        match segment:
+            .move_to(p):
+                # SkPath::Iter drops a trailing move.
+                if iteration == .raw or iter.next_verb() != none:
+                    builder.move_to(p.x, p.y)
+            .line_to(p):
+                builder.line_to(p.x, p.y)
+            .quad_to(p1, p):
+                # promote the quad to a conic
+                builder.conic_to(p1.x, p1.y, p.x, p.y, conic_transform_w(last, p1, p, 1.0, matrix))
+            .conic_to(p1, p, weight):
+                builder.conic_to(p1.x, p1.y, p.x, p.y, conic_transform_w(last, p1, p, weight, matrix))
+            .cubic_to(p1, p2, p):
+                let pts: Point[4] = [last, p1, p2, p]
+                subdivide_cubic_to(&builder, pts, 2)
+            .close:
+                builder.close()
+        last = iter.last_point
+
+    var result = builder.finish() else return none
+    matrix.map_points(result.points.view())
+    if let bounds = Rect.from_points(result.points.view()):
+        result.bounds_ = bounds
+        return result
+    result.release()
+    return none

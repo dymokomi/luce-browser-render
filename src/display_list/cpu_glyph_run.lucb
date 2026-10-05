@@ -29,8 +29,10 @@
 
 # mark: Matrices ===============================================================================
 
-## SkMatrix::preTranslate (affine matrices).
+## SkMatrix::preTranslate (a concatenation under perspective).
 func cpu_pre_translate(m: raster.Transform, dx: f32, dy: f32) -> raster.Transform:
+    if m.has_perspective():
+        return m.pre_concat(raster.Transform.from_translate(dx, dy))
     var result = m
     if m.sx == 1.0 and m.sy == 1.0 and m.kx == 0.0 and m.ky == 0.0:
         result.tx = m.tx + dx
@@ -44,9 +46,13 @@ func cpu_pre_translate(m: raster.Transform, dx: f32, dy: f32) -> raster.Transfor
 func cpu_map_point(m: raster.Transform, x: f32, y: f32) -> (f32, f32):
     return (x * m.sx + y * m.kx + m.tx, y * m.sy + x * m.ky + m.ty)
 
-## SkStrikeSpec::ShouldDrawAsPath for a fill paint: whether a side of the text matrix (the
-## font's size, then `position`) is longer than 256, Skia's limit for cached glyphs.
+## SkStrikeSpec::ShouldDrawAsPath for a fill paint: whether `position` has perspective or a
+## side of the text matrix (the font's size, then `position`) is longer than 256, Skia's
+## limit for cached glyphs.
 func cpu_should_draw_as_path(font: const web_fonts.SkFont*, position: raster.Transform) -> bool:
+    # we don't cache perspective
+    if position.has_perspective():
+        return true
     let size = font.size
     # SkFontPriv::MakeTextMatrix(font).postConcat(viewMatrix): the 2x2 part scaled.
     let sx = position.sx * size
@@ -163,6 +169,26 @@ func cpu_floor_to_int(x: f32) -> i32:
 let i32_max_value: i32 = 2147483647
 let i32_min_value: i32 = -2147483648
 
+## drawForBitmapDevice's path branch for a color paint (no exact CTM needed): each glyph's
+## outline at SkStrikeSpec::MakePath's size (kCanonicalTextSizeForPaths, 64) drawn under the
+## matrix that scales it to the font's size (strikeToSourceScale) and moves it to the run's
+## origin plus its position, with the font's anti-aliasing (runFont.hasSomeAntiAliasing()).
+func cpu_canvas_draw_glyph_paths(canvas: CpuCanvas*, blob: const web_fonts.SkTextBlob*, x: f32, y: f32, color: gfx.Color):
+    var path_font = blob.font
+    path_font.size = 64.0
+    let strike_to_source_scale = blob.font.size / 64.0
+    let paint = cpu_color_paint(color, true)
+    for i in 0..<ak.vector_size(&blob.glyphs):
+        let position = *ak.vector_at_const(&blob.positions, i)
+        if not math32.is_finite(position.m_x) or not math32.is_finite(position.m_y):
+            continue
+        var path = glyph_outline_path(&path_font, *ak.vector_at_const(&blob.glyphs, i)) else continue
+        cpu_canvas_save(canvas)
+        cpu_canvas_concat(canvas, raster.Transform.from_row(strike_to_source_scale, 0.0, 0.0, strike_to_source_scale, x + position.m_x, y + position.m_y))
+        cpu_canvas_fill_path(canvas, &path, &paint, raster.FillRule.winding)
+        cpu_canvas_restore(canvas)
+        path.release()
+
 ## SkCanvas::drawTextBlob(blob, x, y, paint) for `glyph_run`'s cached text blob in `color`
 ## (DisplayListPlayerSkia's paint: only a color), through the current transform and clip.
 func cpu_canvas_draw_text_blob(canvas: CpuCanvas*, glyph_run: const web_fonts.GlyphRun*, x: f32, y: f32, color: gfx.Color):
@@ -173,14 +199,7 @@ func cpu_canvas_draw_text_blob(canvas: CpuCanvas*, glyph_run: const web_fonts.Gl
     let position = cpu_pre_translate(cpu_canvas_transform(canvas), x, y)
 
     if cpu_should_draw_as_path(&blob.font, position):
-        # The paths get the font's anti-aliasing (runFont.hasSomeAntiAliasing()).
-        var path = text_blob_path(glyph_run) else return
-        defer path.release()
-        let path_paint = cpu_color_paint(color, true)
-        cpu_canvas_save(canvas)
-        cpu_canvas_translate(canvas, x, y)
-        cpu_canvas_fill_path(canvas, &path, &path_paint, raster.FillRule.winding)
-        cpu_canvas_restore(canvas)
+        cpu_canvas_draw_glyph_paths(canvas, blob, x, y, color)
         return
 
     let device = web_fonts.SkMatrix22(scale_x = position.sx, skew_x = position.kx, skew_y = position.ky, scale_y = position.sy)

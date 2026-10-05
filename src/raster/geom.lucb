@@ -410,6 +410,15 @@ pub struct Rect:
     pub func transform(ts: Transform) -> Rect?:
         if ts.is_identity():
             return self
+        if ts.has_perspective():
+            # SkMatrix::mapRect: the rect as a path, transformed (and cut at w = 0), bounded;
+            # the empty rect when nothing is left.
+            var path = PathBuilder.from_rect(self)
+            if not path.transform(ts):
+                return Rect.from_ltrb(0.0, 0.0, 0.0, 0.0)
+            let bounds = path.bounds()
+            path.release()
+            return bounds
         if ts.has_skew():
             # we need to transform all 4 corners
             var pts: Point[4] = [

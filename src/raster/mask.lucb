@@ -141,7 +141,8 @@ pub struct Mask:
         if not transform.is_identity():
             var transformed = path.clone()
             defer transformed.release()
-            if not transformed.transform(transform):
+            # SkRasterClip::op(path, matrix): SkPath::makeTransform.
+            if not transformed.transform_with(transform, .path_iter):
                 # log::warn!("path transformation failed")
                 return
             self.fill_path_clipped(&transformed, fill_rule, anti_alias, Transform.identity(), clip)

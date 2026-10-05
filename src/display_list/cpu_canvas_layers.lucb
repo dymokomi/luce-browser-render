@@ -14,9 +14,13 @@
 #       clipped to its bounds only; the prior clip applies when the layer is drawn back.
 #
 #       The layer matrix (skif::Mapping::decomposeCTM) maps local coordinates into layer
-#       space: the whole CTM when it is a scale and translation or the filter handles any
-#       matrix; otherwise only its scale, the rest (rotation, skew) being applied when the
-#       filtered layer is drawn back ("layer to parent", with bilinear sampling).
+#       space: the whole local-to-device SkM44 when it is a scale and translation or the
+#       filter handles any matrix; otherwise only its scale (SkMatrix::decomposeScale, or,
+#       under perspective, SkMatrixPriv::DifferentialAreaScale at the clip's center), the
+#       rest (rotation, skew, perspective) being applied when the filtered layer is drawn
+#       back ("layer to parent", with bilinear sampling). The layer's device takes the
+#       coordinate system SkDevice::setDeviceCoordinateSystem gives it: its global-to-device
+#       matrix is the remainder's inverse times the prior layer's, shifted to its bounds.
 #
 #       Copyright (c) 2026 the luce-browser authors.
 #       SPDX-License-Identifier: BSD-2-Clause
@@ -50,6 +54,8 @@ struct CpuLayer:
     var layer_matrix: raster.Transform
     ## Layer space to the pixels of the layer below (skif::Mapping::layerToDevice()).
     var layer_to_parent: raster.Transform
+    ## The base layer's pixels to this layer's (SkDevice::globalToDevice).
+    var global_to_device: CpuM44
 
 # mark: Geometry ===============================================================================
 
@@ -65,7 +71,13 @@ func cpu_canvas_clip_bounds(canvas: CpuCanvas*) -> CpuIRect:
 func cpu_canvas_map_irect(matrix: raster.Transform, rect: CpuIRect) -> CpuIRect:
     if cpu_irect_is_empty(rect):
         return CpuIRect(left = 0, top = 0, right = 0, bottom = 0)
-    if matrix.kx == 0.0 and matrix.ky == 0.0:
+    if matrix.has_perspective():
+        # RoundOut(matrix.mapRect(SkRect::Make(rect))), mapRect cutting at w = 0.
+        let source = raster.Rect.from_ltrb((f32)rect.left, (f32)rect.top, (f32)rect.right, (f32)rect.bottom) else return CpuIRect(left = 0, top = 0, right = 0, bottom = 0)
+        let mapped = source.transform(matrix) else return CpuIRect(left = 0, top = 0, right = 0, bottom = 0)
+        return CpuIRect(left = cpu_f32_to_i32(math32.floor(mapped.left())), top = cpu_f32_to_i32(math32.floor(mapped.top())),
+                        right = cpu_f32_to_i32(math32.ceil(mapped.right())), bottom = cpu_f32_to_i32(math32.ceil(mapped.bottom())))
+    if not matrix.has_skew():
         let l = (f64)matrix.sx * (f64)rect.left + (f64)matrix.tx
         let r = (f64)matrix.sx * (f64)rect.right + (f64)matrix.tx
         let t = (f64)matrix.sy * (f64)rect.top + (f64)matrix.ty
@@ -93,26 +105,92 @@ func cpu_canvas_map_irect(matrix: raster.Transform, rect: CpuIRect) -> CpuIRect:
         max_y = cpu_max_f32(max_y, ys[i])
     return CpuIRect(left = cpu_f32_to_i32(math32.floor(min_x)), top = cpu_f32_to_i32(math32.floor(min_y)), right = cpu_f32_to_i32(math32.ceil(max_x)), bottom = cpu_f32_to_i32(math32.ceil(max_y)))
 
-## skif::Mapping::decomposeCTM(ctm, capability): the layer matrix and the layer-to-parent
-## remainder, or none when the remainder cannot be inverted.
-func cpu_canvas_decompose_ctm(ctm: raster.Transform, capability: CpuFilterMatrixCapability) -> (raster.Transform, raster.Transform)?:
-    var layer = ctm
-    var remainder = raster.Transform.identity()
+## A layer's mapping (skif::Mapping): local coordinates to layer space, layer space to the
+## prior layer's pixels, and back.
+struct CpuLayerMapping:
+    var layer_matrix: CpuM44
+    var layer_to_device: CpuM44
+    var device_to_layer: CpuM44
+
+## skif::Mapping::decomposeCTM(ctm, capability, representative point): the layer matrix and
+## the remainder applied after filtering, or none when the remainder cannot be inverted.
+func cpu_canvas_decompose_ctm(ctm: const CpuM44*, capability: CpuFilterMatrixCapability, center: raster.Point) -> CpuLayerMapping?:
+    var layer = *ctm
+    var remainder = cpu_m44_identity()
     if capability == CpuFilterMatrixCapability.translate:
         # Apply the entire CTM post-filtering.
-        layer = raster.Transform.identity()
-        remainder = ctm
-    elif not (ctm.kx == 0.0 and ctm.ky == 0.0) and capability != CpuFilterMatrixCapability.complex:
-        # decompose_transform: SkMatrix::decomposeScale's axis lengths, the rest after filtering.
-        let sx = math32.sqrt(ctm.sx * ctm.sx + ctm.ky * ctm.ky)
-        let sy = math32.sqrt(ctm.kx * ctm.kx + ctm.sy * ctm.sy)
-        if not (sx > 1.0 / 4096.0 and sy > 1.0 / 4096.0):
-            return none
-        layer = raster.Transform.from_scale(sx, sy)
-        remainder = ctm.pre_scale(1.0 / sx, 1.0 / sy)
-    if remainder.invert() == none:
-        return none
-    return (layer, remainder)
+        layer = cpu_m44_identity()
+        remainder = *ctm
+    elif not cpu_m44_is_scale_translate_as_m33(ctm) and capability != CpuFilterMatrixCapability.complex:
+        # Some sampling post-filtering (skew, rotation, perspective): keep the layer matrix as
+        # simple as possible.
+        let scale = cpu_decompose_transform_scale(cpu_m44_as_m33(ctm), center)
+        layer = cpu_m44_from_m33(raster.Transform.from_scale(scale.0, scale.1))
+        # Reconstruct full 4x4 remainder matrix so the mapping doesn't lose the 3rd row/column.
+        remainder = *ctm
+        cpu_m44_pre_scale(&remainder, 1.0 / cpu_m44_rc(&layer, 0, 0), 1.0 / cpu_m44_rc(&layer, 1, 1))
+    let inverse = cpu_m44_invert(&remainder) else return none
+    return CpuLayerMapping(layer_matrix = layer, layer_to_device = remainder, device_to_layer = inverse)
+
+## skif's decompose_transform: the scale factored out of `transform` (SkMatrix::decomposeScale's
+## axis lengths; under perspective, or when an axis nearly vanishes, the square root of the
+## differential area scale at `point`, or 1 behind the w = 0 plane).
+func cpu_decompose_transform_scale(transform: raster.Transform, point: raster.Point) -> (f32, f32):
+    if not transform.has_perspective():
+        let sx = cpu_vector_length(transform.sx, transform.ky)
+        let sy = cpu_vector_length(transform.kx, transform.sy)
+        if math32.is_finite(sx) and math32.is_finite(sy) and not (math32.abs(sx) <= 1.0 / 4096.0) and not (math32.abs(sy) <= 1.0 / 4096.0):
+            return (sx, sy)
+    var approx_scale = cpu_differential_area_scale(transform, point)
+    if math32.is_finite(approx_scale) and not (math32.abs(approx_scale) <= 1.0 / 4096.0):
+        # Now take the sqrt to go from an area scale factor to a scaling per X and Y
+        approx_scale = math32.sqrt(approx_scale)
+    else:
+        # The point was behind the W = 0 plane, so don't factor out any scale.
+        approx_scale = 1.0
+    return (approx_scale, approx_scale)
+
+## SkPoint::Length: in float, or in double when the squares overflow.
+func cpu_vector_length(x: f32, y: f32) -> f32:
+    let mag2 = x * x + y * y
+    if math32.is_finite(mag2):
+        return math32.sqrt(mag2)
+    return (f32)math.sqrt((f64)x * (f64)x + (f64)y * (f64)y)
+
+## SkMatrixPriv::DifferentialAreaScale(m, p): |det J| of the projection's Jacobian at `p`,
+## |det J' / w^3| with J' = [x y w; m00 m10 m20; m01 m11 m21].
+func cpu_differential_area_scale(m: raster.Transform, p: raster.Point) -> f32:
+    # mapPointToHomogeneous
+    var x = p.x
+    var y = p.y
+    var w: f32 = 1.0
+    if m.has_perspective():
+        x = m.sx * p.x + m.kx * p.y + m.tx
+        y = m.ky * p.x + m.sy * p.y + m.ty
+        w = m.persp0 * p.x + m.persp1 * p.y + m.persp2
+    elif not m.is_identity():
+        x = m.sx * p.x + m.kx * p.y + m.tx
+        y = m.ky * p.x + m.sy * p.y + m.ty
+    if w < 1.0 / 4096.0:
+        # Reaching the discontinuity of xy/w and where the point would clip to w >= 0
+        return math32.infinity
+    # sk_determinant(jacobian, perspective) of the rows (x, y, w), (sx, ky, persp0), (kx, sy, persp1).
+    let j: f32[9] = [x, y, w, m.sx, m.ky, m.persp0, m.kx, m.sy, m.persp1]
+    let d0 = (f64)j[0] * ((f64)j[4] * (f64)j[8] - (f64)j[5] * (f64)j[7])
+    let d1 = (f64)j[1] * ((f64)j[5] * (f64)j[6] - (f64)j[3] * (f64)j[8])
+    let d2 = (f64)j[2] * ((f64)j[3] * (f64)j[7] - (f64)j[4] * (f64)j[6])
+    var denom = 1.0 / (f64)w
+    denom = denom * denom * denom
+    return math32.abs((f32)((d0 + d1 + d2) * denom))
+
+## compute_decomposition_center: the center of the clip bounds in local coordinates (through
+## the inverse of the local-to-device matrix, divided by w).
+func cpu_decomposition_center(device_to_local: const CpuM44*, bounds: CpuIRect) -> raster.Point:
+    # SkRect::centerX/centerY: sk_float_midpoint.
+    let center_x = (f32)(((f64)bounds.left + (f64)bounds.right) * 0.5)
+    let center_y = (f32)(((f64)bounds.top + (f64)bounds.bottom) * 0.5)
+    let mapped = cpu_m44_map(device_to_local, center_x, center_y, 0.0, 1.0)
+    return raster.Point.from_xy(mapped[0] / mapped[3], mapped[1] / mapped[3])
 
 # mark: Save ===================================================================================
 
@@ -124,14 +202,23 @@ func cpu_canvas_save_layer(canvas: CpuCanvas*, effects: CpuLayerEffects):
     if cpu_canvas_is_clip_empty(canvas):
         return
     let capability = cpu_filter_ctm_capability(effects.filter) if effects.filter != none else CpuFilterMatrixCapability.complex
-    let decomposed = cpu_canvas_decompose_ctm(cpu_canvas_transform(canvas), capability)
+    # get_layer_mapping_and_bounds: the prior layer's local-to-device matrix decomposed about
+    # the clip's center; no layer when it cannot be inverted.
+    let local_to_device = cpu_canvas_state(canvas).device_matrix
+    let inverse = cpu_m44_invert(&local_to_device)
+    if inverse == none:
+        cpu_canvas_abort_layer(canvas)
+        return
+    let device_to_local = inverse else trap("VERIFY_NOT_REACHED")
+    let center = cpu_decomposition_center(&device_to_local, cpu_canvas_clip_bounds(canvas))
+    let decomposed = cpu_canvas_decompose_ctm(&local_to_device, capability, center)
     if decomposed == none:
         cpu_canvas_abort_layer(canvas)
         return
     let mapping = decomposed else trap("VERIFY_NOT_REACHED")
-    let layer_matrix = mapping.0
-    let layer_to_parent = mapping.1
-    let parent_to_layer = layer_to_parent.invert() else trap("VERIFY: an invertible remainder")
+    let layer_matrix = cpu_m44_as_m33(&mapping.layer_matrix)
+    let layer_to_parent = cpu_m44_as_m33(&mapping.layer_to_device)
+    let parent_to_layer = cpu_m44_as_m33(&mapping.device_to_layer)
     let base_bounds = cpu_canvas_map_irect(parent_to_layer, cpu_canvas_clip_bounds(canvas))
 
     var bounds = base_bounds
@@ -154,16 +241,27 @@ func cpu_canvas_save_layer(canvas: CpuCanvas*, effects: CpuLayerEffects):
         return
 
     let pixmap = raster.Pixmap.new_((u32)(bounds.right - bounds.left), (u32)(bounds.bottom - bounds.top)) else trap("CpuCanvas: empty layer")
-    ak.vector_append_t(&canvas.layers, CpuLayer(pixmap = pixmap, effects = effects, left = bounds.left, top = bounds.top, layer_matrix = layer_matrix, layer_to_parent = layer_to_parent))
-    cpu_canvas_enter_layer(canvas, layer_matrix, bounds, padded)
+    cpu_canvas_push_layer(canvas, pixmap, effects, bounds, &mapping, padded)
 
-## The current (just saved) state becomes the first state of the last layer: the transform is
-## `layer_matrix` in the layer's pixels, and the clip is the layer's bounds (inset by the
-## padding).
-func cpu_canvas_enter_layer(canvas: CpuCanvas*, layer_matrix: raster.Transform, bounds: CpuIRect, padded: bool):
+## A new layer over `bounds` (in layer space) with `mapping`, made current: SkDevice::
+## setDeviceCoordinateSystem(prior deviceToGlobal * layerToDevice, deviceToLayer * prior
+## globalToDevice, layerMatrix, bounds' origin) for the current (just saved) state, whose clip
+## becomes the layer's bounds (inset by the padding).
+func cpu_canvas_push_layer(canvas: CpuCanvas*, pixmap: raster.Pixmap, effects: CpuLayerEffects, bounds: CpuIRect, mapping: const CpuLayerMapping*, padded: bool):
     let state = cpu_canvas_state(canvas)
+    let prior = ak.vector_at(&canvas.layers, state.layer_index)
+    var global_to_device = cpu_m44_concat(&mapping.device_to_layer, &prior.global_to_device)
+    cpu_m44_normalize_perspective(&global_to_device)
+    cpu_m44_post_translate(&global_to_device, -(f32)bounds.left, -(f32)bounds.top, 0.0)
+    var device = mapping.layer_matrix
+    cpu_m44_normalize_perspective(&device)
+    cpu_m44_post_translate(&device, -(f32)bounds.left, -(f32)bounds.top, 0.0)
+    ak.vector_append_t(&canvas.layers, CpuLayer(pixmap = pixmap, effects = effects, left = bounds.left, top = bounds.top, layer_matrix = cpu_m44_as_m33(&mapping.layer_matrix),
+                                                layer_to_parent = cpu_m44_as_m33(&mapping.layer_to_device), global_to_device = global_to_device))
+
     let inset: i32 = 1 if padded else 0
-    state.transform = layer_matrix.post_translate(-(f32)bounds.left, -(f32)bounds.top)
+    state.device_matrix = device
+    state.transform = cpu_m44_as_m33(&device)
     state.clip_empty = false
     state.clip_left = inset
     state.clip_top = inset
@@ -187,7 +285,6 @@ func cpu_canvas_save_layer_with_backdrop(canvas: CpuCanvas*, filter: const gfx.I
     cpu_canvas_save(canvas)
     if cpu_canvas_is_clip_empty(canvas):
         return
-    let ctm = cpu_canvas_transform(canvas)
     let bounds = cpu_canvas_clip_bounds(canvas)
     let parent = *cpu_canvas_target(canvas)
     let width = bounds.right - bounds.left
@@ -195,16 +292,18 @@ func cpu_canvas_save_layer_with_backdrop(canvas: CpuCanvas*, filter: const gfx.I
     var pixmap = raster.Pixmap.new_((u32)width, (u32)height) else trap("CpuCanvas: empty layer")
 
     # The new layer's matrix, then the backdrop filter's decomposition of it.
-    let layer_ctm = ctm.post_translate(-(f32)bounds.left, -(f32)bounds.top)
+    var layer_ctm = cpu_canvas_state(canvas).device_matrix
+    cpu_m44_post_translate(&layer_ctm, -(f32)bounds.left, -(f32)bounds.top, 0.0)
     let capability = cpu_filter_ctm_capability(filter)
     let whole = CpuIRect(left = 0, top = 0, right = width, bottom = height)
-    if let mapping = cpu_canvas_decompose_ctm(layer_ctm, capability):
+    let center = raster.Point.from_xy((f32)width * 0.5, (f32)height * 0.5)
+    if let mapping = cpu_canvas_decompose_ctm(&layer_ctm, capability, center):
         # FIXME: When the decomposition leaves a rotation or skew, Skia resamples the prior
         #        device into the filter's layer space (srcToLayer); the port filters in the new
         #        layer's pixels with the whole CTM instead.
-        var filter_matrix = mapping.0
-        if not mapping.1.is_identity():
-            filter_matrix = layer_ctm
+        var filter_matrix = cpu_m44_as_m33(&mapping.layer_matrix)
+        if not cpu_m44_as_m33(&mapping.layer_to_device).is_identity():
+            filter_matrix = cpu_m44_as_m33(&layer_ctm)
         # The prior layer's pixel (x, y) is the new layer's (x - left, y - top).
         let source = CpuFilterImage(pixmap = parent, left = -bounds.left, top = -bounds.top)
         var result = cpu_filter_evaluate(filter, filter_matrix, &source, CpuFilterSourceTile.clamp, whole, 1.0, false)
@@ -213,9 +312,9 @@ func cpu_canvas_save_layer_with_backdrop(canvas: CpuCanvas*, filter: const gfx.I
             pixmap.draw_pixmap(result.left, result.top, image.as_ref(), &paint, raster.Transform.identity(), none)
         cpu_filter_image_release(&result)
 
-    let effects = CpuLayerEffects()
-    ak.vector_append_t(&canvas.layers, CpuLayer(pixmap = pixmap, effects = effects, left = bounds.left, top = bounds.top, layer_matrix = ctm, layer_to_parent = raster.Transform.identity()))
-    cpu_canvas_enter_layer(canvas, ctm, bounds, false)
+    # No layer filter: the layer matrix is the whole local-to-device matrix.
+    let mapping = CpuLayerMapping(layer_matrix = cpu_canvas_state(canvas).device_matrix, layer_to_device = cpu_m44_identity(), device_to_layer = cpu_m44_identity())
+    cpu_canvas_push_layer(canvas, pixmap, CpuLayerEffects(), bounds, &mapping, false)
 
 # mark: Restore ================================================================================
 
@@ -228,6 +327,8 @@ func cpu_canvas_restore(canvas: CpuCanvas*):
     var state = ak.vector_take_last(&canvas.states)
     if state.owns_clip_mask:
         state.clip_mask.release()
+    # SkDevice::restore(ctm) of the top device after the pop (before a layer is drawn back).
+    cpu_canvas_set_global_ctm(canvas)
     if not state.pushes_layer:
         return
 

@@ -20,6 +20,9 @@
 #         Chopping uses m144's SkChopCubicAt and the double-precision SkChopMonoCubicAt
 #         (cubics); anti-aliased hairlines are m144's (scan_antihair); the stroker keeps
 #         m144's tangent vectors and conic stroking (stroker_conics).
+#       - Transforms keep SkMatrix's perspective row (transform.lucb): paths under
+#         perspective are cut at w = 0 and projected as SkPath::transform does
+#         (path_perspective), and shaders sample through matrix_perspective.
 #       - Drawing follows SkDraw (draw.lucb): the blitter is always SkRasterPipelineBlitter,
 #         as Ladybird's BGRA surfaces are not kN32 in this Skia build. The pipeline, its
 #         blitter and the shaders' stages compute what m144 computes on arm64 NEON: lowp's

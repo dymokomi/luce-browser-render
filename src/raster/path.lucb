@@ -92,9 +92,22 @@ pub struct Path:
 
     ## Transforms the path in place (Rust's `Path::transform`, which consumes the path).
     ## Answers false when the result has no valid bounds; the path must then be released.
+    ## A matrix with perspective transforms as SkPathBuilder::transform does (the raw verbs).
     pub func transform(ts: Transform) -> bool:
+        return self.transform_with(ts, .raw)
+
+    ## `transform`, walking the path as `iteration` says when `ts` has perspective (SkPath's
+    ## own transform walks it with SkPath::Iter).
+    pub func transform_with(ts: Transform, iteration: PerspectiveIteration) -> bool:
         if ts.is_identity():
             return true
+        if ts.has_perspective():
+            let result = path_transform_perspective(&self, ts, iteration)
+            self.release()
+            if let transformed = result:
+                self = transformed
+                return true
+            return false
         ts.map_points(self.points.view())
         # Update bounds.
         let bounds = Rect.from_points(self.points.view()) else return false

@@ -542,20 +542,13 @@ func display_list_player_cpu_apply_effects_impl(base: DisplayListPlayer*, comman
 
     cpu_canvas_save_layer(canvas, effects)
 
-## `to_skia_matrix4x4` for a 2D canvas: the affine part of a 4x4 matrix (rows and columns
-## 0, 1 and 3, as SkM44::asM33 takes them, without the perspective row).
-# FIXME: The raster module draws with affine transforms only; a perspective row is dropped.
-func cpu_transform_of_matrix4x4(matrix: const gfx.FloatMatrix4X4*) -> raster.Transform:
-    let m = matrix.m_elements
-    return raster.Transform.from_row(m[0][0], m[1][0], m[0][1], m[1][1], m[0][3], m[1][3])
-
 ## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:53 Web::Painting::DisplayListPlayerSkia::apply_transform (override).
 func display_list_player_cpu_apply_transform_impl(base: DisplayListPlayer*, origin: gfx.FloatPoint, matrix: gfx.FloatMatrix4X4):
-    # translation_matrix(origin) * matrix * translation_matrix(-origin)
-    var new_transform = raster.Transform.from_translate(origin.m_x, origin.m_y)
-    new_transform = new_transform.pre_concat(cpu_transform_of_matrix4x4(&matrix))
-    new_transform = new_transform.pre_concat(raster.Transform.from_translate(-origin.m_x, -origin.m_y))
-    cpu_canvas_concat(display_list_player_cpu_canvas((DisplayListPlayerCpu*)base), new_transform)
+    var new_transform = gfx.translation_matrix(gfx.FloatVector3([origin.m_x, origin.m_y, 0.0]))
+    new_transform = gfx.float_matrix4_x4_mul(&new_transform, matrix)
+    new_transform = gfx.float_matrix4_x4_mul(&new_transform, gfx.translation_matrix(gfx.FloatVector3([-origin.m_x, -origin.m_y, 0.0])))
+    let skia_matrix = cpu_m44_of_matrix4x4(&new_transform)
+    cpu_canvas_concat44(display_list_player_cpu_canvas((DisplayListPlayerCpu*)base), &skia_matrix)
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:55 Web::Painting::DisplayListPlayerSkia::add_clip_path (override).
 func display_list_player_cpu_add_clip_path_impl(base: DisplayListPlayer*, path: gfx.Path):
