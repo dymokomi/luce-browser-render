@@ -49,7 +49,7 @@ func lowp_next_stage(p: LowpPipeline*):
     next(p)
 
 # Must be in the same order as Stage; lowp_null_fn marks a stage m144 has no lowp version of.
-let lowp_stages: LowpStageFn[95] = [
+let lowp_stages: LowpStageFn[96] = [
     lowp_move_source_to_destination,
     lowp_move_destination_to_source,
     lowp_clamp_01,
@@ -145,6 +145,7 @@ let lowp_stages: LowpStageFn[95] = [
     lowp_null_fn, # xform_gamut
     lowp_null_fn, # xform_encode
     lowp_null_fn, # bilinear_mipmap
+    lowp_null_fn, # ColorXform
 ]
 
 func lowp_start(functions: const LowpStageFn[], functions_tail: const LowpStageFn[], rect: ScreenIntRect, aa_mask_ctx: AAMaskCtx, mask_ctx: MaskCtx, ctx: Context*, pixmap_src: PixmapRef, pixmap: SubPixmapMut*):

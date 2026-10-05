@@ -7,13 +7,13 @@ porter follows is [DESIGN.md](../luce-browser-engine/docs/DESIGN.md).
 
 | Module | Contents |
 | --- | --- |
-| `gfx` | LibGfx geometry, color, paths; CSS pixels |
+| `gfx` | LibGfx geometry, color, paths; CSS pixels; color spaces (Gfx::ColorSpace over luce-color's `icc`, its port of skcms and SkColorSpace) |
 | `web_fonts` | fonts and text layout: LibGfx's Font, Typeface, FontDatabase, FontCascadeList and TextLayout over luce-fonts' portable engine (its `opentype` reader and `shaping`, which replace Skia's FreeType backend and HarfBuzz) |
-| `raster` | the CPU rasterizer: tiny-skia ported and changed to paint exactly as Skia m144 (see its module.lucb) |
+| `raster` | the CPU rasterizer: tiny-skia ported and changed to paint exactly as Skia m144 (see its module.lucb), with Skia's color space conversion of image patterns (`color_xform`) |
 | `display_list` | the display list |
 
-Depends on: luce-std, luce-browser-foundation, luce-browser-css, luce-fonts (and through it
-luce-compress).
+Depends on: luce-std, luce-browser-foundation, luce-browser-css, luce-color, luce-fonts (and
+through it luce-compress).
 
 ## Status
 

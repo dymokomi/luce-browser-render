@@ -332,12 +332,19 @@ pub struct Pattern:
     var transform: Transform
     ## SkMipmapMode::kLinear: a minified image samples two mip levels and blends them.
     var mipmap_linear: bool = false
+    ## The image's pixels to the destination's color space after sampling (Skia's
+    ## SkColorSpaceXformSteps of an SkImage with a color space); none when they are sRGB.
+    var color_xform: ColorXform?
 
     ## Creates a new pattern shader. `opacity` will be clamped to the 0..=1 range.
     pub static func new_(pixmap: PixmapRef, spread_mode: SpreadMode, quality: FilterQuality, opacity: f32, transform: Transform) -> Shader:
         return .pattern(p = Pattern(pixmap = pixmap, spread_mode = spread_mode, quality = quality, opacity = normalized_clamped(opacity), transform = transform))
 
     ## A pattern sampled with SkSamplingOptions(kLinear, kLinear): bilinear in the two mip
-    ## levels around the minification, blended linearly.
-    pub static func new_mipmapped(pixmap: PixmapRef, spread_mode: SpreadMode, opacity: f32, transform: Transform) -> Shader:
-        return .pattern(p = Pattern(pixmap = pixmap, spread_mode = spread_mode, quality = .bilinear, opacity = normalized_clamped(opacity), transform = transform, mipmap_linear = true))
+    ## levels around the minification, blended linearly, then converted by `color_xform`.
+    pub static func new_mipmapped(pixmap: PixmapRef, spread_mode: SpreadMode, opacity: f32, transform: Transform, color_xform: ColorXform? = none) -> Shader:
+        return .pattern(p = Pattern(pixmap = pixmap, spread_mode = spread_mode, quality = .bilinear, opacity = normalized_clamped(opacity), transform = transform, mipmap_linear = true, color_xform = color_xform))
+
+    ## A pattern of an image in another color space, converted after sampling by `color_xform`.
+    pub static func new_color_managed(pixmap: PixmapRef, spread_mode: SpreadMode, quality: FilterQuality, opacity: f32, transform: Transform, color_xform: ColorXform?) -> Shader:
+        return .pattern(p = Pattern(pixmap = pixmap, spread_mode = spread_mode, quality = quality, opacity = normalized_clamped(opacity), transform = transform, color_xform = color_xform))

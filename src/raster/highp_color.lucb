@@ -90,7 +90,7 @@ func highp_css_hwb_to_srgb(p: HighpPipeline*):
 
 ## The source transfer function (SkColorSpaceXformSteps linearize: parametric or gamma_).
 func highp_xform_linearize_lane(p: HighpPipeline*, c: f32[4]) -> f32[4]:
-    return [transfer_apply(&p.ctx.xform.src_tf, c[0]), transfer_apply(&p.ctx.xform.src_tf, c[1]), transfer_apply(&p.ctx.xform.src_tf, c[2]), c[3]]
+    return [transfer_apply(&p.ctx.xform_steps.src_tf, c[0]), transfer_apply(&p.ctx.xform_steps.src_tf, c[1]), transfer_apply(&p.ctx.xform_steps.src_tf, c[2]), c[3]]
 
 func highp_xform_linearize(p: HighpPipeline*):
     highp_color_lanes(p, highp_xform_linearize_lane)
@@ -98,7 +98,7 @@ func highp_xform_linearize(p: HighpPipeline*):
 
 ## The gamut matrix (matrix_3x3).
 func highp_xform_gamut_lane(p: HighpPipeline*, c: f32[4]) -> f32[4]:
-    return color_matrix_3x3(p.ctx.xform.matrix, c)
+    return color_matrix_3x3(p.ctx.xform_steps.matrix, c)
 
 func highp_xform_gamut(p: HighpPipeline*):
     highp_color_lanes(p, highp_xform_gamut_lane)
@@ -106,7 +106,7 @@ func highp_xform_gamut(p: HighpPipeline*):
 
 ## The destination's inverse transfer function (encode).
 func highp_xform_encode_lane(p: HighpPipeline*, c: f32[4]) -> f32[4]:
-    return [transfer_apply(&p.ctx.xform.dst_tf_inv, c[0]), transfer_apply(&p.ctx.xform.dst_tf_inv, c[1]), transfer_apply(&p.ctx.xform.dst_tf_inv, c[2]), c[3]]
+    return [transfer_apply(&p.ctx.xform_steps.dst_tf_inv, c[0]), transfer_apply(&p.ctx.xform_steps.dst_tf_inv, c[1]), transfer_apply(&p.ctx.xform_steps.dst_tf_inv, c[2]), c[3]]
 
 func highp_xform_encode(p: HighpPipeline*):
     highp_color_lanes(p, highp_xform_encode_lane)

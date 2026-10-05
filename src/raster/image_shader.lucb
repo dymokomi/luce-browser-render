@@ -102,12 +102,21 @@ func pattern_push_stages(patt: const Pattern*, cs: ColorSpace, p: RasterPipeline
     if quality == .bicubic:
         p.push(.clamp_gamut)
 
+    pattern_push_misc(patt, cs, p)
+    return true
+
+## SkImageShader's append_misc: after sampling, the image's color space to the destination's,
+## then the destination's gamma expansion.
+func pattern_push_misc(patt: const Pattern*, cs: ColorSpace, p: RasterPipelineBuilder*):
+    # Transform color space and alpha type to match shader convention (dst CS, premul alpha).
+    if let xform = patt.color_xform:
+        p.ctx.color_xform = xform
+        p.push(.color_xform)
+
     if let stage = colorspace_expand_stage(cs):
         # TODO: it would be better to gamma-expand prior to sampling, but there isn't
         # currently an intermediate pipeline stage for that.
         p.push(stage)
-
-    return true
 
 # mark: Mipmaps ================================================================================
 
@@ -174,7 +183,5 @@ func pattern_push_mipmap_stages(patt: const Pattern*, cs: ColorSpace, p: RasterP
     p.ctx.sampler = SamplerCtx(spread_mode = patt.spread_mode)
     # tweak_sampling would make an integer translate nearest; a minifying matrix is not one.
     p.push(.bilinear_mipmap if p.ctx.mipmap.lower != none else .bilinear)
-
-    if let stage = colorspace_expand_stage(cs):
-        p.push(stage)
+    pattern_push_misc(patt, cs, p)
     return true

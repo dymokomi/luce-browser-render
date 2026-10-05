@@ -60,7 +60,7 @@ struct PipelineSource:
             # linear sRGB to sRGB (encode only), premul unless opaque.
             if not self.is_opaque:
                 p.push(.unpremul)
-            p.ctx.xform.dst_tf_inv = TransferFunction.from_bits(srgb_inv_bits)
+            p.ctx.xform_steps.dst_tf_inv = TransferFunction.from_bits(srgb_inv_bits)
             p.push(.xform_encode)
             if not self.is_opaque:
                 p.push(.premultiply)
