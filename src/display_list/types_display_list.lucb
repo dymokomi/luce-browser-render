@@ -192,7 +192,7 @@ pub func display_list_player_add_clip_path(this: DisplayListPlayer*, arg0: gfx.P
 pub let display_list_player_vtable: DisplayListPlayerVTable = DisplayListPlayerVTable(class_info = &display_list_player_class)
 
 ## Class information of Web::Painting::DisplayListPlayer: name, class-id range (pre-order), size, vtable.
-pub let display_list_player_class: ak.ClassInfo = ak.ClassInfo(name = "DisplayListPlayer", first_id = 0, last_id = 1, size = sizeof(DisplayListPlayer), vtable = (const void*)&display_list_player_vtable)
+pub let display_list_player_class: ak.ClassInfo = ak.ClassInfo(name = "DisplayListPlayer", first_id = 0, last_id = 1, size = memory.size_of(DisplayListPlayer), vtable = (const void*)&display_list_player_vtable)
 
 ## is<Web::Painting::DisplayListPlayer>: the class-id range test.
 pub func is_display_list_player[P: IsDisplayListPlayer](p: P*) -> bool:

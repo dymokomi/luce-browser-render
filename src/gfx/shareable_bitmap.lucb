@@ -15,7 +15,7 @@ pub func shareable_bitmap_construct(this: ShareableBitmap*):
 
 ## Ported from Libraries/LibGfx/ShareableBitmap.cpp:18 Gfx::ShareableBitmap::ShareableBitmap.
 pub func shareable_bitmap_construct_bitmap(this: ShareableBitmap*, bitmap: Bitmap*, arg1: ShareableBitmapTag):
-    discard(arg1)
+    _ = arg1
     this.m_bitmap = bitmap
 
 ## Ported from Libraries/LibGfx/ShareableBitmap.cpp:31 Gfx::ShareableBitmap::is_valid.

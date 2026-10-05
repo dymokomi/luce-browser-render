@@ -100,8 +100,8 @@ pub func float_rect_mul(this: const FloatRect*, factor: f32) -> FloatRect:
 
 ## Ported from Libraries/LibGfx/Rect.h:427 Gfx::Rect::operator*= for FloatRect.
 pub func float_rect_mul_assign(this: FloatRect*, factor: f32) -> FloatRect*:
-    discard(float_point_mul_assign(&this.m_location, factor))
-    discard(float_size_mul_assign(&this.m_size, factor))
+    _ = float_point_mul_assign(&this.m_location, factor)
+    _ = float_size_mul_assign(&this.m_size, factor)
     return this
 
 ## Ported from Libraries/LibGfx/Rect.h:434 Gfx::Rect::intersect for FloatRect.

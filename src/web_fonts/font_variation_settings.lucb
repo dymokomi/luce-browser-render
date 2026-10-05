@@ -27,17 +27,17 @@ pub func font_variation_axis_eq(this: const FontVariationAxis*, other: FontVaria
 ## Ported from Libraries/LibGfx/Font/FontVariationSettings.h:39 Gfx::FontVariationSettings::set_weight.
 # https://learn.microsoft.com/en-us/typography/opentype/spec/dvaraxistag_wght
 pub func font_variation_settings_set_weight(this: FontVariationSettings*, value: f32):
-    discard(ak.hash_map_set(&this.axes, font_variation_tag('w', 'g', 'h', 't'), value))
+    _ = ak.hash_map_set(&this.axes, font_variation_tag('w', 'g', 'h', 't'), value)
 
 ## Ported from Libraries/LibGfx/Font/FontVariationSettings.h:45 Gfx::FontVariationSettings::set_width.
 # https://learn.microsoft.com/en-us/typography/opentype/spec/dvaraxistag_wdth
 pub func font_variation_settings_set_width(this: FontVariationSettings*, value: f32):
-    discard(ak.hash_map_set(&this.axes, font_variation_tag('w', 'd', 't', 'h'), value))
+    _ = ak.hash_map_set(&this.axes, font_variation_tag('w', 'd', 't', 'h'), value)
 
 ## Ported from Libraries/LibGfx/Font/FontVariationSettings.h:51 Gfx::FontVariationSettings::set_optical_sizing.
 # https://learn.microsoft.com/en-us/typography/opentype/spec/dvaraxistag_opsz
 pub func font_variation_settings_set_optical_sizing(this: FontVariationSettings*, value: f32):
-    discard(ak.hash_map_set(&this.axes, font_variation_tag('o', 'p', 's', 'z'), value))
+    _ = ak.hash_map_set(&this.axes, font_variation_tag('o', 'p', 's', 'z'), value)
 
 ## Ported from Libraries/LibGfx/Font/FontVariationSettings.h:56 Gfx::FontVariationSettings::is_empty.
 pub func font_variation_settings_is_empty(this: const FontVariationSettings*) -> bool:

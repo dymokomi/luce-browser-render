@@ -28,13 +28,13 @@ func expect_optional_color(actual: Color?, expected: u32?, what: str):
     if let color = actual:
         if let value = expected:
             if color_value(&color) != value:
-                print(f"{what}: got {hex(color_value(&color))}, expected {hex(value)}")
+                print(f"{what}: got {color_value(&color):x}, expected {value:x}")
             assert(color_value(&color) == value)
         else:
-            print(f"{what}: got {hex(color_value(&color))}, expected none")
+            print(f"{what}: got {color_value(&color):x}, expected none")
             assert(false)
     elif let value = expected:
-        print(f"{what}: got none, expected {hex(value)}")
+        print(f"{what}: got none, expected {value:x}")
         assert(false)
 
 ## Whether a StringView spells `text`.

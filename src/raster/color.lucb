@@ -32,7 +32,7 @@ pub struct ColorU8:
     var rgba: u8[4]
 
     ## Creates a new color.
-    pub static func from_rgba(r: u8, g: u8, b: u8, a: u8) -> ColorU8:
+    pub func from_rgba(r: u8, g: u8, b: u8, a: u8) -> ColorU8:
         return ColorU8(rgba = [r, g, b, a])
 
     ## Returns color's red component.
@@ -67,17 +67,17 @@ pub struct PremultipliedColorU8:
     var rgba: u8[4]
 
     ## A transparent color.
-    pub static func transparent() -> PremultipliedColorU8:
+    pub func transparent() -> PremultipliedColorU8:
         return PremultipliedColorU8(rgba = [0, 0, 0, 0])
 
     ## Creates a new premultiplied color. RGB components must be <= alpha.
-    pub static func from_rgba(r: u8, g: u8, b: u8, a: u8) -> PremultipliedColorU8?:
+    pub func from_rgba(r: u8, g: u8, b: u8, a: u8) -> PremultipliedColorU8?:
         if r <= a and g <= a and b <= a:
             return PremultipliedColorU8(rgba = [r, g, b, a])
         return none
 
     ## Creates a new color without checking that components are <= alpha.
-    static func from_rgba_unchecked(r: u8, g: u8, b: u8, a: u8) -> PremultipliedColorU8:
+    func from_rgba_unchecked(r: u8, g: u8, b: u8, a: u8) -> PremultipliedColorU8:
         return PremultipliedColorU8(rgba = [r, g, b, a])
 
     ## Returns color's red component. The value is <= alpha.
@@ -123,24 +123,24 @@ pub struct Color:
     var a: f32
 
     ## A transparent color.
-    pub static func transparent() -> Color:
+    pub func transparent() -> Color:
         return Color(r = 0.0, g = 0.0, b = 0.0, a = 0.0)
 
     ## A black color.
-    pub static func black() -> Color:
+    pub func black() -> Color:
         return Color(r = 0.0, g = 0.0, b = 0.0, a = 1.0)
 
     ## A white color.
-    pub static func white() -> Color:
+    pub func white() -> Color:
         return Color(r = 1.0, g = 1.0, b = 1.0, a = 1.0)
 
     ## Creates a new color from 4 components without checking that they are in the 0..=1
     ## range.
-    pub static func from_rgba_unchecked(r: f32, g: f32, b: f32, a: f32) -> Color:
+    pub func from_rgba_unchecked(r: f32, g: f32, b: f32, a: f32) -> Color:
         return Color(r = r, g = g, b = b, a = a)
 
     ## Creates a new color from 4 components. All values must be in 0..=1 range.
-    pub static func from_rgba(r: f32, g: f32, b: f32, a: f32) -> Color?:
+    pub func from_rgba(r: f32, g: f32, b: f32, a: f32) -> Color?:
         let nr = normalized_new(r) else return none
         let ng = normalized_new(g) else return none
         let nb = normalized_new(b) else return none
@@ -149,7 +149,7 @@ pub struct Color:
 
     ## Creates a new color from 4 components: each u8 times 1/255 as an f32, as Skia's
     ## SkColor4f::FromColor (SkColors reach Skia's pipeline this way).
-    pub static func from_rgba8(r: u8, g: u8, b: u8, a: u8) -> Color:
+    pub func from_rgba8(r: u8, g: u8, b: u8, a: u8) -> Color:
         let scale = f32.bits(0x3B808081)  # 1.0f / 255: Skia's Sk4f_fromL32 multiplies by it
         return Color(r = (f32)r * scale, g = (f32)g * scale, b = (f32)b * scale, a = (f32)a * scale)
 
@@ -170,24 +170,24 @@ pub struct Color:
         return self.a
 
     ## Sets the red component value. The new value will be clipped to the 0..=1 range.
-    pub mutating func set_red(c: f32):
+    pub func set_red(c: f32):
         self.r = normalized_clamped(c)
 
     ## Sets the green component value. The new value will be clipped to the 0..=1 range.
-    pub mutating func set_green(c: f32):
+    pub func set_green(c: f32):
         self.g = normalized_clamped(c)
 
     ## Sets the blue component value. The new value will be clipped to the 0..=1 range.
-    pub mutating func set_blue(c: f32):
+    pub func set_blue(c: f32):
         self.b = normalized_clamped(c)
 
     ## Sets the alpha component value. The new value will be clipped to the 0..=1 range.
-    pub mutating func set_alpha(c: f32):
+    pub func set_alpha(c: f32):
         self.a = normalized_clamped(c)
 
     ## Shifts color's opacity. Essentially, multiplies color's alpha by opacity. `opacity`
     ## will be clamped to the 0..=1 range first. The final alpha will also be clamped.
-    pub mutating func apply_opacity(opacity: f32):
+    pub func apply_opacity(opacity: f32):
         self.a = normalized_clamped(self.a * bound(opacity, 0.0, 1.0))
 
     ## Check that color is opaque. Alpha == 1.0

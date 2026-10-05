@@ -123,7 +123,7 @@ pub func typeface_skia_glyph_page(this: TypefaceSkia*, page_index: usize) -> con
     let previous = font_allocators_enter(allocators)
     defer font_allocators_leave(previous)
     with allocators.allocator:
-        discard(ak.hash_map_set(&this.m_glyph_pages, (u64)page_index, glyph_page))
+        _ = ak.hash_map_set(&this.m_glyph_pages, (u64)page_index, glyph_page)
     return glyph_page
 
 ## Ported from Libraries/LibGfx/Font/TypefaceSkia.h:65 Gfx::TypefaceSkia::populate_glyph_page.

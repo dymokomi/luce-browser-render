@@ -20,6 +20,7 @@ import memory
 from luce_std import files
 import raster_png
 from luce_browser_render import raster
+import strings
 
 ## One test: a name and a function that records failures in the Test.
 pub struct TestCase:
@@ -32,17 +33,17 @@ pub struct Test:
     pub var failures: u32
 
     ## Record a failure.
-    pub mutating func fail(message: fmt):
+    pub func fail(message: fmt):
         print(f"  FAIL {self.name}: {message}")
         self.failures += 1
 
     ## Record a failure unless `condition`.
-    pub mutating func check(condition: bool, message: str):
+    pub func check(condition: bool, message: str):
         if not condition:
             self.fail(message)
 
 func path_buffer(buffer: u8[], text: fmt) -> c.str:
-    let s = format(buffer, text) else trap("path too long")
+    let s = strings.format(buffer, text) else trap("path too long")
     return (c.str)s
 
 ## Pixmap::load_png: `image` is relative to tests/raster/images.

@@ -42,12 +42,12 @@ pub struct Paint:
     pub var dither: bool = false
 
     ## Sets a paint source to a solid color.
-    pub mutating func set_color(color: Color):
+    pub func set_color(color: Color):
         self.shader = .solid_color(color = color)
 
     ## Sets a paint source to a solid color. `self.shader = Shader.solid_color(Color.from_rgba8(50, 127, 150, 200))`
     ## shorthand.
-    pub mutating func set_color_rgba8(r: u8, g: u8, b: u8, a: u8):
+    pub func set_color_rgba8(r: u8, g: u8, b: u8, a: u8):
         self.set_color(Color.from_rgba8(r, g, b, a))
 
     ## Checks that the paint source is a solid color.
@@ -57,7 +57,7 @@ pub struct Paint:
             _: return false
 
     ## Frees the shader's gradient stops.
-    pub mutating func release():
+    pub func release():
         self.shader.release()
 
 ## A copy of the paint whose gradient stops are its own (release it).
@@ -163,18 +163,18 @@ struct DrawTiler:
     var finished: bool
 
     # 8K is 1 too big, since 8K << supersample == 32768 which is too big for Fixed.
-    static func max_dimensions() -> u32:
+    func max_dimensions() -> u32:
         return 8192 - 1
 
-    static func required(image_width: u32, image_height: u32) -> bool:
+    func required(image_width: u32, image_height: u32) -> bool:
         return image_width > DrawTiler.max_dimensions() or image_height > DrawTiler.max_dimensions()
 
-    static func new_(image_width: u32, image_height: u32) -> DrawTiler?:
+    func new_(image_width: u32, image_height: u32) -> DrawTiler?:
         if DrawTiler.required(image_width, image_height):
             return DrawTiler(image_width = image_width, image_height = image_height, x_offset = 0, y_offset = 0, finished = false)
         return none
 
-    mutating func next() -> ScreenIntRect?:
+    func next() -> ScreenIntRect?:
         if self.finished:
             return none
 

@@ -239,7 +239,7 @@ func display_list_player_cpu_draw_glyph_run_impl(base: DisplayListPlayer*, comma
             cpu_canvas_fill_path(canvas, &blob, &paint, raster.FillRule.winding)
             cpu_canvas_restore(canvas)
         _:
-            discard(0)
+            _ = 0
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:26 Web::Painting::DisplayListPlayerSkia::fill_rect (override).
 func display_list_player_cpu_fill_rect_impl(base: DisplayListPlayer*, command: FillRect):

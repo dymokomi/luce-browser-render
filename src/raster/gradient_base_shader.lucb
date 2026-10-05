@@ -32,7 +32,7 @@ pub struct GradientStop:
     var color: Color
 
     ## Creates a new gradient point. `position` will be clamped to a 0..=1 range.
-    pub static func new_(position: f32, color: Color) -> GradientStop:
+    pub func new_(position: f32, color: Color) -> GradientStop:
         return GradientStop(position = normalized_clamped(position), color = color)
 
 struct Gradient:
@@ -45,7 +45,7 @@ struct Gradient:
     var interpolate_premul: bool
 
     ## Takes ownership of `stops0` (a Vec in `memory.heap`, at least two stops).
-    static func new_(stops0: Vec[GradientStop], tile_mode: SpreadMode, transform: Transform, points_to_unit: Transform) -> Gradient:
+    func new_(stops0: Vec[GradientStop], tile_mode: SpreadMode, transform: Transform, points_to_unit: Transform) -> Gradient:
         var stops = stops0
         let count = stops.len
 
@@ -155,7 +155,7 @@ struct Gradient:
         if not self.colors_are_opaque and not self.interpolate_premul:
             p.push(.premultiply)
 
-    mutating func apply_opacity(opacity: f32):
+    func apply_opacity(opacity: f32):
         for stop in &self.stops.view():
             stop.color.apply_opacity(opacity)
 

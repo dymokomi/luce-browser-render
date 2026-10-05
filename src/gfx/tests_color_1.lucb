@@ -19,28 +19,28 @@
 ## EXPECT_EQ on two colors, printing both on a mismatch.
 func expect_eq_color(actual: Color, expected: Color):
     if not color_eq(&actual, expected):
-        print(f"got {hex(color_value(&actual))}, expected {hex(color_value(&expected))}")
+        print(f"got {color_value(&actual):x}, expected {color_value(&expected):x}")
     assert(color_eq(&actual, expected))
 
 ## Checks a color against the BGRA8888 value the C++ computed, printing both on a mismatch.
 func expect_color(actual: Color, expected: u32, what: str):
     let value = color_value(&actual)
     if value != expected:
-        print(f"{what}: got {hex(value)}, expected {hex(expected)}")
+        print(f"{what}: got {value:x}, expected {expected:x}")
     assert(value == expected)
 
 ## Checks a float against the bits the C++ computed.
 func expect_f32_bits(actual: f32, expected: u32, what: str):
     let bits = actual.bits()
     if not within_libm_ulps((u64)bits, (u64)expected):
-        print(f"{what}: got {hex(bits)} ({actual}), expected {hex(expected)}")
+        print(f"{what}: got {bits:x} ({actual}), expected {expected:x}")
     assert(within_libm_ulps((u64)bits, (u64)expected))
 
 ## Checks a double against the bits the C++ computed.
 func expect_f64_bits(actual: f64, expected: u64, what: str):
     let bits = actual.bits()
     if not within_libm_ulps(bits, expected):
-        print(f"{what}: got {hex(bits)} ({actual}), expected {hex(expected)}")
+        print(f"{what}: got {bits:x} ({actual}), expected {expected:x}")
     assert(within_libm_ulps(bits, expected))
 
 ## How many units in the last place a result may differ from the expected bits. The expected

@@ -56,7 +56,7 @@ pub let display_list_player_cpu_vtable: DisplayListPlayerCpuVTable = DisplayList
                                                                                                                                                      add_clip_path = display_list_player_cpu_add_clip_path_impl))
 
 ## Class information of Web::Painting::DisplayListPlayerCpu: name, class-id range (pre-order), size, vtable.
-pub let display_list_player_cpu_class: ak.ClassInfo = ak.ClassInfo(name = "DisplayListPlayerCpu", first_id = 1, last_id = 1, size = sizeof(DisplayListPlayerCpu), vtable = (const void*)&display_list_player_cpu_vtable)
+pub let display_list_player_cpu_class: ak.ClassInfo = ak.ClassInfo(name = "DisplayListPlayerCpu", first_id = 1, last_id = 1, size = memory.size_of(DisplayListPlayerCpu), vtable = (const void*)&display_list_player_cpu_vtable)
 
 ## is<Web::Painting::DisplayListPlayerCpu>: the class-id range test.
 pub func is_display_list_player_cpu[P: IsDisplayListPlayer](p: P*) -> bool:

@@ -64,7 +64,7 @@ pub func immutable_bitmap_alpha_type(this: const ImmutableBitmap*) -> AlphaType:
 ## Ported from Libraries/LibGfx/ImmutableBitmap.cpp:73 Gfx::ImmutableBitmap::sk_image.
 ## Replaced: there is no SkImage; the pixels are immutable_bitmap_bitmap.
 pub func immutable_bitmap_sk_image(this: const ImmutableBitmap*) -> const SkImage*?:
-    discard(this)
+    _ = this
     trap("replaced: ImmutableBitmap::sk_image (use immutable_bitmap_bitmap)")
 
 ## Ported from Libraries/LibGfx/ImmutableBitmap.cpp:188 Gfx::ImmutableBitmap::bitmap.
@@ -247,7 +247,7 @@ func immutable_bitmap_adopt(impl: ImmutableBitmapImpl) -> ImmutableBitmap*:
 ## Ported from Libraries/LibGfx/ImmutableBitmap.cpp:204 Gfx::ImmutableBitmap::create_from_yuv.
 ## Not supported: YUVData is Rust code in the donor and is dropped (DESIGN.md §7.2).
 pub func immutable_bitmap_create_from_yuv(yuv_data: YuvData*) -> ImmutableBitmap*!:
-    discard(yuv_data)
+    _ = yuv_data
     trap("unsupported: YUVData (Rust in the donor; dropped by DESIGN.md §7.2)")
 
 ## Ported from Libraries/LibGfx/ImmutableBitmap.cpp:283 Gfx::ImmutableBitmap::create.

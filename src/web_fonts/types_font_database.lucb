@@ -55,7 +55,7 @@ pub func system_font_provider_for_each_typeface_with_family_name(this: SystemFon
 pub let system_font_provider_vtable: SystemFontProviderVTable = SystemFontProviderVTable(class_info = &system_font_provider_class)
 
 ## Class information of Gfx::SystemFontProvider: name, class-id range (pre-order), size, vtable.
-pub let system_font_provider_class: ak.ClassInfo = ak.ClassInfo(name = "SystemFontProvider", first_id = 0, last_id = 1, size = sizeof(SystemFontProvider), vtable = (const void*)&system_font_provider_vtable)
+pub let system_font_provider_class: ak.ClassInfo = ak.ClassInfo(name = "SystemFontProvider", first_id = 0, last_id = 1, size = memory.size_of(SystemFontProvider), vtable = (const void*)&system_font_provider_vtable)
 
 ## is<Gfx::SystemFontProvider>: the class-id range test.
 pub func is_system_font_provider[P: IsSystemFontProvider](p: P*) -> bool:

@@ -30,17 +30,17 @@ struct Edge:
     var kind: EdgeKind
     var data: EdgeData
 
-    static func from_line(line: LineEdge) -> Edge:
+    func from_line(line: LineEdge) -> Edge:
         var e = Edge(kind = .line)
         e.data.line = line
         return e
 
-    static func from_quad(quad: QuadraticEdge) -> Edge:
+    func from_quad(quad: QuadraticEdge) -> Edge:
         var e = Edge(kind = .quadratic)
         e.data.quad = quad
         return e
 
-    static func from_cubic(cubic: CubicEdge) -> Edge:
+    func from_cubic(cubic: CubicEdge) -> Edge:
         var e = Edge(kind = .cubic)
         e.data.cubic = cubic
         return e
@@ -56,7 +56,7 @@ struct LineEdge:
     var last_y: i32
     var winding: i8  # 1 or -1
 
-    static func new_(p0: Point, p1: Point, shift: i32) -> LineEdge?:
+    func new_(p0: Point, p1: Point, shift: i32) -> LineEdge?:
         let scale = (f32)(1 << (shift + 6))
         var x0 = (i32)(p0.x * scale)
         var y0 = (i32)(p0.y * scale)
@@ -89,7 +89,7 @@ struct LineEdge:
     func is_vertical() -> bool:
         return self.dx == 0
 
-    mutating func update(x00: FDot16, y00: FDot16, x10: FDot16, y10: FDot16) -> bool:
+    func update(x00: FDot16, y00: FDot16, x10: FDot16, y10: FDot16) -> bool:
         let y0 = y00 >> 10
         let y1 = y10 >> 10
 
@@ -126,13 +126,13 @@ struct QuadraticEdge:
     var q_last_x: FDot16
     var q_last_y: FDot16
 
-    static func new_(points: const Point[], shift: i32) -> QuadraticEdge?:
+    func new_(points: const Point[], shift: i32) -> QuadraticEdge?:
         var quad = QuadraticEdge.new2(points, shift) else return none
         if quad.update():
             return quad
         return none
 
-    static func new2(points: const Point[], shift0: i32) -> QuadraticEdge?:
+    func new2(points: const Point[], shift0: i32) -> QuadraticEdge?:
         var shift = shift0
         let scale = (f32)(1 << (shift + 6))
         var x0 = (i32)(points[0].x * scale)
@@ -222,7 +222,7 @@ struct QuadraticEdge:
             q_last_y = q_last_y,
         )
 
-    mutating func update() -> bool:
+    func update() -> bool:
         var success: bool
         var count = self.curve_count
         var oldx = self.qx
@@ -275,13 +275,13 @@ struct CubicEdge:
     var c_last_x: FDot16
     var c_last_y: FDot16
 
-    static func new_(points: const Point[], shift: i32) -> CubicEdge?:
+    func new_(points: const Point[], shift: i32) -> CubicEdge?:
         var cubic = CubicEdge.new2(points, shift, true) else return none
         if cubic.update():
             return cubic
         return none
 
-    static func new2(points: const Point[], shift0: i32, sort_y: bool) -> CubicEdge?:
+    func new2(points: const Point[], shift0: i32, sort_y: bool) -> CubicEdge?:
         var shift = shift0
         let scale = (f32)(1 << (shift + 6))
         var x0 = (i32)(points[0].x * scale)
@@ -380,7 +380,7 @@ struct CubicEdge:
             c_last_y = c_last_y,
         )
 
-    mutating func update() -> bool:
+    func update() -> bool:
         var success: bool
         var count = self.curve_count
         var oldx = self.cx

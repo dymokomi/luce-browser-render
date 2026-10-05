@@ -163,9 +163,9 @@ func blit_aaa_trapezoid_row(blitter: AdditiveBlitter*, y: i32, ul: i32, ur: i32,
     var runs: AlphaRun[] = quick_runs
     var heap = false
     if len > quick_len:
-        alphas = (alloc AlphaU8[(usize)len + 1] in memory.heap) else trap("raster: out of memory")
-        temp_alphas = (alloc AlphaU8[(usize)len + 1] in memory.heap) else trap("raster: out of memory")
-        runs = (alloc AlphaRun[(usize)len + 1] in memory.heap) else trap("raster: out of memory")
+        alphas = (new AlphaU8[(usize)len + 1] --- in memory.heap) else trap("raster: out of memory")
+        temp_alphas = (new AlphaU8[(usize)len + 1] --- in memory.heap) else trap("raster: out of memory")
+        runs = (new AlphaRun[(usize)len + 1] --- in memory.heap) else trap("raster: out of memory")
         heap = true
 
     for i in 0..<(usize)len:

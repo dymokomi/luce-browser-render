@@ -109,13 +109,13 @@ test "pixel_units: max_raw":
 test "pixel_units: increment":
     # C++: CSSPixels a = CSSPixels::from_raw(5); ++a; a.raw_value()
     var a = css_pixels_from_raw(5)
-    discard(css_pixels_inc(&a))
+    _ = css_pixels_inc(&a)
     assert((i64)(a.raw_value()) == 69)
 
 test "pixel_units: decrement_saturates":
     # C++: CSSPixels a = CSSPixels::min(); --a; a.raw_value()
     var a = css_pixels_min()
-    discard(css_pixels_dec(&a))
+    _ = css_pixels_dec(&a)
     assert((i64)(a.raw_value()) == -2147483648)
 
 test "pixel_units: cmp_less":
@@ -154,13 +154,13 @@ test "pixel_units: sub_saturates":
 test "pixel_units: div_assign_multiplies":
     # C++: CSSPixels a(6); a /= CSSPixels(2); a.raw_value()
     var a = css_pixels_from_int(6)
-    discard(css_pixels_div_assign(&a, css_pixels_from_int(2)))
+    _ = css_pixels_div_assign(&a, css_pixels_from_int(2))
     assert((i64)(a.raw_value()) == 768)
 
 test "pixel_units: mul_assign_fraction":
     # C++: CSSPixels a(10); a *= CSSPixels(1) / CSSPixels(3); a.raw_value()
     var a = css_pixels_from_int(10)
-    discard(css_pixels_mul_assign_css_pixel_fraction(&a, css_pixels_from_int(1).div(css_pixels_from_int(3))))
+    _ = css_pixels_mul_assign_css_pixel_fraction(&a, css_pixels_from_int(1).div(css_pixels_from_int(3)))
     assert((i64)(a.raw_value()) == 213)
 
 test "pixel_units: div_by_fraction":

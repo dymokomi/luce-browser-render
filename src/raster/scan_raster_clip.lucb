@@ -29,7 +29,7 @@ struct RasterClip:
     var mask: const Mask*?
 
     ## The clip of a `width` x `height` device, narrowed by `mask`.
-    static func new_(width: u32, height: u32, mask: const Mask*?) -> RasterClip:
+    func new_(width: u32, height: u32, mask: const Mask*?) -> RasterClip:
         let device = IRect.ltrb(0, 0, (i32)width, (i32)height)
         let m = mask else return RasterClip(kind = .rect, bounds = device, mask = none)
         let info = MaskClipInfo.of(m)
@@ -55,13 +55,13 @@ struct ClipWrappers:
     var aa: MaskAAClipBlitter
     var has_aa: bool
 
-    static func new_() -> ClipWrappers:
+    func new_() -> ClipWrappers:
         var w: ClipWrappers = ---
         w.has_aa = false
         return w
 
     ## SkAAClipBlitterWrapper: `blitter` seen through the anti-aliased clip.
-    mutating func wrap_aa(blitter: Blitter, mask: const Mask*) -> Blitter:
+    func wrap_aa(blitter: Blitter, mask: const Mask*) -> Blitter:
         self.aa = MaskAAClipBlitter.new_(blitter, mask)
         self.has_aa = true
         return &self.aa
@@ -69,7 +69,7 @@ struct ClipWrappers:
     ## SkScanClipper / SkBlitterClipper::apply for a BW clip: the wrapper `blitter` needs to
     ## draw `ir` inside `clip`, none when `ir` is clipped out. `clip_rect_needed` reports
     ## whether the clip's rectangle still clips (SkScanClipper::getClipRect != nullptr).
-    mutating func wrap_bw(blitter: Blitter, clip: const RasterClip*, ir: IRect, clip_rect_needed: bool*) -> Blitter?:
+    func wrap_bw(blitter: Blitter, clip: const RasterClip*, ir: IRect, clip_rect_needed: bool*) -> Blitter?:
         *clip_rect_needed = true
         if not clip.bounds.intersects(ir):
             return none
@@ -86,7 +86,7 @@ struct ClipWrappers:
             return &self.rect
         return blitter
 
-    mutating func release():
+    func release():
         if self.has_aa:
             self.aa.release()
             self.has_aa = false

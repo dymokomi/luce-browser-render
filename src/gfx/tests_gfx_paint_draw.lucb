@@ -362,7 +362,7 @@ test "gfx paint: filter graphs":
     match last.node:
         .color_filter(outer, input):
             match outer.node:
-                .linear_to_srgb_gamma: discard(0)
+                .linear_to_srgb_gamma: _ = 0
                 _: trap("not linear-to-sRGB")
             let table = input else trap("no table")
             match table.node:

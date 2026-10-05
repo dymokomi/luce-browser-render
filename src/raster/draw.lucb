@@ -29,18 +29,19 @@ struct DeviceBlitter:
     var kind: DeviceBlitterKind
     var pipeline: RasterPipelineBlitter
 
-    static func null_blitter() -> DeviceBlitter:
+    func null_blitter() -> DeviceBlitter:
         var d: DeviceBlitter = ---
         d.kind = .null_
         return d
 
     ## The blitter, none for SkNullBlitter.
-    mutating func view() -> Blitter?:
+    func view() -> Blitter?:
         if self.kind == .pipeline:
-            return &self.pipeline
+            let blitter: RasterPipelineBlitter* = &self.pipeline
+            return blitter
         return none
 
-    mutating func release():
+    func release():
         if self.kind == .pipeline:
             self.pipeline.release()
         self.kind = .null_

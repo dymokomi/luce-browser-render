@@ -49,7 +49,7 @@ test "scroll state: the sentinel, frames and ancestors":
     scroll_state_clear(&state)
     assert(ak.vector_size(&state.m_scroll_frames) == 1)
     for entry in scroll_state_for_each_scroll_frame(&state):
-        discard(entry)
+        _ = entry
         trap("a cleared scroll state has no frames")
 
 test "scroll state: offsets and sticky constraints":
@@ -143,7 +143,7 @@ test "external content source: update, current and clear":
     let source = external_content_source_create()
     assert(external_content_source_current_bitmap(source) == none)
     # Only the pointer matters here: storage the size of an ImmutableBitmap stands in for one.
-    let storage = new u8[sizeof(gfx.ImmutableBitmap)] else trap("out of memory")
+    let storage = new u8[memory.size_of(gfx.ImmutableBitmap)] else trap("out of memory")
     let bitmap = (gfx.ImmutableBitmap*)storage.data
     external_content_source_update(source, bitmap)
     assert(external_content_source_current_bitmap(source) == bitmap)

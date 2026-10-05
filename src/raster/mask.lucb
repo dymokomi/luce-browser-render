@@ -30,13 +30,13 @@ pub struct Mask:
 
     ## Creates a new mask by taking ownership over a mask buffer. The size needs to match
     ## the data provided.
-    pub static func new_(width: u32, height: u32) -> Mask?:
+    pub func new_(width: u32, height: u32) -> Mask?:
         let size = IntSize.from_wh(width, height) else return none
         let data = (new u8[(usize)width * (usize)height] in memory.heap) else trap("raster: out of memory")
         return Mask(data_ = data, size_ = size)
 
     ## Creates a new mask from a `PixmapRef`.
-    pub static func from_pixmap(pixmap: PixmapRef, mask_type: MaskType) -> Mask:
+    pub func from_pixmap(pixmap: PixmapRef, mask_type: MaskType) -> Mask:
         let data_len = (usize)pixmap.width() * (usize)pixmap.height()
         let data = (new u8[data_len] in memory.heap) else trap("raster: out of memory")
         let mask = Mask(data_ = data, size_ = pixmap.size())
@@ -71,7 +71,7 @@ pub struct Mask:
 
     ## Creates a new mask by taking ownership over a mask buffer allocated in `memory.heap`.
     ## The size needs to match the data provided.
-    pub static func from_vec(data: u8[], size: IntSize) -> Mask?:
+    pub func from_vec(data: u8[], size: IntSize) -> Mask?:
         let data_len = (usize)size.width() * (usize)size.height()
         if data.length != data_len:
             return none
@@ -93,17 +93,17 @@ pub struct Mask:
         return self.data_
 
     ## Returns the mutable internal data.
-    pub mutating func data_mut() -> u8[]:
+    pub func data_mut() -> u8[]:
         return self.data_
 
     ## Consumes the internal data. The caller owns the bytes (free them in `memory.heap`).
-    pub mutating func take() -> u8[]:
+    pub func take() -> u8[]:
         let data = self.data_
         self.data_ = self.data_[..<0]
         return data
 
     ## Frees the mask.
-    pub mutating func release():
+    pub func release():
         if self.data_.length > 0:
             free(self.data_) in memory.heap
         self.data_ = self.data_[..<0]
@@ -117,10 +117,10 @@ pub struct Mask:
         let offset = (usize)rect.top() * row_bytes + (usize)rect.left()
         return SubMaskRef(data = self.data_[offset..], size = rect.size(), real_width = self.size_.width())
 
-    mutating func as_subpixmap() -> SubPixmapMut:
+    func as_subpixmap() -> SubPixmapMut:
         return SubPixmapMut(data = self.data_, size = self.size_, real_width = (usize)self.size_.width())
 
-    mutating func subpixmap(rect0: IntRect) -> SubPixmapMut?:
+    func subpixmap(rect0: IntRect) -> SubPixmapMut?:
         let rect = self.size_.to_int_rect(0, 0).intersect(rect0) else return none
         let row_bytes = (usize)self.width()
         let offset = (usize)rect.top() * row_bytes + (usize)rect.left()
@@ -132,12 +132,12 @@ pub struct Mask:
     ## be called first. On a clear mask the result is the clip Skia's SkAAClip::setPath (or,
     ## without anti-aliasing, SkRegion::setPath) makes of the path. For more complex masks
     ## prefer `Mask.from_pixmap`.
-    pub mutating func fill_path(path: const Path*, fill_rule: FillRule, anti_alias: bool, transform: Transform):
+    pub func fill_path(path: const Path*, fill_rule: FillRule, anti_alias: bool, transform: Transform):
         self.fill_path_clipped(path, fill_rule, anti_alias, transform, IRect.ltrb(0, 0, (i32)self.width(), (i32)self.height()))
 
     ## fill_path, with the path's coverage clipped to `clip` (the bounds of the clip the path
     ## is set in).
-    mutating func fill_path_clipped(path: const Path*, fill_rule: FillRule, anti_alias: bool, transform: Transform, clip: IRect):
+    func fill_path_clipped(path: const Path*, fill_rule: FillRule, anti_alias: bool, transform: Transform, clip: IRect):
         if not transform.is_identity():
             var transformed = path.clone()
             defer transformed.release()
@@ -164,7 +164,7 @@ pub struct Mask:
     ## Intersects the provided path with the current clipping path. A temporary mask with
     ## the same size as the current one will be created. The coverages multiply, as
     ## SkAAClip's intersection does.
-    pub mutating func intersect_path(path: const Path*, fill_rule: FillRule, anti_alias: bool, transform: Transform):
+    pub func intersect_path(path: const Path*, fill_rule: FillRule, anti_alias: bool, transform: Transform):
         var submask = Mask.new_(self.width(), self.height()) else trap("unreachable")
         defer submask.release()
         # The new path's coverage is computed within the current clip's bounds
@@ -179,12 +179,12 @@ pub struct Mask:
             self.data_[i] = premultiply_u8(self.data_[i], submask.data_[i])
 
     ## Inverts the mask.
-    pub mutating func invert():
+    pub func invert():
         for a in &self.data_:
             *a = 255 - *a
 
     ## Clears the mask. Zero-fills the internal data buffer.
-    pub mutating func clear():
+    pub func clear():
         for a in &self.data_:
             *a = 0
 
@@ -214,7 +214,7 @@ struct MaskBuilderBlitter: Blitter:
     var mask: Mask*
     var bounds: IRect
 
-    mutating func put(x: i32, y: i32, alpha: u8):
+    func put(x: i32, y: i32, alpha: u8):
         if x < self.bounds.left or x >= self.bounds.right or y < self.bounds.top or y >= self.bounds.bottom:
             return
         let i = (usize)y * (usize)self.mask.width() + (usize)x
@@ -222,11 +222,11 @@ struct MaskBuilderBlitter: Blitter:
         let a = (u32)alpha
         self.mask.data_[i] = (u8)(a + mul_div255_round(old, 255 - a))
 
-    pub mutating func blit_h(x: i32, y: i32, width: i32):
+    pub func blit_h(x: i32, y: i32, width: i32):
         for i in 0..<width:
             self.put(x + i, y, 0xFF)
 
-    pub mutating func blit_anti_h(x: i32, y: i32, antialias: AlphaU8[], runs: AlphaRun[]):
+    pub func blit_anti_h(x: i32, y: i32, antialias: AlphaU8[], runs: AlphaRun[]):
         var i: usize = 0
         while runs[i] != 0:
             let count = (usize)runs[i]
@@ -234,15 +234,15 @@ struct MaskBuilderBlitter: Blitter:
                 self.put(x + (i32)(i + j), y, antialias[i])
             i += count
 
-    pub mutating func blit_v(x: i32, y: i32, height: i32, alpha: AlphaU8):
+    pub func blit_v(x: i32, y: i32, height: i32, alpha: AlphaU8):
         for i in 0..<height:
             self.put(x, y + i, alpha)
 
-    pub mutating func blit_rect(x: i32, y: i32, width: i32, height: i32):
+    pub func blit_rect(x: i32, y: i32, width: i32, height: i32):
         for yy in y..<y + height:
             self.blit_h(x, yy, width)
 
-    pub mutating func blit_anti_rect(x0: i32, y: i32, width0: i32, height: i32, left_alpha: AlphaU8, right_alpha: AlphaU8):
+    pub func blit_anti_rect(x0: i32, y: i32, width0: i32, height: i32, left_alpha: AlphaU8, right_alpha: AlphaU8):
         # addAntiRectRun: no matter whether left_alpha is 0 or positive, [x, x+1] is the
         # left-most column and [x+1, x+1+width] the rect with full alpha.
         for row in y..<y + height:
@@ -253,11 +253,11 @@ struct MaskBuilderBlitter: Blitter:
             if right_alpha > 0:
                 self.put(x0 + 1 + width0, row, right_alpha)
 
-    pub mutating func blit_mask(mask: const BlitMask*, clip: IRect):
+    pub func blit_mask(mask: const BlitMask*, clip: IRect):
         trap("raster: ---- did not expect to get called here")
 
-    pub mutating func blit_anti_h2(x: i32, y: i32, alpha0: AlphaU8, alpha1: AlphaU8):
+    pub func blit_anti_h2(x: i32, y: i32, alpha0: AlphaU8, alpha1: AlphaU8):
         blitter_default_blit_anti_h2(&self, x, y, alpha0, alpha1)
 
-    pub mutating func blit_anti_v2(x: i32, y: i32, alpha0: AlphaU8, alpha1: AlphaU8):
+    pub func blit_anti_v2(x: i32, y: i32, alpha0: AlphaU8, alpha1: AlphaU8):
         blitter_default_blit_anti_v2(&self, x, y, alpha0, alpha1)

@@ -191,10 +191,10 @@ struct GradientColor:
     var b: f32
     var a: f32
 
-    static func new_(r: f32, g: f32, b: f32, a: f32) -> GradientColor:
+    func new_(r: f32, g: f32, b: f32, a: f32) -> GradientColor:
         return GradientColor(r = r, g = g, b = b, a = a)
 
-    static func from_color(c: Color) -> GradientColor:
+    func from_color(c: Color) -> GradientColor:
         return GradientColor(r = c.red(), g = c.green(), b = c.blue(), a = c.alpha())
 
     func equals(o: GradientColor) -> bool:
@@ -213,14 +213,14 @@ struct GradientCtx:
     var biases: Vec[GradientColor]
     var t_values: Vec[f32]
 
-    mutating func push_stop(factor: GradientColor, bias: GradientColor):
+    func push_stop(factor: GradientColor, bias: GradientColor):
         self.factors.push(factor)
         self.biases.push(bias)
 
-    mutating func push_const_color(color: GradientColor):
+    func push_const_color(color: GradientColor):
         self.push_stop(GradientColor.new_(0.0, 0.0, 0.0, 0.0), color)
 
-    mutating func release():
+    func release():
         self.factors.release()
         self.biases.release()
         self.t_values.release()
@@ -250,14 +250,14 @@ struct RasterPipelineBuilder:
     var force_hq_pipeline: bool
     var ctx: Context
 
-    static func new_() -> RasterPipelineBuilder:
+    func new_() -> RasterPipelineBuilder:
         return RasterPipelineBuilder(ctx = Context())
 
     ## Compiles this pipeline to highp (a test hook, as Skia's global one).
-    mutating func set_force_hq_pipeline(hq: bool):
+    func set_force_hq_pipeline(hq: bool):
         self.force_hq_pipeline = hq
 
-    mutating func push(stage: Stage):
+    func push(stage: Stage):
         if self.stages_len == max_stages:
             trap("raster: too many pipeline stages")
         self.stages[self.stages_len] = stage
@@ -265,19 +265,19 @@ struct RasterPipelineBuilder:
 
     ## Skia's appendMatrix: nothing for the identity (the stage computes the same values for
     ## every other kind of affine matrix).
-    mutating func push_transform(ts: Transform):
+    func push_transform(ts: Transform):
         if ts.is_finite() and not ts.is_identity():
             self.push(.transform)
             self.ctx.transform = ts
 
     ## Skia's appendMatrix of a matrix that only scales and translates x.
-    mutating func push_scale_translate_x(sx: f32, tx: f32):
+    func push_scale_translate_x(sx: f32, tx: f32):
         if sx != 1.0 or tx != 0.0:
             self.ctx.scale_translate_x = ScaleTranslateCtx(sx = sx, tx = tx)
             self.push(.scale_translate_x)
 
     ## Skia's appendConstantColor of a premultiplied color in range.
-    mutating func push_uniform_color(c: PremultipliedColor):
+    func push_uniform_color(c: PremultipliedColor):
         let r = c.red()
         let g = c.green()
         let b = c.blue()
@@ -289,11 +289,11 @@ struct RasterPipelineBuilder:
         self.ctx.uniform_color = UniformColorCtx(r = r, g = g, b = b, a = a, rgba = rgba)
 
     ## Frees the builder's context (when it is not compiled).
-    mutating func release():
+    func release():
         self.ctx.gradient.release()
 
     ## Compiles the pipeline; the builder's context moves into it.
-    mutating func compile() -> RasterPipeline:
+    func compile() -> RasterPipeline:
         var p: RasterPipeline = ---
         p.len = 0
         p.is_lowp = false
@@ -374,11 +374,11 @@ struct RasterPipeline:
     var lowp_tail_functions: LowpStageFn[33]
     var ctx: Context
 
-    mutating func run(rect: ScreenIntRect, aa_mask_ctx: AAMaskCtx, mask_ctx: MaskCtx, pixmap_src: PixmapRef, pixmap_dst: SubPixmapMut*):
+    func run(rect: ScreenIntRect, aa_mask_ctx: AAMaskCtx, mask_ctx: MaskCtx, pixmap_src: PixmapRef, pixmap_dst: SubPixmapMut*):
         if self.is_lowp:
             lowp_start(self.lowp_functions[..<self.len], self.lowp_tail_functions[..<self.len], rect, aa_mask_ctx, mask_ctx, &self.ctx, pixmap_src, pixmap_dst)
         else:
             highp_start(self.highp_functions[..<self.len], self.highp_tail_functions[..<self.len], rect, aa_mask_ctx, mask_ctx, &self.ctx, pixmap_src, pixmap_dst)
 
-    mutating func release():
+    func release():
         self.ctx.gradient.release()

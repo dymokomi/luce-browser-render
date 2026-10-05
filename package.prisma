@@ -1,7 +1,7 @@
 #prisma 4.0
 def package "luce-browser-render" {
     str owner = "dymokomi"
-    str version = "0.2.1"
+    str version = "0.3.0"
     str kind = "package"
     str language = "luce-base"
     str description = "Geometry, color, fonts, the CPU rasterizer and the display list of the luce-browser port of Ladybird, in luce-base."
@@ -10,25 +10,25 @@ def package "luce-browser-render" {
 
     def dependency "luce-std" {
         str owner = "dymokomi"
-        str version = "^0.3.2"
+        str version = "^0.4.0"
         str path = "../luce-std"
     }
 
     def dependency "luce-browser-foundation" {
         str owner = "dymokomi"
-        str version = "^0.2.0"
+        str version = "^0.3.0"
         str path = "../luce-browser-foundation"
     }
 
     def dependency "luce-fonts" {
         str owner = "dymokomi"
-        str version = "^0.3.3"
+        str version = "^0.4.0"
         str path = "../luce-fonts"
     }
 
     def dependency "luce-browser-css" {
         str owner = "dymokomi"
-        str version = "^0.2.0"
+        str version = "^0.3.0"
         str path = "../luce-browser-css"
     }
 }

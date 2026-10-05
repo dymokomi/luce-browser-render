@@ -59,7 +59,7 @@ pub enum Shader:
     ## Makes a gradient interpolate its colors premultiplied (Skia's
     ## Interpolation::InPremul::kYes, which Ladybird's CSS gradients use) instead of
     ## unpremultiplied. Other shaders are unchanged.
-    pub mutating func interpolate_in_premul():
+    pub func interpolate_in_premul():
         match self:
             .linear_gradient(g):
                 var ng = g
@@ -88,7 +88,7 @@ pub enum Shader:
             .pattern(patt): return pattern_push_stages(&patt, cs, p)
 
     ## Transforms the shader.
-    pub mutating func transform(ts: Transform):
+    pub func transform(ts: Transform):
         match self:
             .solid_color(_):
                 return
@@ -113,7 +113,7 @@ pub enum Shader:
     ## the same as Skia's `SkPaint::setAlpha`. Unlike Skia, we do not support global alpha/opacity,
     ## which is in Skia is set via the alpha channel of the `SkPaint::fColor4f`. Instead, you can
     ## shift the opacity of the shader to whatever value you need.
-    pub mutating func apply_opacity(opacity: f32):
+    pub func apply_opacity(opacity: f32):
         match self:
             .solid_color(c):
                 var nc = c
@@ -155,7 +155,7 @@ pub enum Shader:
                 return self
 
     ## Frees a gradient shader's stops (Rust's `Drop`).
-    pub mutating func release():
+    pub func release():
         match self:
             .linear_gradient(g):
                 var ng = g
@@ -179,7 +179,7 @@ pub struct LinearGradient:
     ## Creates a new linear gradient shader. Returns `Shader.solid_color` when `stops`
     ## has a single stop, `start` and `end` are the same (degenerate), and none when there
     ## are no stops or the transform is not invertible. The stops are copied.
-    pub static func new_(start: Point, end: Point, stops: const GradientStop[], mode: SpreadMode, transform: Transform) -> Shader?:
+    pub func new_(start: Point, end: Point, stops: const GradientStop[], mode: SpreadMode, transform: Transform) -> Shader?:
         if stops.length == 0:
             return none
 
@@ -254,7 +254,7 @@ pub struct SweepGradient:
 
     ## Creates a new sweep gradient shader around `center`, from `start_angle` to
     ## `end_angle` in degrees. The stops are copied.
-    pub static func new_(center: Point, start_angle: f32, end_angle: f32, stops: const GradientStop[], mode0: SpreadMode, transform: Transform) -> Shader?:
+    pub func new_(center: Point, start_angle: f32, end_angle: f32, stops: const GradientStop[], mode0: SpreadMode, transform: Transform) -> Shader?:
         var mode = mode0
         if not math32.is_finite(start_angle) or not math32.is_finite(end_angle) or start_angle > end_angle:
             return none
@@ -329,5 +329,5 @@ pub struct Pattern:
     var transform: Transform
 
     ## Creates a new pattern shader. `opacity` will be clamped to the 0..=1 range.
-    pub static func new_(pixmap: PixmapRef, spread_mode: SpreadMode, quality: FilterQuality, opacity: f32, transform: Transform) -> Shader:
+    pub func new_(pixmap: PixmapRef, spread_mode: SpreadMode, quality: FilterQuality, opacity: f32, transform: Transform) -> Shader:
         return .pattern(p = Pattern(pixmap = pixmap, spread_mode = spread_mode, quality = quality, opacity = normalized_clamped(opacity), transform = transform))

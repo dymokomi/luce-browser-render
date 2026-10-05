@@ -89,7 +89,7 @@ pub func scroll_state_cumulative_offset(this: const ScrollState*, index0: u64) -
     var offset: gfx.CssPixelPoint
     var index = index0
     while index != 0:
-        discard(gfx.css_pixel_point_add_assign(&offset, scroll_frame_own_offset(scroll_state_frame_at_const(this, index))))
+        _ = gfx.css_pixel_point_add_assign(&offset, scroll_frame_own_offset(scroll_state_frame_at_const(this, index)))
         index = scroll_frame_parent_index(scroll_state_frame_at_const(this, index))
     return offset
 
@@ -120,7 +120,7 @@ pub struct ScrollFrameIterator: luce.Iterable[ScrollFrameEntry, ScrollFrameItera
     pub func iterator() -> ScrollFrameIterator: return self
 
     ## The next frame, or none after the last.
-    pub mutating func next() -> ScrollFrameEntry?: return scroll_frame_iterator_next(&self)
+    pub func next() -> ScrollFrameEntry?: return scroll_frame_iterator_next(&self)
 
 ## `for (size_t i = 1; i < m_scroll_frames.size(); ++i) { if (m_scroll_frames[i].is_sticky() != sticky) continue; callback(...) }`.
 func scroll_frame_iterator_next(this: ScrollFrameIterator*) -> ScrollFrameEntry?:

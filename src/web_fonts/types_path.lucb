@@ -151,7 +151,7 @@ pub func path_impl_to_svg_string(this: PathImpl*) -> ak.String:
 pub let path_impl_vtable: PathImplVTable = PathImplVTable(class_info = &path_impl_class)
 
 ## Class information of Gfx::PathImpl: name, class-id range (pre-order), size, vtable.
-pub let path_impl_class: ak.ClassInfo = ak.ClassInfo(name = "PathImpl", first_id = 0, last_id = 0, size = sizeof(PathImpl), vtable = (const void*)&path_impl_vtable)
+pub let path_impl_class: ak.ClassInfo = ak.ClassInfo(name = "PathImpl", first_id = 0, last_id = 0, size = memory.size_of(PathImpl), vtable = (const void*)&path_impl_vtable)
 
 ## is<Gfx::PathImpl>: the class-id range test.
 pub func is_path_impl[P: IsPathImpl](p: P*) -> bool:

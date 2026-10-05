@@ -34,11 +34,11 @@ pub struct Point:
     pub var y: f32
 
     ## Creates a new `Point`.
-    pub static func from_xy(x: f32, y: f32) -> Point:
+    pub func from_xy(x: f32, y: f32) -> Point:
         return Point(x = x, y = y)
 
     ## Creates a new `Point` from `f32x2`.
-    pub static func from_f32x2(r: F32x2) -> Point:
+    pub func from_f32x2(r: F32x2) -> Point:
         return Point(x = r[0], y = r[1])
 
     ## Converts a `Point` into a `f32x2`.
@@ -46,7 +46,7 @@ pub struct Point:
         return [self.x, self.y]
 
     ## Creates a point at 0x0 position.
-    pub static func zero() -> Point:
+    pub func zero() -> Point:
         return Point(x = 0.0, y = 0.0)
 
     ## Returns true if x and y are both zero.
@@ -68,13 +68,13 @@ pub struct Point:
     ## Scales (fX, fY) so that length() returns one, while preserving ratio of fX to fY, if
     ## possible. If prior length is nearly zero, sets vector to (0, 0) and returns false;
     ## otherwise returns true.
-    pub mutating func normalize() -> bool:
+    pub func normalize() -> bool:
         return self.set_length_from(self.x, self.y, 1.0)
 
     ## Sets vector to (x, y) scaled so length() returns one, and so that (x, y) is
     ## proportional to (x, y). If (x, y) length is nearly zero, sets vector to (0, 0) and
     ## returns false; otherwise returns true.
-    pub mutating func set_normalize(x: f32, y: f32) -> bool:
+    pub func set_normalize(x: f32, y: f32) -> bool:
         return self.set_length_from(x, y, 1.0)
 
     func can_normalize() -> bool:
@@ -91,12 +91,12 @@ pub struct Point:
 
     ## Scales vector so that distanceToOrigin() returns length, if possible. If former length
     ## is nearly zero, sets vector to (0, 0) and return false; otherwise returns true.
-    pub mutating func set_length(length: f32) -> bool:
+    pub func set_length(length: f32) -> bool:
         return self.set_length_from(self.x, self.y, length)
 
     ## Sets vector to (x, y) scaled to length, if possible. If former length is nearly zero,
     ## sets vector to (0, 0) and return false; otherwise returns true.
-    pub mutating func set_length_from(x: f32, y: f32, length: f32) -> bool:
+    pub func set_length_from(x: f32, y: f32, length: f32) -> bool:
         return set_point_length(&self, x, y, length)
 
     ## Returns the Euclidean distance from `other`.
@@ -123,23 +123,23 @@ pub struct Point:
         return self.dot(self)
 
     ## Scales Point in-place by scale.
-    pub mutating func scale(scale: f32):
+    pub func scale(scale: f32):
         self.x *= scale
         self.y *= scale
 
     func scaled(scale: f32) -> Point:
         return Point.from_xy(self.x * scale, self.y * scale)
 
-    mutating func swap_coords():
+    func swap_coords():
         let x = self.x
         self.x = self.y
         self.y = x
 
-    mutating func rotate_cw():
+    func rotate_cw():
         self.swap_coords()
         self.x = -self.x
 
-    mutating func rotate_ccw():
+    func rotate_ccw():
         self.swap_coords()
         self.y = -self.y
 

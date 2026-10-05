@@ -129,7 +129,7 @@ func set_cubic_end_normal(s: const PathStroker*, cubic: const Point[], normal_ab
         *unit_normal_cd = unit_normal_ab
         return
 
-    discard(set_normal_unit_normal2(cd, s.radius, normal_cd, unit_normal_cd))
+    _ = set_normal_unit_normal2(cd, s.radius, normal_cd, unit_normal_cd)
 
 func compare_quad_cubic(s: const PathStroker*, cubic: const Point[], quad_points: QuadConstruct*) -> ResultType:
     # get the quadratic approximation of the stroke
@@ -161,7 +161,7 @@ func cubic_quad_ends(s: const PathStroker*, cubic: const Point[], quad_points: Q
 func init_quad(s: PathStroker*, stroke_type: StrokeType, start: f32, end: f32, quad_points: QuadConstruct*):
     s.stroke_type = stroke_type
     s.found_tangents = false
-    discard(quad_points.init_(start, end))
+    _ = quad_points.init_(start, end)
 
 func quad_stroke(s: PathStroker*, quad: const Point[], quad_points: QuadConstruct*) -> bool:
     let result_type = compare_quad_quad(s, quad, quad_points)
@@ -181,11 +181,11 @@ func quad_stroke(s: PathStroker*, quad: const Point[], quad_points: QuadConstruc
         return true
 
     var half_quad = QuadConstruct.default()
-    discard(half_quad.init_with_start(quad_points))
+    _ = half_quad.init_with_start(quad_points)
     if not quad_stroke(s, quad, &half_quad):
         return false
 
-    discard(half_quad.init_with_end(quad_points))
+    _ = half_quad.init_with_end(quad_points)
     if not quad_stroke(s, quad, &half_quad):
         return false
 
@@ -349,12 +349,12 @@ struct QuadConstruct:
     var end_set: bool
     var opposite_tangents: bool  # set if coincident tangents have opposite directions
 
-    static func default() -> QuadConstruct:
+    func default() -> QuadConstruct:
         var q: QuadConstruct
         return q
 
     # return false if start and end are too close to have a unique middle
-    mutating func init_(start: f32, end: f32) -> bool:
+    func init_(start: f32, end: f32) -> bool:
         self.start_t = start
         self.mid_t = normalized_clamped(half(start + end))
         self.end_t = end
@@ -362,7 +362,7 @@ struct QuadConstruct:
         self.end_set = false
         return self.start_t < self.mid_t and self.mid_t < self.end_t
 
-    mutating func init_with_start(parent: const QuadConstruct*) -> bool:
+    func init_with_start(parent: const QuadConstruct*) -> bool:
         if not self.init_(parent.start_t, parent.mid_t):
             return false
 
@@ -371,7 +371,7 @@ struct QuadConstruct:
         self.start_set = true
         return true
 
-    mutating func init_with_end(parent: const QuadConstruct*) -> bool:
+    func init_with_end(parent: const QuadConstruct*) -> bool:
         if not self.init_(parent.mid_t, parent.end_t):
             return false
 

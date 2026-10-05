@@ -19,7 +19,7 @@ struct ShiftedIntRect:
     var shifted_: ScreenIntRect
     var shift: i32
 
-    static func new_(rect: ScreenIntRect, shift: i32) -> ShiftedIntRect?:
+    func new_(rect: ScreenIntRect, shift: i32) -> ShiftedIntRect?:
         let s = (u32)shift
         let shifted = ScreenIntRect.from_xywh(rect.x() << s, rect.y() << s, rect.width() << s, rect.height() << s) else return none
         return ShiftedIntRect(shifted_ = shifted, shift = shift)
@@ -36,7 +36,7 @@ struct BasicEdgeBuilder:
     var edges: Vec[Edge]
     var clip_shift: i32
 
-    static func new_(clip_shift: i32) -> BasicEdgeBuilder:
+    func new_(clip_shift: i32) -> BasicEdgeBuilder:
         var b = BasicEdgeBuilder(clip_shift = clip_shift)
         b.edges.reserve(64)  # TODO: stack array + fallback
         return b
@@ -45,7 +45,7 @@ struct BasicEdgeBuilder:
     # mimicking it with Vec. The caller owns (and releases) the returned edges.
     ## `can_cull_to_the_right` is Skia's `!isKnownToBeConvex()`: if we're convex, then we
     ## need both edges, even if the right edge is past the clip.
-    static func build_edges(path: const Path*, clip: const ShiftedIntRect*?, clip_shift: i32, can_cull_to_the_right: bool) -> Vec[Edge]?:
+    func build_edges(path: const Path*, clip: const ShiftedIntRect*?, clip_shift: i32, can_cull_to_the_right: bool) -> Vec[Edge]?:
         var builder = BasicEdgeBuilder.new_(clip_shift)
         if not builder.build(path, clip, can_cull_to_the_right):
             # log::warn!("infinite or NaN segments detected during edges building")
@@ -59,7 +59,7 @@ struct BasicEdgeBuilder:
         return builder.edges
 
     # TODO: build_poly
-    mutating func build(path: const Path*, clip: const ShiftedIntRect*?, can_cull_to_the_right: bool) -> bool:
+    func build(path: const Path*, clip: const ShiftedIntRect*?, can_cull_to_the_right: bool) -> bool:
         if let c = clip:
             let clip_rect = c.recover_().to_rect()
             var clipper_iter = EdgeClipperIter.new_(path, clip_rect, can_cull_to_the_right)
@@ -109,7 +109,7 @@ struct BasicEdgeBuilder:
 
         return true
 
-    mutating func push_line(points: const Point[]):
+    func push_line(points: const Point[]):
         if let edge = LineEdge.new_(points[0], points[1], self.clip_shift):
             var combine = Combine.no
             if edge.is_vertical() and not self.edges.is_empty():
@@ -119,7 +119,7 @@ struct BasicEdgeBuilder:
 
             match combine:
                 .total:
-                    discard(self.edges.pop())
+                    _ = self.edges.pop()
                 .partial:
                     return
                 .no:
@@ -127,11 +127,11 @@ struct BasicEdgeBuilder:
                 _:
                     return
 
-    mutating func push_quad(points: const Point[]):
+    func push_quad(points: const Point[]):
         if let edge = QuadraticEdge.new_(points, self.clip_shift):
             self.edges.push(Edge.from_quad(edge))
 
-    mutating func push_cubic(points: const Point[]):
+    func push_cubic(points: const Point[]):
         if let edge = CubicEdge.new_(points, self.clip_shift):
             self.edges.push(Edge.from_cubic(edge))
 
@@ -188,11 +188,11 @@ struct PathEdgeIter:
     var move_to: Point
     var needs_close_line: bool
 
-    mutating func close_line() -> PathEdge?:
+    func close_line() -> PathEdge?:
         self.needs_close_line = false
         return .line_to(p0 = self.path.points.data[self.points_index - 1], p1 = self.move_to)
 
-    mutating func next() -> PathEdge?:
+    func next() -> PathEdge?:
         while self.verb_index < self.path.verbs.len:
             let verb = self.path.verbs.data[self.verb_index]
             self.verb_index += 1

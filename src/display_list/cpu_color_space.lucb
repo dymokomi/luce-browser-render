@@ -256,7 +256,7 @@ func cpu_color_from_srgb(space: CpuColorSpace, color: CpuColor4) -> CpuColor4:
             let (h, w, bl) = cpu_srgb_to_hwb(r, g, b)
             return [h, w, bl, a]
         _:
-            discard(0)
+            _ = 0
     let lr = cpu_srgb_to_linear(r)
     let lg = cpu_srgb_to_linear(g)
     let lb = cpu_srgb_to_linear(b)
@@ -270,7 +270,7 @@ func cpu_color_from_srgb(space: CpuColorSpace, color: CpuColor4) -> CpuColor4:
             let (c, h) = cpu_to_polar(oa, ob)
             return [l, c, h, a]
         _:
-            discard(0)
+            _ = 0
     let (x, y, z) = cpu_mat3_mul(lin_srgb_to_xyz_d65, lr, lg, lb)
     match space:
         .display_p3:
@@ -283,7 +283,7 @@ func cpu_color_from_srgb(space: CpuColorSpace, color: CpuColor4) -> CpuColor4:
             let (rr, rg, rb) = cpu_mat3_mul(xyz_d65_to_lin_rec2020, x, y, z)
             return [cpu_linear_to_rec2020(rr), cpu_linear_to_rec2020(rg), cpu_linear_to_rec2020(rb), a]
         _:
-            discard(0)
+            _ = 0
     let (x50, y50, z50) = cpu_mat3_mul(xyz_d65_to_d50, x, y, z)
     match space:
         .prophoto_rgb:
@@ -320,7 +320,7 @@ func cpu_color_to_srgb(space: CpuColorSpace, color: CpuColor4) -> CpuColor4:
             let (r, g, b) = cpu_oklab_to_lin_srgb(color[0], oa, ob)
             return [cpu_linear_to_srgb(r), cpu_linear_to_srgb(g), cpu_linear_to_srgb(b), a]
         _:
-            discard(0)
+            _ = 0
     match space:
         .display_p3:
             let (x, y, z) = cpu_mat3_mul(lin_p3_to_xyz_d65, cpu_srgb_to_linear(color[0]), cpu_srgb_to_linear(color[1]), cpu_srgb_to_linear(color[2]))

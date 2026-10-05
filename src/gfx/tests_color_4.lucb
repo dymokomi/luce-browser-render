@@ -400,7 +400,7 @@ test "from_cicp":
         if bits != test_case.bits:
             print(f"cicp {test_case.primaries} {test_case.transfer}: bits differ")
             for i in 0..<16:
-                if bits[i] != test_case.bits[i]: print(f"    [{i}] got {hex(bits[i])}, expected {hex(test_case.bits[i])}")
+                if bits[i] != test_case.bits[i]: print(f"    [{i}] got {bits[i]:x}, expected {test_case.bits[i]:x}")
         assert(bits == test_case.bits)
 
 test "color space constructors":
@@ -411,10 +411,10 @@ test "color space constructors":
     var loaded = color_space_load_from_icc_bytes(empty[0..<0]) else trap("empty profile")
     assert(*color_space_color_space_sk_sp(&loaded) == none)
     var failed = false
-    discard(color_space_load_from_icc_bytes(empty) catch failure:
+    _ = color_space_load_from_icc_bytes(empty) catch failure:
         assert(failure.message == "Failed to parse the ICC profile")
         failed = true
-        recover loaded)
+        recover loaded
     assert(failed)
     let impl = new ColorSpaceImpl(color_space = none) else trap("out of memory")
     var wrapped: ColorSpace = ---
@@ -438,7 +438,7 @@ test "anonymous buffer":
 ## A Palette over a new SystemTheme whose every color, alignment, flag, metric and path is
 ## derived from its role, so that each accessor can be checked against the role it reads.
 func palette_with_role_values() -> Palette:
-    let buffer = core_anonymous_buffer_create_with_size(sizeof(SystemTheme)) else trap("create")
+    let buffer = core_anonymous_buffer_create_with_size(memory.size_of(SystemTheme)) else trap("create")
     let impl = palette_impl_create_with_anonymous_buffer(buffer)
     let theme = (SystemTheme*)palette_impl_theme(impl)
     for i in 0..<99: theme.color[i] = 0xff000000 | (u32)i
@@ -708,7 +708,7 @@ test "palette setters":
     let clone = palette_impl_clone(palette_impl_const(&palette))
     let cloned_accent = palette_impl_color(clone, ColorRole.accent)
     assert(color_value(&cloned_accent) == 0xff010203)
-    let replacement = core_anonymous_buffer_create_with_size(sizeof(SystemTheme)) else trap("create")
+    let replacement = core_anonymous_buffer_create_with_size(memory.size_of(SystemTheme)) else trap("create")
     palette_impl_replace_internal_buffer(clone, replacement)
     let replaced_accent = palette_impl_color(clone, ColorRole.accent)
     assert(color_value(&replaced_accent) == 0)

@@ -119,7 +119,7 @@ func cpu_perlin_noise(data: const CpuPerlinData*, fractal: bool, octaves: i32, s
     var stitch_y = (f32)data.stitch_height
     var ratio: f32 = 1.0
     for octave in 0..<octaves:
-        discard(octave)
+        _ = octave
         var floor_x = math32.floor(noise_x)
         var floor_y = math32.floor(noise_y)
         var ceil_x = floor_x + 1.0

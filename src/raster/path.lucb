@@ -92,7 +92,7 @@ pub struct Path:
 
     ## Transforms the path in place (Rust's `Path::transform`, which consumes the path).
     ## Answers false when the result has no valid bounds; the path must then be released.
-    pub mutating func transform(ts: Transform) -> bool:
+    pub func transform(ts: Transform) -> bool:
         if ts.is_identity():
             return true
         ts.map_points(self.points.view())
@@ -126,7 +126,7 @@ pub struct Path:
         return Path(verbs = self.verbs.clone(), points = self.points.clone(), weights = self.weights.clone(), bounds_ = self.bounds_)
 
     ## Clears the path and returns a `PathBuilder` that will reuse an allocated memory.
-    pub mutating func clear() -> PathBuilder:
+    pub func clear() -> PathBuilder:
         self.verbs.clear()
         self.points.clear()
         self.weights.clear()
@@ -137,7 +137,7 @@ pub struct Path:
         return builder
 
     ## Frees the path's storage.
-    pub mutating func release():
+    pub func release():
         self.verbs.release()
         self.points.release()
         self.weights.release()
@@ -211,10 +211,10 @@ pub struct PathSegmentsIter:
     ## Sets the auto closing mode. Off by default. When enabled, emits an additional
     ## `PathSegment.line_to` from the current position to the previous `PathSegment.move_to`.
     ## And only then emits `PathSegment.close`.
-    pub mutating func set_auto_close(flag: bool):
+    pub func set_auto_close(flag: bool):
         self.is_auto_close = flag
 
-    mutating func auto_close() -> PathSegment:
+    func auto_close() -> PathSegment:
         if self.is_auto_close and not points_equal(self.last_point, self.last_move_to):
             self.verb_index -= 1
             return .line_to(p = self.last_move_to)
@@ -257,7 +257,7 @@ pub struct PathSegmentsIter:
         return none
 
     ## The next segment.
-    pub mutating func next() -> PathSegment?:
+    pub func next() -> PathSegment?:
         if self.verb_index < self.path.verbs.len:
             let verb = self.path.verbs.data[self.verb_index]
             self.verb_index += 1

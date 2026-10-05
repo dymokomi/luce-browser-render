@@ -203,7 +203,7 @@ test "geometry: css_point_div":
 test "geometry: css_point_div_assign":
     # C++: p.x().raw_value(); p.y().raw_value()
     var p = CssPixelPoint(css_pixels_from_int(10), css_pixels_from_int(-20))
-    discard(css_pixel_point_div_assign(&p, css_pixels_from_int(3)))
+    _ = css_pixel_point_div_assign(&p, css_pixels_from_int(3))
     assert((i64)(css_pixel_point_x(&p).raw_value()) == 1920)
     assert((i64)(css_pixel_point_y(&p).raw_value()) == -3840)
 
@@ -790,7 +790,7 @@ test "geometry: int_rect_mul":
 test "geometry: css_rect_mul_assign":
     # C++: r.x().raw_value(); r.y().raw_value(); r.width().raw_value(); r.height().raw_value()
     var r = test_crect(1.0, -2.0, 3.0, 4.0)
-    discard(css_pixel_rect_mul_assign(&r, test_px(1.5)))
+    _ = css_pixel_rect_mul_assign(&r, test_px(1.5))
     assert((i64)(css_pixel_rect_x(&r).raw_value()) == 96)
     assert((i64)(css_pixel_rect_y(&r).raw_value()) == -192)
     assert((i64)(css_pixel_rect_width(&r).raw_value()) == 288)

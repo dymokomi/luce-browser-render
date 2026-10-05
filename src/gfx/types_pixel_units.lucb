@@ -31,16 +31,16 @@ pub struct CssPixels: luce.Comparable:
     pub func compare(other: CssPixels) -> i64: return (i64)css_pixels_cmp(&self, other)
 
     ## CSSPixels::from_raw.
-    pub static func from_raw(value: i32) -> CssPixels: return css_pixels_from_raw(value)
+    pub func from_raw(value: i32) -> CssPixels: return css_pixels_from_raw(value)
 
     ## CSSPixels(I) for a signed integer (saturating).
-    pub static func from_int(value: i64) -> CssPixels: return css_pixels_from_int(value)
+    pub func from_int(value: i64) -> CssPixels: return css_pixels_from_int(value)
 
     ## explicit CSSPixels(float): the nearest value.
-    pub static func from_f32(value: f32) -> CssPixels: return css_pixels_from_f32(value)
+    pub func from_f32(value: f32) -> CssPixels: return css_pixels_from_f32(value)
 
     ## explicit CSSPixels(double): the nearest value.
-    pub static func from_f64(value: f64) -> CssPixels: return css_pixels_from_f64(value)
+    pub func from_f64(value: f64) -> CssPixels: return css_pixels_from_f64(value)
 
     ## CSSPixels::raw_value.
     pub func raw_value() -> i32: return self.m_value

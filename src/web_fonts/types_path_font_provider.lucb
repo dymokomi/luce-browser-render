@@ -39,7 +39,7 @@ pub struct PathFontProviderVTable:
 pub let path_font_provider_vtable: PathFontProviderVTable = PathFontProviderVTable(system_font_provider_vtable = SystemFontProviderVTable(class_info = &path_font_provider_class, name = path_font_provider_name_impl, get_font = path_font_provider_get_font_impl, for_each_typeface_with_family_name = path_font_provider_for_each_typeface_with_family_name_impl))
 
 ## Class information of Gfx::PathFontProvider: name, class-id range (pre-order), size, vtable.
-pub let path_font_provider_class: ak.ClassInfo = ak.ClassInfo(name = "PathFontProvider", first_id = 1, last_id = 1, size = sizeof(PathFontProvider), vtable = (const void*)&path_font_provider_vtable)
+pub let path_font_provider_class: ak.ClassInfo = ak.ClassInfo(name = "PathFontProvider", first_id = 1, last_id = 1, size = memory.size_of(PathFontProvider), vtable = (const void*)&path_font_provider_vtable)
 
 ## is<Gfx::PathFontProvider>: the class-id range test.
 pub func is_path_font_provider[P: IsSystemFontProvider](p: P*) -> bool:

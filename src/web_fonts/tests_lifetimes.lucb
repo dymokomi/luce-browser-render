@@ -37,7 +37,7 @@ noinline func test_lifetimes_churn():
     for i in 0..<4096:
         let junk = new u8[96] else trap("out of memory")
         memory.set(junk, 0xA5)
-        discard(i)
+        _ = i
 
 # mark: What a font answers ======================================================================
 
@@ -68,8 +68,8 @@ noinline func test_lifetimes_answers(font: const Font*, text: str) -> TestFontAn
     let first_point = outline.points.at(0)
     # A single ASCII character goes through the shaping cache's own table.
     let single = ak.utf16_string_from_str("W")
-    discard(shape_text_f32(gfx.FloatPoint(m_x = 0.0, m_y = 0.0), 0.0, ak.utf16_string_base_utf16_view(&single.utf16_string_base), font, GlyphRunTextType.ltr))
-    discard(font_is_emoji_font(font))
+    _ = shape_text_f32(gfx.FloatPoint(m_x = 0.0, m_y = 0.0), 0.0, ak.utf16_string_base_utf16_view(&single.utf16_string_base), font, GlyphRunTextType.ltr)
+    _ = font_is_emoji_font(font)
     return TestFontAnswers(
         glyph_count = ak.vector_size(&run.m_glyphs),
         glyph_id_sum = glyph_id_sum,

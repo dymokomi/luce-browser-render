@@ -45,7 +45,7 @@ pub struct TypefaceSkiaVTable:
 pub let typeface_skia_vtable: TypefaceSkiaVTable = TypefaceSkiaVTable(typeface_vtable = TypefaceVTable(class_info = &typeface_skia_class, glyph_count = typeface_skia_glyph_count_impl, units_per_em = typeface_skia_units_per_em_impl, glyph_id_for_code_point = typeface_skia_glyph_id_for_code_point_impl, family = typeface_skia_family_impl, weight = typeface_skia_weight_impl, width = typeface_skia_width_impl, slope = typeface_skia_slope_impl, is_skia = typeface_skia_is_skia_impl, buffer = typeface_skia_buffer_impl, ttc_index = typeface_skia_ttc_index_impl))
 
 ## Class information of Gfx::TypefaceSkia: name, class-id range (pre-order), size, vtable.
-pub let typeface_skia_class: ak.ClassInfo = ak.ClassInfo(name = "TypefaceSkia", first_id = 1, last_id = 1, size = sizeof(TypefaceSkia), vtable = (const void*)&typeface_skia_vtable)
+pub let typeface_skia_class: ak.ClassInfo = ak.ClassInfo(name = "TypefaceSkia", first_id = 1, last_id = 1, size = memory.size_of(TypefaceSkia), vtable = (const void*)&typeface_skia_vtable)
 
 ## is<Gfx::TypefaceSkia>: the class-id range test.
 pub func is_typeface_skia[P: IsTypeface](p: P*) -> bool:

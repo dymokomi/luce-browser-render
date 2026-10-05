@@ -338,20 +338,20 @@ func sk_measure_compute_pos_tan(pts: const SkPoint[], seg_type: u8, t: f32) -> (
     var tangent = SkPoint(x = 0.0, y = 0.0)
     if seg_type == sk_seg_line:
         pos = SkPoint(x = sk_scalar_interp(pts[0].x, pts[1].x, t), y = sk_scalar_interp(pts[0].y, pts[1].y, t))
-        discard(sk_point_set_length(&tangent, pts[1].x - pts[0].x, pts[1].y - pts[0].y, 1.0))
+        _ = sk_point_set_length(&tangent, pts[1].x - pts[0].x, pts[1].y - pts[0].y, 1.0)
     elif seg_type == sk_seg_quad:
         pos = sk_eval_quad_at(pts, t)
         let raw = sk_eval_quad_tangent_at(pts, t)
-        discard(sk_point_set_length(&tangent, raw.x, raw.y, 1.0))
+        _ = sk_point_set_length(&tangent, raw.x, raw.y, 1.0)
     elif seg_type == sk_seg_conic:
         let conic = sk_conic(pts[0], pts[2], pts[3], pts[1].x)
         pos = sk_conic_eval_at(&conic, t)
         let raw = sk_conic_eval_tangent_at(&conic, t)
-        discard(sk_point_set_length(&tangent, raw.x, raw.y, 1.0))
+        _ = sk_point_set_length(&tangent, raw.x, raw.y, 1.0)
     elif seg_type == sk_seg_cubic:
         let (loc, raw) = sk_eval_cubic_at(pts, t)
         pos = loc
-        discard(sk_point_set_length(&tangent, raw.x, raw.y, 1.0))
+        _ = sk_point_set_length(&tangent, raw.x, raw.y, 1.0)
     else:
         trap("unknown segType")
     return (pos, tangent)

@@ -178,8 +178,8 @@ pub func css_pixel_point_div(this: const CssPixelPoint*, factor: CssPixels) -> C
 ## Ported from Libraries/LibGfx/Point.h:162 Gfx::Point::operator/= for CssPixelPoint.
 pub func css_pixel_point_div_assign(this: CssPixelPoint*, factor: CssPixels) -> CssPixelPoint*:
     # donor bug: CSSPixels::operator/= multiplies, so this multiplies too.
-    discard(css_pixels_div_assign(&this.m_x, factor))
-    discard(css_pixels_div_assign(&this.m_y, factor))
+    _ = css_pixels_div_assign(&this.m_x, factor)
+    _ = css_pixels_div_assign(&this.m_y, factor)
     return this
 
 # mark: Orientation and distances ===============================================================

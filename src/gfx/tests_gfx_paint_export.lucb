@@ -45,7 +45,7 @@ func test_gfx_paint_export_subtest(source_formats: const BitmapFormat[], source_
                     assert(bytes.length == expected.length)
                     for i in 0..<expected.length:
                         if bytes[i] != expected[i]:
-                            print(f"subtest {ak.string_view_text(bitmap_format_name(source_format))} -> {ak.string_view_text(export_format_name(export_format))} flip {maybe_flip_y_flag} premultiplied {source_premultiplied} -> {target_premultiplied}: byte {i} is {hex(bytes[i])}, expected {hex(expected[i])}")
+                            print(f"subtest {ak.string_view_text(bitmap_format_name(source_format))} -> {ak.string_view_text(export_format_name(export_format))} flip {maybe_flip_y_flag} premultiplied {source_premultiplied} -> {target_premultiplied}: byte {i} is {bytes[i]:x}, expected {expected[i]:x}")
                         assert(bytes[i] == expected[i])
 
 test "gfx paint: export_to_byte_buffer":

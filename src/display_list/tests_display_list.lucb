@@ -24,8 +24,8 @@ func test_visual_context_tree() -> AccumulatedVisualContextTree*:
     let angle: f32 = 30.0 * 3.14159265358979323846 / 180.0
     let c = math32.cos(angle)
     let sn = math32.sin(angle)
-    discard(accumulated_visual_context_tree_append(tree, .transform_data(value = TransformData(
-        matrix = test_matrix([[c, -sn, 0.0, 0.0], [sn, c, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]), origin = gfx.FloatPoint(m_x = 8.5, m_y = 2.0))), e))
+    _ = accumulated_visual_context_tree_append(tree, .transform_data(value = TransformData(
+        matrix = test_matrix([[c, -sn, 0.0, 0.0], [sn, c, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]), origin = gfx.FloatPoint(m_x = 8.5, m_y = 2.0))), e)
     return tree
 
 test "visual context tree: the sentinel":
@@ -137,19 +137,19 @@ func test_command_loop_tree() -> AccumulatedVisualContextTree*:
     var radii: CornerRadii
     radii.top_left = CornerRadius(horizontal_radius = 2, vertical_radius = 2)
     ak.vector_append_t(&tree.m_nodes, AccumulatedVisualContextNode(data = .clip_data(value = ClipData(rect = test_rect(0, 0, 10, 10), corner_radii = radii)), parent_index = t, depth = 3))
-    discard(accumulated_visual_context_tree_append(tree, .perspective_data(value = PerspectiveData(matrix = test_identity_matrix())), 0))
+    _ = accumulated_visual_context_tree_append(tree, .perspective_data(value = PerspectiveData(matrix = test_identity_matrix())), 0)
     return tree
 
 test "command loop: context switches around commands without bounds":
     let tree = test_command_loop_tree()
     let display_list_ = display_list_create(tree)
-    discard(display_list_append(display_list_, .save(value = Save()), 0))
-    discard(display_list_append(display_list_, .translate(value = Translate(delta = test_point(1, 2))), 3))
-    discard(display_list_append(display_list_, .save_layer(value = SaveLayer()), 4))
-    discard(display_list_append(display_list_, .restore(value = Restore()), 5))
-    discard(display_list_append(display_list_, .apply_effects(value = ApplyEffects(opacity = 0.75, compositing_and_blending_operator = gfx.CompositingAndBlendingOperator.normal)), 0))
-    discard(display_list_append(display_list_, .restore(value = Restore()), 0))
-    discard(display_list_append(display_list_, .restore(value = Restore()), 1))
+    _ = display_list_append(display_list_, .save(value = Save()), 0)
+    _ = display_list_append(display_list_, .translate(value = Translate(delta = test_point(1, 2))), 3)
+    _ = display_list_append(display_list_, .save_layer(value = SaveLayer()), 4)
+    _ = display_list_append(display_list_, .restore(value = Restore()), 5)
+    _ = display_list_append(display_list_, .apply_effects(value = ApplyEffects(opacity = 0.75, compositing_and_blending_operator = gfx.CompositingAndBlendingOperator.normal)), 0)
+    _ = display_list_append(display_list_, .restore(value = Restore()), 0)
+    _ = display_list_append(display_list_, .restore(value = Restore()), 1)
 
     let player = test_recording_player_create()
     var snapshot: ScrollStateSnapshot
@@ -162,7 +162,7 @@ test "command loop: the donor's recorded display list (gated on r08)":
     if not gfx_geometry_is_ported:
         return
     let tree = test_command_loop_tree()
-    discard(accumulated_visual_context_tree_append(tree, .scroll_data(value = ScrollData(scroll_frame_index = 1, is_sticky = false)), 0))
+    _ = accumulated_visual_context_tree_append(tree, .scroll_data(value = ScrollData(scroll_frame_index = 1, is_sticky = false)), 0)
     let display_list_ = display_list_create(tree)
     var recorder = display_list_recorder_new(display_list_)
     let red = test_color(255, 0, 0, 255)

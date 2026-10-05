@@ -102,8 +102,8 @@ pub func css_pixel_rect_mul(this: const CssPixelRect*, factor: CssPixels) -> Css
 
 ## Ported from Libraries/LibGfx/Rect.h:427 Gfx::Rect::operator*= for CssPixelRect.
 pub func css_pixel_rect_mul_assign(this: CssPixelRect*, factor: CssPixels) -> CssPixelRect*:
-    discard(css_pixel_point_mul_assign(&this.m_location, factor))
-    discard(css_pixel_size_mul_assign(&this.m_size, factor))
+    _ = css_pixel_point_mul_assign(&this.m_location, factor)
+    _ = css_pixel_size_mul_assign(&this.m_size, factor)
     return this
 
 ## Ported from Libraries/LibGfx/Rect.h:434 Gfx::Rect::intersect for CssPixelRect.

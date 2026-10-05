@@ -36,7 +36,7 @@ pub func paint_style_is_visible(this: PaintStyle*) -> bool:
 pub let paint_style_vtable: PaintStyleVTable = PaintStyleVTable(class_info = &paint_style_class)
 
 ## Class information of Gfx::PaintStyle: name, class-id range (pre-order), size, vtable.
-pub let paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "PaintStyle", first_id = 0, last_id = 9, size = sizeof(PaintStyle), vtable = (const void*)&paint_style_vtable)
+pub let paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "PaintStyle", first_id = 0, last_id = 9, size = memory.size_of(PaintStyle), vtable = (const void*)&paint_style_vtable)
 
 ## is<Gfx::PaintStyle>: the class-id range test.
 pub func is_paint_style[P: IsPaintStyle](p: P*) -> bool:
@@ -75,7 +75,7 @@ pub struct SolidColorPaintStyleVTable:
 pub let solid_color_paint_style_vtable: SolidColorPaintStyleVTable = SolidColorPaintStyleVTable(paint_style_vtable = PaintStyleVTable(class_info = &solid_color_paint_style_class, is_visible = solid_color_paint_style_is_visible_impl))
 
 ## Class information of Gfx::SolidColorPaintStyle: name, class-id range (pre-order), size, vtable.
-pub let solid_color_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "SolidColorPaintStyle", first_id = 9, last_id = 9, size = sizeof(SolidColorPaintStyle), vtable = (const void*)&solid_color_paint_style_vtable)
+pub let solid_color_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "SolidColorPaintStyle", first_id = 9, last_id = 9, size = memory.size_of(SolidColorPaintStyle), vtable = (const void*)&solid_color_paint_style_vtable)
 
 ## is<Gfx::SolidColorPaintStyle>: the class-id range test.
 pub func is_solid_color_paint_style[P: IsPaintStyle](p: P*) -> bool:
@@ -115,7 +115,7 @@ pub struct GradientPaintStyleVTable:
 pub let gradient_paint_style_vtable: GradientPaintStyleVTable = GradientPaintStyleVTable(paint_style_vtable = PaintStyleVTable(class_info = &gradient_paint_style_class, is_visible = gradient_paint_style_is_visible_impl))
 
 ## Class information of Gfx::GradientPaintStyle: name, class-id range (pre-order), size, vtable.
-pub let gradient_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "GradientPaintStyle", first_id = 2, last_id = 8, size = sizeof(GradientPaintStyle), vtable = (const void*)&gradient_paint_style_vtable)
+pub let gradient_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "GradientPaintStyle", first_id = 2, last_id = 8, size = memory.size_of(GradientPaintStyle), vtable = (const void*)&gradient_paint_style_vtable)
 
 ## is<Gfx::GradientPaintStyle>: the class-id range test.
 pub func is_gradient_paint_style[P: IsPaintStyle](p: P*) -> bool:
@@ -156,7 +156,7 @@ pub struct CanvasPatternPaintStyleVTable:
 pub let canvas_pattern_paint_style_vtable: CanvasPatternPaintStyleVTable = CanvasPatternPaintStyleVTable(paint_style_vtable = PaintStyleVTable(class_info = &canvas_pattern_paint_style_class))
 
 ## Class information of Gfx::CanvasPatternPaintStyle: name, class-id range (pre-order), size, vtable.
-pub let canvas_pattern_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "CanvasPatternPaintStyle", first_id = 1, last_id = 1, size = sizeof(CanvasPatternPaintStyle), vtable = (const void*)&canvas_pattern_paint_style_vtable)
+pub let canvas_pattern_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "CanvasPatternPaintStyle", first_id = 1, last_id = 1, size = memory.size_of(CanvasPatternPaintStyle), vtable = (const void*)&canvas_pattern_paint_style_vtable)
 
 ## is<Gfx::CanvasPatternPaintStyle>: the class-id range test.
 pub func is_canvas_pattern_paint_style[P: IsPaintStyle](p: P*) -> bool:
@@ -205,7 +205,7 @@ pub struct CanvasLinearGradientPaintStyleVTable:
 pub let canvas_linear_gradient_paint_style_vtable: CanvasLinearGradientPaintStyleVTable = CanvasLinearGradientPaintStyleVTable(gradient_paint_style_vtable = GradientPaintStyleVTable(paint_style_vtable = PaintStyleVTable(class_info = &canvas_linear_gradient_paint_style_class, is_visible = gradient_paint_style_is_visible_impl)))
 
 ## Class information of Gfx::CanvasLinearGradientPaintStyle: name, class-id range (pre-order), size, vtable.
-pub let canvas_linear_gradient_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "CanvasLinearGradientPaintStyle", first_id = 4, last_id = 4, size = sizeof(CanvasLinearGradientPaintStyle), vtable = (const void*)&canvas_linear_gradient_paint_style_vtable)
+pub let canvas_linear_gradient_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "CanvasLinearGradientPaintStyle", first_id = 4, last_id = 4, size = memory.size_of(CanvasLinearGradientPaintStyle), vtable = (const void*)&canvas_linear_gradient_paint_style_vtable)
 
 ## is<Gfx::CanvasLinearGradientPaintStyle>: the class-id range test.
 pub func is_canvas_linear_gradient_paint_style[P: IsPaintStyle](p: P*) -> bool:
@@ -247,7 +247,7 @@ pub struct CanvasConicGradientPaintStyleVTable:
 pub let canvas_conic_gradient_paint_style_vtable: CanvasConicGradientPaintStyleVTable = CanvasConicGradientPaintStyleVTable(gradient_paint_style_vtable = GradientPaintStyleVTable(paint_style_vtable = PaintStyleVTable(class_info = &canvas_conic_gradient_paint_style_class, is_visible = gradient_paint_style_is_visible_impl)))
 
 ## Class information of Gfx::CanvasConicGradientPaintStyle: name, class-id range (pre-order), size, vtable.
-pub let canvas_conic_gradient_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "CanvasConicGradientPaintStyle", first_id = 3, last_id = 3, size = sizeof(CanvasConicGradientPaintStyle), vtable = (const void*)&canvas_conic_gradient_paint_style_vtable)
+pub let canvas_conic_gradient_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "CanvasConicGradientPaintStyle", first_id = 3, last_id = 3, size = memory.size_of(CanvasConicGradientPaintStyle), vtable = (const void*)&canvas_conic_gradient_paint_style_vtable)
 
 ## is<Gfx::CanvasConicGradientPaintStyle>: the class-id range test.
 pub func is_canvas_conic_gradient_paint_style[P: IsPaintStyle](p: P*) -> bool:
@@ -291,7 +291,7 @@ pub struct CanvasRadialGradientPaintStyleVTable:
 pub let canvas_radial_gradient_paint_style_vtable: CanvasRadialGradientPaintStyleVTable = CanvasRadialGradientPaintStyleVTable(gradient_paint_style_vtable = GradientPaintStyleVTable(paint_style_vtable = PaintStyleVTable(class_info = &canvas_radial_gradient_paint_style_class, is_visible = gradient_paint_style_is_visible_impl)))
 
 ## Class information of Gfx::CanvasRadialGradientPaintStyle: name, class-id range (pre-order), size, vtable.
-pub let canvas_radial_gradient_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "CanvasRadialGradientPaintStyle", first_id = 5, last_id = 5, size = sizeof(CanvasRadialGradientPaintStyle), vtable = (const void*)&canvas_radial_gradient_paint_style_vtable)
+pub let canvas_radial_gradient_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "CanvasRadialGradientPaintStyle", first_id = 5, last_id = 5, size = memory.size_of(CanvasRadialGradientPaintStyle), vtable = (const void*)&canvas_radial_gradient_paint_style_vtable)
 
 ## is<Gfx::CanvasRadialGradientPaintStyle>: the class-id range test.
 pub func is_canvas_radial_gradient_paint_style[P: IsPaintStyle](p: P*) -> bool:
@@ -338,7 +338,7 @@ pub struct SvgGradientPaintStyleVTable:
 pub let svg_gradient_paint_style_vtable: SvgGradientPaintStyleVTable = SvgGradientPaintStyleVTable(gradient_paint_style_vtable = GradientPaintStyleVTable(paint_style_vtable = PaintStyleVTable(class_info = &svg_gradient_paint_style_class, is_visible = gradient_paint_style_is_visible_impl)))
 
 ## Class information of Gfx::SVGGradientPaintStyle: name, class-id range (pre-order), size, vtable.
-pub let svg_gradient_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "SVGGradientPaintStyle", first_id = 6, last_id = 8, size = sizeof(SvgGradientPaintStyle), vtable = (const void*)&svg_gradient_paint_style_vtable)
+pub let svg_gradient_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "SVGGradientPaintStyle", first_id = 6, last_id = 8, size = memory.size_of(SvgGradientPaintStyle), vtable = (const void*)&svg_gradient_paint_style_vtable)
 
 ## is<Gfx::SVGGradientPaintStyle>: the class-id range test.
 pub func is_svg_gradient_paint_style[P: IsPaintStyle](p: P*) -> bool:
@@ -388,7 +388,7 @@ pub struct SvgLinearGradientPaintStyleVTable:
 pub let svg_linear_gradient_paint_style_vtable: SvgLinearGradientPaintStyleVTable = SvgLinearGradientPaintStyleVTable(svg_gradient_paint_style_vtable = SvgGradientPaintStyleVTable(gradient_paint_style_vtable = GradientPaintStyleVTable(paint_style_vtable = PaintStyleVTable(class_info = &svg_linear_gradient_paint_style_class, is_visible = gradient_paint_style_is_visible_impl))))
 
 ## Class information of Gfx::SVGLinearGradientPaintStyle: name, class-id range (pre-order), size, vtable.
-pub let svg_linear_gradient_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "SVGLinearGradientPaintStyle", first_id = 7, last_id = 7, size = sizeof(SvgLinearGradientPaintStyle), vtable = (const void*)&svg_linear_gradient_paint_style_vtable)
+pub let svg_linear_gradient_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "SVGLinearGradientPaintStyle", first_id = 7, last_id = 7, size = memory.size_of(SvgLinearGradientPaintStyle), vtable = (const void*)&svg_linear_gradient_paint_style_vtable)
 
 ## is<Gfx::SVGLinearGradientPaintStyle>: the class-id range test.
 pub func is_svg_linear_gradient_paint_style[P: IsPaintStyle](p: P*) -> bool:
@@ -434,7 +434,7 @@ pub struct SvgRadialGradientPaintStyleVTable:
 pub let svg_radial_gradient_paint_style_vtable: SvgRadialGradientPaintStyleVTable = SvgRadialGradientPaintStyleVTable(svg_gradient_paint_style_vtable = SvgGradientPaintStyleVTable(gradient_paint_style_vtable = GradientPaintStyleVTable(paint_style_vtable = PaintStyleVTable(class_info = &svg_radial_gradient_paint_style_class, is_visible = gradient_paint_style_is_visible_impl))))
 
 ## Class information of Gfx::SVGRadialGradientPaintStyle: name, class-id range (pre-order), size, vtable.
-pub let svg_radial_gradient_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "SVGRadialGradientPaintStyle", first_id = 8, last_id = 8, size = sizeof(SvgRadialGradientPaintStyle), vtable = (const void*)&svg_radial_gradient_paint_style_vtable)
+pub let svg_radial_gradient_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "SVGRadialGradientPaintStyle", first_id = 8, last_id = 8, size = memory.size_of(SvgRadialGradientPaintStyle), vtable = (const void*)&svg_radial_gradient_paint_style_vtable)
 
 ## is<Gfx::SVGRadialGradientPaintStyle>: the class-id range test.
 pub func is_svg_radial_gradient_paint_style[P: IsPaintStyle](p: P*) -> bool:

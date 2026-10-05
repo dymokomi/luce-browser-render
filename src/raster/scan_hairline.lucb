@@ -242,7 +242,7 @@ func extend_pts(line_cap: LineCap, prev_verb: PathVerb, next_verb: PathVerb?, po
             tangent = Point.from_xy(1.0, 0.0)
             controls = points.length - 1  # If all points are equal, move all but one.
         else:
-            discard(tangent.normalize())
+            _ = tangent.normalize()
 
         offset = 0
         while true:
@@ -278,7 +278,7 @@ func extend_pts(line_cap: LineCap, prev_verb: PathVerb, next_verb: PathVerb?, po
             tangent = Point.from_xy(-1.0, 0.0)
             controls = points.length - 1
         else:
-            discard(tangent.normalize())
+            _ = tangent.normalize()
 
         offset = points.length - 1
         while true:

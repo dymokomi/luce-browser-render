@@ -45,7 +45,7 @@ func test_gfx_paint_expect_pixels(bitmap: const Bitmap*, expected: const u32[]):
     for i in 0..<expected.length:
         let actual = *ak.vector_at_const(&pixels, i)
         if actual != expected[i]:
-            print(f"pixel {i}: expected {hex(expected[i])}, got {hex(actual)}")
+            print(f"pixel {i}: expected {expected[i]:x}, got {actual:x}")
         assert(actual == expected[i])
 
 # A premultiplied bitmap of `format` with the given BGRA pixels, through set_pixel.
@@ -267,15 +267,15 @@ test "gfx paint: bitmap creation errors":
 
 # Whether creating a bitmap of `size` fails with an AK error.
 func test_gfx_paint_create_fails(size: IntSize) -> bool:
-    discard(bitmap_create_int_size(BitmapFormat.bgra8888, size) catch failure:
-        return failure.code == ak.ak_error)
+    _ = bitmap_create_int_size(BitmapFormat.bgra8888, size) catch failure:
+        return failure.code == ak.ak_error
     return false
 
 # Whether wrapping memory as a bitmap of `size` fails with an AK error.
 func test_gfx_paint_wrap_fails(size: IntSize) -> bool:
     let noop = ak.Function0[unit](call = none, context = none)
-    discard(bitmap_create_wrapper(BitmapFormat.bgra8888, AlphaType.premultiplied, size, 16, none, noop) catch failure:
-        return failure.code == ak.ak_error)
+    _ = bitmap_create_wrapper(BitmapFormat.bgra8888, AlphaType.premultiplied, size, 16, none, noop) catch failure:
+        return failure.code == ak.ak_error
     return false
 
 test "gfx paint: shareable bitmaps and anonymous buffers":
@@ -297,9 +297,9 @@ test "gfx paint: shareable bitmaps and anonymous buffers":
     assert(core_anonymous_buffer_is_valid(&copy.m_buffer))
     assert(bitmap_get_pixel(copy, 1, 1) == color_new_u8_u8_u8_u8(5, 6, 7, 8))
     assert(not test_gfx_paint_create_fails(size))
-    discard(bitmap_create_shareable(BitmapFormat.bgra8888, AlphaType.premultiplied, IntSize(m_width = 32767, m_height = 4)) catch failure:
+    _ = bitmap_create_shareable(BitmapFormat.bgra8888, AlphaType.premultiplied, IntSize(m_width = 32767, m_height = 4)) catch failure:
         assert(failure.code == ak.ak_error)
-        return)
+        return
     trap("create_shareable should fail")
 
 test "gfx paint: bitmap clone, crop, diff, strip":

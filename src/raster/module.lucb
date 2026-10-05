@@ -95,7 +95,7 @@ struct Vec[T]:
         return self.data[self.len - 1]
 
     ## Make room for `additional` more elements.
-    mutating func reserve(additional: usize):
+    func reserve(additional: usize):
         let needed = self.len + additional
         if needed <= self.data.length:
             return
@@ -104,7 +104,7 @@ struct Vec[T]:
             capacity = needed
         if capacity < 4:
             capacity = 4
-        let fresh = (alloc T[capacity] in memory.heap) else trap("raster: out of memory")
+        let fresh = (new T[capacity] --- in memory.heap) else trap("raster: out of memory")
         for i in 0..<self.len:
             fresh[i] = self.data[i]
         if self.data.length > 0:
@@ -112,21 +112,21 @@ struct Vec[T]:
         self.data = fresh
 
     ## Append `value`.
-    mutating func push(value: T):
+    func push(value: T):
         if self.len == self.data.length:
             self.reserve(1)
         self.data[self.len] = value
         self.len += 1
 
     ## Remove and return the last element.
-    mutating func pop() -> T?:
+    func pop() -> T?:
         if self.len == 0:
             return none
         self.len -= 1
         return self.data[self.len]
 
     ## Insert `value` at `index`, shifting the rest up.
-    mutating func insert(index: usize, value: T):
+    func insert(index: usize, value: T):
         if self.len == self.data.length:
             self.reserve(1)
         var i = self.len
@@ -137,14 +137,14 @@ struct Vec[T]:
         self.len += 1
 
     ## Append every element of `values`.
-    mutating func extend(values: const T[]):
+    func extend(values: const T[]):
         self.reserve(values.length)
         for value in values:
             self.data[self.len] = value
             self.len += 1
 
     ## Remove every element, keeping the storage.
-    mutating func clear():
+    func clear():
         self.len = 0
 
     ## A copy with its own storage.
@@ -154,7 +154,7 @@ struct Vec[T]:
         return copy
 
     ## Free the storage.
-    mutating func release():
+    func release():
         if self.data.length > 0:
             free(self.data) in memory.heap
         self.data = self.data[..<0]

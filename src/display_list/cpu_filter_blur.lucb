@@ -225,7 +225,7 @@ struct CpuBlurCursor:
 ## Pass::blurSegment: `n` steps of the pass.
 func cpu_blur_pass_segment(pass: CpuBlurPass*, n: i32, src: CpuBlurCursor*, dst: CpuBlurCursor*):
     for step in 0..<n:
-        discard(step)
+        _ = step
         var edge: u32[4] = [0, 0, 0, 0]
         if let data = src.read:
             let offset = (usize)src.index * 4

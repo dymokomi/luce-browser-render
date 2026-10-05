@@ -162,13 +162,13 @@ struct AnalyticEdge:
     ## Applied to cdx and cdy.
     var cubic_dshift: i32
 
-    static func snap_y(y: i32) -> i32:
+    func snap_y(y: i32) -> i32:
         let accuracy = analytic_default_accuracy
         # This approach is safer than left shift, round, then right shift
         return (i32)((((u32)y +% (u32)(fixed_one >> (accuracy + 1))) >> (u32)(16 - accuracy)) << (u32)(16 - accuracy))
 
     ## Update x, y of this edge so y = new_y.
-    mutating func go_y(new_y: i32):
+    func go_y(new_y: i32):
         if new_y == self.y +% fixed_one:
             self.x = self.x + self.dx
             self.y = new_y
@@ -178,12 +178,12 @@ struct AnalyticEdge:
             self.x = self.upper_x + fixed_mul(self.dx, new_y - self.upper_y)
             self.y = new_y
 
-    mutating func go_y_shift(new_y: i32, y_shift: i32):
+    func go_y_shift(new_y: i32, y_shift: i32):
         self.y = new_y
         self.x += self.dx >> y_shift
 
     ## SkAnalyticEdge::setLine.
-    mutating func set_line(p0: Point, p1: Point) -> bool:
+    func set_line(p0: Point, p1: Point) -> bool:
         # We must set X/Y using the same way (e.g., times 4, to FDot6, then to Fixed) as
         # Quads/Cubics. Otherwise the order of the edge might be wrong due to precision
         # limit.
@@ -234,7 +234,7 @@ struct AnalyticEdge:
 
     ## SkAnalyticEdge::updateLine. The slope is computed by the caller: calling SkFixedDiv
     ## twice here would be a bottleneck for small ovals.
-    mutating func update_line(x00: i32, y00: i32, x10: i32, y10: i32, slope: i32) -> bool:
+    func update_line(x00: i32, y00: i32, x10: i32, y10: i32, slope: i32) -> bool:
         var x0 = x00
         var y0 = y00
         var x1 = x10
@@ -274,7 +274,7 @@ struct AnalyticEdge:
         return true
 
     ## Returns true if we're NOT done with this edge.
-    mutating func update(last_y: i32) -> bool:
+    func update(last_y: i32) -> bool:
         if self.curve_count < 0:
             return self.update_cubic()
         elif self.curve_count > 0:
@@ -283,7 +283,7 @@ struct AnalyticEdge:
 
     # mark: SkAnalyticQuadraticEdge ===============================================================
 
-    mutating func set_quadratic_without_update(pts: const Point[], shift0: i32) -> bool:
+    func set_quadratic_without_update(pts: const Point[], shift0: i32) -> bool:
         let scale = (f32)(1 << (shift0 + 6))
         var x0 = (i32)(pts[0].x * scale)
         var y0 = (i32)(pts[0].y * scale)
@@ -361,7 +361,7 @@ struct AnalyticEdge:
         return true
 
     ## SkAnalyticQuadraticEdge::setQuadratic.
-    mutating func set_quadratic(pts: const Point[]) -> bool:
+    func set_quadratic(pts: const Point[]) -> bool:
         if not self.set_quadratic_without_update(pts, analytic_default_accuracy):
             return false
         let acc = analytic_default_accuracy
@@ -384,7 +384,7 @@ struct AnalyticEdge:
         return self.update_quadratic()
 
     ## SkAnalyticQuadraticEdge::updateQuadratic.
-    mutating func update_quadratic() -> bool:
+    func update_quadratic() -> bool:
         var success = false  # initialize to fail!
         var count = self.curve_count
         var oldx = self.qx
@@ -444,14 +444,14 @@ struct AnalyticEdge:
 
     ## SkAnalyticQuadraticEdge::keepContinuous: we use x as the starting x to ensure the
     ## continuity. Without it, we may break the sorted edge list.
-    mutating func keep_continuous_quad():
+    func keep_continuous_quad():
         self.snapped_x = self.x
         self.snapped_y = self.y
 
     # mark: SkAnalyticCubicEdge ===================================================================
 
     ## SkAnalyticCubicEdge::setCubic.
-    mutating func set_cubic(pts: const Point[]) -> bool:
+    func set_cubic(pts: const Point[]) -> bool:
         if not self.set_cubic_without_update(pts, analytic_default_accuracy):
             return false
 
@@ -474,7 +474,7 @@ struct AnalyticEdge:
 
         return self.update_cubic()
 
-    mutating func set_cubic_without_update(pts: const Point[], shift0: i32) -> bool:
+    func set_cubic_without_update(pts: const Point[], shift0: i32) -> bool:
         let scale = (f32)(1 << (shift0 + 6))
         var x0 = (i32)(pts[0].x * scale)
         var y0 = (i32)(pts[0].y * scale)
@@ -559,7 +559,7 @@ struct AnalyticEdge:
         return true
 
     ## SkAnalyticCubicEdge::updateCubic.
-    mutating func update_cubic() -> bool:
+    func update_cubic() -> bool:
         var success = false
         var count = self.curve_count
         var oldx = self.cx
@@ -614,6 +614,6 @@ struct AnalyticEdge:
         return success
 
     ## SkAnalyticCubicEdge::keepContinuous.
-    mutating func keep_continuous_cubic():
+    func keep_continuous_cubic():
         self.cx = self.x
         self.snapped_y = self.y

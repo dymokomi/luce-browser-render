@@ -108,7 +108,7 @@ pub func typeface_ttc_index(this: Typeface*) -> u32:
 pub let typeface_vtable: TypefaceVTable = TypefaceVTable(class_info = &typeface_class)
 
 ## Class information of Gfx::Typeface: name, class-id range (pre-order), size, vtable.
-pub let typeface_class: ak.ClassInfo = ak.ClassInfo(name = "Typeface", first_id = 0, last_id = 1, size = sizeof(Typeface), vtable = (const void*)&typeface_vtable)
+pub let typeface_class: ak.ClassInfo = ak.ClassInfo(name = "Typeface", first_id = 0, last_id = 1, size = memory.size_of(Typeface), vtable = (const void*)&typeface_vtable)
 
 ## is<Gfx::Typeface>: the class-id range test.
 pub func is_typeface[P: IsTypeface](p: P*) -> bool:

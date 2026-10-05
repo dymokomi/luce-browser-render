@@ -17,19 +17,19 @@ struct AlphaRuns:
     var runs: AlphaRun[]
     var alpha: u8[]
 
-    static func new_(width: u32) -> AlphaRuns:
+    func new_(width: u32) -> AlphaRuns:
         let runs = (new AlphaRun[(usize)width + 1] in memory.heap) else trap("raster: out of memory")
         let alpha = (new u8[(usize)width + 1] in memory.heap) else trap("raster: out of memory")
         var result = AlphaRuns(runs = runs, alpha = alpha)
         result.reset(width)
         return result
 
-    mutating func release():
+    func release():
         free(self.runs) in memory.heap
         free(self.alpha) in memory.heap
 
     ## Returns 0-255 given 0-256.
-    static func catch_overflow(alpha: u16) -> AlphaU8:
+    func catch_overflow(alpha: u16) -> AlphaU8:
         return (u8)(alpha - (alpha >> 8))
 
     ## Returns true if the scanline contains only a single run, of alpha value 0.
@@ -40,7 +40,7 @@ struct AlphaRuns:
         return true
 
     ## Reinitialize for a new scanline.
-    mutating func reset(width: u32):
+    func reset(width: u32):
         let run = u16(width)
         self.runs[0] = run
         self.runs[(usize)width] = 0
@@ -59,7 +59,7 @@ struct AlphaRuns:
     ## Returns the offset_x value that should be passed on the next call, assuming we're on
     ## the same scanline. If the caller is switching scanlines, then offset_x should be 0
     ## when this is called.
-    mutating func add(x0: u32, start_alpha: AlphaU8, middle_count0: usize, stop_alpha: AlphaU8, max_value: u8, offset_x: usize) -> usize:
+    func add(x0: u32, start_alpha: AlphaU8, middle_count0: usize, stop_alpha: AlphaU8, max_value: u8, offset_x: usize) -> usize:
         var x = (usize)x0
         var middle_count = middle_count0
 
@@ -118,7 +118,7 @@ struct AlphaRuns:
     ##
     ## Allows add() to sum another run to some of the new sub-runs. i.e. adding ..CCCCC. would
     ## produce AADDEEEB, rle as A2D2E3B1.
-    static func break_run(runs: AlphaRun[], alpha: u8[], x0: usize, count: usize):
+    func break_run(runs: AlphaRun[], alpha: u8[], x0: usize, count: usize):
         var x = x0
         let orig_x = x
         var runs_offset: usize = 0
@@ -159,7 +159,7 @@ struct AlphaRuns:
     ## Cut (at offset x in the buffer) a run into two shorter runs with matching alpha
     ## values. Used by the RectClipBlitter to trim a RLE encoding to match the clipping
     ## rectangle.
-    static func break_at(alpha: AlphaU8[], runs: AlphaRun[], x0: i32):
+    func break_at(alpha: AlphaU8[], runs: AlphaRun[], x0: i32):
         var x = x0
         var alpha_i: usize = 0
         var run_i: usize = 0

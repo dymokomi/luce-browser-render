@@ -272,6 +272,6 @@ func test_sk_check_pos_tan(m: const SkPathMeasure*, distance: u32, ok: bool, px:
         let (pos, tangent) = result
         assert(ok)
         if not (test_sk_bits_within_libm_ulps(pos.x, px) and test_sk_bits_within_libm_ulps(pos.y, py) and test_sk_bits_within_libm_ulps(tangent.x, tx) and test_sk_bits_within_libm_ulps(tangent.y, ty)):
-            trap(f"pos_tan at {hex(distance)}: {hex(pos.x.bits())} {hex(pos.y.bits())} {hex(tangent.x.bits())} {hex(tangent.y.bits())}, expected {hex(px)} {hex(py)} {hex(tx)} {hex(ty)}")
+            trap(f"pos_tan at {distance:x}: {pos.x.bits():x} {pos.y.bits():x} {tangent.x.bits():x} {tangent.y.bits():x}, expected {px:x} {py:x} {tx:x} {ty:x}")
     else:
         assert(not ok)

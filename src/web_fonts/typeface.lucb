@@ -132,7 +132,7 @@ func typeface_cache_font(this: Typeface*, point_size: f32, variations: const Fon
             ak.hash_map_remove_opaque(&this.m_fonts, ak.hash_map_begin(&this.m_fonts))
 
         let key = FontCacheKey(point_size = point_size, axes = font_variation_settings_to_sorted_list(variations), shape_features = ak.vector_clone(shape_features))
-        discard(ak.hash_map_set(&this.m_fonts, key, font))
+        _ = ak.hash_map_set(&this.m_fonts, key, font)
 
 ## Ported from Libraries/LibGfx/Font/Typeface.cpp:76 Gfx::Typeface::harfbuzz_typeface. The
 ## blob and face come from the typeface's allocators.

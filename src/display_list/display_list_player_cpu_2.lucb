@@ -142,7 +142,7 @@ func cpu_shader_release(shader: CpuShader*):
             var p = pixmap
             p.release()
         _:
-            discard(0)
+            _ = 0
 
 ## `to_skia_matrix`: a Gfx::AffineTransform (a, b, c, d, e, f) as a raster transform.
 func cpu_transform_of_affine(transform: const gfx.AffineTransform*) -> raster.Transform:
@@ -403,7 +403,7 @@ func display_list_player_cpu_draw_line_impl(base: DisplayListPlayer*, command: D
             to_x += dx * ((f32)command.thickness / 2.0)
             to_y += dy * ((f32)command.thickness / 2.0)
         _:
-            discard(0)
+            _ = 0
     defer cpu_stroke_release(&stroke)
 
     # canvas.drawLine(from, to, paint)

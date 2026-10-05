@@ -90,14 +90,14 @@ func display_list_recorder_append(this: DisplayListRecorder*, command: DisplayLi
         if display_list_append(this.m_display_list, command, this.m_accumulated_visual_context_index):
             ak.vector_append_t(&this.m_captured_commands, command_copy)
     else:
-        discard(display_list_append(this.m_display_list, command, this.m_accumulated_visual_context_index))
+        _ = display_list_append(this.m_display_list, command, this.m_accumulated_visual_context_index)
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListRecorder.cpp:76 Web::Painting::DisplayListRecorder::replay_cached_commands.
 pub func display_list_recorder_replay_cached_commands(this: DisplayListRecorder*, commands: const DisplayListCommand[]):
     for command in commands:
         let command_copy = command
         this.m_save_nesting_level += command_nesting_level_change(&command_copy)
-        discard(display_list_append(this.m_display_list, command_copy, this.m_accumulated_visual_context_index))
+        _ = display_list_append(this.m_display_list, command_copy, this.m_accumulated_visual_context_index)
 
 # mark: Nesting, clips and masks ===============================================================
 

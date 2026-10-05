@@ -20,7 +20,7 @@ func test_canvas_pixel(canvas: CpuCanvas*, x: u32, y: u32) -> u32:
 func expect_pixel(canvas: CpuCanvas*, x: u32, y: u32, expected: u32):
     let actual = test_canvas_pixel(canvas, x, y)
     if actual != expected:
-        print(f"pixel ({x}, {y}): expected {hex(expected)}, got {hex(actual)}")
+        print(f"pixel ({x}, {y}): expected {expected:x}, got {actual:x}")
         trap("pixel mismatch")
 
 ## A raster rectangle.

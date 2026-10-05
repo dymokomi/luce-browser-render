@@ -116,7 +116,7 @@ pub func affine_transform_set_scale_float_point(this: AffineTransform*, s: Float
 pub func affine_transform_skew_radians(this: AffineTransform*, x_radians: f32, y_radians: f32) -> AffineTransform*:
     var skew_transform: AffineTransform
     affine_transform_construct_f32(&skew_transform, 1.0, ak.trigonometry_tan_f32(y_radians), ak.trigonometry_tan_f32(x_radians), 1.0, 0.0, 0.0)
-    discard(affine_transform_multiply(this, skew_transform))
+    _ = affine_transform_multiply(this, skew_transform)
     return this
 
 ## Ported from Libraries/LibGfx/AffineTransform.cpp:80 Gfx::AffineTransform::translate(float, float).
@@ -167,7 +167,7 @@ pub func affine_transform_rotate_radians(this: AffineTransform*, radians: f32) -
     ak.trigonometry_sincos_f32(radians, &sin_angle, &cos_angle)
     var rotation: AffineTransform
     affine_transform_construct_f32(&rotation, cos_angle, sin_angle, -sin_angle, cos_angle, 0.0, 0.0)
-    discard(affine_transform_multiply(this, rotation))
+    _ = affine_transform_multiply(this, rotation)
     return this
 
 ## Ported from Libraries/LibGfx/AffineTransform.cpp:134 Gfx::AffineTransform::determinant.

@@ -46,12 +46,12 @@ struct Convexicator:
     var reversals: i32 = 0
     var is_finite: bool = true
 
-    mutating func set_move_pt(pt: Point):
+    func set_move_pt(pt: Point):
         self.first_pt = pt
         self.last_pt = pt
         self.expected_dir = .invalid
 
-    mutating func add_pt(pt: Point) -> bool:
+    func add_pt(pt: Point) -> bool:
         if self.last_pt.x == pt.x and self.last_pt.y == pt.y:
             return true
         # should only be true for first non-zero vector after set_move_pt was called. It is
@@ -68,7 +68,7 @@ struct Convexicator:
     ## add_pt() is a no-op. Otherwise, the add_pt implicitly closes the contour. In either
     ## case, we have to check the direction change along the first vector in case it is
     ## concave.
-    mutating func close() -> bool:
+    func close() -> bool:
         return self.add_pt(self.first_pt) and self.add_vec(self.first_vec)
 
     func direction_change(cur_vec: Point) -> DirChange:
@@ -81,7 +81,7 @@ struct Convexicator:
             return .straight
         return .right if cross > 0.0 else .left
 
-    mutating func add_vec(cur_vec: Point) -> bool:
+    func add_vec(cur_vec: Point) -> bool:
         let dir = self.direction_change(cur_vec)
         match dir:
             .left, .right:

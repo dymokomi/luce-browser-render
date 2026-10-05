@@ -394,7 +394,7 @@ func cpu_fr_to_image(ctx: const CpuFilterContext*, fr: const CpuFr*, desired: Cp
     let height = cpu_irect_height(visible)
     var pixmap = raster.Pixmap.new_((u32)width, (u32)height) else trap("cpu_filter: empty image")
     cpu_fr_draw_src(fr, pixmap.data_mut(), visible)
-    discard(ctx)
+    _ = ctx
     return CpuFilterImage(pixmap = pixmap, left = visible.left, top = visible.top)
 
 # mark: Transforms =============================================================================

@@ -16,12 +16,12 @@ struct ClippedEdges:
     var edges: PathEdge[18]
     var len: usize
 
-    static func empty() -> ClippedEdges:
+    func empty() -> ClippedEdges:
         var c: ClippedEdges = ---
         c.len = 0
         return c
 
-    mutating func push(edge: PathEdge):
+    func push(edge: PathEdge):
         if self.len == max_verbs:
             trap("raster: too many clipped edges")
         self.edges[self.len] = edge
@@ -32,10 +32,10 @@ struct EdgeClipper:
     var can_cull_to_the_right: bool
     var edges: ClippedEdges
 
-    static func new_(clip: Rect, can_cull_to_the_right: bool) -> EdgeClipper:
+    func new_(clip: Rect, can_cull_to_the_right: bool) -> EdgeClipper:
         return EdgeClipper(clip = clip, can_cull_to_the_right = can_cull_to_the_right, edges = ClippedEdges.empty())
 
-    mutating func clip_line(p0: Point, p1: Point) -> ClippedEdges?:
+    func clip_line(p0: Point, p1: Point) -> ClippedEdges?:
         var points: Point[4]
         let count = line_clipper_clip([p0, p1], self.clip, self.can_cull_to_the_right, points)
         if count != 0:
@@ -46,10 +46,10 @@ struct EdgeClipper:
             return none
         return self.edges
 
-    mutating func push_line(p0: Point, p1: Point):
+    func push_line(p0: Point, p1: Point):
         self.edges.push(.line_to(p0 = p0, p1 = p1))
 
-    mutating func push_vline(x: f32, y00: f32, y10: f32, reverse: bool):
+    func push_vline(x: f32, y00: f32, y10: f32, reverse: bool):
         var y0 = y00
         var y1 = y10
         if reverse:
@@ -58,7 +58,7 @@ struct EdgeClipper:
             y1 = t
         self.edges.push(.line_to(p0 = Point.from_xy(x, y0), p1 = Point.from_xy(x, y1)))
 
-    mutating func clip_quad(p0: Point, p1: Point, p2: Point) -> ClippedEdges?:
+    func clip_quad(p0: Point, p1: Point, p2: Point) -> ClippedEdges?:
         let pts: Point[3] = [p0, p1, p2]
         let bounds = Rect.from_points(pts) else return none
 
@@ -78,7 +78,7 @@ struct EdgeClipper:
         return self.edges
 
     # src[] must be monotonic in X and Y
-    mutating func clip_mono_quad(src: const Point[]):
+    func clip_mono_quad(src: const Point[]):
         var pts: Point[3]
         var reverse = sort_increasing_y(src, pts)
 
@@ -148,13 +148,13 @@ struct EdgeClipper:
             # wholly inside the clip
             self.push_quad(pts, reverse)
 
-    mutating func push_quad(pts: const Point[], reverse: bool):
+    func push_quad(pts: const Point[], reverse: bool):
         if reverse:
             self.edges.push(.quad_to(p0 = pts[2], p1 = pts[1], p2 = pts[0]))
         else:
             self.edges.push(.quad_to(p0 = pts[0], p1 = pts[1], p2 = pts[2]))
 
-    mutating func clip_cubic(p0: Point, p1: Point, p2: Point, p3: Point) -> ClippedEdges?:
+    func clip_cubic(p0: Point, p1: Point, p2: Point, p3: Point) -> ClippedEdges?:
         let pts: Point[4] = [p0, p1, p2, p3]
         let bounds = Rect.from_points(pts) else return none
 
@@ -183,7 +183,7 @@ struct EdgeClipper:
         return self.edges
 
     # src[] must be monotonic in X and Y
-    mutating func clip_mono_cubic(src: const Point[]):
+    func clip_mono_cubic(src: const Point[]):
         var pts: Point[4]
         var reverse = sort_increasing_y(src, pts)
 
@@ -244,7 +244,7 @@ struct EdgeClipper:
             # wholly inside the clip
             self.push_cubic(pts, reverse)
 
-    mutating func push_cubic(pts: const Point[], reverse: bool):
+    func push_cubic(pts: const Point[], reverse: bool):
         if reverse:
             self.edges.push(.cubic_to(p0 = pts[3], p1 = pts[2], p2 = pts[1], p3 = pts[0]))
         else:
@@ -260,7 +260,7 @@ struct EdgeClipperIter:
     ## The next quad of `conic_quads` to clip (conic_quads.len when none is pending).
     var conic_index: usize
 
-    static func new_(path: const Path*, clip: Rect, can_cull_to_the_right: bool) -> EdgeClipperIter:
+    func new_(path: const Path*, clip: Rect, can_cull_to_the_right: bool) -> EdgeClipperIter:
         var iter: EdgeClipperIter = ---
         iter.edge_iter = edge_iter(path)
         iter.clip = clip
@@ -269,7 +269,7 @@ struct EdgeClipperIter:
         iter.conic_index = 0
         return iter
 
-    mutating func next() -> ClippedEdges?:
+    func next() -> ClippedEdges?:
         while true:
             while self.conic_index < self.conic_quads.len:
                 let q = self.conic_quads.quad(self.conic_index)

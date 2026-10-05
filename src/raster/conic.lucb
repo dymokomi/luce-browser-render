@@ -15,13 +15,13 @@ struct Conic:
     var points: Point[3]
     var weight: f32
 
-    static func new_(pt0: Point, pt1: Point, pt2: Point, weight: f32) -> Conic:
+    func new_(pt0: Point, pt1: Point, pt2: Point, weight: f32) -> Conic:
         return Conic(points = [pt0, pt1, pt2], weight = weight)
 
-    static func from_points(points: const Point[], weight: f32) -> Conic:
+    func from_points(points: const Point[], weight: f32) -> Conic:
         return Conic(points = [points[0], points[1], points[2]], weight = weight)
 
-    static func zero() -> Conic:
+    func zero() -> Conic:
         return Conic(points = [Point.zero(), Point.zero(), Point.zero()], weight = 0.0)
 
     ## SkConic::computeQuadPOW2: how many times (as a power of 2) the conic must be halved
@@ -67,7 +67,7 @@ struct Conic:
                 pow2 = 1
                 done = true
         if not done:
-            discard(subdivide(&self, points[1..], (u8)pow2))
+            _ = subdivide(&self, points[1..], (u8)pow2)
 
         let quad_count: usize = (usize)1 << (usize)pow2
         let pt_count = 2 * quad_count + 1
@@ -205,7 +205,7 @@ struct Conic:
 
     ## Writes the conics of the unit arc from `u_start` to `u_stop` into `dst` (5 slots) and
     ## answers how many (0 is Rust's `None`).
-    static func build_unit_arc(u_start: Point, u_stop: Point, dir: PathDirection, user_transform: Transform, dst: Conic[]) -> usize:
+    func build_unit_arc(u_start: Point, u_stop: Point, dir: PathDirection, user_transform: Transform, dst: Conic[]) -> usize:
         # rotate by x,y so that u_start is (1.0)
         let x = u_start.dot(u_stop)
         var y = u_start.cross(u_stop)
@@ -267,7 +267,7 @@ struct Conic:
             # get length = sqrt(2 / (1 + cos(theta)). We already have cos() when to computed
             # the dot. This is nice, since our computed weight is cos(theta/2) as well!
             let cos_theta_over_2 = math32.sqrt((1.0 + dot) / 2.0)
-            discard(off_curve.set_length(invert(cos_theta_over_2)))
+            _ = off_curve.set_length(invert(cos_theta_over_2))
             if not last_q.almost_equal(off_curve):
                 dst[conic_count] = Conic.new_(last_q, off_curve, final_pt, cos_theta_over_2)
                 conic_count += 1
@@ -375,7 +375,7 @@ struct AutoConicToQuads:
     ## The number of quads.
     var len: usize
 
-    static func compute(pt0: Point, pt1: Point, pt2: Point, weight: f32, tolerance: f32) -> AutoConicToQuads:
+    func compute(pt0: Point, pt1: Point, pt2: Point, weight: f32, tolerance: f32) -> AutoConicToQuads:
         let conic = Conic.new_(pt0, pt1, pt2, weight)
         let pow2 = conic.compute_quad_pow2(tolerance)
         var result: AutoConicToQuads = ---

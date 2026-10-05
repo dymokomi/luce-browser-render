@@ -144,7 +144,7 @@ pub func sk_path_get_last_pt(this: const SkPath*) -> SkPoint?:
 ## SkRect::setBoundsCheck over the points): empty when a point is not finite.
 pub func sk_path_get_bounds(this: const SkPath*) -> SkRect:
     var bounds: SkRect
-    discard(sk_rect_set_bounds_check(&bounds, sk_path_points(this)))
+    _ = sk_rect_set_bounds_check(&bounds, sk_path_points(this))
     return bounds
 
 ## Ported from src/core/SkPath_pathref.cpp:143 SkPath::isFinite: every point is finite.

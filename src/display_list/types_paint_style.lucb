@@ -31,7 +31,7 @@ pub struct SvgPaintServerPaintStyleVTable:
 pub let svg_paint_server_paint_style_vtable: SvgPaintServerPaintStyleVTable = SvgPaintServerPaintStyleVTable(class_info = &svg_paint_server_paint_style_class)
 
 ## Class information of Web::Painting::SVGPaintServerPaintStyle: name, class-id range (pre-order), size, vtable.
-pub let svg_paint_server_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "SVGPaintServerPaintStyle", first_id = 0, last_id = 4, size = sizeof(SvgPaintServerPaintStyle), vtable = (const void*)&svg_paint_server_paint_style_vtable)
+pub let svg_paint_server_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "SVGPaintServerPaintStyle", first_id = 0, last_id = 4, size = memory.size_of(SvgPaintServerPaintStyle), vtable = (const void*)&svg_paint_server_paint_style_vtable)
 
 ## is<Web::Painting::SVGPaintServerPaintStyle>: the class-id range test.
 pub func is_svg_paint_server_paint_style[P: IsSvgPaintServerPaintStyle](p: P*) -> bool:
@@ -91,7 +91,7 @@ pub struct SvgGradientPaintStyleVTable:
 pub let svg_gradient_paint_style_vtable: SvgGradientPaintStyleVTable = SvgGradientPaintStyleVTable(svg_paint_server_paint_style_vtable = SvgPaintServerPaintStyleVTable(class_info = &svg_gradient_paint_style_class))
 
 ## Class information of Web::Painting::SVGGradientPaintStyle: name, class-id range (pre-order), size, vtable.
-pub let svg_gradient_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "SVGGradientPaintStyle", first_id = 1, last_id = 3, size = sizeof(SvgGradientPaintStyle), vtable = (const void*)&svg_gradient_paint_style_vtable)
+pub let svg_gradient_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "SVGGradientPaintStyle", first_id = 1, last_id = 3, size = memory.size_of(SvgGradientPaintStyle), vtable = (const void*)&svg_gradient_paint_style_vtable)
 
 ## is<Web::Painting::SVGGradientPaintStyle>: the class-id range test.
 pub func is_svg_gradient_paint_style[P: IsSvgPaintServerPaintStyle](p: P*) -> bool:
@@ -139,7 +139,7 @@ pub struct SvgLinearGradientPaintStyleVTable:
 pub let svg_linear_gradient_paint_style_vtable: SvgLinearGradientPaintStyleVTable = SvgLinearGradientPaintStyleVTable(svg_gradient_paint_style_vtable = SvgGradientPaintStyleVTable(svg_paint_server_paint_style_vtable = SvgPaintServerPaintStyleVTable(class_info = &svg_linear_gradient_paint_style_class)))
 
 ## Class information of Web::Painting::SVGLinearGradientPaintStyle: name, class-id range (pre-order), size, vtable.
-pub let svg_linear_gradient_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "SVGLinearGradientPaintStyle", first_id = 2, last_id = 2, size = sizeof(SvgLinearGradientPaintStyle), vtable = (const void*)&svg_linear_gradient_paint_style_vtable)
+pub let svg_linear_gradient_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "SVGLinearGradientPaintStyle", first_id = 2, last_id = 2, size = memory.size_of(SvgLinearGradientPaintStyle), vtable = (const void*)&svg_linear_gradient_paint_style_vtable)
 
 ## is<Web::Painting::SVGLinearGradientPaintStyle>: the class-id range test.
 pub func is_svg_linear_gradient_paint_style[P: IsSvgPaintServerPaintStyle](p: P*) -> bool:
@@ -183,7 +183,7 @@ pub struct SvgRadialGradientPaintStyleVTable:
 pub let svg_radial_gradient_paint_style_vtable: SvgRadialGradientPaintStyleVTable = SvgRadialGradientPaintStyleVTable(svg_gradient_paint_style_vtable = SvgGradientPaintStyleVTable(svg_paint_server_paint_style_vtable = SvgPaintServerPaintStyleVTable(class_info = &svg_radial_gradient_paint_style_class)))
 
 ## Class information of Web::Painting::SVGRadialGradientPaintStyle: name, class-id range (pre-order), size, vtable.
-pub let svg_radial_gradient_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "SVGRadialGradientPaintStyle", first_id = 3, last_id = 3, size = sizeof(SvgRadialGradientPaintStyle), vtable = (const void*)&svg_radial_gradient_paint_style_vtable)
+pub let svg_radial_gradient_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "SVGRadialGradientPaintStyle", first_id = 3, last_id = 3, size = memory.size_of(SvgRadialGradientPaintStyle), vtable = (const void*)&svg_radial_gradient_paint_style_vtable)
 
 ## is<Web::Painting::SVGRadialGradientPaintStyle>: the class-id range test.
 pub func is_svg_radial_gradient_paint_style[P: IsSvgPaintServerPaintStyle](p: P*) -> bool:
@@ -224,7 +224,7 @@ pub struct SvgPatternPaintStyleVTable:
 pub let svg_pattern_paint_style_vtable: SvgPatternPaintStyleVTable = SvgPatternPaintStyleVTable(svg_paint_server_paint_style_vtable = SvgPaintServerPaintStyleVTable(class_info = &svg_pattern_paint_style_class))
 
 ## Class information of Web::Painting::SVGPatternPaintStyle: name, class-id range (pre-order), size, vtable.
-pub let svg_pattern_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "SVGPatternPaintStyle", first_id = 4, last_id = 4, size = sizeof(SvgPatternPaintStyle), vtable = (const void*)&svg_pattern_paint_style_vtable)
+pub let svg_pattern_paint_style_class: ak.ClassInfo = ak.ClassInfo(name = "SVGPatternPaintStyle", first_id = 4, last_id = 4, size = memory.size_of(SvgPatternPaintStyle), vtable = (const void*)&svg_pattern_paint_style_vtable)
 
 ## is<Web::Painting::SVGPatternPaintStyle>: the class-id range test.
 pub func is_svg_pattern_paint_style[P: IsSvgPaintServerPaintStyle](p: P*) -> bool:

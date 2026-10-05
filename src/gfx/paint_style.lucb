@@ -17,7 +17,7 @@
 # `new (nothrow) T(...)` for a class of the PaintStyle hierarchy: zeroed storage of the
 # class's size whose header names the class, ready for the class's constructor.
 func paint_style_allocate(class_info: const ak.ClassInfo*) -> PaintStyle*!:
-    let block = try alloc(class_info.size, 8)
+    let block = try memory.allocate(class_info.size, 8)
     memory.set(block, 0)
     let style = (PaintStyle*)block.data
     style.vtable = (const PaintStyleVTable*)class_info.vtable
@@ -59,7 +59,7 @@ pub func gradient_paint_style_add_color_stop_f32(this: GradientPaintStyle*, posi
 
 # add_color_stop's sort comparator: [](auto& a, auto& b) { return a.position < b.position; }
 func gradient_paint_style_color_stop_less(context: void*?, a: const ColorStop*, b: const ColorStop*) -> bool:
-    discard(context)
+    _ = context
     return a.position < b.position
 
 ## Ported from Libraries/LibGfx/PaintStyle.h:56 Gfx::GradientPaintStyle::add_color_stop.

@@ -71,7 +71,7 @@ func scan_fill_path_impl(path: const Path*, fill_rule: FillRule, clip_rect: Scre
     let count = built.len
 
     # SkTQSort, as Skia sorts its edge list (the sort is not stable).
-    let keys = (alloc EdgeSortKey[count] in memory.heap) else trap("raster: out of memory")
+    let keys = (new EdgeSortKey[count] --- in memory.heap) else trap("raster: out of memory")
     defer free(keys) in memory.heap
     for i in 0..<count:
         keys[i] = EdgeSortKey(upper_y = built.data[i].data.line.first_y, x = built.data[i].data.line.x, dx = 0, index = (u32)i)

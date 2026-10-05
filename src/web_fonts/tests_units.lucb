@@ -241,13 +241,13 @@ test "font_cascade_list":
         font_cascade_list_add_pending_face(ranged, pending_ranges, ak.Function0[unit](call = test_count_start_load, context = &loads))
         font_cascade_list_add_pending_face(ranged, ak.Vector[UnicodeRange](), ak.Function0[unit](call = test_count_start_load, context = &loads))
         assert(ak.vector_size(&ranged.m_pending_faces) == 1)
-        discard(font_cascade_list_font_for_code_point(ranged, 0x416))
+        _ = font_cascade_list_font_for_code_point(ranged, 0x416)
         assert(loads == 0)
-        discard(font_cascade_list_font_for_code_point(ranged, 0x100, FontCascadeListTriggerPendingLoads.yes))
+        _ = font_cascade_list_font_for_code_point(ranged, 0x100, FontCascadeListTriggerPendingLoads.yes)
         assert(loads == 0)
-        discard(font_cascade_list_font_for_code_point(ranged, 0x416, FontCascadeListTriggerPendingLoads.yes))
+        _ = font_cascade_list_font_for_code_point(ranged, 0x416, FontCascadeListTriggerPendingLoads.yes)
         assert(loads == 1)
-        discard(font_cascade_list_font_for_code_point(ranged, 0x417, FontCascadeListTriggerPendingLoads.yes))
+        _ = font_cascade_list_font_for_code_point(ranged, 0x417, FontCascadeListTriggerPendingLoads.yes)
         assert(loads == 1)
         assert(ak.vector_size(&ranged.m_pending_faces) == 0)
 
@@ -340,7 +340,7 @@ func test_font_database() -> FontDatabase*:
     if test_provider == none:
         let provider = path_font_provider_create()
         path_font_provider_load_all_fonts_from_uri(provider, ak.sv("file://tests/web_fonts/fonts"))
-        discard(font_database_install_system_font_provider(font_database_the(), provider.system_font_provider()))
+        _ = font_database_install_system_font_provider(font_database_the(), provider.system_font_provider())
         test_provider = provider
     return font_database_the()
 

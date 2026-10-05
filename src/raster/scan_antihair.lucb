@@ -60,7 +60,7 @@ struct AntiHairBlitter:
     var kind: AntiHairKind
     var blitter: Blitter
 
-    mutating func draw_cap(x: i32, fy0: FDot16, slope: FDot16, coverage: FDot6) -> FDot16:
+    func draw_cap(x: i32, fy0: FDot16, slope: FDot16, coverage: FDot6) -> FDot16:
         let fy = fy0 + fdot16_half
         let i = fixed_floor_to_int(fy)
         let a = antihair_fixed_to_alpha(fy)
@@ -92,7 +92,7 @@ struct AntiHairBlitter:
                 self.blitter.blit_anti_h2(i - 1, x, (u8)scale_alpha_by_coverage(255 - a, coverage), (u8)scale_alpha_by_coverage(a, coverage))
                 return fy + slope - fdot16_half
 
-    mutating func draw_line(x0: i32, stop_x: i32, fy0: FDot16, slope: FDot16) -> FDot16:
+    func draw_line(x0: i32, stop_x: i32, fy0: FDot16, slope: FDot16) -> FDot16:
         var fy = fy0 + fdot16_half
         match self.kind:
             .hline:
@@ -324,7 +324,7 @@ func do_anti_hairline(x00: FDot6, y00: FDot6, x10: FDot6, y10: FDot6, clip0: IRe
     if full_spans > 0:
         fstart = hair.draw_line(istart, istart + full_spans, fstart, slope)
     if stop_coverage > 0:
-        discard(hair.draw_cap(istop - 1, fstart, slope, stop_coverage))
+        _ = hair.draw_cap(istop - 1, fstart, slope, stop_coverage)
 
 # mark: AntiHairLineRgn =======================================================================
 

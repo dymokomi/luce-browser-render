@@ -100,8 +100,8 @@ pub func device_pixel_rect_mul(this: const DevicePixelRect*, factor: i32) -> Dev
 
 ## Ported from Libraries/LibGfx/Rect.h:427 Gfx::Rect::operator*= for DevicePixelRect.
 pub func device_pixel_rect_mul_assign(this: DevicePixelRect*, factor: i32) -> DevicePixelRect*:
-    discard(int_point_mul_assign(&this.m_location, factor))
-    discard(int_size_mul_assign(&this.m_size, factor))
+    _ = int_point_mul_assign(&this.m_location, factor)
+    _ = int_size_mul_assign(&this.m_size, factor)
     return this
 
 ## Ported from Libraries/LibGfx/Rect.h:434 Gfx::Rect::intersect for DevicePixelRect.

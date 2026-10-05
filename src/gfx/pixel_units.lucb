@@ -313,13 +313,13 @@ pub func css_pixels_scale_by_f64(this: CssPixels*, value: f64) -> CssPixels*:
 ## Ported from Libraries/LibWeb/PixelUnits.h:262 Web::CSSPixels::scaled(float).
 pub func css_pixels_scaled_f32(this: const CssPixels*, value: f32) -> CssPixels:
     var result = *this
-    discard(css_pixels_scale_by_f32(&result, value))
+    _ = css_pixels_scale_by_f32(&result, value)
     return result
 
 ## Ported from Libraries/LibWeb/PixelUnits.h:269 Web::CSSPixels::scaled(double).
 pub func css_pixels_scaled_f64(this: const CssPixels*, value: f64) -> CssPixels:
     var result = *this
-    discard(css_pixels_scale_by_f64(&result, value))
+    _ = css_pixels_scale_by_f64(&result, value)
     return result
 
 # mark: CSSPixels with other number types =======================================================

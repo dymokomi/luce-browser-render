@@ -268,7 +268,7 @@ pub func sk_conic_chop_into_quads_pow2(this: const SkConic*, pts: SkPoint[], pow
             pow2 = 1
             lines = true
     if not lines:
-        discard(sk_conic_subdivide(this, pts, 1, pow2))
+        _ = sk_conic_subdivide(this, pts, 1, pow2)
     # commonFinitePtCheck:
     let quad_count = 1 << (u32)pow2
     let pt_count = (usize)(2 * quad_count + 1)

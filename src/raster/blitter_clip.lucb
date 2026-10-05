@@ -35,7 +35,7 @@ struct MaskClipInfo:
     var kind: MaskClipKind
     var bounds: IRect
 
-    static func of(mask: const Mask*) -> MaskClipInfo:
+    func of(mask: const Mask*) -> MaskClipInfo:
         let w = (i32)mask.width()
         let h = (i32)mask.height()
         let data = mask.data()
@@ -105,7 +105,7 @@ struct MaskRegionClipBlitter: Blitter:
     var blitter: Blitter
     var mask: const Mask*
 
-    pub mutating func blit_h(x: i32, y: i32, width: i32):
+    pub func blit_h(x: i32, y: i32, width: i32):
         if not mask_has_row(self.mask, y):
             return
         let row = clip_mask_row(self.mask, y)
@@ -117,7 +117,7 @@ struct MaskRegionClipBlitter: Blitter:
                 self.blitter.blit_h(left, y, right - left)
             left = right
 
-    pub mutating func blit_anti_h(x: i32, y: i32, aa: AlphaU8[], runs: AlphaRun[]):
+    pub func blit_anti_h(x: i32, y: i32, aa: AlphaU8[], runs: AlphaRun[]):
         if not mask_has_row(self.mask, y):
             return
         let width = compute_anti_width(runs)
@@ -149,7 +149,7 @@ struct MaskRegionClipBlitter: Blitter:
                 xx += skip
             self.blitter.blit_anti_h(xx, y, aa2, runs2)
 
-    pub mutating func blit_v(x: i32, y: i32, height: i32, alpha: AlphaU8):
+    pub func blit_v(x: i32, y: i32, height: i32, alpha: AlphaU8):
         if x < 0 or x >= (i32)self.mask.width():
             return
         let top0 = y if y > 0 else 0
@@ -164,11 +164,11 @@ struct MaskRegionClipBlitter: Blitter:
                 self.blitter.blit_v(x, top, bottom - top, alpha)
             top = bottom
 
-    pub mutating func blit_rect(x: i32, y: i32, width: i32, height: i32):
+    pub func blit_rect(x: i32, y: i32, width: i32, height: i32):
         for yy in y..<y + height:
             self.blit_rect_row(x, yy, width)
 
-    mutating func blit_rect_row(x: i32, y: i32, width: i32):
+    func blit_rect_row(x: i32, y: i32, width: i32):
         if not mask_has_row(self.mask, y):
             return
         let row = clip_mask_row(self.mask, y)
@@ -180,7 +180,7 @@ struct MaskRegionClipBlitter: Blitter:
                 self.blitter.blit_rect(left, y, right - left, 1)
             left = right
 
-    pub mutating func blit_anti_rect(x: i32, y: i32, width: i32, height: i32, left_alpha: AlphaU8, right_alpha: AlphaU8):
+    pub func blit_anti_rect(x: i32, y: i32, width: i32, height: i32, left_alpha: AlphaU8, right_alpha: AlphaU8):
         # The *true* width of the rectangle to blit is width + 2
         let full_right = x + width + 2
         for yy in y..<y + height:
@@ -205,7 +205,7 @@ struct MaskRegionClipBlitter: Blitter:
                         self.blitter.blit_anti_rect(left, yy, right - left - 2, 1, effective_left, effective_right)
                 left = right
 
-    pub mutating func blit_mask(mask: const BlitMask*, clip: IRect):
+    pub func blit_mask(mask: const BlitMask*, clip: IRect):
         for y in clip.top..<clip.bottom:
             if not mask_has_row(self.mask, y):
                 continue
@@ -218,10 +218,10 @@ struct MaskRegionClipBlitter: Blitter:
                     self.blitter.blit_mask(mask, IRect.ltrb(left, y, right, y + 1))
                 left = right
 
-    pub mutating func blit_anti_h2(x: i32, y: i32, alpha0: AlphaU8, alpha1: AlphaU8):
+    pub func blit_anti_h2(x: i32, y: i32, alpha0: AlphaU8, alpha1: AlphaU8):
         blitter_default_blit_anti_h2(&self, x, y, alpha0, alpha1)
 
-    pub mutating func blit_anti_v2(x: i32, y: i32, alpha0: AlphaU8, alpha1: AlphaU8):
+    pub func blit_anti_v2(x: i32, y: i32, alpha0: AlphaU8, alpha1: AlphaU8):
         blitter_default_blit_anti_v2(&self, x, y, alpha0, alpha1)
 
 # mark: SkAAClipBlitter =======================================================================
@@ -235,13 +235,13 @@ struct MaskAAClipBlitter: Blitter:
     var runs: AlphaRun[]
     var aa: AlphaU8[]
 
-    static func new_(blitter: Blitter, mask: const Mask*) -> MaskAAClipBlitter:
+    func new_(blitter: Blitter, mask: const Mask*) -> MaskAAClipBlitter:
         let count = (usize)mask.width() + 1
-        let runs = (alloc AlphaRun[count] in memory.heap) else trap("raster: out of memory")
-        let aa = (alloc AlphaU8[count] in memory.heap) else trap("raster: out of memory")
+        let runs = (new AlphaRun[count] --- in memory.heap) else trap("raster: out of memory")
+        let aa = (new AlphaU8[count] --- in memory.heap) else trap("raster: out of memory")
         return MaskAAClipBlitter(blitter = blitter, mask = mask, runs = runs, aa = aa)
 
-    mutating func release():
+    func release():
         free(self.runs) in memory.heap
         free(self.aa) in memory.heap
 
@@ -255,7 +255,7 @@ struct MaskAAClipBlitter: Blitter:
         return true
 
     ## expandToRuns: the clip's row from x as runs of equal alpha.
-    mutating func expand_to_runs(row: const u8[], x: i32, width: i32):
+    func expand_to_runs(row: const u8[], x: i32, width: i32):
         var i: i32 = 0
         while i < width:
             let n = mask_run_length(row, x + i, x + width)
@@ -264,7 +264,7 @@ struct MaskAAClipBlitter: Blitter:
             i += n
         self.runs[(usize)width] = 0
 
-    pub mutating func blit_h(x: i32, y: i32, width: i32):
+    pub func blit_h(x: i32, y: i32, width: i32):
         let row = clip_mask_row(self.mask, y)
         let initial_count = mask_run_length(row, x, x + width)
         if initial_count >= width:
@@ -277,7 +277,7 @@ struct MaskAAClipBlitter: Blitter:
         self.expand_to_runs(row, x, width)
         self.blitter.blit_anti_h(x, y, self.aa, self.runs)
 
-    pub mutating func blit_anti_h(x: i32, y: i32, src_aa: AlphaU8[], src_runs: AlphaRun[]):
+    pub func blit_anti_h(x: i32, y: i32, src_aa: AlphaU8[], src_runs: AlphaRun[]):
         let row = clip_mask_row(self.mask, y)
         # merge(): the runs split where either the source or the clip changes, each alpha
         # scaled by the clip's.
@@ -304,7 +304,7 @@ struct MaskAAClipBlitter: Blitter:
         self.runs[dst_i] = 0
         self.blitter.blit_anti_h(x, y, self.aa, self.runs)
 
-    pub mutating func blit_v(x: i32, y0: i32, height: i32, alpha: AlphaU8):
+    pub func blit_v(x: i32, y0: i32, height: i32, alpha: AlphaU8):
         if self.quick_contains(x, y0, 1, height):
             self.blitter.blit_v(x, y0, height, alpha)
             return
@@ -320,17 +320,17 @@ struct MaskAAClipBlitter: Blitter:
                 self.blitter.blit_v(x, y, dy, new_alpha)
             y += dy
 
-    pub mutating func blit_rect(x: i32, y: i32, width: i32, height: i32):
+    pub func blit_rect(x: i32, y: i32, width: i32, height: i32):
         if self.quick_contains(x, y, width, height):
             self.blitter.blit_rect(x, y, width, height)
             return
         for yy in y..<y + height:
             self.blit_h(x, yy, width)
 
-    pub mutating func blit_anti_rect(x: i32, y: i32, width: i32, height: i32, left_alpha: AlphaU8, right_alpha: AlphaU8):
+    pub func blit_anti_rect(x: i32, y: i32, width: i32, height: i32, left_alpha: AlphaU8, right_alpha: AlphaU8):
         blitter_default_blit_anti_rect(&self, x, y, width, height, left_alpha, right_alpha)
 
-    pub mutating func blit_mask(mask: const BlitMask*, clip: IRect):
+    pub func blit_mask(mask: const BlitMask*, clip: IRect):
         if self.quick_contains(clip.left, clip.top, clip.width(), clip.height()):
             self.blitter.blit_mask(mask, clip)
             return
@@ -352,10 +352,10 @@ struct MaskAAClipBlitter: Blitter:
             let row_mask = BlitMask(image = self.aa, bounds = row_rect, row_bytes = (u32)width)
             self.blitter.blit_mask(&row_mask, row_rect)
 
-    pub mutating func blit_anti_h2(x: i32, y: i32, alpha0: AlphaU8, alpha1: AlphaU8):
+    pub func blit_anti_h2(x: i32, y: i32, alpha0: AlphaU8, alpha1: AlphaU8):
         blitter_default_blit_anti_h2(&self, x, y, alpha0, alpha1)
 
-    pub mutating func blit_anti_v2(x: i32, y: i32, alpha0: AlphaU8, alpha1: AlphaU8):
+    pub func blit_anti_v2(x: i32, y: i32, alpha0: AlphaU8, alpha1: AlphaU8):
         blitter_default_blit_anti_v2(&self, x, y, alpha0, alpha1)
 
 ## The length of the run of equal alphas starting at `x`, looking no further than `end`.

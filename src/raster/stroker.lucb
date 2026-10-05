@@ -16,7 +16,7 @@ struct SwappableBuilders:
     var inner: PathBuilder*
     var outer: PathBuilder*
 
-    mutating func swap():
+    func swap():
         let tmp = self.inner
         self.inner = self.outer
         self.outer = tmp
@@ -134,7 +134,7 @@ pub struct PathStroker:
     var join_completed: bool  # previous join was not degenerate
 
     ## Creates a new PathStroker.
-    pub static func new_() -> PathStroker:
+    pub func new_() -> PathStroker:
         return PathStroker(
             radius = 0.0,
             inv_miter_limit = 0.0,
@@ -167,7 +167,7 @@ pub struct PathStroker:
     ## more precise, since it will be zoomed up, and small errors will be magnified. Smaller
     ## values (0 < res < 1) indicate that the result can be less precise, since it will be
     ## zoomed down, and small errors may be invisible.
-    pub static func compute_resolution_scale(ts: Transform) -> f32:
+    pub func compute_resolution_scale(ts: Transform) -> f32:
         let sx = Point.from_xy(ts.sx, ts.kx).length()
         let sy = Point.from_xy(ts.ky, ts.sy).length()
         if math32.is_finite(sx) and math32.is_finite(sy):
@@ -179,19 +179,19 @@ pub struct PathStroker:
     ## Stroke the path. Can be none when: `width` <= 0 or Nan/inf, `miter_limit` < 4 or
     ## NaN/inf (only when LineJoin::Miter is used). Unlike `Path.stroke`, allows to reuse
     ## internal allocations.
-    pub mutating func stroke(path: const Path*, stroke: const Stroke*, resolution_scale: f32) -> Path?:
+    pub func stroke(path: const Path*, stroke: const Stroke*, resolution_scale: f32) -> Path?:
         let width = stroke.width
         if not (math32.is_finite(width) and width > 0.0):
             return none
         return self.stroke_inner(path, width, stroke.miter_limit, stroke.line_cap, stroke.line_join, resolution_scale)
 
     ## Frees the stroker's working storage.
-    pub mutating func release():
+    pub func release():
         self.inner.release()
         self.outer.release()
         self.cusper.release()
 
-    mutating func stroke_inner(path: const Path*, width: f32, miter_limit: f32, line_cap: LineCap, line_join0: LineJoin, res_scale: f32) -> Path?:
+    func stroke_inner(path: const Path*, width: f32, miter_limit: f32, line_cap: LineCap, line_join0: LineJoin, res_scale: f32) -> Path?:
         # TODO: stroke_rect optimization
         var line_join = line_join0
         var inv_miter_limit: f32 = 0.0
@@ -289,13 +289,13 @@ pub struct PathStroker:
 
         return self.finish(last_segment_is_line)
 
-    mutating func builders() -> SwappableBuilders:
+    func builders() -> SwappableBuilders:
         return SwappableBuilders(inner = &self.inner, outer = &self.outer)
 
     func move_to_pt() -> Point:
         return self.first_pt
 
-    mutating func move_to(p: Point):
+    func move_to(p: Point):
         if self.segment_count > 0:
             self.finish_contour(false, false)
 
@@ -304,7 +304,7 @@ pub struct PathStroker:
         self.prev_pt = p
         self.join_completed = false
 
-    mutating func line_to(p: Point, iter: const PathSegmentsIter*?):
+    func line_to(p: Point, iter: const PathSegmentsIter*?):
         let teeny_line = self.prev_pt.equals_within_tolerance(p, scalar_nearly_zero * self.inv_res_scale)
         if fn_ptr_eq(self.capper, butt_capper) and teeny_line:
             return
@@ -326,7 +326,7 @@ pub struct PathStroker:
 
         self.post_join_to(p, normal, unit_normal)
 
-    mutating func quad_to(p1: Point, p2: Point):
+    func quad_to(p1: Point, p2: Point):
         let quad: Point[3] = [self.prev_pt, p1, p2]
         let (reduction, reduction_type) = check_quad_linear(quad)
         if reduction_type == .point:
@@ -358,9 +358,9 @@ pub struct PathStroker:
 
         var quad_points = QuadConstruct.default()
         init_quad(&self, .outer, 0.0, 1.0, &quad_points)
-        discard(quad_stroke(&self, quad, &quad_points))
+        _ = quad_stroke(&self, quad, &quad_points)
         init_quad(&self, .inner, 0.0, 1.0, &quad_points)
-        discard(quad_stroke(&self, quad, &quad_points))
+        _ = quad_stroke(&self, quad, &quad_points)
 
         let ok = set_normal_unit_normal(quad[1], quad[2], self.res_scale, self.radius, &normal_bc, &unit_bc)
         if not ok:
@@ -369,7 +369,7 @@ pub struct PathStroker:
 
         self.post_join_to(p2, normal_bc, unit_bc)
 
-    mutating func cubic_to(pt1: Point, pt2: Point, pt3: Point):
+    func cubic_to(pt1: Point, pt2: Point, pt3: Point):
         let cubic: Point[4] = [self.prev_pt, pt1, pt2, pt3]
         var reduction: Point[3] = [Point.zero(), Point.zero(), Point.zero()]
         var tangent_pt = Point.zero()
@@ -415,9 +415,9 @@ pub struct PathStroker:
 
             var quad_points = QuadConstruct.default()
             init_quad(&self, .outer, last_t, next_t, &quad_points)
-            discard(cubic_stroke(&self, cubic, &quad_points))
+            _ = cubic_stroke(&self, cubic, &quad_points)
             init_quad(&self, .inner, last_t, next_t, &quad_points)
-            discard(cubic_stroke(&self, cubic, &quad_points))
+            _ = cubic_stroke(&self, cubic, &quad_points)
             last_t = next_t
 
         if let cusp = find_cubic_cusp(cubic):
@@ -430,10 +430,10 @@ pub struct PathStroker:
 
         self.post_join_to(pt3, normal_cd, unit_cd)
 
-    mutating func close(is_line: bool):
+    func close(is_line: bool):
         self.finish_contour(true, is_line)
 
-    mutating func finish_contour(close: bool, curr_is_line: bool):
+    func finish_contour(close: bool, curr_is_line: bool):
         if self.segment_count > 0:
             if close:
                 self.joiner(self.prev_unit_normal, self.prev_pt, self.first_unit_normal, self.radius, self.inv_miter_limit, self.prev_is_line, curr_is_line, self.builders())
@@ -468,7 +468,7 @@ pub struct PathStroker:
         self.segment_count = -1
         self.first_outer_pt_index_in_contour = self.outer.points.len
 
-    mutating func pre_join_to(p: Point, curr_is_line: bool, normal: Point*, unit_normal: Point*) -> bool:
+    func pre_join_to(p: Point, curr_is_line: bool, normal: Point*, unit_normal: Point*) -> bool:
         let prev_x = self.prev_pt.x
         let prev_y = self.prev_pt.y
 
@@ -496,14 +496,14 @@ pub struct PathStroker:
         self.prev_is_line = curr_is_line
         return true
 
-    mutating func post_join_to(p: Point, normal: Point, unit_normal: Point):
+    func post_join_to(p: Point, normal: Point, unit_normal: Point):
         self.join_completed = true
         self.prev_pt = p
         self.prev_unit_normal = unit_normal
         self.prev_normal = normal
         self.segment_count += 1
 
-    mutating func finish(is_line: bool) -> Path?:
+    func finish(is_line: bool) -> Path?:
         self.finish_contour(false, is_line)
 
         # Swap out the outer builder.

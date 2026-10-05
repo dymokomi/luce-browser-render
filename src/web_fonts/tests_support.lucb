@@ -55,7 +55,7 @@ func test_fly_text(string: ak.FlyString) -> str:
 ## Asserts that two floats are the same float (bit for bit), naming what differs.
 func test_expect_bits(what: str, actual: f32, expected_bits: u32):
     if actual.bits() != expected_bits:
-        print(f"{what}: got {actual} ({hex(actual.bits())}), expected {f32.bits(expected_bits)} ({hex(expected_bits)})")
+        print(f"{what}: got {actual} ({actual.bits():x}), expected {f32.bits(expected_bits)} ({expected_bits:x})")
         assert(false, "a float differs from the reference build")
 
 # mark: Test bodies =================================================================================

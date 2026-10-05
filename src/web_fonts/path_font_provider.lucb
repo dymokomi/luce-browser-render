@@ -83,7 +83,7 @@ pub func font_data_create_from_file(path: str) -> FontData*?:
 struct PathFontProviderWalk: files.WalkVisitor:
     var provider: PathFontProvider*
 
-    mutating func visit(path: str, info: files.Metadata, depth: usize) -> bool!:
+    func visit(path: str, info: files.Metadata, depth: usize) -> bool!:
         if info.kind == files.FileKind.regular:
             path_font_provider_load_font_file(self.provider, path)
         return true
@@ -92,7 +92,7 @@ struct PathFontProviderWalk: files.WalkVisitor:
 func path_font_provider_add_typeface(this: PathFontProvider*, font: Typeface*):
     let family_name = typeface_family(font)
     if ak.hash_map_get_k(&this.m_typeface_by_family, family_name) == none:
-        discard(ak.hash_map_set(&this.m_typeface_by_family, family_name, ak.Vector[Typeface*]()))
+        _ = ak.hash_map_set(&this.m_typeface_by_family, family_name, ak.Vector[Typeface*]())
     let family = ak.hash_map_get_k(&this.m_typeface_by_family, family_name) else trap("VERIFY_NOT_REACHED")
     ak.vector_append_t(family, font)
 

@@ -138,7 +138,7 @@ func do_blunt_or_clipped(builders: SwappableBuilders, pivot: Point, radius: f32,
     after.scale(radius)
 
     if miter_clip:
-        discard(mid.normalize())
+        _ = mid.normalize()
 
         let cos_beta = before.dot(mid)
         let sin_beta = before.cross(mid)
@@ -236,7 +236,7 @@ func miter_joiner_inner(before_unit_normal: Point, pivot: Point, after_unit_norm
         do_blunt_or_clipped(builders, pivot, radius, prev_is_line, curr_is_line, before, mid, after, inv_miter_limit, miter_clip)
         return
 
-    discard(mid.set_length(radius / sin_half_angle))
+    _ = mid.set_length(radius / sin_half_angle)
     do_miter(builders, pivot, radius, prev_is_line, curr_is_line, mid, after)
 
 func set_normal_unit_normal(before: Point, after: Point, scale: f32, radius: f32, normal: Point*, unit_normal: Point*) -> bool:

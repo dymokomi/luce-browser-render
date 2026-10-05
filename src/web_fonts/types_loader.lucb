@@ -51,7 +51,7 @@ pub func woff2_byte_buffer_out_size(this: Woff2ByteBufferOut*) -> usize:
 pub let woff2_byte_buffer_out_vtable: Woff2ByteBufferOutVTable = Woff2ByteBufferOutVTable(class_info = &woff2_byte_buffer_out_class)
 
 ## Class information of WOFF2::WOFF2ByteBufferOut: name, class-id range (pre-order), size, vtable.
-pub let woff2_byte_buffer_out_class: ak.ClassInfo = ak.ClassInfo(name = "WOFF2ByteBufferOut", first_id = 0, last_id = 0, size = sizeof(Woff2ByteBufferOut), vtable = (const void*)&woff2_byte_buffer_out_vtable)
+pub let woff2_byte_buffer_out_class: ak.ClassInfo = ak.ClassInfo(name = "WOFF2ByteBufferOut", first_id = 0, last_id = 0, size = memory.size_of(Woff2ByteBufferOut), vtable = (const void*)&woff2_byte_buffer_out_vtable)
 
 ## is<WOFF2::WOFF2ByteBufferOut>: the class-id range test.
 pub func is_woff2_byte_buffer_out[P: IsWoff2ByteBufferOut](p: P*) -> bool:

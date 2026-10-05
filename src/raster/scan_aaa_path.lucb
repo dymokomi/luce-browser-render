@@ -198,7 +198,7 @@ func aaa_fill_path(path: const Path*, convex: bool, clip_rect: IRect, blitter: A
         return
 
     # this returns the first and last edge after they're sorted into a dlink list
-    let keys = (alloc EdgeSortKey[count] in memory.heap) else trap("raster: out of memory")
+    let keys = (new EdgeSortKey[count] --- in memory.heap) else trap("raster: out of memory")
     defer free(keys) in memory.heap
     for i in 0..<count:
         let e = &list.data[i]

@@ -61,7 +61,7 @@ pub let painter_raster_vtable: PainterVTable = PainterVTable(
     reset = painter_raster_reset_impl)
 
 ## Class information of PainterRaster (a subclass of Gfx::Painter).
-pub let painter_raster_class: ak.ClassInfo = ak.ClassInfo(name = "PainterRaster", first_id = 1, last_id = 1, size = sizeof(PainterRaster), vtable = (const void*)&painter_raster_vtable)
+pub let painter_raster_class: ak.ClassInfo = ak.ClassInfo(name = "PainterRaster", first_id = 1, last_id = 1, size = memory.size_of(PainterRaster), vtable = (const void*)&painter_raster_vtable)
 
 # mark: Canvas =================================================================================
 

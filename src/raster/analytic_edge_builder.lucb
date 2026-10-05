@@ -130,7 +130,7 @@ func analytic_add_line(edges: Vec[AnalyticEdge]*, p0: Point, p1: Point):
 
         match combine:
             .total:
-                discard(edges.pop())
+                _ = edges.pop()
             .partial:
                 return
             _:

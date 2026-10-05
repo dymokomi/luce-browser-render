@@ -71,7 +71,7 @@ func path_glyphs_of_utf8(font: const Font*, text: const ak.Utf8View*) -> ak.Vect
     var it = ak.utf8_view_begin(text)
     while not ak.utf8_code_point_iterator_done(&it):
         ak.vector_append_t(&glyphs, font_glyph_id_for_code_point(font, ak.utf8_code_point_iterator_deref(&it)))
-        discard(ak.utf8_code_point_iterator_inc(&it))
+        _ = ak.utf8_code_point_iterator_inc(&it)
     return glyphs
 
 # SkAutoToGlyphs over UTF-16: the glyph of each code point (SkFont::textToGlyphs).
@@ -80,7 +80,7 @@ func path_glyphs_of_utf16(font: const Font*, text: const ak.Utf16View*) -> ak.Ve
     var it = ak.utf16_view_begin(text)
     while not ak.utf16_code_point_iterator_done(&it):
         ak.vector_append_t(&glyphs, font_glyph_id_for_code_point(font, ak.utf16_code_point_iterator_deref(&it)))
-        discard(ak.utf16_code_point_iterator_inc(&it))
+        _ = ak.utf16_code_point_iterator_inc(&it)
     return glyphs
 
 # SkTextUtils::GetPath (Skia src/utils/SkTextUtils.cpp:39): the outlines of `glyphs` laid out
@@ -191,19 +191,19 @@ pub func path_place_text_along_utf16_view(this: const gfx.Path*, text: ak.Utf16V
 ## Ported from Libraries/LibGfx/Path.h:122 Gfx::Path::impl. Replaced: the implementation is
 ## gfx.PathImplRaster, reached through gfx.path_sk_path (see the header).
 pub func path_impl(this: gfx.Path*) -> PathImpl*:
-    discard(this)
+    _ = this
     trap("replaced: Path::impl (gfx.Path's implementation is gfx.PathImplRaster)")
 
 ## Ported from Libraries/LibGfx/Path.h:123 Gfx::Path::impl. Replaced: see path_impl.
 pub func path_impl_const(this: const gfx.Path*) -> PathImpl*:
-    discard(this)
+    _ = this
     trap("replaced: Path::impl (gfx.Path's implementation is gfx.PathImplRaster)")
 
 ## Ported from Libraries/LibGfx/Path.h:126 Gfx::Path::Path(NonnullOwnPtr<PathImpl>&&).
 ## Replaced: a gfx.Path is built from a gfx.PathImplRaster (see the header).
 pub func path_construct(this: gfx.Path*, impl: PathImpl*):
-    discard(this)
-    discard(impl)
+    _ = this
+    _ = impl
     trap("replaced: Path(NonnullOwnPtr<PathImpl>) (gfx.Path's implementation is gfx.PathImplRaster)")
 
 # mark: PathImpl ===============================================================================

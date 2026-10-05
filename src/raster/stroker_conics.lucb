@@ -47,9 +47,9 @@ func stroker_conic_to(s: PathStroker*, pt1: Point, pt2: Point, weight: f32):
         return
     var quad_points = QuadConstruct.default()
     init_quad(s, .outer, 0.0, 1.0, &quad_points)
-    discard(conic_stroke(s, &conic, &quad_points))
+    _ = conic_stroke(s, &conic, &quad_points)
     init_quad(s, .inner, 0.0, 1.0, &quad_points)
-    discard(conic_stroke(s, &conic, &quad_points))
+    _ = conic_stroke(s, &conic, &quad_points)
     # setConicEndNormal: setQuadEndNormal on the conic's points
     if not set_normal_unit_normal(conic.points[1], conic.points[2], s.res_scale, s.radius, &normal_bc, &unit_bc):
         normal_bc = normal_ab
@@ -123,10 +123,10 @@ func conic_stroke(s: PathStroker*, conic: const Conic*, quad_points: QuadConstru
         add_degenerate_line(s, quad_points)
         return true
     var half_quad = QuadConstruct.default()
-    discard(half_quad.init_with_start(quad_points))
+    _ = half_quad.init_with_start(quad_points)
     if not conic_stroke(s, conic, &half_quad):
         return false
-    discard(half_quad.init_with_end(quad_points))
+    _ = half_quad.init_with_end(quad_points)
     if not conic_stroke(s, conic, &half_quad):
         return false
     s.recursion_depth -= 1

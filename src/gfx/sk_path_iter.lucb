@@ -56,7 +56,7 @@ pub struct SkPathIter:
     var m_close_line: bool
 
     ## The next record, none when done.
-    mutating func next() -> SkPathIterRec?:
+    func next() -> SkPathIterRec?:
         return sk_path_iter_next(&self)
 
 ## Ported from src/core/SkPath.cpp:308 SkPath::Iter::Iter(path, forceClose) (setPath). The
@@ -173,7 +173,7 @@ pub struct SkPathRawIter:
     var m_weight_index: usize
 
     ## The next record, none when done.
-    mutating func next() -> SkPathIterRec?:
+    func next() -> SkPathIterRec?:
         return sk_path_raw_iter_next(&self)
 
 ## Ported from src/core/SkPath.cpp:470 SkPath::RawIter::setPath. The iterator views the

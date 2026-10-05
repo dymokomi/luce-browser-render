@@ -193,7 +193,7 @@ func display_list_player_switch_to_context_visit_node(visit: SwitchToContextVisi
                     visit.result = SwitchResult.culled_by_effect
                     return ak.IterationDecision.break_
             _:
-                discard(0)
+                _ = 0
     display_list_player_apply_accumulated_visual_context(visit.state, node)
     visit.state.applied_depth += 1
     return ak.IterationDecision.continue_
@@ -215,7 +215,7 @@ func display_list_player_switch_to_context(state: DisplayListPlayerExecuteState*
         state.applied_depth -= 1
 
     var visit = SwitchToContextVisit(state = state, bounding_rect = bounding_rect, result = SwitchResult.switched)
-    discard(display_list_player_for_each_node_from_common_ancestor_to_target(&visit, common_ancestor_index, target_index))
+    _ = display_list_player_for_each_node_from_common_ancestor_to_target(&visit, common_ancestor_index, target_index)
 
     if visit.result == SwitchResult.switched:
         state.applied_context_index = target_index
@@ -251,7 +251,7 @@ func display_list_player_execute_impl(this: DisplayListPlayer*, display_list_: D
                 display_list_player_paint_scrollbar(this, paint_scroll_bar)
                 continue
             _:
-                discard(0)
+                _ = 0
 
         if let rect = bounding_rect:
             if gfx.device_pixel_rect_is_empty(&rect) or display_list_player_would_be_fully_clipped_by_painter(this, rect):

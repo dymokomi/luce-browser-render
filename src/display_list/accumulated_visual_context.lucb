@@ -142,7 +142,7 @@ pub func accumulated_visual_context_tree_transform_point_for_hit_test(this: cons
                     return none
             .effects_data(_):
                 # Effects don't affect coordinate transforms
-                discard(0)
+                _ = 0
         i -= 1
 
     return point
@@ -168,7 +168,7 @@ pub func accumulated_visual_context_tree_inverse_transform_point(this: const Acc
                 if let inverse = gfx.affine_transform_inverse(&affine):
                     point = map_about_origin(&inverse, point, transform.origin)
             _:
-                discard(0)
+                _ = 0
         i -= 1
 
     return point
@@ -195,13 +195,13 @@ pub func accumulated_visual_context_tree_transform_rect_to_viewport(this: const 
                 gfx.float_rect_translate_by_float_point(&rect, scroll_state_snapshot_device_offset_for_index(scroll_state, scroll.scroll_frame_index))
             .clip_data(_):
                 # clips don't affect rect coordinates
-                discard(0)
+                _ = 0
             .clip_path_data(_):
                 # clip paths don't affect rect coordinates
-                discard(0)
+                _ = 0
             .effects_data(_):
                 # effects don't affect rect coordinates
-                discard(0)
+                _ = 0
         i = node.parent_index
 
     return rect

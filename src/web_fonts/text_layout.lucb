@@ -274,7 +274,7 @@ pub func shape_text_utf16_view(baseline_start: gfx.FloatPoint, string: ak.Utf16V
             ak.vector_append_t(&runs, run)
             last_font = font
             substring_begin_offset = ak.utf16_view_iterator_offset(&string, &it)
-        discard(ak.utf16_code_point_iterator_inc(&it))
+        _ = ak.utf16_code_point_iterator_inc(&it)
 
     let end_offset = ak.utf16_view_iterator_offset(&string, &it)
     if substring_begin_offset < end_offset:
@@ -350,7 +350,7 @@ func shape_text_get_or_create_buffer(string: ak.Utf16View, font: const Font*, te
     let previous = font_allocators_enter(allocators)
     defer font_allocators_leave(previous)
     with allocators.allocator:
-        discard(ak.hash_map_set(&shaping_cache.map, ak.utf16_string_from_utf16(string), buffer))
+        _ = ak.hash_map_set(&shaping_cache.map, ak.utf16_string_from_utf16(string), buffer)
     return buffer
 
 ## The copy of a shaped `buffer` that the font's shaping cache keeps, in the typeface's

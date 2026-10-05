@@ -41,9 +41,9 @@ pub func painting_surface_wrap_bitmap(bitmap: Bitmap*) -> PaintingSurface*:
 ## Ported from Libraries/LibGfx/PaintingSurface.cpp:132 Gfx::PaintingSurface::create_from_shared_image_buffer.
 ## Replaced: needs a Metal texture from an IOSurface; the port has no GPU backend.
 pub func painting_surface_create_from_shared_image_buffer(shared_image_buffer: SharedImageBuffer*, context: SkiaBackendContext*, origin: PaintingSurfaceOrigin = PaintingSurfaceOrigin.top_left) -> PaintingSurface*:
-    discard(shared_image_buffer)
-    discard(context)
-    discard(origin)
+    _ = shared_image_buffer
+    _ = context
+    _ = origin
     trap("unsupported: GPU painting surfaces (Metal/Vulkan) in the CPU-only port")
 
 ## Ported from Libraries/LibGfx/PaintingSurface.cpp:151 Gfx::PaintingSurface::PaintingSurface.
@@ -158,19 +158,19 @@ pub func painting_surface_rect(this: const PaintingSurface*) -> DevicePixelRect:
 ## Ported from Libraries/LibGfx/PaintingSurface.cpp:195 Gfx::PaintingSurface::canvas.
 ## Replaced: there is no SkCanvas; draw through painting_surface_begin_raster.
 pub func painting_surface_canvas(this: const PaintingSurface*) -> SkCanvas*:
-    discard(this)
+    _ = this
     trap("replaced: PaintingSurface::canvas (use painting_surface_begin_raster)")
 
 ## Ported from Libraries/LibGfx/PaintingSurface.cpp:200 Gfx::PaintingSurface::sk_surface.
 ## Replaced: there is no SkSurface; draw through painting_surface_begin_raster.
 pub func painting_surface_sk_surface(this: const PaintingSurface*) -> SkSurface*:
-    discard(this)
+    _ = this
     trap("replaced: PaintingSurface::sk_surface (use painting_surface_begin_raster)")
 
 ## Ported from Libraries/LibGfx/PaintingSurface.cpp:213 Gfx::PaintingSurface::sk_image_snapshot.
 ## Replaced: there is no SkImage; use painting_surface_snapshot_bitmap.
 pub func painting_surface_sk_image_snapshot_sk_sp(this: const PaintingSurface*) -> void*?:
-    discard(this)
+    _ = this
     trap("replaced: PaintingSurface::sk_image_snapshot (use painting_surface_snapshot_bitmap)")
 
 ## Ported from Libraries/LibGfx/PaintingSurface.cpp:218 Gfx::PaintingSurface::skia_backend_context.

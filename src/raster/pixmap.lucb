@@ -23,7 +23,7 @@ pub struct Pixmap:
 
     ## Allocates a new pixmap. A pixmap is filled with transparent black by default, aka
     ## (0, 0, 0, 0). Zero size in an error. Pixmap's width is limited by i32::MAX/4.
-    pub static func new_(width: u32, height: u32) -> Pixmap?:
+    pub func new_(width: u32, height: u32) -> Pixmap?:
         let size = IntSize.from_wh(width, height) else return none
         let data_len = data_len_for_size(size) else return none
         # We cannot check that allocation was successful yet.
@@ -33,7 +33,7 @@ pub struct Pixmap:
     ## Creates a new pixmap by taking ownership over an image buffer (premultiplied RGBA
     ## pixels) allocated in `memory.heap`. The size needs to match the data provided.
     ## Pixmap's width is limited by i32::MAX/4.
-    pub static func from_vec(data: u8[], size: IntSize) -> Pixmap?:
+    pub func from_vec(data: u8[], size: IntSize) -> Pixmap?:
         let data_len = data_len_for_size(size) else return none
         if data.length != data_len:
             return none
@@ -44,7 +44,7 @@ pub struct Pixmap:
         return PixmapRef(data_ = self.data_, size_ = self.size_)
 
     ## Returns a container that references Pixmap's data.
-    pub mutating func as_mut() -> PixmapMut:
+    pub func as_mut() -> PixmapMut:
         return PixmapMut(data_ = self.data_, size_ = self.size_)
 
     ## Returns pixmap's width.
@@ -60,7 +60,7 @@ pub struct Pixmap:
         return self.size_
 
     ## Fills the entire pixmap with a specified color.
-    pub mutating func fill(color: Color):
+    pub func fill(color: Color):
         var m = self.as_mut()
         m.fill(color)
 
@@ -69,7 +69,7 @@ pub struct Pixmap:
         return self.data_
 
     ## Returns the mutable internal data. Byteorder: RGBA
-    pub mutating func data_mut() -> u8[]:
+    pub func data_mut() -> u8[]:
         return self.data_
 
     ## Returns a pixel color. Returns none when position is out of bounds.
@@ -77,7 +77,7 @@ pub struct Pixmap:
         return self.as_ref().pixel(x, y)
 
     ## Returns a mutable slice of pixels.
-    pub mutating func pixels_mut() -> PremultipliedColorU8[]:
+    pub func pixels_mut() -> PremultipliedColorU8[]:
         return pixels_of(self.data_)
 
     ## Returns a slice of pixels.
@@ -86,14 +86,14 @@ pub struct Pixmap:
 
     ## Consumes the internal data. Byteorder: RGBA. The caller owns the bytes (free them in
     ## `memory.heap`); the pixmap must not be used afterwards.
-    pub mutating func take() -> u8[]:
+    pub func take() -> u8[]:
         let data = self.data_
         self.data_ = self.data_[..<0]
         return data
 
     ## Consumes the internal data. Byteorder: straight RGBA. The caller owns the bytes;
     ## the pixmap must not be used afterwards.
-    pub mutating func take_demultiplied() -> u8[]:
+    pub func take_demultiplied() -> u8[]:
         # Demultiply alpha.
         #
         # RasterPipeline is 15% faster here, but produces slightly different results due to
@@ -117,34 +117,34 @@ pub struct Pixmap:
         return self.size_.width() == other.size_.width() and self.size_.height() == other.size_.height() and bytes_equal(self.data_, other.data_)
 
     ## Frees the pixels.
-    pub mutating func release():
+    pub func release():
         if self.data_.length > 0:
             free(self.data_) in memory.heap
         self.data_ = self.data_[..<0]
 
     ## Draws a filled rectangle onto the pixmap. See `PixmapMut.fill_rect` for details.
-    pub mutating func fill_rect(rect: Rect, paint: const Paint*, transform: Transform, mask: const Mask*?):
+    pub func fill_rect(rect: Rect, paint: const Paint*, transform: Transform, mask: const Mask*?):
         var m = self.as_mut()
         m.fill_rect(rect, paint, transform, mask)
 
     ## Draws a filled path onto the pixmap. See `PixmapMut.fill_path` for details.
-    pub mutating func fill_path(path: const Path*, paint: const Paint*, fill_rule: FillRule, transform: Transform, mask: const Mask*?):
+    pub func fill_path(path: const Path*, paint: const Paint*, fill_rule: FillRule, transform: Transform, mask: const Mask*?):
         var m = self.as_mut()
         m.fill_path(path, paint, fill_rule, transform, mask)
 
     ## Strokes a path. See `PixmapMut.stroke_path` for details.
-    pub mutating func stroke_path(path: const Path*, paint: const Paint*, stroke: const Stroke*, transform: Transform, mask: const Mask*?):
+    pub func stroke_path(path: const Path*, paint: const Paint*, stroke: const Stroke*, transform: Transform, mask: const Mask*?):
         var m = self.as_mut()
         m.stroke_path(path, paint, stroke, transform, mask)
 
     ## Draws a `Pixmap` on top of the current `Pixmap`. See `PixmapMut.draw_pixmap` for
     ## details.
-    pub mutating func draw_pixmap(x: i32, y: i32, pixmap: PixmapRef, paint: const PixmapPaint*, transform: Transform, mask: const Mask*?):
+    pub func draw_pixmap(x: i32, y: i32, pixmap: PixmapRef, paint: const PixmapPaint*, transform: Transform, mask: const Mask*?):
         var m = self.as_mut()
         m.draw_pixmap(x, y, pixmap, paint, transform, mask)
 
     ## Applies a masks. See `PixmapMut.apply_mask` for details.
-    pub mutating func apply_mask(mask: const Mask*):
+    pub func apply_mask(mask: const Mask*):
         var m = self.as_mut()
         m.apply_mask(mask)
 
@@ -170,7 +170,7 @@ pub struct PixmapRef:
     ## `size.width() * size.height() * BYTES_PER_PIXEL`. Zero size in an error. Width is
     ## limited by i32::MAX/4. The `data` is assumed to have premultiplied RGBA pixels
     ## (byteorder: RGBA).
-    pub static func from_bytes(data: const u8[], width: u32, height: u32) -> PixmapRef?:
+    pub func from_bytes(data: const u8[], width: u32, height: u32) -> PixmapRef?:
         let size = IntSize.from_wh(width, height) else return none
         let data_len = data_len_for_size(size) else return none
         if data.length < data_len:
@@ -244,7 +244,7 @@ pub struct PixmapMut:
     ## `size.width() * size.height() * BYTES_PER_PIXEL`. Zero size in an error. Width is
     ## limited by i32::MAX/4. The `data` is assumed to have premultiplied RGBA pixels
     ## (byteorder: RGBA).
-    pub static func from_bytes(data: u8[], width: u32, height: u32) -> PixmapMut?:
+    pub func from_bytes(data: u8[], width: u32, height: u32) -> PixmapMut?:
         let size = IntSize.from_wh(width, height) else return none
         let data_len = data_len_for_size(size) else return none
         if data.length < data_len:
@@ -271,23 +271,23 @@ pub struct PixmapMut:
         return self.size_
 
     ## Fills the entire pixmap with a specified color.
-    pub mutating func fill(color: Color):
+    pub func fill(color: Color):
         let c = color.premultiply().to_color_u8()
         for p in &self.pixels_mut():
             *p = c
 
     ## Returns the mutable internal data. Byteorder: RGBA
-    pub mutating func data_mut() -> u8[]:
+    pub func data_mut() -> u8[]:
         return self.data_
 
     ## Returns a mutable slice of pixels.
-    pub mutating func pixels_mut() -> PremultipliedColorU8[]:
+    pub func pixels_mut() -> PremultipliedColorU8[]:
         return pixels_of(self.data_)
 
-    mutating func as_subpixmap() -> SubPixmapMut:
+    func as_subpixmap() -> SubPixmapMut:
         return SubPixmapMut(data = self.data_, size = self.size_, real_width = (usize)self.size_.width())
 
-    mutating func subpixmap(rect0: IntRect) -> SubPixmapMut?:
+    func subpixmap(rect0: IntRect) -> SubPixmapMut?:
         let rect = self.size_.to_int_rect(0, 0).intersect(rect0) else return none
         let row_bytes = (usize)self.width() * bytes_per_pixel
         let offset = (usize)rect.top() * row_bytes + (usize)rect.left() * bytes_per_pixel
@@ -297,11 +297,11 @@ pub struct PixmapMut:
     ## filling a rectangular path, but it produces better results. Mainly it doesn't suffer
     ## from weird clipping of horizontal/vertical edges. Used mainly to render a pixmap onto
     ## a pixmap.
-    pub mutating func fill_rect(rect: Rect, paint: const Paint*, transform: Transform, mask: const Mask*?):
+    pub func fill_rect(rect: Rect, paint: const Paint*, transform: Transform, mask: const Mask*?):
         draw_fill_rect(&self, rect, paint, transform, mask)
 
     ## Draws a filled path onto the pixmap. Returns silently when nothing to draw.
-    pub mutating func fill_path(path: const Path*, paint: const Paint*, fill_rule: FillRule, transform: Transform, mask: const Mask*?):
+    pub func fill_path(path: const Path*, paint: const Paint*, fill_rule: FillRule, transform: Transform, mask: const Mask*?):
         draw_fill_path(&self, path, paint, fill_rule, transform, mask)
 
     ## Strokes a path. Stroking is implemented using two separate algorithms: 1. If a stroke
@@ -311,18 +311,18 @@ pub struct PixmapMut:
     ## stroke width is thinner than 1px (after applying the transformation), we will use
     ## hairline stroking, which doesn't involve a separate path allocation. Also, `Stroke`
     ## dashing is not supported for hairlines.
-    pub mutating func stroke_path(path: const Path*, paint: const Paint*, stroke: const Stroke*, transform: Transform, mask: const Mask*?):
+    pub func stroke_path(path: const Path*, paint: const Paint*, stroke: const Stroke*, transform: Transform, mask: const Mask*?):
         draw_stroke_path(&self, path, paint, stroke, transform, mask)
 
     ## Draws a `Pixmap` on top of the current `Pixmap`. The same as filling a rectangle
     ## with a `pixmap` pattern.
-    pub mutating func draw_pixmap(x: i32, y: i32, pixmap: PixmapRef, paint: const PixmapPaint*, transform: Transform, mask: const Mask*?):
+    pub func draw_pixmap(x: i32, y: i32, pixmap: PixmapRef, paint: const PixmapPaint*, transform: Transform, mask: const Mask*?):
         painter_draw_pixmap(&self, x, y, pixmap, paint, transform, mask)
 
     ## Applies a masks. When a `Mask` value is 0, than the destination pixel will be set to
     ## transparent. When a `Mask` value is 255, than the destination pixel won't be changed.
     ## The `mask` must have the same size as the pixmap.
-    pub mutating func apply_mask(mask: const Mask*):
+    pub func apply_mask(mask: const Mask*):
         painter_apply_mask(&self, mask)
 
 ## A mutable view of pixels (or of a mask's bytes) with its own row stride.
@@ -331,7 +331,7 @@ struct SubPixmapMut:
     var size: IntSize
     var real_width: usize
 
-    mutating func pixels_mut() -> PremultipliedColorU8[]:
+    func pixels_mut() -> PremultipliedColorU8[]:
         return pixels_of(self.data)
 
     func offset(dx: usize, dy: usize) -> usize:

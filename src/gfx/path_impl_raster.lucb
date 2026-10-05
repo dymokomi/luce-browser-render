@@ -98,8 +98,8 @@ pub func path_impl_raster_append_path(this: PathImplRaster*, other: const SkPath
 
 ## Replaces PathSkia.cpp:212 Gfx::PathImplSkia::intersect. Not supported: see the header.
 pub func path_impl_raster_intersect(this: PathImplRaster*, other: const SkPath*):
-    discard(this)
-    discard(other)
+    _ = this
+    _ = other
     trap("unsupported: Path::intersect (Skia's SkPathOps is not ported)")
 
 ## Replaces PathSkia.cpp:217 Gfx::PathImplSkia::is_empty.
