@@ -1,0 +1,433 @@
+#==============================================================================================
+#
+#   tt_hinting - FreeType's TrueType glyph programs, for fonts without a font program
+#
+#   DESCRIPTION:
+#       Port of the part of FreeType 2.13.3's TrueType bytecode interpreter (src/truetype/
+#       ttinterp.c, ttgload.c's TT_Hint_Glyph) that glyph programs run when a font has no
+#       font program and no CVT program (no fpgm, no prep): the default graphics state, the
+#       v40 interpreter in backward-compatibility mode (FreeType's default "subpixel hinting
+#       lean": moves along x are discarded, so only y is hinted), axis-aligned projection and
+#       freedom vectors, rounding to the grid or none, and the instructions such programs
+#       use: PUSHB, PUSHW, NPUSHB, NPUSHW, SVTCA, SPVTCA, SFVTCA, SFVTPV, SRP0-2, SLOOP, SMD,
+#       SCVTCI, RTG, ROFF, POP, DUP, MDAP, MIAP, MDRP, MIRP, ALIGNRP and SHP. This is what
+#       FontForge's box-shaped .notdef glyphs carry (SerenitySans', which every unsupported
+#       script draws). A program that uses anything else, a phantom point or the twilight
+#       zone is not run at all: the glyph keeps its unhinted outline (a deviation; fonts
+#       with a font program are never hinted here).
+#
+#       Copyright (c) 1996-2024 by David Turner, Robert Wilhelm, and Werner Lemberg.
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: FTL (see LICENSE-freetype)
+#
+#==============================================================================================
+
+# mark: The execution context ==================================================================
+
+## The largest stack the subset needs (maxStackElements is larger in real fonts; a program that
+## pushes more is not run).
+let tt_stack_limit: usize = 256
+
+## The interpreter's state over a glyph zone: the points (`cur` hinted, `org` scaled, `orus`
+## unscaled, all with y up and the glyph's real x), the scaled CVT, the graphics state and the
+## stack. Vectors are axis-aligned: `proj_y` and `free_y` say whether the projection and the
+## freedom vector are the y axis (the dual vector follows the projection vector).
+struct TtExec:
+    var cur_x: i64[]
+    var cur_y: i64[]
+    var org_x: i64[]
+    var org_y: i64[]
+    var orus_x: i64[]
+    var orus_y: i64[]
+    var point_count: usize
+    var cvt: const i64[]
+    var x_scale: i64
+    var y_scale: i64
+    var proj_y: bool
+    var free_y: bool
+    var rp0: usize
+    var rp1: usize
+    var rp2: usize
+    var loop: i64
+    var minimum_distance: i64
+    var control_value_cutin: i64
+    var round_to_grid: bool
+    var stack: i64[tt_stack_limit]
+    var top: usize
+
+## FT_PIX_ROUND_LONG.
+func tt_pix_round(x: i64) -> i64:
+    return (x + 32) & ~(i64)63
+
+## Round_To_Grid (the engine compensations are zero) or Round_None.
+func tt_round(exec: const TtExec*, distance: i64) -> i64:
+    if not exec.round_to_grid:
+        return distance
+    if distance >= 0:
+        let value = tt_pix_round(distance)
+        return 0 if value < 0 else value
+    let value = -tt_pix_round(-distance)
+    return 0 if value > 0 else value
+
+## Project_x or Project_y of a vector.
+func tt_project(exec: const TtExec*, dx: i64, dy: i64) -> i64:
+    return dy if exec.proj_y else dx
+
+## PROJECT(zp.cur + a, zp.cur + b).
+func tt_project_cur(exec: const TtExec*, a: usize, b: usize) -> i64:
+    return tt_project(exec, exec.cur_x[a] - exec.cur_x[b], exec.cur_y[a] - exec.cur_y[b])
+
+## DUALPROJ(zp.org + a, zp.org + b) (the dual vector is the projection vector here).
+func tt_dual_project_org(exec: const TtExec*, a: usize, b: usize) -> i64:
+    return tt_project(exec, exec.org_x[a] - exec.org_x[b], exec.org_y[a] - exec.org_y[b])
+
+## Direct_Move along an axis-aligned freedom vector in v40's backward-compatibility mode: a
+## move along x is discarded (the point is still touched), a move along y is applied (no
+## IUP runs in the subset, so the post-IUP curfew never applies). F_dot_P is 0x4000 for
+## axis-aligned vectors (or forced to it when they are perpendicular).
+func tt_move(exec: TtExec*, point: usize, distance: i64):
+    if exec.free_y:
+        exec.cur_y[point] = exec.cur_y[point] +% distance
+
+# mark: The instructions =======================================================================
+
+## Ins_MDAP: touch a point, rounding its projection when `round`.
+func tt_mdap(exec: TtExec*, point: usize, round: bool) -> bool:
+    if point >= exec.point_count:
+        return false
+    var distance: i64 = 0
+    if round:
+        let cur_dist = tt_project(exec, exec.cur_x[point], exec.cur_y[point])
+        distance = tt_round(exec, cur_dist) - cur_dist
+    tt_move(exec, point, distance)
+    exec.rp0 = point
+    exec.rp1 = point
+    return true
+
+## Ins_MIAP: move a point to a CVT value (with the cut-in test when `round`).
+func tt_miap(exec: TtExec*, point: usize, cvt_entry: i64, round: bool) -> bool:
+    if point >= exec.point_count or cvt_entry < 0 or cvt_entry >= (i64)exec.cvt.length:
+        return false
+    var distance = exec.cvt[(usize)cvt_entry]
+    let org_dist = tt_project(exec, exec.cur_x[point], exec.cur_y[point])
+    if round:
+        var delta = distance - org_dist
+        if delta < 0:
+            delta = -delta
+        if delta > exec.control_value_cutin:
+            distance = org_dist
+        distance = tt_round(exec, distance)
+    tt_move(exec, point, distance - org_dist)
+    exec.rp0 = point
+    exec.rp1 = point
+    return true
+
+## The minimum distance flag of MDRP and MIRP.
+func tt_keep_minimum(exec: const TtExec*, org_dist: i64, distance: i64) -> i64:
+    let minimum = exec.minimum_distance
+    if org_dist >= 0:
+        return minimum if distance < minimum else distance
+    return -minimum if distance > -minimum else distance
+
+## Ins_MDRP: keep a point's original distance from rp0 (from the unscaled outline, scaled).
+func tt_mdrp(exec: TtExec*, point: usize, opcode: u8) -> bool:
+    if point >= exec.point_count or exec.rp0 >= exec.point_count:
+        return false
+    # Both points are in the glyph zone: the distance comes from the unscaled coordinates.
+    var org_dist: i64
+    let dx = exec.orus_x[point] - exec.orus_x[exec.rp0]
+    let dy = exec.orus_y[point] - exec.orus_y[exec.rp0]
+    if exec.x_scale == exec.y_scale:
+        org_dist = opentype.ft_mul_fix(tt_project(exec, dx, dy), exec.x_scale)
+    else:
+        org_dist = tt_project(exec, opentype.ft_mul_fix(dx, exec.x_scale), opentype.ft_mul_fix(dy, exec.y_scale))
+    # (the single width cut-in is zero in the default graphics state)
+    var distance = tt_round(exec, org_dist) if (opcode & 4) != 0 else org_dist
+    if (opcode & 8) != 0:
+        distance = tt_keep_minimum(exec, org_dist, distance)
+    let cur_dist = tt_project_cur(exec, point, exec.rp0)
+    tt_move(exec, point, distance - cur_dist)
+    exec.rp1 = exec.rp0
+    exec.rp2 = point
+    if (opcode & 16) != 0:
+        exec.rp0 = point
+    return true
+
+## Ins_MIRP: put a point at a CVT distance from rp0 (auto-flip, cut-in, rounding, minimum).
+func tt_mirp(exec: TtExec*, point: usize, cvt_argument: i64, opcode: u8) -> bool:
+    # UNDOCUMENTED! cvt[-1] = 0 always
+    let cvt_entry = cvt_argument + 1
+    if point >= exec.point_count or cvt_entry < 0 or cvt_entry >= (i64)exec.cvt.length + 1 or exec.rp0 >= exec.point_count:
+        return false
+    var cvt_dist: i64 = 0 if cvt_entry == 0 else exec.cvt[(usize)(cvt_entry - 1)]
+    # (the single width test changes nothing with a zero single width value and cut-in)
+    let org_dist = tt_dual_project_org(exec, point, exec.rp0)
+    let cur_dist = tt_project_cur(exec, point, exec.rp0)
+
+    # auto-flip test
+    if (org_dist ^ cvt_dist) < 0:
+        cvt_dist = -cvt_dist
+
+    var distance: i64
+    if (opcode & 4) != 0:
+        # Both points are in the glyph zone: the cut-in test applies.
+        var delta = cvt_dist - org_dist
+        if delta < 0:
+            delta = -delta
+        if delta > exec.control_value_cutin:
+            cvt_dist = org_dist
+        distance = tt_round(exec, cvt_dist)
+    else:
+        distance = cvt_dist
+    if (opcode & 8) != 0:
+        distance = tt_keep_minimum(exec, org_dist, distance)
+    tt_move(exec, point, distance - cur_dist)
+    exec.rp1 = exec.rp0
+    if (opcode & 16) != 0:
+        exec.rp0 = point
+    exec.rp2 = point
+    return true
+
+## Pops a point index for the looping instructions, false when the stack or the zone does
+## not have it.
+func tt_pop_point(exec: TtExec*) -> usize?:
+    if exec.top == 0:
+        return none
+    exec.top -= 1
+    let value = exec.stack[exec.top]
+    if value < 0 or value >= (i64)exec.point_count:
+        return none
+    return (usize)value
+
+## Ins_ALIGNRP: move `loop` points onto rp0's projection.
+func tt_alignrp(exec: TtExec*) -> bool:
+    if (i64)exec.top < exec.loop or exec.rp0 >= exec.point_count:
+        return false
+    while exec.loop > 0:
+        let point = tt_pop_point(exec) else return false
+        tt_move(exec, point, -tt_project_cur(exec, point, exec.rp0))
+        exec.loop -= 1
+    exec.loop = 1
+    return true
+
+## Ins_SHP: shift `loop` points by how far rp2 (SHP[0], zp1) or rp1 (SHP[1], zp0) moved.
+func tt_shp(exec: TtExec*, opcode: u8) -> bool:
+    if (i64)exec.top < exec.loop:
+        return false
+    # Compute_Point_Displacement
+    let reference = exec.rp1 if (opcode & 1) != 0 else exec.rp2
+    if reference >= exec.point_count:
+        return false
+    let d = tt_project(exec, exec.cur_x[reference] - exec.org_x[reference], exec.cur_y[reference] - exec.org_y[reference])
+    while exec.loop > 0:
+        let point = tt_pop_point(exec) else return false
+        # Move_Zp2_Point: x is discarded in backward-compatibility mode.
+        if exec.free_y:
+            exec.cur_y[point] = exec.cur_y[point] +% d
+        exec.loop -= 1
+    exec.loop = 1
+    return true
+
+# mark: The interpreter loop ===================================================================
+
+## Pops one value, none on underflow.
+func tt_pop(exec: TtExec*) -> i64?:
+    if exec.top == 0:
+        return none
+    exec.top -= 1
+    return exec.stack[exec.top]
+
+## Pushes one value, false on overflow.
+func tt_push(exec: TtExec*, value: i64) -> bool:
+    if exec.top >= tt_stack_limit:
+        return false
+    exec.stack[exec.top] = value
+    exec.top += 1
+    return true
+
+## TT_RunIns over `code` for the subset: false when the program uses anything outside it or
+## fails (the caller then keeps the unhinted outline).
+func tt_run(exec: TtExec*, code: const u8[]) -> bool:
+    var ip: usize = 0
+    while ip < code.length:
+        let opcode = code[ip]
+        ip += 1
+        if opcode >= 0xB0 and opcode <= 0xB7:
+            # PUSHB[abc]
+            let count = (usize)(opcode - 0xB0) + 1
+            if ip + count > code.length:
+                return false
+            for k in 0..<count:
+                if not tt_push(exec, (i64)code[ip + k]):
+                    return false
+            ip += count
+        elif opcode >= 0xB8 and opcode <= 0xBF:
+            # PUSHW[abc]
+            let count = (usize)(opcode - 0xB8) + 1
+            if ip + count * 2 > code.length:
+                return false
+            for k in 0..<count:
+                let word = (i64)(i16)(((u16)code[ip + 2 * k] << 8) | (u16)code[ip + 2 * k + 1])
+                if not tt_push(exec, word):
+                    return false
+            ip += count * 2
+        elif opcode == 0x40 or opcode == 0x41:
+            # NPUSHB, NPUSHW
+            if ip >= code.length:
+                return false
+            let count = (usize)code[ip]
+            ip += 1
+            let size: usize = 1 if opcode == 0x40 else 2
+            if ip + count * size > code.length:
+                return false
+            for k in 0..<count:
+                var value: i64
+                if size == 1:
+                    value = (i64)code[ip + k]
+                else:
+                    value = (i64)(i16)(((u16)code[ip + 2 * k] << 8) | (u16)code[ip + 2 * k + 1])
+                if not tt_push(exec, value):
+                    return false
+            ip += count * size
+        elif opcode <= 0x01:
+            # SVTCA[a]: 0 is the y axis, 1 the x axis.
+            exec.proj_y = opcode == 0
+            exec.free_y = opcode == 0
+        elif opcode == 0x02 or opcode == 0x03:
+            exec.proj_y = opcode == 0x02
+        elif opcode == 0x04 or opcode == 0x05:
+            exec.free_y = opcode == 0x04
+        elif opcode == 0x0E:
+            # SFVTPV
+            exec.free_y = exec.proj_y
+        elif opcode >= 0x10 and opcode <= 0x12:
+            # SRP0, SRP1, SRP2
+            let value = tt_pop(exec) else return false
+            if value < 0:
+                return false
+            if opcode == 0x10:
+                exec.rp0 = (usize)value
+            elif opcode == 0x11:
+                exec.rp1 = (usize)value
+            else:
+                exec.rp2 = (usize)value
+        elif opcode == 0x17:
+            # SLOOP
+            let value = tt_pop(exec) else return false
+            if value < 0:
+                return false
+            exec.loop = value if value < 0xFFFF else 0xFFFF
+        elif opcode == 0x1A:
+            exec.minimum_distance = tt_pop(exec) else return false
+        elif opcode == 0x1D:
+            exec.control_value_cutin = tt_pop(exec) else return false
+        elif opcode == 0x18:
+            exec.round_to_grid = true
+        elif opcode == 0x7A:
+            exec.round_to_grid = false
+        elif opcode == 0x21:
+            # POP
+            let dropped = tt_pop(exec) else return false
+            _ = dropped
+        elif opcode == 0x20:
+            # DUP
+            let value = tt_pop(exec) else return false
+            if not (tt_push(exec, value) and tt_push(exec, value)):
+                return false
+        elif opcode == 0x2E or opcode == 0x2F:
+            let point = tt_pop(exec) else return false
+            if point < 0 or not tt_mdap(exec, (usize)point, opcode == 0x2F):
+                return false
+        elif opcode == 0x3E or opcode == 0x3F:
+            let cvt_entry = tt_pop(exec) else return false
+            let point = tt_pop(exec) else return false
+            if point < 0 or not tt_miap(exec, (usize)point, cvt_entry, opcode == 0x3F):
+                return false
+        elif opcode >= 0xC0 and opcode <= 0xDF:
+            let point = tt_pop(exec) else return false
+            if point < 0 or not tt_mdrp(exec, (usize)point, opcode):
+                return false
+        elif opcode >= 0xE0:
+            let cvt_entry = tt_pop(exec) else return false
+            let point = tt_pop(exec) else return false
+            if point < 0 or not tt_mirp(exec, (usize)point, cvt_entry, opcode):
+                return false
+        elif opcode == 0x3C:
+            if not tt_alignrp(exec):
+                return false
+        elif opcode == 0x32 or opcode == 0x33:
+            if not tt_shp(exec, opcode):
+                return false
+        else:
+            return false
+    return true
+
+# mark: Hinting a glyph ========================================================================
+
+## The 'fpgm' and 'prep' tags.
+let tt_tag_fpgm: u32 = 0x6670676D
+let tt_tag_prep: u32 = 0x70726570
+let tt_tag_cvt: u32 = 0x63767420
+
+## TT_Hint_Glyph for a simple glyph of a font without a font or CVT program: runs the glyph's
+## instructions over `outline` (luce-fonts' scaled outline of `glyph` at `scale`, its origin
+## at pp1, y up) and moves its points along y as FreeType's v40 interpreter does. Leaves the
+## outline as it is when the font or the glyph has no instructions, or when the program
+## needs more than this subset.
+pub func tt_hint_glyph(face: const opentype.SfntFace*, glyph: u32, scale: i64, outline: opentype.SfntOutline*):
+    if face.outline_format != opentype.SfntOutlineFormat.true_type:
+        return
+    if opentype.sfnt_face_has_table(face, tt_tag_fpgm) or opentype.sfnt_face_has_table(face, tt_tag_prep):
+        return
+    let (start, end) = opentype.sfnt_glyf_range(face, glyph) else return
+    if end - start < 12:
+        return
+    let data = face.glyf[start..<end]
+    let contours = (i64)opentype.sfnt_i16(data, 0)
+    if contours <= 0:
+        return
+    let instructions_at = 10 + (usize)contours * 2
+    if instructions_at + 2 > data.length:
+        return
+    let instruction_length = (usize)opentype.sfnt_u16(data, instructions_at)
+    if instruction_length == 0 or instructions_at + 2 + instruction_length > data.length:
+        return
+    let code = data[instructions_at + 2..<instructions_at + 2 + instruction_length]
+
+    # The unscaled outline (FT_MulFix by 1.0 changes nothing) for MDRP's original distances.
+    var units = opentype.sfnt_face_load_outline(face, glyph, 0x10000) else return
+    defer units.release()
+    let count = outline.xs.length()
+    if units.xs.length() != count:
+        return
+
+    # The scaled CVT (tt_size_reset: FT_MulFix of the FUnits by the larger ppem's scale, here
+    # the one scale).
+    let cvt_table = opentype.sfnt_face_table(face, tt_tag_cvt) else face.glyf[..<0]
+    let cvt = (new i64[cvt_table.length // 2] in memory.heap) else trap("web_fonts: out of memory")
+    defer free(cvt) in memory.heap
+    for i in 0..<cvt.length:
+        cvt[i] = opentype.ft_mul_fix((i64)opentype.sfnt_i16(cvt_table, i * 2), scale)
+
+    # The zone: luce-fonts moved the outline so that pp1 is the origin; the interpreter sees
+    # the glyph's own x (pp1 = x_min - left side bearing), as FreeType's zone does.
+    let x_min = (i64)opentype.sfnt_i16(data, 2)
+    let pp1_units = x_min - (i64)opentype.sfnt_face_left_side_bearing(face, glyph)
+    let pp1_scaled = opentype.ft_mul_fix(pp1_units, scale)
+    let arrays = (new i64[count * 6] in memory.heap) else trap("web_fonts: out of memory")
+    defer free(arrays) in memory.heap
+    var exec = TtExec(cur_x = arrays[..<count], cur_y = arrays[count..<count * 2], org_x = arrays[count * 2..<count * 3], org_y = arrays[count * 3..<count * 4], orus_x = arrays[count * 4..<count * 5], orus_y = arrays[count * 5..<count * 6], point_count = count, cvt = cvt, x_scale = scale, y_scale = scale, proj_y = false, free_y = false, rp0 = 0, rp1 = 0, rp2 = 0, loop = 1, minimum_distance = 64, control_value_cutin = 68, round_to_grid = true, top = 0)
+    for i in 0..<count:
+        exec.cur_x[i] = *outline.xs.at(i) + pp1_scaled
+        exec.cur_y[i] = *outline.ys.at(i)
+        exec.org_x[i] = exec.cur_x[i]
+        exec.org_y[i] = exec.cur_y[i]
+        exec.orus_x[i] = *units.xs.at(i) + pp1_units
+        exec.orus_y[i] = *units.ys.at(i)
+
+    if not tt_run(&exec, code):
+        return
+    # Only y moves; the origin stays where the unhinted pp1 put it (v40 keeps the phantom
+    # points in backward-compatibility mode).
+    for i in 0..<count:
+        *outline.ys.at(i) = exec.cur_y[i]

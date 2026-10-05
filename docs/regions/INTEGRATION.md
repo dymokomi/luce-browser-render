@@ -113,12 +113,14 @@ Skia's CPU text draws masks, not paths. The player does the same (fix/fidelity-t
 - **Blitting** (`raster/draw_masks.lucb`): Draw::paintMasks through the clip (region, AA clip or
   rectangle) with the pipeline blitter's blit_mask.
 
-Hinting: the outlines are luce-fonts' unhinted FreeType outlines. That is what FreeType's v40
-TrueType interpreter produces for glyphs without instructions (SerenitySans, the test font), so
-those masks are FreeType's. Glyphs with TrueType instructions (Lato) are not hinted (no bytecode
-interpreter), CFF glyphs are not hinted (no CFF hinter), and fonts that FreeType autohints (no
-instructions, no fpgm/prep and maxSizeOfInstructions 0: Ahem, Noto Emoji) are drawn unhinted (no
-autohinter).
+Hinting: the outlines are luce-fonts' FreeType outlines, which FreeType's v40 TrueType
+interpreter leaves as they are for glyphs without instructions (SerenitySans, the test font).
+`web_fonts/tt_hinting.lucb` runs the glyph programs of fonts without a font or CVT program (the
+v40 backward-compatibility mode: y moves only) for the instructions FontForge's .notdef boxes use
+(SerenitySans' .notdef, which every script the test fonts lack draws), and gives up on anything
+else. Glyphs of fonts with a font program (Lato) are not hinted (no full bytecode interpreter),
+CFF glyphs are not hinted (no CFF hinter), and fonts that FreeType autohints (no instructions, no
+fpgm/prep and maxSizeOfInstructions 0: Ahem, Noto Emoji) are drawn unhinted (no autohinter).
 
 ## Image filters
 
@@ -186,7 +188,7 @@ nearest sampling's round-down, conics) was merged last, and then:
 1. `luce-base fmt --check` on every hand-written `.lucb`;
 2. `luce-base check -W` on raster, gfx, web_fonts and display_list, failing on any output;
 3. `luce-base test` of gfx (359 tests), web_fonts (28; the font engine's oracle and unit
-   tests moved to luce-fonts with the engine, 2026-10-03), display_list (109, `--native`) and
+   tests moved to luce-fonts with the engine, 2026-10-03), display_list (110, `--native`) and
    raster (38), and the raster integration suite (`tests/run_raster.py`, 291 scenes).
 
 ## Remaining traps, stubs and gates
@@ -209,9 +211,9 @@ nearest sampling's round-down, conics) was merged last, and then:
 
 The player's 36 scenes against DisplayListPlayerSkia match exactly except:
 
-- **Glyphs.** SerenitySans' glyph runs match exactly (`glyph_run` and the five scenes of
+- **Glyphs.** SerenitySans' glyph runs match exactly (`glyph_run` and the scenes of
   `tests_cpu_glyph_run.lucb`: every quarter-pixel phase, five text colors on three
-  backgrounds, vertical text, a blob at scale 1.5). Lato carries TrueType instructions that
+  backgrounds, vertical text, a blob at scale 1.5, hinted .notdef boxes). Lato carries TrueType instructions that
   FreeType's interpreter runs for Skia's masks (stems and heights snapped along y) and that are
   not run here: `glyph_run_scaled`: 275 pixels by up to 108 levels; `text_shadow` (blurred):
   307 by up to 20.

@@ -20,10 +20,10 @@
 #         rasterizer (generateGlyphImage, FT_Outline_Get_Bitmap: raster's ft_grays).
 #
 #       Outlines come from luce-fonts' FreeType loader (FT_Load_Glyph at the scale). Skia
-#       asks for FT_LOAD_TARGET_NORMAL; the glyphs of the test fonts carry no instructions,
-#       and FreeType's v40 interpreter leaves such outlines as they are, so they are the
-#       unhinted ones (glyphs with TrueType instructions or CFF hints are drawn unhinted:
-#       there is no bytecode interpreter or CFF hinter). A8 masks from FreeType get no mask
+#       asks for FT_LOAD_TARGET_NORMAL: FreeType's v40 interpreter leaves glyphs without
+#       instructions as they are, and tt_hinting.lucb runs the glyph programs of fonts
+#       without a font program (SerenitySans' .notdef). Other hinted glyphs (fonts with a
+#       font program, CFF hints, the autohinter) are drawn unhinted. A8 masks from FreeType get no mask
 #       gamma (SkScalerContextFTUtils applies the pre-blend to LCD masks only).
 #
 #       Copyright (c) 2006-2014 The Android Open Source Project, Google Inc.
@@ -81,6 +81,9 @@ pub struct SkStrike:
     pub var axis_alignment: SkAxisAlignment
     ## False when the matrix is singular (computeMatrices failed): every glyph is empty.
     var valid: bool
+    ## SkFontHinting::kNormal (FT_LOAD_TARGET_NORMAL), kNone when the text is not axis-aligned
+    ## (SkTypeface_FreeType::onFilterRec).
+    var hinting: bool
     ## FT_Set_Char_Size's 16.16 scales.
     var x_scale: i64
     var y_scale: i64
@@ -132,7 +135,9 @@ pub func sk_strike_make(font: const SkFont*, device: SkMatrix22, r: u8, g: u8, b
     elif post.scale_x == 0.0:
         alignment = SkAxisAlignment.y
 
-    var strike = SkStrike(face = face, subpixel = font.subpixel, axis_alignment = alignment, valid = false, x_scale = 0, y_scale = 0, has_matrix = false, xx = 0x10000, xy = 0, yx = 0, yy = 0x10000)
+    # isAxisAligned: rotated text looks bad with hinting, so it is disabled.
+    let axis_aligned = (post.skew_y == 0.0 and post.skew_x == 0.0) or (post.scale_x == 0.0 and post.scale_y == 0.0)
+    var strike = SkStrike(face = face, subpixel = font.subpixel, axis_alignment = alignment, valid = false, hinting = axis_aligned, x_scale = 0, y_scale = 0, has_matrix = false, xx = 0x10000, xy = 0, yx = 0, yy = 0x10000)
     sk_mask_gamma_table(strike.gamma, r, g, b)
 
     # computeMatrices(kFull): A is the text matrix (the size) followed by the 2x2 part.
@@ -228,6 +233,8 @@ func sk_strike_load_outline(strike: const SkStrike*, glyph: u32) -> opentype.Sfn
     var outline: opentype.SfntOutline
     if strike.x_scale == strike.y_scale:
         outline = opentype.sfnt_face_load_outline(strike.face, glyph, strike.y_scale) else return none
+        if strike.hinting:
+            tt_hint_glyph(strike.face, glyph, strike.y_scale, &outline)
     else:
         # A non-uniform scale: the outline in font units, scaled per axis (FreeType scales
         # inside its loader; this differs from it by the rounding of the origin shift).
