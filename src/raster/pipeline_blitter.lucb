@@ -60,8 +60,10 @@ struct PipelineSource:
             # linear sRGB to sRGB (encode only), premul unless opaque.
             if not self.is_opaque:
                 p.push(.unpremul)
-            p.ctx.xform_steps.dst_tf_inv = TransferFunction.from_bits(srgb_inv_bits)
-            p.push(.xform_encode)
+            let linear = icc.ColorSpace.srgb_linear()
+            let srgb = icc.ColorSpace.srgb()
+            p.ctx.color_filter_xform = ColorXform.make(icc.Steps.make(&linear, .unpremul, &srgb, .unpremul)) else trap("raster: linear sRGB to sRGB encodes")
+            p.push(.color_filter_xform)
             if not self.is_opaque:
                 p.push(.premultiply)
         if self.dither:

@@ -122,13 +122,11 @@ enum Stage as u8:
     css_hcl_to_lab = 88
     css_hsl_to_srgb = 89
     css_hwb_to_srgb = 90
-    xform_linearize = 91
-    xform_gamut = 92
-    xform_encode = 93
-    bilinear_mipmap = 94
-    color_xform = 95
+    bilinear_mipmap = 91
+    color_xform = 92
+    color_filter_xform = 93
 
-let stages_count: usize = 96
+let stages_count: usize = 94
 
 ## Skia's gForceHighPrecisionRasterPipeline: every pipeline compiles to highp while set.
 var force_highp: bool = false
@@ -175,9 +173,9 @@ struct Context:
     var limit_y: TileCtx
     var gather: GatherCtx
     var sampler: SamplerCtx
-    var color_xform: ColorXform
+    var color_xform: ColorXform  # the shader's steps to the destination's color space
+    var color_filter_xform: ColorXform  # the steps of a color space transform color filter
     var transform: Transform = Transform()
-    var xform_steps: ColorXformSteps  # the gradient color conversion of xform_linearize, xform_gamut, xform_encode
     var mipmap: MipmapCtx  # the mip levels a mipmapped pattern samples
 
 ## The tile modes of the fused bilinear / bicubic samplers (Skia appends repeat_x / mirror_x
@@ -309,20 +307,19 @@ struct RasterPipelineBuilder:
             self.push(.transform_perspective if ts.has_perspective() else .transform)
             self.ctx.transform = ts
 
-    ## SkColorSpaceXformSteps::apply(SkRasterPipeline*): unpremul, the transfer function
-    ## (parametric or gamma_), matrix_3x3, the inverse transfer function and premul, as the
-    ## steps say.
-    func push_color_xform_steps(steps: ColorXformSteps):
-        self.ctx.xform_steps = steps
-        if steps.unpremul:
+    ## SkColorSpaceXformSteps::apply(SkRasterPipeline*): unpremul and premul as their own
+    ## stages (premul has a lowp form), the steps between them as one color_xform.
+    func push_color_xform(x: ColorXform):
+        let flags = x.steps.flags
+        if flags.unpremul:
             self.push(.unpremul)
-        if steps.linearize:
-            self.push(.xform_linearize)
-        if steps.gamut_transform:
-            self.push(.xform_gamut)
-        if steps.encode:
-            self.push(.xform_encode)
-        if steps.premul:
+        var middle = x
+        middle.steps.flags.unpremul = false
+        middle.steps.flags.premul = false
+        if not middle.steps.is_identity():
+            self.ctx.color_xform = middle
+            self.push(.color_xform)
+        if flags.premul:
             self.push(.premultiply)
 
     ## Skia's appendMatrix of a matrix that only scales and translates x.

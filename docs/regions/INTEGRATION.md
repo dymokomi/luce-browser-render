@@ -168,15 +168,14 @@ setDither and SVG's LinearToSRGBGamma color filter; no shader paints opaque blac
 SkShader does). The raster module follows Skia m144 for what CSS asks of a gradient:
 
 - **Interpolation** (`raster/gradient_interpolation.lucb`): SkColor4fXformer converts the stop
-  colors into the intermediate color space (SkConvertPixels' pipeline: SkColorSpaceXformSteps
-  with the transfer functions and gamut matrices skcms gives, recorded bit for bit in
-  `gradient_color_spaces.lucb` by luce-browser-tools' `oracles/luce-browser-render/gradients/
-  spaces.cpp`), then into Lab, OKLab, LCH, OKLCH, HSL or HWB, takes powerless hues from their
-  neighbors, adjusts hues for the hue method and premultiplies (not the hue).
-  AppendInterpolatedToDstStages ends the pipeline with unpremul or unpremul_polar, the css_*
-  stage back to the intermediate space and the XformSteps to sRGB (`highp_color.lucb` over
-  `color_math.lucb`: NEON's fused parametric/gamma_ with approx_powf, matrix_3x3, Skia's sin_
-  and cos_).
+  colors into the intermediate color space (SkConvertPixels' pipeline: luce-color's
+  `icc.Steps`, SkColorSpaceXformSteps, between sRGB and the space `gradient_color_spaces.lucb`
+  makes as intermediate_color_space does, run by the `color_xform` arithmetic images use), then
+  into Lab, OKLab, LCH, OKLCH, HSL or HWB, takes powerless hues from their neighbors, adjusts
+  hues for the hue method and premultiplies (not the hue). AppendInterpolatedToDstStages ends
+  the pipeline with unpremul or unpremul_polar, the css_* stage back to the intermediate space
+  (`highp_color.lucb` over `color_math.lucb`, with Skia's sin_ and cos_) and the steps to sRGB
+  (`push_color_xform`: unpremul and premul as their own stages, the rest one `color_xform`).
 - **Degenerate gradients** are MakeDegenerateGradient's colors (the last color when clamped,
   the average color otherwise), MakeRadial included (`RadialGradient.new_simple`); a scale that
   cannot be inverted makes no shader (SkMatrix::invert's finiteness checks).

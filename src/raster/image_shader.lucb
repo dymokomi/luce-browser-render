@@ -110,8 +110,7 @@ func pattern_push_stages(patt: const Pattern*, cs: ColorSpace, p: RasterPipeline
 func pattern_push_misc(patt: const Pattern*, cs: ColorSpace, p: RasterPipelineBuilder*):
     # Transform color space and alpha type to match shader convention (dst CS, premul alpha).
     if let xform = patt.color_xform:
-        p.ctx.color_xform = xform
-        p.push(.color_xform)
+        p.push_color_xform(xform)
 
     if let stage = colorspace_expand_stage(cs):
         # TODO: it would be better to gamma-expand prior to sampling, but there isn't

@@ -50,18 +50,6 @@ pub struct GradientInterpolation:
     pub var color_space: GradientColorSpace = GradientColorSpace.destination
     pub var hue_method: GradientHueMethod = GradientHueMethod.shorter
 
-## intermediate_color_space: the RGB space colors are first converted into (sRGB is the
-## destination here).
-func gradient_intermediate_space(cs: GradientColorSpace) -> GradientRgbSpaceKind:
-    match cs:
-        .srgb_linear, .oklab, .oklch: return GradientRgbSpaceKind.srgb_linear
-        .lab, .lch: return GradientRgbSpaceKind.xyz_d50
-        .display_p3: return GradientRgbSpaceKind.display_p3
-        .rec2020: return GradientRgbSpaceKind.rec2020
-        .prophoto_rgb: return GradientRgbSpaceKind.prophoto_rgb
-        .a98_rgb: return GradientRgbSpaceKind.a98_rgb
-        _: return GradientRgbSpaceKind.srgb
-
 ## color_space_is_polar.
 func gradient_space_is_polar(cs: GradientColorSpace) -> bool:
     match cs:
@@ -164,9 +152,10 @@ struct GradientXformed:
 ## SkColor4fXformer for `stops` (sRGB, unpremultiplied; positions used when `has_positions`).
 func gradient_xform_colors(stops: const GradientStop[], has_positions: bool, interpolation: GradientInterpolation, first_is_implicit: bool, last_is_implicit: bool) -> GradientXformed:
     let cs = interpolation.color_space
-    let space = gradient_rgb_space(gradient_intermediate_space(cs))
+    let space = gradient_intermediate_space(cs)
+    let srgb = icc.ColorSpace.srgb()
     # 2) SkConvertPixels from sRGB to the intermediate space, unpremultiplied.
-    let steps = color_xform_steps(&space, false, AlphaType.unpremul, AlphaType.unpremul)
+    let xform = gradient_color_xform(&srgb, .unpremul, &space, .unpremul)
     var colors: Vec[f32[4]]
     defer colors.release()
     var powerless: Vec[bool]
@@ -175,8 +164,8 @@ func gradient_xform_colors(stops: const GradientStop[], has_positions: bool, int
     for stop in stops:
         let c = stop.color
         var v: f32[4] = [c.red(), c.green(), c.blue(), c.alpha()]
-        if not steps.is_empty():
-            v = steps.apply(v)
+        if let x = xform:
+            v = xform_pixel(&x, v)
         # 3) Into the interpolation space when it is not an RGB one.
         let converted = gradient_convert_color(cs, v)
         colors.push(converted.0)
@@ -303,11 +292,12 @@ func push_interpolated_to_dst_stages(p: RasterPipelineBuilder*, colors_are_opaqu
             _ = 0
 
     # Now transform from intermediate to destination color space.
-    var intermediate_alpha = AlphaType.premul if color_is_premul else AlphaType.unpremul
-    var dst_alpha = AlphaType.premul
+    var intermediate_alpha = icc.AlphaType.premul if color_is_premul else icc.AlphaType.unpremul
+    var dst_alpha = icc.AlphaType.premul
     if colors_are_opaque:
-        intermediate_alpha = AlphaType.unpremul
-        dst_alpha = AlphaType.unpremul
-    let space = gradient_rgb_space(gradient_intermediate_space(cs))
-    let steps = color_xform_steps(&space, true, intermediate_alpha, dst_alpha)
-    p.push_color_xform_steps(steps)
+        intermediate_alpha = icc.AlphaType.unpremul
+        dst_alpha = icc.AlphaType.unpremul
+    let space = gradient_intermediate_space(cs)
+    let srgb = icc.ColorSpace.srgb()
+    if let xform = gradient_color_xform(&space, intermediate_alpha, &srgb, dst_alpha):
+        p.push_color_xform(xform)

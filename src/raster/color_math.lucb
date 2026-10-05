@@ -5,10 +5,9 @@
 #   DESCRIPTION:
 #       Port of the highp stages of Skia m144's src/opts/SkRasterPipeline_opts.h that convert
 #       colors between color spaces, as one lane computes them on arm64 NEON (mad is a fused
-#       vfmaq_f32, nmad vfmsq_f32, min/max vminq/vmaxq, round vcvtnq): the transfer functions
-#       (`parametric` and `gamma_` over approx_powf, approx_log2 and approx_pow2), matrix_3x3,
-#       unpremul, unpremul_polar and premul, and the CSS color stages gradients interpolated in
-#       other color spaces end with (css_lab_to_xyz, css_oklab_to_linear_srgb, css_hcl_to_lab
+#       vfmaq_f32, nmad vfmsq_f32, min/max vminq/vmaxq, round vcvtnq): unpremul and
+#       unpremul_polar, and the CSS color stages gradients interpolated in other
+#       color spaces end with (css_lab_to_xyz, css_oklab_to_linear_srgb, css_hcl_to_lab
 #       with Skia's sin_/cos_ approximations, css_hsl_to_srgb, css_hwb_to_srgb). Plain
 #       arithmetic is unfused, as Skia is built (-ffp-contract=off).
 #
@@ -18,85 +17,7 @@
 #
 #==============================================================================================
 
-## skcms_TransferFunction: v <= d ? c * v + f : (a * v + b)^g + e.
-pub struct TransferFunction:
-    pub var g: f32
-    pub var a: f32
-    pub var b: f32
-    pub var c: f32
-    pub var d: f32
-    pub var e: f32
-    pub var f: f32
-
-    ## SkRasterPipeline::appendTransferFunction's choice of `gamma_` (a pure power curve) over
-    ## `parametric`.
-    func is_gamma() -> bool:
-        return self.a == 1.0 and self.b == 0.0 and self.c == 0.0 and self.d == 0.0 and self.e == 0.0 and self.f == 0.0
-
-    ## The bits of the seven values, in skcms order (g, a, b, c, d, e, f).
-    static func from_bits(bits: u32[7]) -> TransferFunction:
-        return TransferFunction(g = f32.bits(bits[0]), a = f32.bits(bits[1]), b = f32.bits(bits[2]), c = f32.bits(bits[3]), d = f32.bits(bits[4]),
-                                e = f32.bits(bits[5]), f = f32.bits(bits[6]))
-
-# mark: Powers =================================================================================
-
-## approx_log2: the exponent, refined by the mantissa.
-func approx_log2_neon(x: f32) -> f32:
-    let bits = x.bits()
-    let e = (f32)bits * (1.0 / 8388608.0)
-    let m = f32.bits((bits & 0x007fffff) | 0x3f000000)
-    return math32.fma(-m, 1.498030302, e - 124.225514990) - 1.725879990 / (0.3520887068 + m)
-
-## approx_pow2, clamped to [0, infinity] and rounded to the bits of the result.
-func approx_pow2_neon(x: f32) -> f32:
-    let f = x - math32.floor(x)
-    var approx = math32.fma(-f, 1.490129070, x + 121.274057500)
-    approx += 27.728023300 / (4.84252568 - f)
-    approx *= 8388608.0
-    approx = f32_vmin(f32_vmax(approx, 0.0), 2139095040.0)
-    return f32.bits(f32_round_nonneg(approx))
-
-## approx_powf: x^y, exact for 0 and 1.
-pub func approx_powf_neon(x: f32, y: f32) -> f32:
-    if x == 0.0 or x == 1.0:
-        return x
-    return approx_pow2_neon(approx_log2_neon(x) * y)
-
-# mark: Transfer functions =====================================================================
-
-## The `parametric` stage on one value: the sign set aside, the function applied to |v|.
-pub func transfer_parametric(tf: const TransferFunction*, input: f32) -> f32:
-    let bits = input.bits()
-    let sign = bits & 0x80000000
-    let v = f32.bits(bits ^ sign)
-    var result: f32 = 0.0
-    if v <= tf.d:
-        result = math32.fma(tf.c, v, tf.f)
-    else:
-        result = approx_powf_neon(math32.fma(tf.a, v, tf.b), tf.g) + tf.e
-    return f32.bits(sign | result.bits())
-
-## The `gamma_` stage on one value.
-func transfer_gamma(g: f32, input: f32) -> f32:
-    let bits = input.bits()
-    let sign = bits & 0x80000000
-    let v = f32.bits(bits ^ sign)
-    return f32.bits(sign | approx_powf_neon(v, g).bits())
-
-## SkRasterPipeline::appendTransferFunction's stage on one value.
-func transfer_apply(tf: const TransferFunction*, v: f32) -> f32:
-    if tf.is_gamma():
-        return transfer_gamma(tf.g, v)
-    return transfer_parametric(tf, v)
-
-# mark: Matrices and alpha =====================================================================
-
-## matrix_3x3 (column-major `m`, SkColorSpaceXformSteps' fSrcToDstMatrix).
-func color_matrix_3x3(m: const f32[], c: f32[4]) -> f32[4]:
-    let r = math32.fma(c[0], m[0], math32.fma(c[1], m[3], c[2] * m[6]))
-    let g = math32.fma(c[0], m[1], math32.fma(c[1], m[4], c[2] * m[7]))
-    let b = math32.fma(c[0], m[2], math32.fma(c[1], m[5], c[2] * m[8]))
-    return [r, g, b, c[3]]
+# mark: Alpha ==================================================================================
 
 ## unpremul: rgb divided by alpha (0 where 1/alpha is not below infinity).
 func color_unpremul(c: f32[4]) -> f32[4]:
@@ -109,10 +30,6 @@ func color_unpremul_polar(c: f32[4]) -> f32[4]:
     let inv = 1.0 / c[3]
     let scale = inv if inv < math32.infinity else 0.0
     return [c[0], c[1] * scale, c[2] * scale, c[3]]
-
-## premul.
-func color_premul(c: f32[4]) -> f32[4]:
-    return [c[0] * c[3], c[1] * c[3], c[2] * c[3], c[3]]
 
 # mark: CSS color stages =======================================================================
 

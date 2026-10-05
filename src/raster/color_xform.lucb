@@ -12,17 +12,17 @@
 #       SkColorSpaceXformSteps (`icc.Steps`); this fragment is the arithmetic of the highp
 #       stages they become (SkRasterPipeline::appendTransferFunction picks gamma_, parametric,
 #       PQish, HLGish or HLGinvish), as m144 computes them on arm64 NEON: `mad` fuses,
-#       min/max are vminq/vmaxq, approx_powf rounds half to even. One stage, `color_xform`,
-#       runs every step a pattern needs, lane by lane; it has no lowp version, so a pipeline
-#       with it is highp, as in Skia.
+#       min/max are vminq/vmaxq, approx_powf rounds half to even. Unpremul and premul stay
+#       their own stages (RasterPipelineBuilder.push_color_xform); one stage, `color_xform`,
+#       runs the steps between them lane by lane for an image or a gradient, and
+#       `color_filter_xform` those of a color space transform color filter. Neither has a
+#       lowp version, so a pipeline with one is highp, as in Skia.
 #
 #       Copyright (c) 2018 Google Inc. All rights reserved.
 #       Copyright (c) 2026 the luce-browser authors.
 #       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
 #
 #==============================================================================================
-
-from luce_color import icc
 
 ## The highp stage SkRasterPipeline::appendTransferFunction appends for a transfer function.
 enum XformCurve:
@@ -160,9 +160,20 @@ func xform_pixel(x: const ColorXform*, rgba: f32[4]) -> f32[4]:
         c = [c[0] * a, c[1] * a, c[2] * a]
     return [c[0], c[1], c[2], a]
 
-## The color_xform stage: the steps of the pattern's ColorXform on every lane.
+## The color_xform stage: the steps of the shader's ColorXform (an image's or a gradient's,
+## between unpremul and premul) on every lane.
 func highp_color_xform(p: HighpPipeline*):
-    let x = &p.ctx.color_xform
+    highp_xform_lanes(p, &p.ctx.color_xform)
+    highp_next_stage(p)
+
+## The color_filter_xform stage: the steps of SkColorSpaceXformColorFilter (between unpremul
+## and premul) on every lane.
+func highp_color_filter_xform(p: HighpPipeline*):
+    highp_xform_lanes(p, &p.ctx.color_filter_xform)
+    highp_next_stage(p)
+
+## The steps of `x` on every lane.
+func highp_xform_lanes(p: HighpPipeline*, x: const ColorXform*):
     for h in 0..<(usize)2:
         for l in 0..<(usize)4:
             let out = xform_pixel(x, [p.r[h][l], p.g[h][l], p.b[h][l], p.a[h][l]])
@@ -170,8 +181,6 @@ func highp_color_xform(p: HighpPipeline*):
             p.g[h][l] = out[1]
             p.b[h][l] = out[2]
             p.a[h][l] = out[3]
-
-    highp_next_stage(p)
 
 # mark: Tests ==================================================================================
 
