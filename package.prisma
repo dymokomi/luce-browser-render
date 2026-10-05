@@ -1,7 +1,7 @@
 #prisma 4.0
 def package "luce-browser-render" {
     str owner = "dymokomi"
-    str version = "0.5.0"
+    str version = "0.5.1"
     str kind = "package"
     str language = "luce-base"
     str description = "Geometry, color, fonts, the CPU rasterizer and the display list of the luce-browser port of Ladybird, in luce-base."
