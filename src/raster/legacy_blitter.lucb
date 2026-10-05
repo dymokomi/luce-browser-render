@@ -1,0 +1,288 @@
+#==============================================================================================
+#
+#   legacy_blitter - Skia's legacy kN32 blitters for solid colors (SkARGB32_*_Blitter)
+#
+#   DESCRIPTION:
+#       Port of Skia m144 src/core/SkBlitter_ARGB32.cpp (SkARGB32_Blitter,
+#       SkARGB32_Opaque_Blitter, SkARGB32_Black_Blitter), SkBlitRow::Color32 with
+#       blit_row_color32 (src/opts/SkBlitRow_opts.h), blit_mask_d32_a8's NEON kernels
+#       (src/opts/SkBlitMask_opts.h, the arm64 build) and the packed-pixel helpers of
+#       SkColorPriv.h / SkColorData.h. SkBlitter::Choose picks them instead of the raster
+#       pipeline when the device is kN32 and the paint is a solid sRGB color drawn src-over
+#       (SkBlitter::UseLegacyBlitter). Ladybird's surfaces are BGRA, which is not kN32 on macOS
+#       and Linux, but SkBitmapDevice::createDevice makes every layer with an image filter
+#       (and every layer inside one) kN32, so what is drawn into a filtered layer goes
+#       through these blitters. A kN32 pixel is RGBA in memory, read as a little-endian
+#       SkPMColor (red in the low byte, alpha in the high byte).
+#
+#       Copyright (c) 2006 The Android Open Source Project
+#       Copyright (c) 2015 Google Inc.
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+# mark: Packed pixels ==========================================================================
+
+## SK_A32_SHIFT for the RGBA kN32 layout.
+let legacy_a32_shift: u32 = 24
+
+## SkGetPackedA32.
+func legacy_packed_a(c: u32) -> u32:
+    return c >> legacy_a32_shift
+
+## SkAlpha255To256: 0..255 to 0..256 by adding one.
+func legacy_alpha_255_to_256(alpha: u32) -> u32:
+    return alpha + 1
+
+## SkAlphaMulQ: the four channels of `c` times `scale` / 256.
+func legacy_alpha_mul_q(c: u32, scale: u32) -> u32:
+    let mask: u32 = 0x00FF00FF
+    let rb = ((c & mask) *% scale) >> 8
+    let ag = ((c >> 8) & mask) *% scale
+    return (rb & mask) | (ag & ~mask)
+
+## SkAlphaMulInv256.
+func legacy_alpha_mul_inv_256(value: u32, alpha256: u32) -> u32:
+    let prod = 0xFFFF -% value *% alpha256
+    return (prod +% (prod >> 8)) >> 8
+
+## SkBlendARGB32: `src` blended over `dst` with coverage `aa`.
+func legacy_blend_argb32(src: u32, dst: u32, aa: u32) -> u32:
+    let src_scale = legacy_alpha_255_to_256(aa)
+    let dst_scale = legacy_alpha_mul_inv_256(legacy_packed_a(src), src_scale)
+    let mask: u32 = 0x00FF00FF
+    let src_rb = (src & mask) *% src_scale
+    let src_ag = ((src >> 8) & mask) *% src_scale
+    let dst_rb = (dst & mask) *% dst_scale
+    let dst_ag = ((dst >> 8) & mask) *% dst_scale
+    return (((src_rb +% dst_rb) >> 8) & mask) | ((src_ag +% dst_ag) & ~mask)
+
+## SkSplay (64-bit): 0xAARRGGBB to 0x00AA00GG00RR00BB.
+func legacy_splay(color: u32) -> u64:
+    let mask: u32 = 0x00FF00FF
+    return ((u64)((color >> 8) & mask) << 32) | (u64)(color & mask)
+
+## SkUnsplay (64-bit).
+func legacy_unsplay(agrb: u64) -> u32:
+    let mask: u64 = 0xFF00FF00
+    return (u32)(((agrb & mask) >> 8) | ((agrb >> 32) & mask))
+
+## SkFastFourByteInterp: `src` and `dst` interpolated by `src_weight` (0 gives `dst`), the
+## 64-bit SkFastFourByteInterp256.
+func legacy_fast_four_byte_interp(src: u32, dst: u32, src_weight: u32) -> u32:
+    let scale = (u64)(src_weight + (src_weight >> 7))
+    return legacy_unsplay(legacy_splay(src) *% scale +% (256 - scale) *% legacy_splay(dst))
+
+## SkMulDiv255Round.
+func legacy_mul_div_255_round(a: u32, b: u32) -> u32:
+    let prod = a * b + 128
+    return (prod + (prod >> 8)) >> 8
+
+## SkPreMultiplyColor of an SkColor (0xAARRGGBB) into a kN32 (RGBA) SkPMColor.
+func legacy_premultiply_color(color: u32) -> u32:
+    let a = color >> 24
+    var r = (color >> 16) & 0xFF
+    var g = (color >> 8) & 0xFF
+    var b = color & 0xFF
+    if a != 255:
+        r = legacy_mul_div_255_round(r, a)
+        g = legacy_mul_div_255_round(g, a)
+        b = legacy_mul_div_255_round(b, a)
+    return (a << 24) | (b << 16) | (g << 8) | r
+
+## SkColor4f::toSkColor (Sk4f_toL32): each channel times 255 plus one half, pinned and
+## truncated; none unless the color fits in bytes (SkColor4f::fitsInBytes).
+func legacy_sk_color(c: Color) -> u32?:
+    let channels: f32[4] = [c.alpha(), c.red(), c.green(), c.blue()]
+    var color: u32 = 0
+    for v in channels:
+        if not (v >= 0.0 and v <= 1.0):
+            return none
+        color = (color << 8) | (u32)fmin(fmax(v * 255.0 + 0.5, 0.0), 255.0)
+    return color
+
+# mark: Rows ===================================================================================
+
+## The kN32 pixel (x, y) of `pixmap`, as an SkPMColor.
+func legacy_load(pixmap: const SubPixmapMut*, x: i32, y: i32) -> u32:
+    let i = ((usize)y * pixmap.real_width + (usize)x) * 4
+    let d = pixmap.data
+    return (u32)d[i] | ((u32)d[i + 1] << 8) | ((u32)d[i + 2] << 16) | ((u32)d[i + 3] << 24)
+
+## Stores the SkPMColor `c` at (x, y).
+func legacy_store(pixmap: SubPixmapMut*, x: i32, y: i32, c: u32):
+    let i = ((usize)y * pixmap.real_width + (usize)x) * 4
+    pixmap.data[i] = (u8)(c & 0xFF)
+    pixmap.data[i + 1] = (u8)((c >> 8) & 0xFF)
+    pixmap.data[i + 2] = (u8)((c >> 16) & 0xFF)
+    pixmap.data[i + 3] = (u8)(c >> 24)
+
+## SkBlitRow::Color32: `count` pixels from (x, y) with the premultiplied `color` drawn
+## src-over (a store when opaque, nothing when transparent); blit_row_color32's kernel adds
+## the color to each byte scaled by 256 - alpha, shifted down.
+func legacy_color32(pixmap: SubPixmapMut*, x: i32, y: i32, count: i32, color: u32):
+    let alpha = legacy_packed_a(color)
+    if alpha == 0:
+        return
+    if alpha == 255:
+        for i in 0..<count:
+            legacy_store(pixmap, x + i, y, color)
+        return
+    let inv_a = legacy_alpha_255_to_256(255 - alpha)
+    for i in 0..<count:
+        let s = legacy_load(pixmap, x + i, y)
+        var r: u32 = 0
+        let shifts: u32[4] = [0, 8, 16, 24]
+        for shift in shifts:
+            let byte = (((s >> shift) & 0xFF) * inv_a >> 8) + ((color >> shift) & 0xFF)
+            r |= (byte & 0xFF) << shift
+        legacy_store(pixmap, x + i, y, r)
+
+# mark: The blitters ===========================================================================
+
+## Which of the solid-color kN32 blitters SkBlitter::Choose made.
+enum LegacyBlitterKind as u8:
+    ## SkARGB32_Blitter: a translucent color.
+    general = 0
+    ## SkARGB32_Opaque_Blitter.
+    opaque = 1
+    ## SkARGB32_Black_Blitter: opaque black.
+    black = 2
+
+## SkARGB32_Blitter and its opaque and black specializations.
+struct LegacyBlitter: Blitter:
+    var pixmap: SubPixmapMut*
+    var kind: LegacyBlitterKind
+    ## The paint's SkColor (0xAARRGGBB), its alpha and its premultiplied kN32 color.
+    var color: u32
+    var src_a: u32
+    var pm_color: u32
+
+    ## SkBlitter::Choose's legacy branch for a solid `color` (an SkColor).
+    static func new_(color: u32, pixmap: SubPixmapMut*) -> LegacyBlitter:
+        var kind = LegacyBlitterKind.general
+        if color == 0xFF000000:
+            kind = .black
+        elif (color >> 24) == 0xFF:
+            kind = .opaque
+        return LegacyBlitter(pixmap = pixmap, kind = kind, color = color, src_a = color >> 24, pm_color = legacy_premultiply_color(color))
+
+    pub func blit_h(x: i32, y: i32, width: i32):
+        legacy_color32(self.pixmap, x, y, width, self.pm_color)
+
+    pub func blit_anti_h(x0: i32, y: i32, antialias: AlphaU8[], runs: AlphaRun[]):
+        if self.kind == .general and self.src_a == 0:
+            return
+        var x = x0
+        var i: usize = 0
+        while true:
+            let count = (i32)runs[i]
+            if count <= 0:
+                return
+            let aa = (u32)antialias[i]
+            if self.kind == .black:
+                if aa == 255:
+                    legacy_color32(self.pixmap, x, y, count, 0xFF000000)
+                elif aa != 0:
+                    let src = aa << legacy_a32_shift
+                    let dst_scale = legacy_alpha_255_to_256(255 - aa)
+                    for n in 0..<count:
+                        let d = legacy_load(self.pixmap, x + n, y)
+                        legacy_store(self.pixmap, x + n, y, src +% legacy_alpha_mul_q(d, dst_scale))
+            elif self.kind == .opaque and aa == 255:
+                legacy_color32(self.pixmap, x, y, count, self.pm_color)
+            elif aa != 0:
+                let sc = legacy_alpha_mul_q(self.pm_color, legacy_alpha_255_to_256(aa))
+                legacy_color32(self.pixmap, x, y, count, sc)
+            i += (usize)count
+            x += count
+
+    pub func blit_v(x: i32, y: i32, height: i32, alpha: AlphaU8):
+        if alpha == 0 or self.src_a == 0:
+            return
+        var color = self.pm_color
+        if alpha != 255:
+            color = legacy_alpha_mul_q(color, legacy_alpha_255_to_256((u32)alpha))
+        let dst_scale = legacy_alpha_255_to_256(255 - legacy_packed_a(color))
+        for row in 0..<height:
+            let d = legacy_load(self.pixmap, x, y + row)
+            legacy_store(self.pixmap, x, y + row, color +% legacy_alpha_mul_q(d, dst_scale))
+
+    pub func blit_rect(x: i32, y: i32, width: i32, height: i32):
+        if self.src_a == 0:
+            return
+        for row in 0..<height:
+            legacy_color32(self.pixmap, x, y + row, width, self.pm_color)
+
+    pub func blit_anti_rect(x: i32, y: i32, width: i32, height: i32, left_alpha: AlphaU8, right_alpha: AlphaU8):
+        blitter_default_blit_anti_rect(&self, x, y, width, height, left_alpha, right_alpha)
+
+    pub func blit_mask(mask: const BlitMask*, clip: IRect):
+        if self.kind == .general and self.src_a == 0:
+            return
+        # blit_color: SkOpts::blit_mask_d32_a8 (the A8 masks are the only ones made here).
+        for y in clip.top..<clip.bottom:
+            for x in clip.left..<clip.right:
+                let m = (u32)mask.image[mask.index(x, y)]
+                let d = legacy_load(self.pixmap, x, y)
+                legacy_store(self.pixmap, x, y, self.mask_pixel(m, d))
+
+    ## One pixel of blit_mask_d32_a8: the black kernel, or the NEON kernel (translucent or
+    ## opaque), whose vector and scalar lanes compute alike.
+    func mask_pixel(m: u32, d: u32) -> u32:
+        if self.color == 0xFF000000:
+            return legacy_alpha_mul_q(d, 256 - m) +% (m << legacy_a32_shift)
+        let mask256 = legacy_alpha_255_to_256(m)
+        var scale = 256 - m
+        if self.src_a != 255:
+            scale = 256 - legacy_alpha_mul_q(self.src_a, mask256)
+        return legacy_alpha_mul_q(self.pm_color, mask256) +% legacy_alpha_mul_q(d, scale)
+
+    pub func blit_anti_h2(x: i32, y: i32, alpha0: AlphaU8, alpha1: AlphaU8):
+        self.blend_pixel(x, y, (u32)alpha0)
+        self.blend_pixel(x + 1, y, (u32)alpha1)
+
+    pub func blit_anti_v2(x: i32, y: i32, alpha0: AlphaU8, alpha1: AlphaU8):
+        self.blend_pixel(x, y, (u32)alpha0)
+        self.blend_pixel(x, y + 1, (u32)alpha1)
+
+    ## blitAntiH2 / blitAntiV2's pixel: SkBlendARGB32, SkFastFourByteInterp when opaque, and
+    ## the black blitter's alpha add.
+    func blend_pixel(x: i32, y: i32, a: u32):
+        let d = legacy_load(self.pixmap, x, y)
+        match self.kind:
+            .general:
+                legacy_store(self.pixmap, x, y, legacy_blend_argb32(self.pm_color, d, a))
+            .opaque:
+                legacy_store(self.pixmap, x, y, legacy_fast_four_byte_interp(self.pm_color, d, a))
+            _:
+                legacy_store(self.pixmap, x, y, (a << legacy_a32_shift) +% legacy_alpha_mul_q(d, 256 - a))
+
+# mark: SkBlitter::UseLegacyBlitter ============================================================
+
+## The SkColor a legacy blitter draws `paint` with into a kN32 device, none when
+## SkBlitter::UseLegacyBlitter (with the color-shader part of Choose) picks the raster
+## pipeline: a solid sRGB color that fits in bytes, drawn src-over (or src when opaque, which
+## CheckFastPath makes src-over), without the port's own color-space and color-filter
+## options.
+func legacy_blitter_color(paint: const Paint*) -> u32?:
+    if paint.linear_to_srgb or paint.force_hq_pipeline or paint.colorspace != .linear:
+        return none
+    var color = Color.transparent()
+    match paint.shader:
+        .solid_color(c):
+            color = c
+        _:
+            return none
+    if paint.alpha != 1.0:
+        color.apply_opacity(paint.alpha)
+    match paint.blend_mode:
+        .source_over:
+            _ = 0
+        .source:
+            if not color.is_opaque():
+                return none
+        _:
+            return none
+    return legacy_sk_color(color)

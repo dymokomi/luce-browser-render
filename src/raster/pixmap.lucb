@@ -20,6 +20,10 @@ pub let bytes_per_pixel: usize = 4
 pub struct Pixmap:
     var data_: u8[]
     var size_: IntSize
+    ## The pixels are Skia's kN32 (RGBA), the color type of the layers it makes for image
+    ## filters, where solid colors go through the legacy blitters (legacy_blitter.lucb);
+    ## otherwise they stand for Ladybird's BGRA surfaces, drawn by the raster pipeline.
+    var n32: bool = false
 
     ## Allocates a new pixmap. A pixmap is filled with transparent black by default, aka
     ## (0, 0, 0, 0). Zero size in an error. Pixmap's width is limited by i32::MAX/4.
@@ -45,7 +49,15 @@ pub struct Pixmap:
 
     ## Returns a container that references Pixmap's data.
     pub func as_mut() -> PixmapMut:
-        return PixmapMut(data_ = self.data_, size_ = self.size_)
+        return PixmapMut(data_ = self.data_, size_ = self.size_, n32 = self.n32)
+
+    ## Marks the pixels as Skia's kN32 color type (see `n32`).
+    pub func set_n32(n32: bool):
+        self.n32 = n32
+
+    ## Whether the pixels are Skia's kN32 color type.
+    pub func is_n32() -> bool:
+        return self.n32
 
     ## Returns pixmap's width.
     pub func width() -> u32:
@@ -244,6 +256,8 @@ pub struct PixmapRef:
 pub struct PixmapMut:
     var data_: u8[]
     var size_: IntSize
+    ## Skia's kN32 color type (Pixmap.n32).
+    var n32: bool = false
 
     ## Creates a new `PixmapMut` from bytes. The size must be at least
     ## `size.width() * size.height() * BYTES_PER_PIXEL`. Zero size in an error. Width is
@@ -290,13 +304,13 @@ pub struct PixmapMut:
         return pixels_of(self.data_)
 
     func as_subpixmap() -> SubPixmapMut:
-        return SubPixmapMut(data = self.data_, size = self.size_, real_width = (usize)self.size_.width())
+        return SubPixmapMut(data = self.data_, size = self.size_, real_width = (usize)self.size_.width(), n32 = self.n32)
 
     func subpixmap(rect0: IntRect) -> SubPixmapMut?:
         let rect = self.size_.to_int_rect(0, 0).intersect(rect0) else return none
         let row_bytes = (usize)self.width() * bytes_per_pixel
         let offset = (usize)rect.top() * row_bytes + (usize)rect.left() * bytes_per_pixel
-        return SubPixmapMut(data = self.data_[offset..], size = rect.size(), real_width = (usize)self.width())
+        return SubPixmapMut(data = self.data_[offset..], size = rect.size(), real_width = (usize)self.width(), n32 = self.n32)
 
     ## Draws a filled rectangle onto the pixmap. This function is usually slower than
     ## filling a rectangular path, but it produces better results. Mainly it doesn't suffer
@@ -340,6 +354,8 @@ struct SubPixmapMut:
     var data: u8[]
     var size: IntSize
     var real_width: usize
+    ## Skia's kN32 color type (Pixmap.n32).
+    var n32: bool = false
 
     func pixels_mut() -> PremultipliedColorU8[]:
         return pixels_of(self.data)

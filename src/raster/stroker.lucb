@@ -5,9 +5,11 @@
 #   DESCRIPTION:
 #       Port of tiny-skia-path stroker.rs, part 1 (lines 1-620): Stroke, LineCap, LineJoin,
 #       the cap/join procedure types, SwappableBuilders, PathStroker and its per-segment
-#       entry points (move_to, line_to, quad_to, cubic_to). Based on SkStroke.cpp. The
-#       curve approximation is in stroker_curves.lucb, the caps and joins in
-#       stroker_joins.lucb.
+#       entry points (move_to, line_to, quad_to, cubic_to). Based on SkStroke.cpp, and
+#       checked against Skia m144's SkStroke::strokePath (a closed rectangle goes through
+#       strokeRect, stroker_rect.lucb; a zero-length line before a segment with length is
+#       skipped, has_valid_tangent). The curve approximation is in stroker_curves.lucb, the
+#       caps and joins in stroker_joins.lucb.
 #
 #==============================================================================================
 
@@ -183,6 +185,12 @@ pub struct PathStroker:
         let width = stroke.width
         if not (math32.is_finite(width) and width > 0.0):
             return none
+        # SkStroke::strokePath: a closed rectangle goes through strokeRect (Skia has no
+        # miter-clip join, which keeps the general walk).
+        if stroke.line_join != .miter_clip:
+            if let contour = path_is_rect_contour(path):
+                if contour.is_closed:
+                    return stroke_rect(contour.rect, contour.clockwise, width, stroke.miter_limit, stroke.line_join)
         return self.stroke_inner(path, width, stroke.miter_limit, stroke.line_cap, stroke.line_join, resolution_scale)
 
     ## Frees the stroker's working storage.
@@ -192,7 +200,6 @@ pub struct PathStroker:
         self.cusper.release()
 
     func stroke_inner(path: const Path*, width: f32, miter_limit: f32, line_cap: LineCap, line_join0: LineJoin, res_scale: f32) -> Path?:
-        # TODO: stroke_rect optimization
         var line_join = line_join0
         var inv_miter_limit: f32 = 0.0
 
@@ -422,7 +429,7 @@ pub struct PathStroker:
 
         if let cusp = find_cubic_cusp(cubic):
             let cusp_loc = eval_cubic_pos_at(cubic, cusp)
-            self.cusper.push_circle(cusp_loc.x, cusp_loc.y, self.radius)
+            push_sk_circle(&self.cusper, cusp_loc.x, cusp_loc.y, self.radius)
 
         # emit the join even if one stroke succeeded but the last one failed
         # this avoids reversing an inner stroke with a partial path followed by another moveto

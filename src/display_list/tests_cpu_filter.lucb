@@ -133,6 +133,14 @@ test "cpu filter: displacement map":
     let noise = gfx.filter_turbulence(gfx.TurbulenceType.fractal_noise, 0.2, 0.2, 1, 2.0, gfx.IntSize(m_width = 0, m_height = 0))
     let displaced = gfx.filter_displacement_map(none, &noise, 6.0, gfx.ChannelSelector.red, gfx.ChannelSelector.alpha)
     test_filter_expect("displacement", TestFilterScene(), test_filter_graph(&displaced), filter_skia_displacement, 0, 0)
+    # A black map at scale 1 samples the color input at integer coordinates, which nearest
+    # sampling's roundDownAtInteger takes from the pixel before.
+    let black = gfx.filter_flood(test_filter_color(0, 0, 0, 255), 1.0)
+    let integer = gfx.filter_displacement_map(none, &black, 1.0, gfx.ChannelSelector.red, gfx.ChannelSelector.red)
+    test_filter_expect("displacement_integer", TestFilterScene(), test_filter_graph(&integer), filter_skia_displacement_integer, 0, 0)
+    let turbulence = gfx.filter_turbulence(gfx.TurbulenceType.turbulence, 0.05, 0.05, 2, 0.0, gfx.IntSize(m_width = 0, m_height = 0))
+    let rg = gfx.filter_displacement_map(none, &turbulence, 30.0, gfx.ChannelSelector.red, gfx.ChannelSelector.green)
+    test_filter_expect("displacement_turbulence", TestFilterScene(width = 48, height = 48), test_filter_graph(&rg), filter_skia_displacement_turbulence, 0, 0)
 
 # mark: Backdrops ==============================================================================
 

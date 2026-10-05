@@ -1,0 +1,197 @@
+#==============================================================================================
+#
+#   tests_stroke_skia - strokes and dashes against the fill paths Skia m144 makes
+#
+#   DESCRIPTION:
+#       Each case of tests_stroke_skia_data_1/2 strokes a path with stroke_fill_path
+#       (skpathutils::FillPathWithPaint: the dash with the device's cull rectangle, the
+#       stroke at the matrix's resolution scale), maps it by the matrix and compares its
+#       verbs, point bits and conic weight bits with the path Skia makes, recorded by
+#       luce-browser-tools' oracles/luce-browser-render/strokes: the StrokePath commands of
+#       the Screenshot test svg-stroke-styles, zero-length segments and contours with every
+#       cap, closed rectangles with every join (SkStroke::strokeRect), dashed lines
+#       (SpecialLineRec) and rectangles (cull_path and the initial join), and random paths
+#       with curves, joins, caps, miter limits, dashes and rotations.
+#
+#==============================================================================================
+
+## The words of a case, read one at a time (whitespace-separated).
+struct StrokeCaseWords:
+    var text: const u8[]
+    var at: usize
+
+    ## The next word, none at the end.
+    func next() -> const u8[]?:
+        while self.at < self.text.length and (self.text[self.at] == ' ' or self.text[self.at] == '\n'):
+            self.at += 1
+        if self.at >= self.text.length:
+            return none
+        let start = self.at
+        while self.at < self.text.length and self.text[self.at] != ' ' and self.text[self.at] != '\n':
+            self.at += 1
+        return self.text[start..<self.at]
+
+    ## The next word as a hexadecimal number (the small decimal numbers of a case read alike).
+    func hex() -> u32:
+        let word = self.next() else trap("stroke case: missing a word")
+        var value: u32 = 0
+        for c in word:
+            var digit: u32 = 0
+            if c >= '0' and c <= '9':
+                digit = (u32)(c - '0')
+            elif c >= 'a' and c <= 'f':
+                digit = (u32)(c - 'a') + 10
+            else:
+                trap("stroke case: not a hexadecimal word")
+            value = (value << 4) | digit
+        return value
+
+    ## The next word as the float of its bits.
+    func float() -> f32:
+        return f32.bits(self.hex())
+
+    ## Skips the next word.
+    func skip():
+        _ = self.next()
+
+## A raster.LineCap from a case's number.
+func stroke_case_cap(n: u32) -> LineCap:
+    match n:
+        0: return .butt
+        1: return .round
+        _: return .square
+
+## A raster.LineJoin from a case's number.
+func stroke_case_join(n: u32) -> LineJoin:
+    match n:
+        0: return .miter
+        2: return .round
+        _: return .bevel
+
+## Strokes the case `text` and compares the result with Skia's path.
+func check_stroke_case(text: str):
+    let bytes = text.bytes
+    var line_end: usize = 0
+    while bytes[line_end] != '\n':
+        line_end += 1
+    var words = StrokeCaseWords(text = bytes[..<line_end], at = 0)
+    words.skip()  # stroke
+    let width = words.float()
+    let cap = stroke_case_cap(words.hex())
+    let join = stroke_case_join(words.hex())
+    let miter = words.float()
+    words.skip()  # anti-aliasing
+    let offset = words.float()
+    let count = (usize)words.hex()
+    var intervals: f32[8] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    for i in 0..<count:
+        intervals[i] = words.float()
+    words.skip()  # color
+    words.skip()  # |
+    var m: f32[6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    for i in 0..<6usize:
+        m[i] = words.float()
+    words.skip()  # |
+    var pb = PathBuilder.new_()
+    while let verb = words.next():
+        match verb[0]:
+            '0':
+                let x = words.float()
+                pb.move_to(x, words.float())
+            '1':
+                let x = words.float()
+                pb.line_to(x, words.float())
+            '2':
+                let x1 = words.float()
+                let y1 = words.float()
+                let x = words.float()
+                pb.quad_to(x1, y1, x, words.float())
+            '3':
+                let x1 = words.float()
+                let y1 = words.float()
+                let x2 = words.float()
+                let y2 = words.float()
+                let x = words.float()
+                pb.cubic_to(x1, y1, x2, y2, x, words.float())
+            '4':
+                pb.close()
+            _:
+                let x1 = words.float()
+                let y1 = words.float()
+                let x = words.float()
+                let y = words.float()
+                pb.conic_to(x1, y1, x, y, words.float())
+    var path = pb.finish() else trap("stroke case: no path")
+    defer path.release()
+
+    var dash: StrokeDash? = none
+    if count > 0:
+        dash = StrokeDash.new_(intervals[..<count], offset)
+    var stroke = Stroke(width = width, miter_limit = miter, line_cap = cap, line_join = join, dash = dash)
+    defer:
+        if let d = stroke.dash:
+            var owned = d
+            owned.release()
+    let ts = Transform.from_row(m[0], m[3], m[1], m[4], m[2], m[5])
+    let device = Rect.from_ltrb(-1.0, -1.0, 201.0, 201.0) else trap("rect")
+    let cull = device.transform(ts.invert() else trap("stroke case: singular matrix"))
+
+    var expected = StrokeCaseWords(text = bytes[line_end + 1..], at = 0)
+    if let fill0 = stroke_fill_path(&path, &stroke, ts, cull):
+        var fill = fill0
+        defer fill.path.release()
+        assert(fill.path.transform(ts))
+        expect_stroke_case_path(&fill.path, &expected, text)
+    if let _ = expected.next():
+        print(f"stroke case: Skia's path has more: {text}")
+        trap("stroke case: path too short")
+
+## Compares `path` with the verbs, point bits and weight bits `expected` reads.
+func expect_stroke_case_path(path: const Path*, expected: StrokeCaseWords*, text: str):
+    let points = path.points_view()
+    let weights = path.weights_view()
+    var p: usize = 0
+    var w: usize = 0
+    for verb in path.verbs_view():
+        var n: usize = 0
+        var code: u32 = 0
+        match verb:
+            .move:
+                n = 1
+            .line:
+                n = 1
+                code = 1
+            .quad:
+                n = 2
+                code = 2
+            .cubic:
+                n = 3
+                code = 3
+            .conic:
+                n = 2
+                code = 5
+            _:
+                code = 4
+        let wanted = expected.hex()
+        if wanted != code:
+            print(f"stroke case: verb {code}, Skia's is {wanted}: {text}")
+            trap("stroke case: verb mismatch")
+        for _ in 0..<n:
+            let x = expected.hex()
+            let y = expected.hex()
+            if points[p].x.bits() != x or points[p].y.bits() != y:
+                print(f"stroke case: point {p} is ({points[p].x.bits():x}, {points[p].y.bits():x}), Skia's is ({x:x}, {y:x}): {text}")
+                trap("stroke case: point mismatch")
+            p += 1
+        if code == 5:
+            if weights[w].bits() != expected.hex():
+                trap("stroke case: weight mismatch")
+            w += 1
+
+test "stroke: Skia's fill paths (first half)":
+    for case in stroke_cases_1:
+        check_stroke_case(case)
+
+test "stroke: Skia's fill paths (second half)":
+    for case in stroke_cases_2:
+        check_stroke_case(case)

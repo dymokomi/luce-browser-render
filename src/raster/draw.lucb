@@ -6,10 +6,13 @@
 #       Port of Skia m144 src/core/SkDraw.cpp (Draw::drawRect, drawPath, drawDevPath and
 #       modifyPaintForHairlines) and of SkBlitter::Choose (src/core/SkBlitter.cpp) with
 #       CheckFastPath (src/core/SkBlendMode.cpp): a draw picks the raster pipeline blitter
-#       (Ladybird's BGRA surfaces are not Skia's kN32, so its legacy blitters never draw
-#       them), then scan-converts through the clip (scan_raster_clip.lucb). These are the bodies of
-#       PixmapMut's fill_rect, fill_path and stroke_path. Pixmaps larger than 8191 pixels
-#       are drawn in tiles (DrawTiler), as Skia's SkDrawTiler does.
+#       (Ladybird's BGRA surfaces are not Skia's kN32), or a legacy kN32 blitter for a solid
+#       color in a kN32 pixmap (the layers Skia makes for image filters, legacy_blitter.lucb),
+#       then scan-converts through the clip (scan_raster_clip.lucb). A stroke is
+#       skpathutils::FillPathWithPaint's path: dashed with the clip's local bounds
+#       (dash_filter.lucb), then stroked. These are the bodies of PixmapMut's fill_rect,
+#       fill_path and stroke_path. Pixmaps larger than 8191 pixels are drawn in tiles
+#       (DrawTiler), as Skia's SkDrawTiler does.
 #
 #       Copyright (c) 2006 The Android Open Source Project
 #       Copyright (c) 2026 the luce-browser authors.
@@ -23,11 +26,14 @@ enum DeviceBlitterKind as u8:
     ## SkNullBlitter: nothing to draw.
     null_ = 0
     pipeline = 1
+    ## One of the legacy kN32 blitters (SkARGB32_*_Blitter).
+    legacy = 2
 
 ## The blitter a draw writes the device with (SkBlitter::Choose's result).
 struct DeviceBlitter:
     var kind: DeviceBlitterKind
     var pipeline: RasterPipelineBlitter
+    var legacy: LegacyBlitter
 
     static func null_blitter() -> DeviceBlitter:
         var d: DeviceBlitter = ---
@@ -38,6 +44,8 @@ struct DeviceBlitter:
     func view() -> Blitter?:
         if self.kind == .pipeline:
             return &self.pipeline
+        if self.kind == .legacy:
+            return &self.legacy
         return none
 
     func release():
@@ -47,10 +55,17 @@ struct DeviceBlitter:
 
 ## SkBlitter::Choose for a paint drawing into `pixmap`. Skia's legacy SkARGB32 blitters
 ## draw only into kN32 devices, which is kRGBA_8888 on macOS and Linux; Ladybird paints into
-## kBGRA_8888 surfaces, so every draw goes through the raster pipeline
-## (SkBlitter::UseLegacyBlitter is false), whose blitter makes the rest of Choose's choices.
+## kBGRA_8888 surfaces, so draws go through the raster pipeline
+## (SkBlitter::UseLegacyBlitter is false), whose blitter makes the rest of Choose's choices,
+## except in the kN32 layers Skia makes for image filters, where a solid color takes the
+## legacy blitter.
 func choose_blitter(paint: const Paint*, pixmap: SubPixmapMut*) -> DeviceBlitter:
     var d = DeviceBlitter.null_blitter()
+    if pixmap.n32:
+        if let color = legacy_blitter_color(paint):
+            d.kind = .legacy
+            d.legacy = LegacyBlitter.new_(color, pixmap)
+            return d
     if let rp = RasterPipelineBlitter.new_(paint, pixmap):
         d.kind = .pipeline
         d.pipeline = rp
@@ -207,24 +222,18 @@ func draw_stroke_path(pixmap: PixmapMut*, path: const Path*, paint: const Paint*
         return
     if paint_nothing_to_draw(paint):
         return
+    let clip = RasterClip.new_(pixmap.width(), pixmap.height(), mask)
+    if clip.is_empty():
+        return
 
-    let res_scale = PathStroker.compute_resolution_scale(transform)
-
-    if let dash = stroke.dash:
-        var dashed = path.dash(&dash, res_scale) else return  # path dashing failed
-        defer dashed.release()
-        draw_stroke_path_impl(pixmap, &dashed, paint, stroke, transform, mask, res_scale)
-    else:
-        draw_stroke_path_impl(pixmap, path, paint, stroke, transform, mask, res_scale)
-
-## The rest of Draw::drawPath for a stroke, with the dashed path when there is a dash.
-func draw_stroke_path_impl(pixmap: PixmapMut*, path: const Path*, paint: const Paint*, stroke: const Stroke*, transform: Transform, mask: const Mask*?, res_scale: f32):
     # modifyPaintForHairlines
+    var hair_paint = shader_clone_paint(paint)
+    defer hair_paint.release()
+    var hair_stroke = *stroke
     if let coverage = treat_as_hairline(paint, stroke, transform):
-        var hair_paint = shader_clone_paint(paint)
-        defer hair_paint.release()
-        var hairline = coverage == 1.0
-        if not hairline and blend_mode_supports_coverage_as_alpha(hair_paint.blend_mode):
+        if coverage == 1.0:
+            hair_stroke.width = 0.0
+        elif blend_mode_supports_coverage_as_alpha(hair_paint.blend_mode):
             # this is the old technique, which we preserve for now so we don't change
             # previous results (testing) the new way seems fine, its just (a tiny bit)
             # different
@@ -239,14 +248,60 @@ func draw_stroke_path_impl(pixmap: PixmapMut*, path: const Path*, paint: const P
                 _:
                     let new_alpha = (255 * scale) >> 8
                     hair_paint.shader.apply_opacity((f32)new_alpha / 255.0)
-            hairline = true
-        if hairline:
-            draw_hairline(pixmap, path, &hair_paint, stroke.line_cap, transform, mask)
-            return
+            hair_stroke.width = 0.0
 
-    var stroked = path.stroke(stroke, res_scale) else return  # path stroking failed
-    defer stroked.release()
-    draw_fill_path(pixmap, &stroked, paint, .winding, transform, mask)
+    let cull = local_clip_bounds(&clip, transform)
+    var fill = stroke_fill_path(path, &hair_stroke, transform, cull) else return
+    defer fill.path.release()
+    if fill.hairline:
+        draw_hairline(pixmap, &fill.path, &hair_paint, stroke.line_cap, transform, mask)
+    else:
+        draw_fill_path(pixmap, &fill.path, &hair_paint, .winding, transform, mask)
+
+## Draw::computeConservativeLocalClipBounds: the clip's bounds, outset by a pixel for
+## anti-aliasing and hairlines, in local coordinates; none when the transform cannot be
+## inverted.
+func local_clip_bounds(clip: const RasterClip*, transform: Transform) -> Rect?:
+    let inverse = transform.invert() else return none
+    let device = IRect.ltrb(clip.bounds.left - 1, clip.bounds.top - 1, clip.bounds.right + 1, clip.bounds.bottom + 1)
+    return device.to_rect().transform(inverse)
+
+## The path a stroke paints, and how (skpathutils::FillPathWithPaint for a stroke paint).
+pub struct StrokeFillPath:
+    ## The path, in the stroke's local coordinates (owned: release it).
+    pub var path: Path
+    ## The path is drawn as a hairline (SkStrokeRec::isHairlineStyle), not filled.
+    pub var hairline: bool
+
+## skpathutils::FillPathWithPaint for `stroke` (a width of 0 is a hairline) under
+## `transform`: the dash (SkDashImpl::onFilterPath with the clip's local bounds `cull_rect`),
+## then the stroke (SkStrokeRec::applyToPath, at SkMatrixPriv::ComputeResScaleForStroking's
+## scale) unless the dash already made a fill or the stroke is a hairline. None when nothing
+## is left to draw.
+pub func stroke_fill_path(path: const Path*, stroke: const Stroke*, transform: Transform, cull_rect: Rect?) -> StrokeFillPath?:
+    let res_scale = PathStroker.compute_resolution_scale(transform)
+    var rec = DashStrokeRec(width = stroke.width, miter_limit = stroke.miter_limit, line_cap = stroke.line_cap, line_join = stroke.line_join, res_scale = res_scale, is_fill = false)
+
+    var dashed: Path? = none
+    if let dash = stroke.dash:
+        let result = dash_filter(path, &dash, &rec, cull_rect)
+        if result.applied:
+            let d = result.path else return none
+            dashed = d
+    var source = path
+    if let d = dashed:
+        source = &d
+
+    if rec.is_fill:
+        return StrokeFillPath(path = dashed else path.clone(), hairline = false)
+    if rec.width == 0.0:
+        return StrokeFillPath(path = dashed else path.clone(), hairline = true)
+    var stroked = source.stroke(stroke, res_scale)
+    if let d = dashed:
+        var p = d
+        p.release()
+    let outline = stroked else return none
+    return StrokeFillPath(path = outline, hairline = false)
 
 ## SkBlendMode_SupportsCoverageAsAlpha.
 func blend_mode_supports_coverage_as_alpha(mode: BlendMode) -> bool:

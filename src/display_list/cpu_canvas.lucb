@@ -335,11 +335,15 @@ func cpu_canvas_stroke_path(canvas: CpuCanvas*, path: const raster.Path*, paint:
     let ts = cpu_canvas_transform(canvas)
     cpu_canvas_target(canvas).stroke_path(path, paint, stroke, ts, mask)
 
-## SkCanvas::drawRect with a fill paint.
+## SkCanvas::drawRect with a fill paint: Draw::drawRect, which fills the device rectangle
+## (SkScan::AntiFillRect when anti-aliased) while the matrix keeps rectangles rectangles, and
+## the rectangle's path otherwise.
 func cpu_canvas_fill_rect(canvas: CpuCanvas*, rect: raster.Rect, paint: const raster.Paint*):
-    var path = raster.PathBuilder.from_rect(rect)
-    defer path.release()
-    cpu_canvas_fill_path(canvas, &path, paint, raster.FillRule.winding)
+    if cpu_canvas_is_clip_empty(canvas):
+        return
+    let mask = cpu_canvas_draw_mask(canvas)
+    let ts = cpu_canvas_transform(canvas)
+    cpu_canvas_target(canvas).fill_rect(rect, paint, ts, mask)
 
 ## SkCanvas::drawRect with a stroke paint of `width` and miter joins. When the transform keeps
 ## rectangles axis-aligned, Skia draws the stroke as a frame (SkScan::AntiFrameRect): the

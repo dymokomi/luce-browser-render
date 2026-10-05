@@ -132,7 +132,10 @@ pub struct Path:
     ## `PathStroker.compute_resolution_scale`. Returns none when the path is empty, or the
     ## dash is too long.
     pub func dash(dash: const StrokeDash*, resolution_scale: f32) -> Path?:
-        return dash_impl(&self, dash, resolution_scale)
+        # SkDashImpl::filterPath for a hairline without a cull rectangle.
+        var rec = DashStrokeRec(width = 0.0, miter_limit = 4.0, line_cap = .butt, line_join = .miter, res_scale = resolution_scale, is_fill = false)
+        let result = dash_filter(&self, dash, &rec, none)
+        return result.path
 
     ## A copy of the path with its own storage (Rust's `Path::clone`).
     pub func clone() -> Path:
@@ -233,30 +236,31 @@ pub struct PathSegmentsIter:
             return .line_to(p = self.last_move_to)
         return .close
 
+    ## SkStroke.cpp's has_valid_tangent: whether a segment with length follows before the
+    ## contour ends. A segment's points are compared with its start (`pts[0]`), the point the
+    ## iterator stood on before it.
     func has_valid_tangent() -> bool:
         var iter = self
+        var start = iter.last_point
         while let segment = iter.next():
             match segment:
                 .move_to(_):
                     return false
                 .line_to(p):
-                    if points_equal(iter.last_point, p):
-                        continue
-                    return true
+                    if not points_equal(start, p):
+                        return true
                 .quad_to(p1, p2):
-                    if points_equal(iter.last_point, p1) and points_equal(iter.last_point, p2):
-                        continue
-                    return true
+                    if not points_equal(start, p1) or not points_equal(start, p2):
+                        return true
                 .conic_to(p1, p2, _):
-                    if points_equal(iter.last_point, p1) and points_equal(iter.last_point, p2):
-                        continue
-                    return true
+                    if not points_equal(start, p1) or not points_equal(start, p2):
+                        return true
                 .cubic_to(p1, p2, p3):
-                    if points_equal(iter.last_point, p1) and points_equal(iter.last_point, p2) and points_equal(iter.last_point, p3):
-                        continue
-                    return true
+                    if not points_equal(start, p1) or not points_equal(start, p2) or not points_equal(start, p3):
+                        return true
                 .close:
                     return false
+            start = iter.last_point
         return false
 
     ## Returns the current verb.

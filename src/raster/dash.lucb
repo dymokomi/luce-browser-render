@@ -4,8 +4,9 @@
 #
 #   DESCRIPTION:
 #       Port of tiny-skia-path dash.rs: StrokeDash (the dash array, owned; `release()`
-#       frees it), dash_impl, and the contour measuring (ContourMeasureIter, ContourMeasure,
-#       Segment, the curve length subdivision and segment_to).
+#       frees it; SkDashImpl's parameters) and the contour measuring (ContourMeasureIter,
+#       ContourMeasure, Segment, the curve length subdivision and segment_to), checked
+#       against Skia m144's SkContourMeasure.cpp. The dashing itself is dash_filter.lucb.
 #
 #==============================================================================================
 
@@ -92,70 +93,6 @@ func find_first_interval(dash_array: const f32[], dash_offset0: f32) -> (f32, us
 func is_even(x: usize) -> bool:
     return x % 2 == 0
 
-func dash_impl(src: const Path*, dash: const StrokeDash*, res_scale: f32) -> Path?:
-    # We do not support the `cull_path` branch here. Skia has a lot of code for cases when a
-    # path contains only a single zero-length line or when a path is a rect. Not sure why. We
-    # simply ignoring it for the sake of simplicity.
-
-    # We also doesn't support the `SpecialLineRec` case. I have no idea what the point in it.
-
-    var pb = PathBuilder()
-    var dash_count: f32 = 0.0
-    var contours = ContourMeasureIter.new_(src, res_scale)
-    while let contour0 = contours.next():
-        var contour = contour0
-        defer contour.release()
-        var skip_first_segment = contour.is_closed
-        var added_segment = false
-        let length = contour.length
-        var index = dash.first_index
-
-        # Since the path length / dash length ratio may be arbitrarily large, we can exert
-        # significant memory pressure while attempting to build the filtered path. To avoid
-        # this, we simply give up dashing beyond a certain threshold.
-        #
-        # The original bug report (http://crbug.com/165432) is based on a path yielding more
-        # than 90 million dash segments and crashing the memory allocator. A limit of 1
-        # million segments seems reasonable: at 2 verbs per segment * 9 bytes per verb, this
-        # caps the maximum dash memory overhead at roughly 17MB per path.
-        let max_dash_count: usize = 1000000
-        dash_count += length * (f32)(dash.array.len >> 1) / dash.interval_len
-        if dash_count > (f32)max_dash_count:
-            pb.release()
-            return none
-
-        # Using double precision to avoid looping indefinitely due to single precision
-        # rounding (for extreme path_length/dash_length ratios). See test_infinite_dash()
-        # unittest.
-        var distance: f32 = 0.0
-        var d_len = dash.first_len
-
-        while distance < length:
-            added_segment = false
-            if is_even(index) and not skip_first_segment:
-                added_segment = true
-                contour.push_segment(distance, distance + d_len, true, &pb)
-
-            distance += d_len
-
-            # clear this so we only respect it the first time around
-            skip_first_segment = false
-
-            # wrap around our intervals array if necessary
-            index += 1
-            if index == dash.array.len:
-                index = 0
-
-            # fetch our next d_len
-            d_len = dash.array.data[index]
-
-        # extend if we ended on a segment and we need to join up with the (skipped) initial
-        # segment
-        if contour.is_closed and is_even(dash.first_index) and dash.first_len >= 0.0:
-            contour.push_segment(0.0, dash.first_len, not added_segment, &pb)
-
-    return pb.finish()
-
 let max_t_value: u32 = 0x3FFFFFFF
 
 struct ContourMeasureIter:
@@ -168,8 +105,17 @@ struct ContourMeasureIter:
         let cheap_dist_limit: f32 = 0.5  # just made this value up
         return ContourMeasureIter(iter = path.segments(), tolerance = cheap_dist_limit * invert(res_scale))
 
-    # If it encounters a zero-length contour, it is skipped.
+    ## SkContourMeasureIter::next: the next contour with a length (zero-length contours are
+    ## skipped).
     func next() -> ContourMeasure?:
+        while let _ = self.iter.next_verb():
+            if let contour = self.build_segments():
+                return contour
+        return none
+
+    ## SkContourMeasureIter::Impl::buildSegments: the segments of the contour at the iterator,
+    ## none when it has no length.
+    func build_segments() -> ContourMeasure?:
         # Note: as we accumulate distance, we have to check that the result of += actually
         # made it larger, since a very small delta might be > 0, but still have no effect on
         # distance (if distance >>> delta).
@@ -240,7 +186,7 @@ struct ContourMeasureIter:
                 if next_verb == .move:
                     break
 
-        if not math32.is_finite(distance):
+        if not math32.is_finite(distance) or contour.segments.is_empty():
             contour.release()
             return none
 
@@ -358,8 +304,10 @@ struct ContourMeasure:
                 start_t = self.segments.data[seg_index - 1].scalar_t()
 
         let t = start_t + (seg.scalar_t() - start_t) * (distance - start_d) / (seg.distance - start_d)
-        let nt = normalized_new(t) else return none
-        return (seg_index, nt)
+        # getSegment refuses only a t that is not finite.
+        if not math32.is_finite(t):
+            return none
+        return (seg_index, t)
 
     func compute_line_seg(p0: Point, p1: Point, distance0: f32, point_index: usize) -> f32:
         var distance = distance0

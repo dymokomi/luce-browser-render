@@ -156,3 +156,21 @@ test "cpu player 3d: a glyph run under perspective is drawn as paths":
         display_list_player_draw_glyph_run(player, DrawGlyphRun(glyph_run = run, rect = test_rect(0, 0, 40, 24), translation = test_float_point(4.0, 16.0), color = test_color(0, 0, 0, 255), orientation = gfx.Orientation.horizontal))
         test_leave_3d(player)
         expect_like_skia(&scene, "persp_text", skia_persp_text, 0, 0)
+
+test "cpu player 3d: a rectangle under an affine rotateX is SkScan::AntiFillRect's":
+    let scene = test_scene_new(32, 32)
+    defer test_scene_release(&scene)
+    let player = test_scene_player(&scene)
+    display_list_player_save(player, Save())
+    display_list_player_apply_transform(player, test_float_point(16.0, 15.0), test_rotate_x(0.98480775, 0.17364818))
+    display_list_player_fill_rect(player, FillRect(rect = test_rect(4, 5, 20, 15), color = test_color(128, 128, 128, 255)))
+    var frame: gfx.Path
+    let corners: f32[16] = [2.0, 3.0, 26.0, 3.0, 26.0, 22.0, 2.0, 22.0, 4.0, 5.0, 24.0, 5.0, 24.0, 20.0, 4.0, 20.0]
+    for contour in 0..<2usize:
+        gfx.path_move_to(&frame, test_float_point(corners[contour * 8], corners[contour * 8 + 1]))
+        for k in 1..<4usize:
+            gfx.path_line_to(&frame, test_float_point(corners[contour * 8 + k * 2], corners[contour * 8 + k * 2 + 1]))
+        gfx.path_close(&frame)
+    display_list_player_fill_path(player, test_fill_path(frame, test_color(0, 0, 0, 255), gfx.WindingRule.even_odd, 1.0))
+    display_list_player_restore(player, Restore())
+    expect_like_skia(&scene, "rotate_x_affine_rect", skia_rotate_x_affine_rect, 0, 0)

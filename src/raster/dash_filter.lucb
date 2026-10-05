@@ -1,0 +1,378 @@
+#==============================================================================================
+#
+#   dash_filter - dashing a stroked path (SkDashPath::InternalFilter)
+#
+#   DESCRIPTION:
+#       Port of Skia m144 src/utils/SkDashPath.cpp's InternalFilter, the body of
+#       SkDashImpl::onFilterPath: before dashing, a line or a rectangle is trimmed to the
+#       clip's local bounds (cull_path, keeping the dash phase), and a closed rectangle whose
+#       dashes start and end "on" gets the tiny right angle that joins its last dash to its
+#       first; a butt-capped line is dashed into quadrilaterals (SpecialLineRec), which turns
+#       the stroke into a fill; the dash distances accumulate in double precision; a path that
+#       would make more than a million dashes is not dashed at all (the caller strokes it
+#       whole). The contours are measured by dash.lucb's ContourMeasure.
+#
+#       Copyright (c) 2014 Google Inc.
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+## The parts of SkStrokeRec dashing reads (and SpecialLineRec changes).
+struct DashStrokeRec:
+    ## The stroke width; 0 for a hairline.
+    var width: f32
+    var miter_limit: f32
+    var line_cap: LineCap
+    var line_join: LineJoin
+    var res_scale: f32
+    ## Set when SpecialLineRec has stroked the dashes itself (SkStrokeRec::setFillStyle).
+    var is_fill: bool
+
+## What InternalFilter did: `applied` is false when the path is not dashed (the stroke then
+## takes the source path); otherwise `path` is the dashed path, none when it is empty.
+struct DashFilterResult:
+    var applied: bool
+    var path: Path?
+
+## SkDashPath's kMaxDashCount (non-fuzzer builds).
+let max_dash_count: f32 = 1000000.0
+
+# mark: cull_path =============================================================================
+
+## outset_for_stroke: the cull rectangle grown by what a stroke can reach.
+func outset_for_stroke(rect: Rect, rec: const DashStrokeRec*) -> Rect?:
+    var radius = half(rec.width)
+    if radius == 0.0:
+        radius = 1.0  # hairlines
+    if rec.line_join == .miter:
+        radius *= rec.miter_limit
+    return Rect.from_ltrb(rect.left() - radius, rect.top() - radius, rect.right() + radius, rect.bottom() + radius)
+
+## adjust_zero_length_line: a zero-length line bumped out by a tiny amount so that its caps are
+## drawn.
+func adjust_zero_length_line(pts: Point[]):
+    pts[1].x += fmax(1.001, pts[1].x) * scalar_nearly_zero
+
+## The coordinate `axis` (0 for x, 1 for y) of a point.
+func point_axis(p: Point, axis: usize) -> f32:
+    return p.x if axis == 0 else p.y
+
+func set_point_axis(p: Point*, axis: usize, value: f32):
+    if axis == 0:
+        p.x = value
+    else:
+        p.y = value
+
+## The coordinate `axis` of a rectangle's left-top (`near`) or right-bottom corner.
+func rect_axis(r: Rect, axis: usize, near: bool) -> f32:
+    if near:
+        return r.left() if axis == 0 else r.top()
+    return r.right() if axis == 0 else r.bottom()
+
+## clip_line: a horizontal or vertical line trimmed to `bounds`, in phase with the dash; false
+## when it is diagonal or outside.
+func clip_line(pts: Point[], bounds: Rect, interval_length: f32, prior_phase: f32) -> bool:
+    let dx = pts[1].x - pts[0].x
+    let dy = pts[1].y - pts[0].y
+
+    # only horizontal or vertical lines
+    if dx != 0.0 and dy != 0.0:
+        return false
+    let axis: usize = 1 if dy != 0.0 else 0  # 0 to adjust horizontal, 1 to adjust vertical
+
+    var min_xy = point_axis(pts[0], axis)
+    var max_xy = point_axis(pts[1], axis)
+    let swapped = max_xy < min_xy
+    if swapped:
+        let t = min_xy
+        min_xy = max_xy
+        max_xy = t
+
+    let left_top = rect_axis(bounds, axis, true)
+    let right_bottom = rect_axis(bounds, axis, false)
+    if max_xy < left_top or min_xy > right_bottom:
+        return false
+
+    # Now we actually perform the chop, removing the excess to the left/top and right/bottom
+    # of the bounds (keeping our new line "in phase" with the dash, hence the
+    # (mod intervalLength).
+    if min_xy < left_top:
+        min_xy = left_top - math32.mod(left_top - min_xy, interval_length)
+        if not swapped:
+            min_xy -= prior_phase  # for rectangles, adjust by prior phase
+    if max_xy > right_bottom:
+        max_xy = right_bottom + math32.mod(max_xy - right_bottom, interval_length)
+        if swapped:
+            max_xy += prior_phase  # for rectangles, adjust by prior phase
+
+    if swapped:
+        let t = min_xy
+        min_xy = max_xy
+        max_xy = t
+    set_point_axis(&pts[0], axis, min_xy)
+    set_point_axis(&pts[1], axis, max_xy)
+
+    if min_xy == max_xy:
+        adjust_zero_length_line(pts)
+    return true
+
+## SkPath::isLine: the two points of a path that is a single line.
+func path_as_line(path: const Path*) -> (Point, Point)?:
+    let verbs = path.verbs.view()
+    if verbs.length == 2 and verbs[1] == .line:
+        let pts = path.points.view()
+        return (pts[0], pts[1])
+    return none
+
+## cull_path: a line or a rectangle trimmed to the cull rectangle into `builder`; false when the
+## path is neither (or, for a line, is culled away), and the source is dashed as it is.
+func cull_path(src: const Path*, rec: const DashStrokeRec*, cull_rect: Rect?, interval_length: f32, builder: PathBuilder*) -> bool:
+    if cull_rect == none:
+        if let line = path_as_line(src):
+            if points_equal(line.0, line.1):
+                var pts: Point[2] = [line.0, line.1]
+                adjust_zero_length_line(pts)
+                builder.move_to(pts[0].x, pts[0].y)
+                builder.line_to(pts[1].x, pts[1].y)
+                return true
+        return false
+    let cull = cull_rect else return false
+
+    let bounds = outset_for_stroke(cull, rec) else return false
+
+    if let line = path_as_line(src):
+        var pts: Point[2] = [line.0, line.1]
+        if clip_line(pts, bounds, interval_length, 0.0):
+            builder.move_to(pts[0].x, pts[0].y)
+            builder.line_to(pts[1].x, pts[1].y)
+            return true
+        return false
+
+    if let _ = path_is_rect_contour(src):
+        # We'll break the rect into four lines, culling each separately.
+        # SkPath::Iter makes the close's line too.
+        var iter = src.segments()
+        iter.set_auto_close(true)
+        _ = iter.next()  # the move
+        var accum: f64 = 0.0  # Sum of unculled edge lengths to keep the phase correct.
+        var start = iter.last_point
+        while let segment = iter.next():
+            var end = start
+            match segment:
+                .line_to(p):
+                    end = p
+                _:
+                    break
+            # Notice this vector v and accum work with the original unclipped length.
+            let v = Point.from_xy(end.x - start.x, end.y - start.y)
+            var pts: Point[2] = [start, end]
+            if clip_line(pts, bounds, interval_length, (f32)math.mod(accum, (f64)interval_length)):
+                # pts[0] may have just been changed by clip_line(). If that's not where we
+                # ended the previous lineTo(), we need to moveTo() there.
+                var moved = true
+                if let last = builder.last_point():
+                    moved = not points_equal(last, pts[0])
+                if moved:
+                    builder.move_to(pts[0].x, pts[0].y)
+                builder.line_to(pts[1].x, pts[1].y)
+            # We either just traveled v.x horizontally or v.y vertically.
+            accum += (f64)math32.abs(v.x + v.y)
+            start = end
+        return not builder.is_empty()
+
+    return false
+
+# mark: SpecialLineRec ========================================================================
+
+## SpecialLineRec: a butt-capped line's dashes made as the quadrilaterals their strokes are.
+struct SpecialLineRec:
+    var p0: Point
+    var tangent: Point
+    var normal: Point
+    var path_length: f32
+
+    ## SpecialLineRec::init: none unless the source is a line stroked with butt caps; a line
+    ## it takes over makes the stroke a fill.
+    static func new_(src: const Path*, rec: DashStrokeRec*, interval_count: usize, interval_length: f32) -> SpecialLineRec?:
+        if rec.width == 0.0:
+            return none
+        let line = path_as_line(src) else return none
+        # can relax this in the future, if we handle square and round caps
+        if rec.line_cap != .butt:
+            return none
+
+        let path_length = line.0.distance(line.1)
+        var tangent = Point.from_xy(line.1.x - line.0.x, line.1.y - line.0.y)
+        if tangent.x == 0.0 and tangent.y == 0.0:
+            return none
+        tangent.scale(1.0 / path_length)
+        if not math32.is_finite(tangent.x) or not math32.is_finite(tangent.y):
+            return none
+        # SkPointPriv::RotateCCW
+        var normal = Point.from_xy(tangent.y, -tangent.x)
+        normal.scale(half(rec.width))
+
+        # now estimate how many quads will be added to the path
+        #     resulting segments = pathLen * intervalCount / intervalLen
+        #     resulting points = 4 * segments
+        let pt_count = fmin(path_length * (f32)interval_count / interval_length, max_dash_count)
+        if math32.is_nan(pt_count):
+            return none
+
+        # we will take care of the stroking
+        rec.is_fill = true
+        return SpecialLineRec(p0 = line.0, tangent = tangent, normal = normal, path_length = path_length)
+
+    ## addSegment: the dash from `d0` to `d1` along the line, as an open polygon.
+    func add_segment(d0: f32, d1_0: f32, pb: PathBuilder*):
+        # clamp the segment to our length
+        let d1 = self.path_length if d1_0 > self.path_length else d1_0
+
+        let x0 = self.p0.x + self.tangent.x * d0
+        let x1 = self.p0.x + self.tangent.x * d1
+        let y0 = self.p0.y + self.tangent.y * d0
+        let y1 = self.p0.y + self.tangent.y * d1
+
+        # addPolygon(pts, false)
+        pb.move_to(x0 + self.normal.x, y0 + self.normal.y)
+        pb.line_to(x1 + self.normal.x, y1 + self.normal.y)
+        pb.line_to(x1 - self.normal.x, y1 - self.normal.y)
+        pb.line_to(x0 - self.normal.x, y0 - self.normal.y)
+
+# mark: InternalFilter ========================================================================
+
+## The rectangle's "initial join": when a closed rectangle's dashes start and end "on", a
+## tiny right angle at its first point makes the stroker join the last dash to the first.
+func push_rect_initial_join(src: const Path*, dash: const StrokeDash*, rec: const DashStrokeRec*, builder: PathBuilder*):
+    let intervals = dash.array.view()
+    let path_length = path_first_contour_length(src, rec.res_scale)
+    var end_phase = math32.mod(path_length + dash.offset, dash.interval_len)
+    var index: usize = 0
+    while end_phase > intervals[index]:
+        end_phase -= intervals[index]
+        index += 1
+        if index == intervals.length:
+            # We have run out of intervals. endPhase "should" never get to this point, but it
+            # could if the subtracts underflowed. Hence we will pin it as if it perfectly ran
+            # through the intervals. See crbug.com/875494 (and skbug.com/40039544)
+            end_phase = 0.0
+            break
+    # if dash ends inside "on", or ends at beginning of "off"
+    if is_even(index) == (end_phase > 0.0):
+        let pts = src.points.view()
+        let mid_point = pts[0]
+        # get vector at end of rect
+        var last = pts.length - 1
+        while points_equal(mid_point, pts[last]):
+            last -= 1
+        # get vector at start of rect
+        var next: usize = 1
+        while points_equal(mid_point, pts[next]):
+            next += 1
+        let tiny_offset = scalar_nearly_zero
+        # scale vector to make start of tiny right angle
+        let v0 = Point.from_xy((mid_point.x - pts[last].x) * tiny_offset, (mid_point.y - pts[last].y) * tiny_offset)
+        builder.move_to(mid_point.x - v0.x, mid_point.y - v0.y)
+        builder.line_to(mid_point.x, mid_point.y)
+        # scale vector to make end of tiny right angle
+        let v1 = Point.from_xy((mid_point.x - pts[next].x) * tiny_offset, (mid_point.y - pts[next].y) * tiny_offset)
+        builder.line_to(mid_point.x - v1.x, mid_point.y - v1.y)
+
+## SkPathMeasure(path, false, res_scale).getLength(): the length of the first contour with any.
+func path_first_contour_length(path: const Path*, res_scale: f32) -> f32:
+    var contours = ContourMeasureIter.new_(path, res_scale)
+    var contour = contours.next() else return 0.0
+    defer contour.release()
+    return contour.length
+
+## SkDashPath::InternalFilter for a stroke (or hairline) `rec`, with the clip's local bounds
+## `cull_rect` (Draw::computeConservativeLocalClipBounds) when the device has a clip.
+func dash_filter(src: const Path*, dash: const StrokeDash*, rec: DashStrokeRec*, cull_rect: Rect?) -> DashFilterResult:
+    var result = DashFilterResult(applied = true, path = none)
+    if src.points.len == 0:
+        return result
+    let intervals = dash.array.view()
+    let count = intervals.length
+
+    var culled: Path? = none
+    defer:
+        if let c = culled:
+            var p = c
+            p.release()
+    var builder = PathBuilder.new_()
+    if cull_path(src, rec, cull_rect, dash.interval_len, &builder):
+        # if rect is closed, starts in a dash, and ends in a dash, add the initial join
+        # potentially a better fix is described here: skbug.com/40038693
+        if let _ = path_is_rect_contour(src):
+            # SkPath::isLastContourClosed: the path's last verb is a close.
+            let verbs = src.verbs.view()
+            if verbs[verbs.length - 1] == .close and is_even(dash.first_index):
+                push_rect_initial_join(src, dash, rec, &builder)
+        culled = builder.finish()
+    else:
+        builder.release()
+    var source = src
+    if let c = culled:
+        source = &c
+
+    var pb = PathBuilder.new_()
+    let line_rec = SpecialLineRec.new_(source, rec, count >> 1, dash.interval_len)
+
+    var dash_count: f32 = 0.0
+    var contours = ContourMeasureIter.new_(source, rec.res_scale)
+    while let contour0 = contours.next():
+        var contour = contour0
+        defer contour.release()
+        var skip_first_segment = contour.is_closed
+        var added_segment = false
+        let length = contour.length
+        var index = dash.first_index
+
+        # Since the path length / dash length ratio may be arbitrarily large, we can exert
+        # significant memory pressure while attempting to build the filtered path. To avoid
+        # this, we simply give up dashing beyond a certain threshold.
+        #
+        # The original bug report (http://crbug.com/165432) is based on a path yielding more
+        # than 90 million dash segments and crashing the memory allocator. A limit of 1
+        # million segments seems reasonable: at 2 verbs per segment * 9 bytes per verb, this
+        # caps the maximum dash memory overhead at roughly 17MB per path.
+        dash_count += length * (f32)(count >> 1) / dash.interval_len
+        if dash_count > max_dash_count:
+            pb.release()
+            return DashFilterResult(applied = false, path = none)
+
+        # Using double precision to avoid looping indefinitely due to single precision
+        # rounding (for extreme path_length/dash_length ratios). See test_infinite_dash()
+        # unittest.
+        var distance: f64 = 0.0
+        var d_len = (f64)dash.first_len
+
+        while distance < (f64)length:
+            added_segment = false
+            if is_even(index) and not skip_first_segment:
+                added_segment = true
+                if let special = line_rec:
+                    special.add_segment((f32)distance, (f32)(distance + d_len), &pb)
+                else:
+                    contour.push_segment((f32)distance, (f32)(distance + d_len), true, &pb)
+            distance += d_len
+
+            # clear this so we only respect it the first time around
+            skip_first_segment = false
+
+            # wrap around our intervals array if necessary
+            index += 1
+            if index == count:
+                index = 0
+
+            # fetch our next d_len
+            d_len = (f64)intervals[index]
+
+        # extend if we ended on a segment and we need to join up with the (skipped) initial
+        # segment
+        if contour.is_closed and is_even(dash.first_index) and dash.first_len >= 0.0:
+            contour.push_segment(0.0, dash.first_len, not added_segment, &pb)
+
+    result.path = pb.finish()
+    return result

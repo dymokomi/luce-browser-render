@@ -1,0 +1,193 @@
+#==============================================================================================
+#
+#   stroker_rect - stroking a closed rectangle (SkStroke::strokeRect) and Skia's shape contours
+#
+#   DESCRIPTION:
+#       Port of Skia m144 src/core/SkStroke.cpp's strokeRect and addBevel: a path that is a
+#       closed rectangle (SkPath::isRect) is stroked as an outer rectangle, an octagon or a
+#       rounded rectangle for the miter, bevel and round joins, with the inner rectangle
+#       reversed when the stroke is thinner than the rectangle. The contours are
+#       SkPathBuilder::addRect, addOval, addCircle and addRRect (src/core/SkPathRawShapes.cpp with
+#       SkPathMakers.h's point iterators, and SkRRect::setRectXY's rectangle and oval
+#       simplifications), with their direction and start index.
+#
+#       Copyright (c) 2008 The Android Open Source Project
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+# mark: Shape contours ========================================================================
+
+## SkPath_PointIterator: the next of `count` points from `index` in the direction.
+func shape_next_index(index: usize, count: usize, clockwise: bool) -> usize:
+    return (index + (1 if clockwise else count - 1)) % count
+
+## SkPath_RectPointIterator's points: left-top, right-top, right-bottom, left-bottom.
+func rect_corner(rect: Rect, index: usize) -> Point:
+    match index:
+        0: return Point.from_xy(rect.left(), rect.top())
+        1: return Point.from_xy(rect.right(), rect.top())
+        2: return Point.from_xy(rect.right(), rect.bottom())
+        _: return Point.from_xy(rect.left(), rect.bottom())
+
+## SkRect::centerX / centerY: sk_float_midpoint, in double.
+func rect_midpoint(a: f32, b: f32) -> f32:
+    return (f32)(0.5 * ((f64)a + (f64)b))
+
+## SkPath_OvalPointIterator's points: the middles of the top, right, bottom and left sides.
+func oval_point(oval: Rect, index: usize) -> Point:
+    let cx = rect_midpoint(oval.left(), oval.right())
+    let cy = rect_midpoint(oval.top(), oval.bottom())
+    match index:
+        0: return Point.from_xy(cx, oval.top())
+        1: return Point.from_xy(oval.right(), cy)
+        2: return Point.from_xy(cx, oval.bottom())
+        _: return Point.from_xy(oval.left(), cy)
+
+## SkPathBuilder::addRect(rect, dir, index): set_as_rect's contour.
+func push_rect_contour(pb: PathBuilder*, rect: Rect, clockwise: bool, start: usize):
+    var index = start % 4
+    let first = rect_corner(rect, index)
+    pb.move_to(first.x, first.y)
+    for _ in 0..<3:
+        index = shape_next_index(index, 4, clockwise)
+        let p = rect_corner(rect, index)
+        pb.line_to(p.x, p.y)
+    pb.close()
+
+## SkPathBuilder::addOval(oval, dir, index): set_as_oval's four quarter conics.
+func push_oval_contour(pb: PathBuilder*, oval: Rect, clockwise: bool, start: usize):
+    var oval_index = start % 4
+    var rect_index = (start + (0 if clockwise else 1)) % 4
+    let first = oval_point(oval, oval_index)
+    pb.move_to(first.x, first.y)
+    for _ in 0..<4:
+        rect_index = shape_next_index(rect_index, 4, clockwise)
+        oval_index = shape_next_index(oval_index, 4, clockwise)
+        pb.conic_points_to(rect_corner(oval, rect_index), oval_point(oval, oval_index), scalar_root_2_over_2)
+    pb.close()
+
+## SkPathBuilder::addCircle(x, y, r): the oval of (x - r, y - r, x + r, y + r), clockwise
+## from its right (addOval's default start index 1); nothing for a negative radius.
+func push_sk_circle(pb: PathBuilder*, x: f32, y: f32, r: f32):
+    if r >= 0.0:
+        if let oval = Rect.from_ltrb(x - r, y - r, x + r, y + r):
+            push_oval_contour(pb, oval, true, 1)
+
+## SkPath_RRectPointIterator's points for equal radii (rx, ry) at every corner.
+func rrect_point(rect: Rect, rx: f32, ry: f32, index: usize) -> Point:
+    match index:
+        0: return Point.from_xy(rect.left() + rx, rect.top())
+        1: return Point.from_xy(rect.right() - rx, rect.top())
+        2: return Point.from_xy(rect.right(), rect.top() + ry)
+        3: return Point.from_xy(rect.right(), rect.bottom() - ry)
+        4: return Point.from_xy(rect.right() - rx, rect.bottom())
+        5: return Point.from_xy(rect.left() + rx, rect.bottom())
+        6: return Point.from_xy(rect.left(), rect.bottom() - ry)
+        _: return Point.from_xy(rect.left(), rect.top() + ry)
+
+## SkPathBuilder::addRRect(SkRRect::MakeRectXY(rect, rx, ry), dir) with addRRect's default
+## start index (6 clockwise, 7 counter-clockwise). `rect` is sorted and finite.
+func push_rrect_xy(pb: PathBuilder*, rect: Rect, rx0: f32, ry0: f32, clockwise: bool):
+    let start: usize = 6 if clockwise else 7
+    # SkRRect::setRectXY: an empty rectangle and square corners make a rectangle, radii that
+    # meet in the middle an oval (SkPathPriv::SimplifyRRect's start indices).
+    var rx = rx0
+    var ry = ry0
+    if rect.width() <= 0.0 or rect.height() <= 0.0:
+        push_rect_contour(pb, rect, clockwise, (start + 1) // 2)
+        return
+    if not math32.is_finite(rx) or not math32.is_finite(ry):
+        rx = 0.0
+        ry = 0.0
+    if rect.width() < rx + rx or rect.height() < ry + ry:
+        let scale = fmin(rect.width() / (rx + rx), rect.height() / (ry + ry))
+        rx *= scale
+        ry *= scale
+    if rx <= 0.0 or ry <= 0.0:
+        push_rect_contour(pb, rect, clockwise, (start + 1) // 2)
+        return
+    if rx >= half(rect.width()) and ry >= half(rect.height()):
+        push_oval_contour(pb, rect, clockwise, start // 2)
+        return
+
+    # set_as_rrect: odd start indices begin with a conic when clockwise, even ones when not.
+    let starts_with_conic = ((start & 1) == 1) == clockwise
+    var rrect_index = start % 8
+    var rect_index = (start // 2 + (0 if clockwise else 1)) % 4
+    let first = rrect_point(rect, rx, ry, rrect_index)
+    pb.move_to(first.x, first.y)
+    let weight = scalar_root_2_over_2
+    if starts_with_conic:
+        for i in 0..<4:
+            rect_index = shape_next_index(rect_index, 4, clockwise)
+            rrect_index = shape_next_index(rrect_index, 8, clockwise)
+            pb.conic_points_to(rect_corner(rect, rect_index), rrect_point(rect, rx, ry, rrect_index), weight)
+            if i < 3:
+                # the last line is the close
+                rrect_index = shape_next_index(rrect_index, 8, clockwise)
+                let p = rrect_point(rect, rx, ry, rrect_index)
+                pb.line_to(p.x, p.y)
+    else:
+        for _ in 0..<4:
+            rrect_index = shape_next_index(rrect_index, 8, clockwise)
+            let p = rrect_point(rect, rx, ry, rrect_index)
+            pb.line_to(p.x, p.y)
+            rect_index = shape_next_index(rect_index, 4, clockwise)
+            rrect_index = shape_next_index(rrect_index, 8, clockwise)
+            pb.conic_points_to(rect_corner(rect, rect_index), rrect_point(rect, rx, ry, rrect_index), weight)
+    pb.close()
+
+# mark: strokeRect ============================================================================
+
+## SkStroke.cpp's addBevel: the octagon of `outer` with its corners cut at `r`'s sides.
+func push_bevel(pb: PathBuilder*, r: Rect, outer: Rect, clockwise: bool):
+    var pts: Point[8] = ---
+    let corners: Point[8] = [
+        Point.from_xy(r.left(), outer.top()),
+        Point.from_xy(r.right(), outer.top()),
+        Point.from_xy(outer.right(), r.top()),
+        Point.from_xy(outer.right(), r.bottom()),
+        Point.from_xy(r.right(), outer.bottom()),
+        Point.from_xy(r.left(), outer.bottom()),
+        Point.from_xy(outer.left(), r.bottom()),
+        Point.from_xy(outer.left(), r.top()),
+    ]
+    for i: usize in 0..<8:
+        pts[i] = corners[i] if clockwise else corners[7 - i]
+    # addPolygon(pts, true)
+    pb.move_to(pts[0].x, pts[0].y)
+    for i: usize in 1..<8:
+        pb.line_to(pts[i].x, pts[i].y)
+    pb.close()
+
+## SkStroke::strokeRect: the stroke of the closed rectangle `rect` (sorted, as SkPath::isRect
+## gives it) drawn in the direction `clockwise`, for `width` > 0 and the stroke's join.
+func stroke_rect(rect: Rect, clockwise: bool, width: f32, miter_limit: f32, line_join0: LineJoin) -> Path?:
+    let radius = half(width)
+    if radius <= 0.0:
+        return none
+    let rw = rect.width()
+    let rh = rect.height()
+    let r = Rect.from_ltrb(rect.left() - radius, rect.top() - radius, rect.right() + radius, rect.bottom() + radius) else return none
+
+    var line_join = line_join0
+    if line_join == .miter and miter_limit < 1.41421356:  # SK_ScalarSqrt2
+        line_join = .bevel
+
+    var pb = PathBuilder.new_()
+    match line_join:
+        .miter:
+            push_rect_contour(&pb, r, clockwise, 0)
+        .bevel:
+            push_bevel(&pb, rect, r, clockwise)
+        .round:
+            push_rrect_xy(&pb, r, radius, radius, clockwise)
+        _:
+            _ = 0
+
+    if width < fmin(rw, rh):
+        let inner = Rect.from_ltrb(rect.left() + radius, rect.top() + radius, rect.right() - radius, rect.bottom() - radius) else return pb.finish()
+        push_rect_contour(&pb, inner, not clockwise, 0)
+    return pb.finish()

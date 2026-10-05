@@ -300,8 +300,8 @@ func aaa_fill_path_entry(path: const Path*, fill_rule: FillRule, is_inverse: boo
 
 ## Check if the path is a rect and fat enough after clipping; if so, blit it.
 func try_blit_fat_anti_rect(blitter: Blitter, path: const Path*, clip: IRect) -> bool:
-    let rect0 = path_is_rect_contour(path) else return false
-    let rect = rect0.intersect(clip.to_rect()) else return true  # The intersection is empty. Hence consider it done.
+    let contour = path_is_rect_contour(path) else return false
+    let rect = contour.rect.intersect(clip.to_rect()) else return true  # The intersection is empty. Hence consider it done.
     let bounds = irect_round_out(rect)
     if bounds.width() < 3:
         return false  # not fat

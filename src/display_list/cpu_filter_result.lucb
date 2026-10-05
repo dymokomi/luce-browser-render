@@ -241,9 +241,15 @@ func cpu_fr_shader_sample(fr: const CpuFr*, sampler: const (CpuFMatrix, (i32, i3
     if not cpu_fr_has_image(fr) or not cpu_fr_in_bounds(fr, x, y):
         return cpu_rgba_zero()
     var color = cpu_rgba_zero()
-    if let origin = (*sampler).1:
-        color = cpu_fr_tiled_texel(fr, x - origin.0, y - origin.1)
-    else:
+    var sampled = false
+    if not nearest:
+        if let origin = (*sampler).1:
+            # A pixel center under an integer translation is that texel.
+            color = cpu_fr_tiled_texel(fr, x - origin.0, y - origin.1)
+            sampled = true
+    if not sampled:
+        # Any point (kNonTrivialSampling): through the matrix, nearest-neighbor with
+        # roundDownAtInteger, so an exact integer coordinate picks the texel before it.
         color = cpu_fr_sample_point(fr, &(*sampler).0, cx, cy, nearest or not fr.linear)
     for i in 0..<fr.op_count:
         color = cpu_color_op_apply(&fr.ops[i], color)

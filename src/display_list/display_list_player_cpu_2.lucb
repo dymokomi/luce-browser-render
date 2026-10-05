@@ -246,22 +246,31 @@ func display_list_player_cpu_paint_style_to_shader(this: DisplayListPlayerCpu*, 
 
     return cpu_default_shader()
 
-## Fills `path` with `shader` at `opacity` (SkPaint::setAlphaf on a shader's paint).
-func cpu_canvas_fill_path_with_shader(canvas: CpuCanvas*, path: const raster.Path*, fill_rule: raster.FillRule, anti_alias: bool, shader: const CpuShader*, opacity: f32):
+## The paint of `shader` at `opacity` (SkPaint::setAlphaf on a shader's paint); the caller
+## releases it.
+func cpu_shader_paint(shader: const CpuShader*, anti_alias: bool, opacity: f32) -> raster.Paint:
     match *shader:
         .color(color):
             var paint = cpu_color_paint(color, anti_alias)
             var c = cpu_color(color)
             c.set_alpha(cpu_clamp_unit(opacity))
             paint.set_color(c)
-            cpu_canvas_fill_path(canvas, path, &paint, fill_rule)
+            return paint
         .gradient(gradient):
-            cpu_canvas_fill_path_with_gradient(canvas, path, fill_rule, anti_alias, &gradient, opacity)
+            return cpu_gradient_paint(&gradient, anti_alias, opacity, false)
         .pattern(pixmap, transform):
             var paint = raster.Paint()
             paint.anti_alias = anti_alias
             paint.shader = raster.Pattern.new_(pixmap.as_ref(), raster.SpreadMode.repeat, raster.FilterQuality.bilinear, opacity, transform)
-            cpu_canvas_fill_path(canvas, path, &paint, fill_rule)
+            return paint
+
+## Fills `path` with `shader` at `opacity`.
+func cpu_canvas_fill_path_with_shader(canvas: CpuCanvas*, path: const raster.Path*, fill_rule: raster.FillRule, anti_alias: bool, shader: const CpuShader*, opacity: f32):
+    if cpu_canvas_is_clip_empty(canvas):
+        return
+    var paint = cpu_shader_paint(shader, anti_alias, opacity)
+    cpu_canvas_fill_path(canvas, path, &paint, fill_rule)
+    paint.release()
 
 # mark: Paths ==================================================================================
 
@@ -335,16 +344,9 @@ func display_list_player_cpu_stroke_path_impl(base: DisplayListPlayer*, command:
             let style = paint_style else trap("VERIFY: a null paint style")
             var shader = display_list_player_cpu_paint_style_to_shader((DisplayListPlayerCpu*)base, style, int_rect_to_float_rect(stroke_path_bounding_rect(&command)))
             defer cpu_shader_release(&shader)
-            # A shader paints the stroke's outline: dash, then stroke, then fill.
-            let resolution_scale = raster.PathStroker.compute_resolution_scale(cpu_canvas_transform(canvas))
-            var dashed: raster.Path? = none
-            if let dash = stroke.dash:
-                dashed = cpu_path.path.dash(&dash, resolution_scale)
-            var source = dashed else cpu_path.path.clone()
-            defer source.release()
-            var outline = source.stroke(&stroke, resolution_scale) else return
-            defer outline.release()
-            cpu_canvas_fill_path_with_shader(canvas, &outline, raster.FillRule.winding, anti_alias, &shader, command.opacity)
+            var paint = cpu_shader_paint(&shader, anti_alias, command.opacity)
+            cpu_canvas_stroke_path(canvas, &cpu_path.path, &paint, &stroke)
+            paint.release()
         .color(color):
             let paint = cpu_color_paint(color, anti_alias)
             cpu_canvas_stroke_path(canvas, &cpu_path.path, &paint, &stroke)

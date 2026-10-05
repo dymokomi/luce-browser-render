@@ -219,6 +219,53 @@ left); other inner shadows still blur the outer coverage less the inner (no SkPa
 `tests_cpu_shadow_skia.lucb` compares eight scenes from `oracles/luce-browser-render/shadows`:
 all exact, and the player's two shadow scenes are now exact too.
 
+## Strokes and dashes (fix/fidelity-svg)
+
+A stroke is drawn as Draw::drawPath draws a stroke paint (`raster/draw.lucb`): thin strokes
+become modulated hairlines (modifyPaintForHairlines), then skpathutils::FillPathWithPaint
+(`stroke_fill_path`, public for the player) dashes and strokes the path:
+
+- **Dashing** (`raster/dash_filter.lucb`, SkDashPath::InternalFilter): a line or a rectangle
+  is first trimmed to the clip's local bounds (Draw::computeConservativeLocalClipBounds,
+  outset for the stroke) in phase with the dash (cull_path), a closed rectangle whose dashes
+  start and end "on" gets the tiny right angle that joins its last dash to its first, a
+  butt-capped line is dashed into quadrilaterals that are filled, not stroked
+  (SpecialLineRec), the distances accumulate in double precision, and a path that would
+  make more than a million dashes is stroked undashed. SkContourMeasureIter skips
+  zero-length contours instead of stopping at the first one (tiny-skia stopped).
+- **Stroking**: a closed rectangle (SkPath::isRect, with its direction) goes through
+  SkStroke::strokeRect (`raster/stroker_rect.lucb`: the outer rectangle, octagon or rounded
+  rectangle as SkPathBuilder's addRect, addPolygon and addRRect/addOval make them, the
+  inner rectangle reversed); a zero-length line followed by a segment with length is
+  skipped (has_valid_tangent compares a segment with its start; tiny-skia compared it with
+  its end, so caps were drawn for it); round cusps are SkPathBuilder::addCircle.
+- The player strokes shader paints the same way (a gradient or pattern paint through
+  cpu_canvas_stroke_path), so their dashes, caps and hairlines are Skia's too.
+
+`raster/tests_stroke_skia.lucb` compares 116 fill paths with Skia's bit for bit (the
+StrokePath commands of svg-stroke-styles, zero-length segments and contours with every cap,
+rectangles with every join, dashed lines and rectangles, random paths with curves and
+rotations), from `oracles/luce-browser-render/strokes`; 2,800 more random strokes matched
+while porting.
+
+## Legacy blitters in filter layers (fix/fidelity-svg)
+
+SkBitmapDevice::createDevice makes every layer whose paint has an image filter kN32 (RGBA on
+macOS and Linux), and image_filter_color_type keeps kN32 for the layers below it. In a kN32
+device SkBlitter::Choose takes the legacy SkARGB32 blitters for a solid sRGB color drawn
+src-over (UseLegacyBlitter), whose 8-bit arithmetic (SkAlphaMulQ, SkBlendARGB32,
+SkFastFourByteInterp, blit_row_color32, NEON blit_mask_d32_a8) rounds differently from the
+raster pipeline. The CPU canvas marks such layers (`Pixmap.set_n32`) and
+`raster/legacy_blitter.lucb` ports the three blitters; `raster/tests_legacy_blitter.lucb`
+compares eight scenes (anti-aliased and aliased paths, rectangles, strokes, hairlines, an
+anti-aliased clip) with Skia's kN32 pixels from `oracles/luce-browser-render/legacy_blitters`:
+all exact. Shaders keep the raster pipeline (Skia has legacy shader contexts only for kN32
+images, which Ladybird's BGRA images are not).
+
+The canvas's fill_rect is Draw::drawRect (SkScan::AntiFillRect while the matrix keeps
+rectangles rectangles) rather than the rectangle's path (`rotate_x_affine_rect` in
+`tests_cpu_player_3d.lucb`).
+
 ## Image filters
 
 r10 builds a gfx.Filter as the graph of SkImageFilters the donor builds and leaves evaluation to
@@ -242,12 +289,14 @@ src/effects/imagefilters, SkBlurEngine):
   with Skia's round-down at exact integers); **merge** (src-over); **compose** (the inner
   result is the outer's source); **erode / dilate** (per channel, radii rounded, capped at
   256); **shader** (flood; fractal noise and turbulence with stitching, SkPerlinNoiseShader);
-  **displacement_map**; **image** (MakeFromImage's rectangle rules); **blend** (every
+  **displacement_map** (the color input sampled through its matrix, nearest-neighbor with
+  roundDownAtInteger, so a displaced coordinate on an exact integer takes the pixel before
+  it); **image** (MakeFromImage's rectangle rules); **blend** (every
   CompositingAndBlendingOperator through LibGfx's mapping, in lowp where Skia runs lowp);
   **arithmetic** (Skia's shortcuts, then the arithmetic blender).
 
 The canvas calls it at restore (layers with a filter, the text-shadow blur) and at save
-(backdrops, the prior layer clamped). `tests_cpu_filter*.lucb` compare 62 scenes (every node
+(backdrops, the prior layer clamped). `tests_cpu_filter*.lucb` compare 64 scenes (every node
 kind, blur at sigma 1.5 to 300, every blend mode, rotated layer matrices, backdrops) with Skia
 m144's pixels for the donor's own Gfx::Filter graphs: all exact but `image_bilinear` (1 level
 on 2 pixels: a scaled image with linear sampling goes through Skia's strict, shader-tiled image
@@ -286,8 +335,8 @@ nearest sampling's round-down, conics) was merged last, and then:
 1. `luce-base fmt --check` on every hand-written `.lucb`;
 2. `luce-base check -W` on raster, gfx, web_fonts and display_list, failing on any output;
 3. `luce-base test` of gfx (359 tests), web_fonts (28; the font engine's oracle and unit
-   tests moved to luce-fonts with the engine, 2026-10-03), display_list (110, `--native`) and
-   raster (38), and the raster integration suite (`tests/run_raster.py`, 291 scenes).
+   tests moved to luce-fonts with the engine, 2026-10-03), display_list (119, `--native`) and
+   raster (53), and the raster integration suite (`tests/run_raster.py`, 291 scenes).
 
 ## Remaining traps, stubs and gates
 

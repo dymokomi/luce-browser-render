@@ -11,7 +11,9 @@ stroker.lucb
 stroker_curves.lucb
 stroker_joins.lucb
 stroker_conics.lucb
+stroker_rect.lucb
 dash.lucb
+dash_filter.lucb
 color.lucb
 pixmap.lucb
 mask.lucb
@@ -43,6 +45,7 @@ scan_antihair.lucb
 wide.lucb
 pipeline.lucb
 pipeline_blitter.lucb
+legacy_blitter.lucb
 highp.lucb
 highp_image.lucb
 highp_blend.lucb
@@ -68,3 +71,8 @@ tests_path.lucb
 tests_core.lucb
 tests_ft_grays.lucb
 tests_perspective.lucb
+tests_stroke_skia.lucb
+tests_stroke_skia_data_1.lucb
+tests_stroke_skia_data_2.lucb
+tests_legacy_blitter.lucb
+tests_legacy_blitter_data.lucb

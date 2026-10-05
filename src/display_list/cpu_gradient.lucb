@@ -100,6 +100,12 @@ func cpu_gradient_shader(gradient: const CpuGradient*) -> raster.Shader?:
 func cpu_canvas_fill_path_with_gradient(canvas: CpuCanvas*, path: const raster.Path*, fill_rule: raster.FillRule, anti_alias: bool, gradient: const CpuGradient*, opacity: f32, dither: bool = false):
     if cpu_canvas_is_clip_empty(canvas):
         return
+    var paint = cpu_gradient_paint(gradient, anti_alias, opacity, dither)
+    cpu_canvas_fill_path(canvas, path, &paint, fill_rule)
+    paint.release()
+
+## The paint of a gradient at `opacity` (the caller releases it).
+func cpu_gradient_paint(gradient: const CpuGradient*, anti_alias: bool, opacity: f32, dither: bool) -> raster.Paint:
     var paint = raster.Paint()
     paint.anti_alias = anti_alias
     # Without a shader (Skia made none) the paint keeps its default color, opaque black.
@@ -108,8 +114,7 @@ func cpu_canvas_fill_path_with_gradient(canvas: CpuCanvas*, path: const raster.P
     paint.alpha = cpu_clamp_unit(opacity)
     paint.dither = dither
     paint.linear_to_srgb = gradient.linear_to_srgb
-    cpu_canvas_fill_path(canvas, path, &paint, fill_rule)
-    paint.release()
+    return paint
 
 ## A [0, 1] value as a byte, rounded.
 func cpu_unit_to_u8(value: f32) -> u8:

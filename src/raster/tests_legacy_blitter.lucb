@@ -1,0 +1,164 @@
+#==============================================================================================
+#
+#   tests_legacy_blitter - solid colors drawn into kN32 pixmaps, against Skia m144's pixels
+#
+#   DESCRIPTION:
+#       The scenes of luce-browser-tools' oracles/luce-browser-render/legacy_blitters drawn
+#       into a kN32 pixmap (Pixmap.set_n32), where SkBlitter::Choose takes the legacy
+#       SkARGB32 blitters for solid colors: translucent, opaque and black anti-aliased paths
+#       (blitAntiH, blitAntiH2/V2, blitV), aliased fills (blitH), anti-aliased and aliased
+#       rectangles (blitAntiRect, blitRect), strokes and hairlines, and an anti-aliased clip
+#       (blitMask through SkAAClip), each over a translucent background. Compared with the
+#       pixels of tests_legacy_blitter_data.lucb, exactly.
+#
+#==============================================================================================
+
+## The oracle's background, SkColorSetARGB(0x60, 0x20, 0x80, 0xc0) cleared premultiplied.
+func legacy_scene() -> Pixmap:
+    var pixmap = Pixmap.new_(24, 24) else trap("pixmap")
+    pixmap.set_n32(true)
+    let data = pixmap.data_mut()
+    var i: usize = 0
+    while i < data.length:
+        data[i] = 0x0c
+        data[i + 1] = 0x30
+        data[i + 2] = 0x48
+        data[i + 3] = 0x60
+        i += 4
+    return pixmap
+
+## A solid paint of the SkColor 0xAARRGGBB.
+func legacy_paint(color: u32, anti_alias: bool) -> Paint:
+    var paint = Paint()
+    paint.set_color_rgba8((u8)((color >> 16) & 0xFF), (u8)((color >> 8) & 0xFF), (u8)(color & 0xFF), (u8)(color >> 24))
+    paint.anti_alias = anti_alias
+    return paint
+
+## SkPathBuilder::addCircle.
+func legacy_circle(cx: f32, cy: f32, r: f32) -> Path:
+    var pb = PathBuilder.new_()
+    push_sk_circle(&pb, cx, cy, r)
+    return pb.finish() else trap("circle")
+
+## The oracle's five-pointed star.
+func legacy_star() -> Path:
+    var pb = PathBuilder.new_()
+    pb.move_to(12.3, 1.7)
+    pb.line_to(18.6, 21.2)
+    pb.line_to(2.1, 8.9)
+    pb.line_to(22.4, 8.6)
+    pb.line_to(5.8, 21.9)
+    pb.close()
+    return pb.finish() else trap("star")
+
+func legacy_rect(l: f32, t: f32, r: f32, b: f32) -> Rect:
+    return Rect.from_ltrb(l, t, r, b) else trap("rect")
+
+## Compares the pixmap with Skia's 0xAARRGGBB words.
+func expect_legacy_pixels(name: str, pixmap: const Pixmap*, expected: str):
+    let pixels = pixmap.pixels()
+    let text = expected.bytes
+    var index: usize = 0
+    var i: usize = 0
+    while i < text.length:
+        if text[i] == ' ' or text[i] == '\n':
+            i += 1
+            continue
+        var value: u32 = 0
+        for k in 0..<8usize:
+            let c = text[i + k]
+            let digit = (u32)(c - '0') if c <= '9' else (u32)(c - 'a') + 10
+            value = (value << 4) | digit
+        i += 8
+        let p = pixels[index]
+        let actual = ((u32)p.alpha() << 24) | ((u32)p.red() << 16) | ((u32)p.green() << 8) | (u32)p.blue()
+        if actual != value:
+            print(f"{name}: pixel ({index % 24}, {index // 24}) is {actual:08x}, Skia's is {value:08x}")
+            trap("legacy blitter: pixel mismatch")
+        index += 1
+    assert(index == pixels.length)
+
+## Fills `path` with the SkColor `color` into a new scene and compares it.
+func legacy_fill_scene(name: str, path: const Path*, color: u32, anti_alias: bool, rule: FillRule, expected: str):
+    var pixmap = legacy_scene()
+    defer pixmap.release()
+    var paint = legacy_paint(color, anti_alias)
+    pixmap.fill_path(path, &paint, rule, Transform.identity(), none)
+    expect_legacy_pixels(name, &pixmap, expected)
+
+test "legacy blitter: anti-aliased circles":
+    var a = legacy_circle(11.3, 12.6, 8.4)
+    defer a.release()
+    legacy_fill_scene("circle_translucent", &a, 0x5a8a64e5, true, .winding, legacy_circle_translucent)
+    var b = legacy_circle(12.5, 11.2, 9.1)
+    defer b.release()
+    legacy_fill_scene("circle_opaque", &b, 0xff20c040, true, .winding, legacy_circle_opaque)
+    var c = legacy_circle(12.1, 12.4, 7.7)
+    defer c.release()
+    legacy_fill_scene("circle_black", &c, 0xff000000, true, .winding, legacy_circle_black)
+
+test "legacy blitter: even-odd and aliased fills":
+    var star = legacy_star()
+    defer star.release()
+    legacy_fill_scene("star_evenodd", &star, 0xc0e03010, true, .even_odd, legacy_star_evenodd)
+    legacy_fill_scene("star_aliased", &star, 0x80102030, false, .winding, legacy_star_aliased)
+
+test "legacy blitter: rectangles":
+    var pixmap = legacy_scene()
+    defer pixmap.release()
+    var p1 = legacy_paint(0x9040a0f0, true)
+    pixmap.fill_rect(legacy_rect(2.3, 3.6, 14.7, 11.2), &p1, Transform.identity(), none)
+    var p2 = legacy_paint(0xffc08020, true)
+    pixmap.fill_rect(legacy_rect(8.5, 9.25, 21.75, 20.5), &p2, Transform.identity(), none)
+    var p3 = legacy_paint(0x70ff0000, false)
+    pixmap.fill_rect(legacy_rect(1.0, 15.0, 7.0, 22.0), &p3, Transform.identity(), none)
+    var p4 = legacy_paint(0xff000000, true)
+    pixmap.fill_rect(legacy_rect(15.2, 1.4, 22.9, 6.6), &p4, Transform.identity(), none)
+    expect_legacy_pixels("rects", &pixmap, legacy_rects)
+
+test "legacy blitter: strokes and hairlines":
+    var pixmap = legacy_scene()
+    defer pixmap.release()
+    var pb = PathBuilder.new_()
+    pb.move_to(2.2, 3.1)
+    pb.line_to(20.4, 9.7)
+    pb.quad_to(4.1, 14.3, 19.6, 21.8)
+    var path = pb.finish() else trap("path")
+    defer path.release()
+    var paint = legacy_paint(0xa0305090, true)
+    let wide = Stroke(width = 2.5)
+    let hairline = Stroke(width = 0.0)
+    pixmap.stroke_path(&path, &paint, &wide, Transform.identity(), none)
+    var hb = PathBuilder.new_()
+    hb.move_to(3.5, 20.1)
+    hb.line_to(21.3, 2.4)
+    hb.move_to(1.2, 11.5)
+    hb.line_to(22.7, 12.9)
+    var hairs = hb.finish() else trap("path")
+    defer hairs.release()
+    var black = legacy_paint(0xff000000, true)
+    pixmap.stroke_path(&hairs, &black, &hairline, Transform.identity(), none)
+    var lb = PathBuilder.new_()
+    lb.move_to(4.4, 1.6)
+    lb.line_to(6.9, 22.3)
+    var line = lb.finish() else trap("path")
+    defer line.release()
+    var yellow = legacy_paint(0xc0f0d020, true)
+    pixmap.stroke_path(&line, &yellow, &hairline, Transform.identity(), none)
+    expect_legacy_pixels("strokes", &pixmap, legacy_strokes)
+
+test "legacy blitter: an anti-aliased clip":
+    var pixmap = legacy_scene()
+    defer pixmap.release()
+    var clip = Mask.new_(24, 24) else trap("mask")
+    defer clip.release()
+    var circle = legacy_circle(12.0, 12.0, 9.3)
+    defer circle.release()
+    clip.fill_path(&circle, .winding, true, Transform.identity())
+    var green = legacy_paint(0xb0108040, true)
+    pixmap.fill_rect(legacy_rect(0.5, 5.5, 23.5, 18.5), &green, Transform.identity(), &clip)
+    var star = legacy_star()
+    defer star.release()
+    var black = legacy_paint(0xff000000, true)
+    pixmap.fill_path(&star, &black, .winding, Transform.identity(), &clip)
+    expect_legacy_pixels("clipped", &pixmap, legacy_clipped)

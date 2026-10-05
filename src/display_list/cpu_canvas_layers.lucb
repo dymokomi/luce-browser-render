@@ -240,7 +240,10 @@ func cpu_canvas_save_layer(canvas: CpuCanvas*, effects: CpuLayerEffects):
         cpu_canvas_abort_layer(canvas)
         return
 
-    let pixmap = raster.Pixmap.new_((u32)(bounds.right - bounds.left), (u32)(bounds.bottom - bounds.top)) else trap("CpuCanvas: empty layer")
+    var pixmap = raster.Pixmap.new_((u32)(bounds.right - bounds.left), (u32)(bounds.bottom - bounds.top)) else trap("CpuCanvas: empty layer")
+    # SkBitmapDevice::createDevice makes a layer with an image filter kN32 (and
+    # image_filter_color_type keeps the prior layer's kN32 below it).
+    pixmap.set_n32(effects.filter != none or cpu_canvas_target(canvas).is_n32())
     cpu_canvas_push_layer(canvas, pixmap, effects, bounds, &mapping, padded)
 
 ## A new layer over `bounds` (in layer space) with `mapping`, made current: SkDevice::
@@ -290,6 +293,8 @@ func cpu_canvas_save_layer_with_backdrop(canvas: CpuCanvas*, filter: const gfx.I
     let width = bounds.right - bounds.left
     let height = bounds.bottom - bounds.top
     var pixmap = raster.Pixmap.new_((u32)width, (u32)height) else trap("CpuCanvas: empty layer")
+    # A backdrop layer has no paint: it keeps the prior layer's color type.
+    pixmap.set_n32(parent.is_n32())
 
     # The new layer's matrix, then the backdrop filter's decomposition of it.
     var layer_ctm = cpu_canvas_state(canvas).device_matrix
