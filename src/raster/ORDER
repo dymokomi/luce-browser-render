@@ -47,9 +47,13 @@ highp.lucb
 highp_image.lucb
 highp_blend.lucb
 highp_shaders.lucb
+highp_color.lucb
 lowp.lucb
 lowp_stages.lucb
 lowp_image.lucb
+color_math.lucb
+gradient_color_spaces.lucb
+gradient_interpolation.lucb
 gradient_base_shader.lucb
 shaders.lucb
 image_shader.lucb

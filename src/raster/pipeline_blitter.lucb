@@ -45,6 +45,7 @@ struct PipelineSource:
     var is_constant: bool
     var dither: bool
     var colorspace: ColorSpace
+    var linear_to_srgb: bool  # SkColorFilters::LinearToSRGBGamma after the paint's alpha
 
     ## The color pipeline into `p`: the shader, the paint's alpha, dither, and clamp_01
     ## (appendClampIfNormalized; skipped where it is a no-op).
@@ -54,6 +55,15 @@ struct PipelineSource:
         if not self.is_constant and self.paint_alpha != 1.0:
             p.ctx.paint_alpha = self.paint_alpha
             p.push(.scale_paint_alpha)
+        if self.linear_to_srgb:
+            # SkColorSpaceXformColorFilter::appendStages: unpremul unless opaque, the steps from
+            # linear sRGB to sRGB (encode only), premul unless opaque.
+            if not self.is_opaque:
+                p.push(.unpremul)
+            p.ctx.xform.dst_tf_inv = TransferFunction.from_bits(srgb_inv_bits)
+            p.push(.xform_encode)
+            if not self.is_opaque:
+                p.push(.premultiply)
         if self.dither:
             p.ctx.dither_rate = dither_rate_8888
             p.push(.dither)
@@ -118,7 +128,8 @@ struct RasterPipelineBlitter: Blitter:
     ## SkBlitter::Choose and SkRasterPipelineBlitter::Create for `paint`; none when the paint
     ## draws nothing (SkNullBlitter) or its shader cannot draw.
     static func new_(paint: const Paint*, pixmap: SubPixmapMut*) -> RasterPipelineBlitter?:
-        var src = PipelineSource(shader = paint.shader, blend_mode = paint.blend_mode, paint_alpha = 1.0, is_opaque = false, is_constant = false, dither = false, colorspace = paint.colorspace)
+        var src = PipelineSource(shader = paint.shader, blend_mode = paint.blend_mode, paint_alpha = 1.0, is_opaque = false, is_constant = false, dither = false, colorspace = paint.colorspace,
+                                 linear_to_srgb = paint.linear_to_srgb)
 
         # SkBlitter::Choose. We have the most fast-paths for SrcOver, so see if we can act
         # like SrcOver (CheckFastPath; an 8888 destination is not always opaque).
@@ -141,14 +152,24 @@ struct RasterPipelineBlitter: Blitter:
         var pixmap_src = dummy_pixmap_ref()
         match src.shader:
             .solid_color(color):
+                # A color shader takes the paint's alpha into its color.
+                var c = color
+                if paint.alpha != 1.0:
+                    c.apply_opacity(paint.alpha)
+                    src.shader = .solid_color(color = c)
                 src.is_constant = true
-                src.is_opaque = color.alpha() == 1.0
+                src.is_opaque = c.alpha() == 1.0
             .pattern(patt):
-                src.paint_alpha = patt.opacity
-                src.is_opaque = src.shader.is_opaque() and patt.opacity == 1.0
+                src.paint_alpha = patt.opacity * paint.alpha
+                src.is_opaque = src.shader.is_opaque() and src.paint_alpha == 1.0
                 pixmap_src = patt.pixmap
             _:
-                src.is_opaque = src.shader.is_opaque()
+                src.paint_alpha = paint.alpha
+                src.is_opaque = src.shader.is_opaque() and paint.alpha == 1.0
+
+        # A color filter keeps the pipeline (no memset of a constant color).
+        if paint.linear_to_srgb:
+            src.is_constant = false
 
         # We can strength-reduce SrcOver into Src when opaque.
         if src.is_opaque and src.blend_mode == .source_over:

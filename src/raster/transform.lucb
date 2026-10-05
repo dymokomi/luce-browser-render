@@ -240,8 +240,18 @@ func invert_transform(ts: Transform) -> Transform?:
         if ts.has_scale():
             let inv_x = invert(ts.sx)
             let inv_y = invert(ts.sy)
-            return Transform.from_row(inv_x, 0.0, 0.0, inv_y, -ts.tx * inv_x, -ts.ty * inv_y)
+            # Denormalized (non-zero) scale factors overflow when inverted (SkMatrix::invert).
+            if not math32.is_finite(inv_x) or not math32.is_finite(inv_y):
+                return none
+            let inv_tx = -ts.tx * inv_x
+            let inv_ty = -ts.ty * inv_y
+            # The inverse translation must not overflow, and the original must be finite.
+            if not math32.is_finite(inv_tx) or not math32.is_finite(inv_ty):
+                return none
+            return Transform.from_row(inv_x, 0.0, 0.0, inv_y, inv_tx, inv_ty)
         # translate only
+        if not math32.is_finite(ts.tx) or not math32.is_finite(ts.ty):
+            return none
         return Transform.from_translate(-ts.tx, -ts.ty)
     if ts.has_perspective():
         let inv_det = persp_inv_determinant(ts) else return none

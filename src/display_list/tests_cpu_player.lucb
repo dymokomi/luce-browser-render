@@ -165,7 +165,7 @@ test "cpu player: paint_linear_gradient (gated on r10's calculate_gradient_lengt
     defer test_scene_release(&scene_45)
     let data_45 = LinearGradientData(gradient_angle = 45.0, color_stops = test_red_to_blue_stops(), interpolation_method = .rectangular_color_space(value = css_data.RectangularColorSpace.srgb))
     display_list_player_paint_linear_gradient(test_scene_player(&scene_45), PaintLinearGradient(gradient_rect = test_rect(0, 0, 16, 16), linear_gradient_data = data_45))
-    expect_like_skia(&scene_45, "linear_gradient_45", skia_linear_gradient_45, 2, 200)
+    expect_like_skia(&scene_45, "linear_gradient_45", skia_linear_gradient_45, 0, 0)
 
 # mark: Shadows ================================================================================
 

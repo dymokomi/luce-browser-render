@@ -48,7 +48,7 @@ func highp_next_stage(p: HighpPipeline*):
     next(p)
 
 # Must be in the same order as Stage
-let highp_stages: HighpStageFn[84] = [
+let highp_stages: HighpStageFn[94] = [
     highp_move_source_to_destination,
     highp_move_destination_to_source,
     highp_clamp_01,
@@ -133,6 +133,16 @@ let highp_stages: HighpStageFn[84] = [
     highp_gamma_expand_dst_srgb,
     highp_gamma_compress_srgb,
     highp_transform_perspective,
+    highp_unpremul,
+    highp_unpremul_polar,
+    highp_css_lab_to_xyz,
+    highp_css_oklab_to_linear_srgb,
+    highp_css_hcl_to_lab,
+    highp_css_hsl_to_srgb,
+    highp_css_hwb_to_srgb,
+    highp_xform_linearize,
+    highp_xform_gamut,
+    highp_xform_encode,
 ]
 
 func highp_start(functions: const HighpStageFn[], functions_tail: const HighpStageFn[], rect: ScreenIntRect, aa_mask_ctx: AAMaskCtx, mask_ctx: MaskCtx, ctx: Context*, pixmap_src: PixmapRef, pixmap_dst: SubPixmapMut*):

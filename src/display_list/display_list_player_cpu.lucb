@@ -310,21 +310,22 @@ func display_list_player_cpu_translate_impl(base: DisplayListPlayer*, command: T
 
 ## `to_skia_interpolation`: the interpolation space and hue method of a CSS color
 ## interpolation method; always premultiplied.
-func cpu_interpolation(gradient: CpuGradient*, interpolation_method: ColorInterpolationMethod):
+func cpu_interpolation(interpolation_method: ColorInterpolationMethod) -> raster.GradientInterpolation:
+    var interpolation = raster.GradientInterpolation(in_premul = true)
     match interpolation_method:
         .rectangular_color_space(color_space):
             match color_space:
-                .srgb: gradient.space = CpuColorSpace.srgb
-                .srgb_linear: gradient.space = CpuColorSpace.srgb_linear
-                .lab: gradient.space = CpuColorSpace.lab
-                .oklab: gradient.space = CpuColorSpace.oklab
-                .display_p3: gradient.space = CpuColorSpace.display_p3
-                .a98_rgb: gradient.space = CpuColorSpace.a98_rgb
-                .prophoto_rgb: gradient.space = CpuColorSpace.prophoto_rgb
-                .rec2020: gradient.space = CpuColorSpace.rec2020
+                .srgb: interpolation.color_space = raster.GradientColorSpace.srgb
+                .srgb_linear: interpolation.color_space = raster.GradientColorSpace.srgb_linear
+                .lab: interpolation.color_space = raster.GradientColorSpace.lab
+                .oklab: interpolation.color_space = raster.GradientColorSpace.oklab
+                .display_p3: interpolation.color_space = raster.GradientColorSpace.display_p3
+                .a98_rgb: interpolation.color_space = raster.GradientColorSpace.a98_rgb
+                .prophoto_rgb: interpolation.color_space = raster.GradientColorSpace.prophoto_rgb
+                .rec2020: interpolation.color_space = raster.GradientColorSpace.rec2020
                 .display_p3_linear, .xyz_d50, .xyz_d65:
                     ak.dbgln("FIXME: Unsupported gradient color space")
-                    gradient.space = CpuColorSpace.oklab
+                    interpolation.color_space = raster.GradientColorSpace.oklab
                 .xyz:
                     # NB: Xyz should have been canonicalized to XyzD65 at parse time
                     trap("VERIFY_NOT_REACHED")
@@ -332,20 +333,19 @@ func cpu_interpolation(gradient: CpuGradient*, interpolation_method: ColorInterp
                     trap("VERIFY_NOT_REACHED")
         .polar_color_interpolation_method(color_space):
             match color_space.color_space:
-                .hsl: gradient.space = CpuColorSpace.hsl
-                .hwb: gradient.space = CpuColorSpace.hwb
-                .lch: gradient.space = CpuColorSpace.lch
-                .oklch: gradient.space = CpuColorSpace.oklch
+                .hsl: interpolation.color_space = raster.GradientColorSpace.hsl
+                .hwb: interpolation.color_space = raster.GradientColorSpace.hwb
+                .lch: interpolation.color_space = raster.GradientColorSpace.lch
+                .oklch: interpolation.color_space = raster.GradientColorSpace.oklch
                 _: trap("VERIFY_NOT_REACHED")
 
             match color_space.hue_interpolation_method:
-                .shorter: gradient.hue_method = CpuHueMethod.shorter
-                .longer: gradient.hue_method = CpuHueMethod.longer
-                .increasing: gradient.hue_method = CpuHueMethod.increasing
-                .decreasing: gradient.hue_method = CpuHueMethod.decreasing
+                .shorter: interpolation.hue_method = raster.GradientHueMethod.shorter
+                .longer: interpolation.hue_method = raster.GradientHueMethod.longer
+                .increasing: interpolation.hue_method = raster.GradientHueMethod.increasing
+                .decreasing: interpolation.hue_method = raster.GradientHueMethod.decreasing
                 _: trap("VERIFY_NOT_REACHED")
-
-    gradient.premul = true
+    return interpolation
 
 ## The color and position lists of a CSS gradient: the stops, skipping a stop equal to the
 ## one before it, with each position mapped by `(position - first_position) / scale`.
@@ -378,11 +378,11 @@ func display_list_player_cpu_paint_linear_gradient_impl(base: DisplayListPlayer*
     let end = gfx.FloatPoint(m_x = start.m_x, m_y = start.m_y + (repeat_length else 1.0) * -length)
 
     # matrix.setRotate(gradient_angle, rect_center)
-    let matrix = raster.Transform.from_rotate_at(linear_gradient_data.gradient_angle, rect_center.m_x, rect_center.m_y)
+    let matrix = cpu_rotate_matrix(linear_gradient_data.gradient_angle, rect_center.m_x, rect_center.m_y)
 
-    var gradient = CpuGradient(geometry = .linear(x0 = start.m_x, y0 = start.m_y, x1 = end.m_x, y1 = end.m_y), stops = stops,
-                               tile_mode = CpuTileMode.repeat, premul = true, local_matrix = matrix, linear_to_srgb = false)
-    cpu_interpolation(&gradient, linear_gradient_data.interpolation_method)
+    let gradient = CpuGradient(geometry = .linear(x0 = start.m_x, y0 = start.m_y, x1 = end.m_x, y1 = end.m_y), stops = stops,
+                               tile_mode = CpuTileMode.repeat, interpolation = cpu_interpolation(linear_gradient_data.interpolation_method),
+                               local_matrix = matrix, linear_to_srgb = false)
 
     let draw_rect = cpu_float_rect(rect) else return
     var path = cpu_rect_path(draw_rect)
@@ -412,9 +412,9 @@ func display_list_player_cpu_paint_radial_gradient_impl(base: DisplayListPlayer*
 
     let tile_mode = CpuTileMode.repeat if radial_gradient_data.color_stops.repeating else CpuTileMode.clamp
 
-    var gradient = CpuGradient(geometry = .radial(cx = center.m_x, cy = center.m_y, radius = size.m_height), stops = stops,
-                               tile_mode = tile_mode, premul = true, local_matrix = matrix, linear_to_srgb = false)
-    cpu_interpolation(&gradient, radial_gradient_data.interpolation_method)
+    let gradient = CpuGradient(geometry = .radial(cx = center.m_x, cy = center.m_y, radius = size.m_height), stops = stops,
+                               tile_mode = tile_mode, interpolation = cpu_interpolation(radial_gradient_data.interpolation_method),
+                               local_matrix = matrix, linear_to_srgb = false)
 
     let draw_rect = cpu_rect(rect) else return
     var path = cpu_rect_path(draw_rect)
@@ -434,10 +434,10 @@ func display_list_player_cpu_paint_conic_gradient_impl(base: DisplayListPlayer*,
     let center = gfx.FloatPoint(m_x = (f32)(command.position.m_x + rect.m_location.m_x), m_y = (f32)(command.position.m_y + rect.m_location.m_y))
 
     # matrix.setRotate(-90 + start_angle, center)
-    let matrix = raster.Transform.from_rotate_at(-90.0 + conic_gradient_data.start_angle, center.m_x, center.m_y)
-    var gradient = CpuGradient(geometry = .sweep(cx = center.m_x, cy = center.m_y), stops = stops,
-                               tile_mode = CpuTileMode.repeat, premul = true, local_matrix = matrix, linear_to_srgb = false)
-    cpu_interpolation(&gradient, conic_gradient_data.interpolation_method)
+    let matrix = cpu_rotate_matrix(-90.0 + conic_gradient_data.start_angle, center.m_x, center.m_y)
+    let gradient = CpuGradient(geometry = .sweep(cx = center.m_x, cy = center.m_y), stops = stops,
+                               tile_mode = CpuTileMode.repeat, interpolation = cpu_interpolation(conic_gradient_data.interpolation_method),
+                               local_matrix = matrix, linear_to_srgb = false)
 
     let draw_rect = cpu_rect(rect) else return
     var path = cpu_rect_path(draw_rect)

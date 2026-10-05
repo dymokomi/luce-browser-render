@@ -159,6 +159,36 @@ text) with DisplayListPlayerSkia's pixels: all exact. `raster/tests_perspective.
 the matrices and transformed paths bit for bit against SkMatrix and SkPath. Both come from
 luce-browser-tools' `oracles/luce-browser-render/perspective`.
 
+## Gradients (fix/fidelity-3d)
+
+The player's gradients are the raster module's shaders, as DisplayListPlayerSkia's
+SkGradientShader calls are Skia's (`display_list/cpu_gradient.lucb` maps each command's
+geometry, tile mode, local matrix and interpolation onto them; the paint carries setAlphaf,
+setDither and SVG's LinearToSRGBGamma color filter; no shader paints opaque black, as a null
+SkShader does). The raster module follows Skia m144 for what CSS asks of a gradient:
+
+- **Interpolation** (`raster/gradient_interpolation.lucb`): SkColor4fXformer converts the stop
+  colors into the intermediate color space (SkConvertPixels' pipeline: SkColorSpaceXformSteps
+  with the transfer functions and gamut matrices skcms gives, recorded bit for bit in
+  `gradient_color_spaces.lucb` by luce-browser-tools' `oracles/luce-browser-render/gradients/
+  spaces.cpp`), then into Lab, OKLab, LCH, OKLCH, HSL or HWB, takes powerless hues from their
+  neighbors, adjusts hues for the hue method and premultiplies (not the hue).
+  AppendInterpolatedToDstStages ends the pipeline with unpremul or unpremul_polar, the css_*
+  stage back to the intermediate space and the XformSteps to sRGB (`highp_color.lucb` over
+  `color_math.lucb`: NEON's fused parametric/gamma_ with approx_powf, matrix_3x3, Skia's sin_
+  and cos_).
+- **Degenerate gradients** are MakeDegenerateGradient's colors (the last color when clamped,
+  the average color otherwise), MakeRadial included (`RadialGradient.new_simple`); a scale that
+  cannot be inverted makes no shader (SkMatrix::invert's finiteness checks).
+
+`tests_cpu_gradient_skia.lucb` compares 17 scenes (every CSS interpolation space and hue
+method, a repeating gradient, radial, degenerate radial and conic) with DisplayListPlayerSkia's
+pixels: all exact on macOS (the Lab and OKLab conversions call cbrt and atan2, whose last bit
+may differ on another libm; the scenes allow one level on 8 pixels).
+
+LibGfx's ColorStop now starts with a NaN position (`color_stop_init_fields`), which the CSS
+color-stop fix-up relies on to space stops without a position.
+
 ## Image filters
 
 r10 builds a gfx.Filter as the graph of SkImageFilters the donor builds and leaves evaluation to
@@ -213,7 +243,8 @@ nearest sampling's round-down, conics) was merged last, and then:
 - the player's rounded rectangles are SkPath::RRect's contour (start index 6, clockwise,
   quarter conics of weight sqrt(2)/2), where r51a drew cubics;
 - the player's gradients are dithered as `SkPaint::setDither` makes the raster pipeline
-  dither them (the 8x8 ordered matrix at 1/255, clamped to alpha);
+  dither them (the 8x8 ordered matrix at 1/255, clamped to alpha); since fix/fidelity-3d they
+  are the raster module's gradient shaders (see *Gradients*);
 - `tests_gfx_paint_raster_is_skia_m144` is set, so PainterRaster's cases compare with the
   donor's pixels;
 - test.sh checks raster like every module.

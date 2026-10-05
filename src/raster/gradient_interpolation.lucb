@@ -1,0 +1,313 @@
+#==============================================================================================
+#
+#   gradient_interpolation - the color space and hue method gradients interpolate in
+#
+#   DESCRIPTION:
+#       Port of SkGradientShader::Interpolation and of the parts of Skia m144's
+#       src/shaders/gradients/SkGradientBaseShader.cpp that use it: SkColor4fXformer (the
+#       stop colors converted into the intermediate color space by SkConvertPixels' pipeline,
+#       then into Lab, OKLab, their polar forms, HSL or HWB, with powerless hues taken from
+#       their neighbors, hues adjusted for the hue method and colors premultiplied, the hue
+#       left alone) and AppendInterpolatedToDstStages (unpremul or unpremul_polar, the CSS
+#       stage back to the intermediate space, then SkColorSpaceXformSteps to sRGB).
+#
+#       The conversions into Lab and OKLab call cbrtf and atan2f and sqrtf, as Skia does;
+#       Luce's math32 gives them, which may differ from the platform libm in the last bit.
+#
+#       Copyright (c) 2006 The Android Open Source Project
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+## SkGradientShader::Interpolation::ColorSpace (the gamut-mapping forms aside).
+pub enum GradientColorSpace as u8:
+    destination = 0
+    srgb_linear = 1
+    lab = 2
+    oklab = 3
+    display_p3 = 4
+    rec2020 = 5
+    prophoto_rgb = 6
+    a98_rgb = 7
+    lch = 8
+    oklch = 9
+    srgb = 10
+    hsl = 11
+    hwb = 12
+
+## SkGradientShader::Interpolation::HueMethod.
+pub enum GradientHueMethod as u8:
+    shorter = 0
+    longer = 1
+    increasing = 2
+    decreasing = 3
+
+## SkGradientShader::Interpolation. The default interpolates unpremultiplied colors in the
+## destination color space.
+pub struct GradientInterpolation:
+    pub var in_premul: bool = false
+    pub var color_space: GradientColorSpace = GradientColorSpace.destination
+    pub var hue_method: GradientHueMethod = GradientHueMethod.shorter
+
+## intermediate_color_space: the RGB space colors are first converted into (sRGB is the
+## destination here).
+func gradient_intermediate_space(cs: GradientColorSpace) -> GradientRgbSpaceKind:
+    match cs:
+        .srgb_linear, .oklab, .oklch: return GradientRgbSpaceKind.srgb_linear
+        .lab, .lch: return GradientRgbSpaceKind.xyz_d50
+        .display_p3: return GradientRgbSpaceKind.display_p3
+        .rec2020: return GradientRgbSpaceKind.rec2020
+        .prophoto_rgb: return GradientRgbSpaceKind.prophoto_rgb
+        .a98_rgb: return GradientRgbSpaceKind.a98_rgb
+        _: return GradientRgbSpaceKind.srgb
+
+## color_space_is_polar.
+func gradient_space_is_polar(cs: GradientColorSpace) -> bool:
+    match cs:
+        .lch, .oklch, .hsl, .hwb: return true
+        _: return false
+
+# mark: Conversions into the interpolation space ===============================================
+
+## srgb_to_hsl; the bool says whether the hue is powerless.
+func srgb_to_hsl(rgb: f32[4]) -> (f32[4], bool):
+    let mx = math32.max(rgb[0], math32.max(rgb[1], rgb[2]))
+    let mn = math32.min(rgb[0], math32.min(rgb[1], rgb[2]))
+    var hue: f32 = 0.0
+    var saturation: f32 = 0.0
+    let light = (mn + mx) / 2.0
+    let d = mx - mn
+    if d != 0.0:
+        saturation = 0.0 if light == 0.0 or light == 1.0 else (mx - light) / math32.min(light, 1.0 - light)
+        if mx == rgb[0]:
+            hue = (rgb[1] - rgb[2]) / d + (6.0 if rgb[1] < rgb[2] else 0.0)
+        elif mx == rgb[1]:
+            hue = (rgb[2] - rgb[0]) / d + 2.0
+        else:
+            hue = (rgb[0] - rgb[1]) / d + 4.0
+        hue *= 60.0
+    return ([hue, saturation * 100.0, light * 100.0, rgb[3]], saturation == 0.0)
+
+## srgb_to_hwb.
+func srgb_to_hwb(rgb: f32[4]) -> (f32[4], bool):
+    let hsl = srgb_to_hsl(rgb)
+    let white = math32.min(rgb[0], math32.min(rgb[1], rgb[2]))
+    let black = 1.0 - math32.max(rgb[0], math32.max(rgb[1], rgb[2]))
+    return ([hsl.0[0], white * 100.0, black * 100.0, rgb[3]], hsl.1)
+
+## xyzd50_to_lab.
+func xyzd50_to_lab(xyz: f32[4]) -> f32[4]:
+    let d50: f32[3] = [0.3457 / 0.3585, 1.0, (1.0 - 0.3457 - 0.3585) / 0.3585]
+    let e: f32 = 216.0 / 24389.0
+    let k: f32 = 24389.0 / 27.0
+    var f: f32[3] = ---
+    for i in 0..<3usize:
+        let v = xyz[i] / d50[i]
+        f[i] = math32.cbrt(v) if v > e else (k * v + 16.0) / 116.0
+    return [(116.0 * f[1]) - 16.0, 500.0 * (f[0] - f[1]), 200.0 * (f[1] - f[2]), xyz[3]]
+
+## sk_float_radians_to_degrees of atan2(b, a), then [0, 360).
+func lab_hue_degrees(b: f32, a: f32) -> f32:
+    let hue = math32.atan2(b, a) * (180.0 / 3.14159265)
+    return hue if hue >= 0.0 else hue + 360.0
+
+## xyzd50_to_hcl: LCH stored as hue, chroma, lightness.
+func xyzd50_to_hcl(xyz: f32[4]) -> (f32[4], bool):
+    let lab = xyzd50_to_lab(xyz)
+    let chroma = math32.sqrt(lab[1] * lab[1] + lab[2] * lab[2])
+    # The LCH math produces small-ish (but not tiny) chroma values for achromatic colors.
+    return ([lab_hue_degrees(lab[2], lab[1]), chroma, lab[0], xyz[3]], chroma <= 1e-2)
+
+## lin_srgb_to_oklab.
+func lin_srgb_to_oklab(rgb: f32[4]) -> f32[4]:
+    var l = 0.4122214708 * rgb[0] + 0.5363325363 * rgb[1] + 0.0514459929 * rgb[2]
+    var m = 0.2119034982 * rgb[0] + 0.6806995451 * rgb[1] + 0.1073969566 * rgb[2]
+    var s = 0.0883024619 * rgb[0] + 0.2817188376 * rgb[1] + 0.6299787005 * rgb[2]
+    l = math32.cbrt(l)
+    m = math32.cbrt(m)
+    s = math32.cbrt(s)
+    return [0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s, 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+            0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s, rgb[3]]
+
+## lin_srgb_to_okhcl.
+func lin_srgb_to_okhcl(rgb: f32[4]) -> (f32[4], bool):
+    let lab = lin_srgb_to_oklab(rgb)
+    let chroma = math32.sqrt(lab[1] * lab[1] + lab[2] * lab[2])
+    # The OKLCH math produces very small chroma values for achromatic colors.
+    return ([lab_hue_degrees(lab[2], lab[1]), chroma, lab[0], rgb[3]], chroma <= 1e-6)
+
+## The color in `cs` (from its intermediate space); the bool says whether the hue is powerless.
+func gradient_convert_color(cs: GradientColorSpace, c: f32[4]) -> (f32[4], bool):
+    match cs:
+        .hsl: return srgb_to_hsl(c)
+        .hwb: return srgb_to_hwb(c)
+        .lab: return (xyzd50_to_lab(c), false)
+        .lch: return xyzd50_to_hcl(c)
+        .oklab: return (lin_srgb_to_oklab(c), false)
+        .oklch: return lin_srgb_to_okhcl(c)
+        _: return (c, false)
+
+# mark: SkColor4fXformer =======================================================================
+
+## The stops of a gradient as its fill stages take them: colors in the interpolation space and,
+## unless they are evenly spaced, their positions.
+struct GradientXformed:
+    var colors: Vec[GradientColor]
+    var positions: Vec[f32]
+    var has_positions: bool
+
+    func release():
+        self.colors.release()
+        self.positions.release()
+
+## SkColor4fXformer for `stops` (sRGB, unpremultiplied; positions used when `has_positions`).
+func gradient_xform_colors(stops: const GradientStop[], has_positions: bool, interpolation: GradientInterpolation, first_is_implicit: bool, last_is_implicit: bool) -> GradientXformed:
+    let cs = interpolation.color_space
+    let space = gradient_rgb_space(gradient_intermediate_space(cs))
+    # 2) SkConvertPixels from sRGB to the intermediate space, unpremultiplied.
+    let steps = color_xform_steps(&space, false, AlphaType.unpremul, AlphaType.unpremul)
+    var colors: Vec[f32[4]]
+    defer colors.release()
+    var powerless: Vec[bool]
+    defer powerless.release()
+    var any_powerless = false
+    for stop in stops:
+        let c = stop.color
+        var v: f32[4] = [c.red(), c.green(), c.blue(), c.alpha()]
+        if not steps.is_empty():
+            v = steps.apply(v)
+        # 3) Into the interpolation space when it is not an RGB one.
+        let converted = gradient_convert_color(cs, v)
+        colors.push(converted.0)
+        powerless.push(converted.1)
+        any_powerless = any_powerless or converted.1
+
+    var result = GradientXformed(has_positions = has_positions)
+    if any_powerless:
+        # A powerless hue takes the hue of each neighbor, as two stops at its position.
+        let n = colors.len
+        for i in 0..<n:
+            let position = gradient_stop_position(stops, i, has_positions)
+            let current = colors.data[i]
+            if not powerless.data[i]:
+                result.colors.push(GradientColor.new_(current[0], current[1], current[2], current[3]))
+                result.positions.push(position)
+                continue
+            if i != 0:
+                result.positions.push(position)
+                result.colors.push(GradientColor.new_(colors.data[i - 1][0], current[1], current[2], current[3]))
+            if i != n - 1:
+                result.positions.push(position)
+                result.colors.push(GradientColor.new_(colors.data[i + 1][0], current[1], current[2], current[3]))
+        result.has_positions = true
+    else:
+        for i in 0..<colors.len:
+            let c = colors.data[i]
+            result.colors.push(GradientColor.new_(c[0], c[1], c[2], c[3]))
+            if has_positions:
+                result.positions.push(stops[i].position)
+
+    # 4) Polar hues follow the hue method: the adjustment always goes to the second color of
+    #    a pair, with a running total.
+    if gradient_space_is_polar(cs):
+        var delta: f32 = 0.0
+        let n = result.colors.len
+        let hues = result.colors.data
+        for i in 0..<n - 1:
+            let h1 = hues[i].r
+            var h2 = hues[i + 1].r + delta
+            match interpolation.hue_method:
+                .shorter:
+                    if h2 - h1 > 180.0:
+                        h2 -= 360.0
+                        delta -= 360.0
+                    elif h2 - h1 < -180.0:
+                        h2 += 360.0
+                        delta += 360.0
+                .longer:
+                    if (i == 0 and first_is_implicit) or (i == n - 2 and last_is_implicit):
+                        # Do nothing: no full revolution for these stops (skbug.com/40044215).
+                        _ = 0
+                    elif 0.0 < h2 - h1 and h2 - h1 < 180.0:
+                        h2 -= 360.0
+                        delta -= 360.0
+                    elif -180.0 < h2 - h1 and h2 - h1 <= 0.0:
+                        h2 += 360.0
+                        delta += 360.0
+                .increasing:
+                    if h2 < h1:
+                        h2 += 360.0
+                        delta += 360.0
+                .decreasing:
+                    if h1 < h2:
+                        h2 -= 360.0
+                        delta -= 360.0
+                _:
+                    _ = 0
+            hues[i + 1].r = h2
+
+    # 5) Premultiplication; polar colors keep their hue.
+    if interpolation.in_premul:
+        let polar = gradient_space_is_polar(cs)
+        for c in &result.colors.view():
+            if not polar:
+                c.r = c.r * c.a
+            c.g = c.g * c.a
+            c.b = c.b * c.a
+    return result
+
+## SkGradientBaseShader::getPos: the stop's position, or i / (count - 1) when they are evenly
+## spaced.
+func gradient_stop_position(stops: const GradientStop[], i: usize, has_positions: bool) -> f32:
+    if has_positions:
+        return stops[i].position
+    return (f32)i / (f32)(stops.length - 1)
+
+# mark: AppendInterpolatedToDstStages ==========================================================
+
+## AppendInterpolatedToDstStages: from the interpolated colors to premultiplied sRGB.
+func push_interpolated_to_dst_stages(p: RasterPipelineBuilder*, colors_are_opaque: bool, interpolation: GradientInterpolation):
+    let cs = interpolation.color_space
+    var color_is_premul = interpolation.in_premul
+
+    # If we interpolated premul colors in any of the special color spaces, we need to unpremul.
+    if color_is_premul and not colors_are_opaque:
+        match cs:
+            .lab, .oklab:
+                p.push(.unpremul)
+                color_is_premul = false
+            .lch, .oklch, .hsl, .hwb:
+                p.push(.unpremul_polar)
+                color_is_premul = false
+            _:
+                _ = 0
+
+    # Convert colors in exotic spaces back to their intermediate SkColorSpace.
+    match cs:
+        .lab:
+            p.push(.css_lab_to_xyz)
+        .oklab:
+            p.push(.css_oklab_to_linear_srgb)
+        .lch:
+            p.push(.css_hcl_to_lab)
+            p.push(.css_lab_to_xyz)
+        .oklch:
+            p.push(.css_hcl_to_lab)
+            p.push(.css_oklab_to_linear_srgb)
+        .hsl:
+            p.push(.css_hsl_to_srgb)
+        .hwb:
+            p.push(.css_hwb_to_srgb)
+        _:
+            _ = 0
+
+    # Now transform from intermediate to destination color space.
+    var intermediate_alpha = AlphaType.premul if color_is_premul else AlphaType.unpremul
+    var dst_alpha = AlphaType.premul
+    if colors_are_opaque:
+        intermediate_alpha = AlphaType.unpremul
+        dst_alpha = AlphaType.unpremul
+    let space = gradient_rgb_space(gradient_intermediate_space(cs))
+    let steps = color_xform_steps(&space, true, intermediate_alpha, dst_alpha)
+    p.push_color_xform_steps(steps)

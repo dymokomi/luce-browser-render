@@ -1,0 +1,172 @@
+#==============================================================================================
+#
+#   gradient_color_spaces - the RGB color spaces gradients interpolate through, and the
+#                           SkColorSpaceXformSteps between them and sRGB
+#
+#   DESCRIPTION:
+#       Skia m144 interpolates a gradient's colors in an intermediate SkColorSpace
+#       (SkGradientBaseShader.cpp's intermediate_color_space) and converts between it and
+#       sRGB with SkColorSpaceXformSteps (src/core/SkColorSpaceXformSteps.cpp): unpremul,
+#       linearize (the source transfer function), a gamut matrix, encode (the inverse of the
+#       destination's) and premul, each skipped when it changes nothing. The transfer
+#       functions, their inverses and the gamut matrices are skcms' numbers, recorded bit for
+#       bit from the library Ladybird 47c82b38d0 links by luce-browser-tools'
+#       oracles/luce-browser-render/gradients/spaces.cpp (SkColorSpace::transferFn,
+#       invTransferFn and gamutTransformTo; the matrices are stored as fSrcToDstMatrix,
+#       column-major).
+#
+#       Copyright (c) 2018 Google Inc. All rights reserved.
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+## The intermediate RGB color spaces of SkGradientShader::Interpolation::ColorSpace.
+enum GradientRgbSpaceKind as u8:
+    ## sRGB itself (kDestination, kSRGB, kHSL, kHWB).
+    srgb = 0
+    ## Linear sRGB (kSRGBLinear, kOKLab, kOKLCH).
+    srgb_linear = 1
+    ## Linear XYZ D50 (kLab, kLCH).
+    xyz_d50 = 2
+    display_p3 = 3
+    rec2020 = 4
+    prophoto_rgb = 5
+    a98_rgb = 6
+
+## An intermediate color space as SkColorSpaceXformSteps sees it next to sRGB.
+struct GradientRgbSpace:
+    var kind: GradientRgbSpaceKind
+    ## transferFn and invTransferFn, as bits.
+    var tf: u32[7]
+    var inv: u32[7]
+    ## Whether its toXYZD50 and transfer-function hashes are sRGB's.
+    var same_gamut_as_srgb: bool
+    var same_tf_as_srgb: bool
+    ## gamutTransformTo from sRGB and to sRGB (fSrcToDstMatrix order).
+    var srgb_to: u32[9]
+    var to_srgb: u32[9]
+
+    ## Whether the transfer function is skcms' linear one (memcmp with kLinear).
+    func tf_is_linear() -> bool:
+        let linear: u32[7] = [0x3f800000, 0x3f800000, 0, 0, 0, 0, 0]
+        for i in 0..<7usize:
+            if self.tf[i] != linear[i]:
+                return false
+        return true
+
+let srgb_tf_bits: u32[7] = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000]
+let srgb_inv_bits: u32[7] = [0x3ed55555, 0x3f919280, 0x80000000, 0x414eb852, 0x3b4d2e31, 0xbd612800, 0x80000000]
+
+## The space of `kind`.
+func gradient_rgb_space(kind: GradientRgbSpaceKind) -> GradientRgbSpace:
+    match kind:
+        .srgb:
+            return GradientRgbSpace(kind = kind, tf = srgb_tf_bits, inv = srgb_inv_bits, same_gamut_as_srgb = true, same_tf_as_srgb = true, srgb_to = [0, 0, 0, 0, 0, 0, 0, 0, 0], to_srgb = [0, 0, 0, 0, 0, 0, 0, 0, 0])
+        .srgb_linear:
+            return GradientRgbSpace(kind = kind, tf = [0x3f800000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000], inv = [0x3f800000, 0x3f800000, 0x80000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000],
+                                    same_gamut_as_srgb = true, same_tf_as_srgb = false,
+                                    srgb_to = [0x3f7fffff, 0xb285c000, 0x31c00000, 0x33900000, 0x3f7fffff, 0x00000000, 0x00000000, 0x31000000, 0x3f800000],
+                                    to_srgb = [0x3f7fffff, 0xb285c000, 0x31c00000, 0x33900000, 0x3f7fffff, 0x00000000, 0x00000000, 0x31000000, 0x3f800000])
+        .xyz_d50:
+            return GradientRgbSpace(kind = kind, tf = [0x3f800000, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000], inv = [0x3f800000, 0x3f800000, 0x80000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000],
+                                    same_gamut_as_srgb = false, same_tf_as_srgb = false,
+                                    srgb_to = [0x3edf4400, 0x3e63d400, 0x3c640000, 0x3ec53200, 0x3f378500, 0x3dc6d000, 0x3e128000, 0x3d784000, 0x3f36cf00],
+                                    to_srgb = [0x4048954b, 0xbf7a91ce, 0x3d936bd9, 0xbfcf06b7, 0x3ff548a6, 0xbe6a7b44, 0xbefb344d, 0x3d0907cf, 0x3fb3e3a9])
+        .display_p3:
+            return GradientRgbSpace(kind = kind, tf = [0x4019999a, 0x3f72a76e, 0x3d558919, 0x3d9e8391, 0x3d25aee6, 0x00000000, 0x00000000], inv = [0x3ed55555, 0x3f919280, 0x80000000, 0x414eb852, 0x3b4d2e31, 0xbd612800, 0x80000000],
+                                    same_gamut_as_srgb = false, same_tf_as_srgb = true,
+                                    srgb_to = [0x3f529274, 0x3d07e79d, 0x3c8bd707, 0x3e35f162, 0x3f777b36, 0x3d943cf2, 0xb6a20000, 0xb7290c00, 0x3f690fde],
+                                    to_srgb = [0x3f9cc6c9, 0xbd2c3058, 0xbca0c169, 0xbe66847e, 0x3f856515, 0xbda10bbc, 0x36870000, 0x373dc800, 0x3f8c9901])
+        .rec2020:
+            return GradientRgbSpace(kind = kind, tf = [0x400e38da, 0x3f68e044, 0x3db8fdad, 0x3e638e2a, 0x3da662ad, 0x00000000, 0x00000000], inv = [0x3ee66676, 0x3f9e0080, 0x80000000, 0x40900009, 0x3c93e5e5, 0xbdcb6800, 0x80000000],
+                                    same_gamut_as_srgb = false, same_tf_as_srgb = false,
+                                    srgb_to = [0x3f20a180, 0x3d8d7e0e, 0x3c862d25, 0x3ea8a375, 0x3f6b6252, 0x3db4377d, 0x3d315d20, 0x3c39f9d2, 0x3f653de9],
+                                    to_srgb = [0x3fd485f3, 0xbdff0ae8, 0xbc948824, 0xbf1679bf, 0x3f9105e4, 0xbdcdffbe, 0xbd952b50, 0xbc08a42e, 0x3f8f3757])
+        .prophoto_rgb:
+            return GradientRgbSpace(kind = kind, tf = [0x3fe66666, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000], inv = [0x3f0e38e4, 0x3f800000, 0x80000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000],
+                                    same_gamut_as_srgb = false, same_tf_as_srgb = false,
+                                    srgb_to = [0x3f0782f0, 0x3dc96df5, 0x3c8a2586, 0x3ea90e0d, 0x3f5f97a7, 0x3df0ed14, 0x3e0ff0bb, 0x3ce6a988, 0x3f5d878c],
+                                    to_srgb = [0x40022ef2, 0xbe6a46df, 0xbc0be21f, 0xbf3a485e, 0x3f9dac6c, 0xbe1cf54f, 0xbe9d0d71, 0xbb3f35e0, 0x3f94bba8])
+        .a98_rgb:
+            return GradientRgbSpace(kind = kind, tf = [0x400ccccd, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000], inv = [0x3ee8ba2e, 0x3f800000, 0x80000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000],
+                                    same_gamut_as_srgb = false, same_tf_as_srgb = false,
+                                    srgb_to = [0x3f371590, 0xb77b4a80, 0xb72c2000, 0x3e91e46a, 0x3f7ffa94, 0x3d28b340, 0xb7540000, 0xb7f56400, 0x3f758615],
+                                    to_srgb = [0x3fb2fa07, 0x37af9760, 0x376bf000, 0xbecc02fa, 0x3f80027a, 0xbd2fedde, 0x36d20000, 0x37ffd400, 0x3f857622])
+        _:
+            trap("unreachable")
+
+# mark: SkColorSpaceXformSteps =================================================================
+
+## SkAlphaType.
+enum AlphaType as u8:
+    opaque = 0
+    premul = 1
+    unpremul = 2
+
+## SkColorSpaceXformSteps: what converting colors between two spaces does, in order.
+pub struct ColorXformSteps:
+    var unpremul: bool
+    var linearize: bool
+    var gamut_transform: bool
+    var encode: bool
+    var premul: bool
+    var src_tf: TransferFunction
+    var matrix: f32[9]
+    var dst_tf_inv: TransferFunction
+
+    ## Whether there is nothing to do.
+    func is_empty() -> bool:
+        return not self.unpremul and not self.linearize and not self.gamut_transform and not self.encode and not self.premul
+
+    ## SkColorSpaceXformSteps::apply(float*): the steps on one color.
+    func apply(c0: f32[4]) -> f32[4]:
+        var c = c0
+        if self.unpremul:
+            c = color_unpremul(c)
+        if self.linearize:
+            c = [transfer_apply(&self.src_tf, c[0]), transfer_apply(&self.src_tf, c[1]), transfer_apply(&self.src_tf, c[2]), c[3]]
+        if self.gamut_transform:
+            c = color_matrix_3x3(self.matrix, c)
+        if self.encode:
+            c = [transfer_apply(&self.dst_tf_inv, c[0]), transfer_apply(&self.dst_tf_inv, c[1]), transfer_apply(&self.dst_tf_inv, c[2]), c[3]]
+        if self.premul:
+            c = color_premul(c)
+        return c
+
+## The steps from `src` to `dst`, one of which is sRGB (`to_srgb` says which way).
+func color_xform_steps(space: const GradientRgbSpace*, to_srgb: bool, src_alpha: AlphaType, dst_alpha0: AlphaType) -> ColorXformSteps:
+    var steps = ColorXformSteps(unpremul = false, linearize = false, gamut_transform = false, encode = false, premul = false,
+                                src_tf = TransferFunction.from_bits(srgb_tf_bits), matrix = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dst_tf_inv = TransferFunction.from_bits(srgb_inv_bits))
+    # Opaque outputs are treated as the same alpha type as the source input.
+    var dst_alpha = dst_alpha0
+    if dst_alpha == .opaque:
+        dst_alpha = src_alpha
+    if space.kind == .srgb and src_alpha == dst_alpha:
+        return steps
+
+    if to_srgb:
+        steps.linearize = not space.tf_is_linear()
+        steps.src_tf = TransferFunction.from_bits(space.tf)
+        steps.encode = true
+    else:
+        steps.linearize = true
+        steps.encode = not space.tf_is_linear()
+        steps.dst_tf_inv = TransferFunction.from_bits(space.inv)
+    steps.unpremul = src_alpha == .premul
+    steps.gamut_transform = not space.same_gamut_as_srgb
+    steps.premul = src_alpha != .opaque and dst_alpha == .premul
+    if steps.gamut_transform:
+        let bits = space.to_srgb if to_srgb else space.srgb_to
+        for i in 0..<9usize:
+            steps.matrix[i] = f32.bits(bits[i])
+
+    # If we linearize then immediately reencode with the same transfer function, skip both.
+    if steps.linearize and not steps.gamut_transform and steps.encode and space.same_tf_as_srgb:
+        steps.linearize = false
+        steps.encode = false
+    # Skip unpremul...premul if there are no non-linear operations between.
+    if steps.unpremul and not steps.linearize and not steps.encode and steps.premul:
+        steps.unpremul = false
+        steps.premul = false
+    return steps

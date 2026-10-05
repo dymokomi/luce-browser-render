@@ -20,5 +20,5 @@ pub struct ColorStop:
 
 ## The non-zero default member initializers of Gfx::ColorStop; the constructor runs them first.
 pub func color_stop_init_fields(this: ColorStop*):
-    # position: C++ default AK :: NaN < float > (not translated by the generator)
-    return
+    # position: C++ default AK::NaN<float>
+    this.position = math32.nan

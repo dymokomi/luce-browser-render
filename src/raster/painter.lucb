@@ -41,6 +41,13 @@ pub struct Paint:
     ## SkPaint::setDither. Default: false
     pub var dither: bool = false
 
+    ## The paint's alpha (SkPaint::setAlphaf), applied after the shader. Default: 1
+    pub var alpha: f32 = 1.0
+
+    ## SkColorFilters::LinearToSRGBGamma as the paint's color filter: the shader's colors,
+    ## taken as linear sRGB, encoded to sRGB. Default: false
+    pub var linear_to_srgb: bool = false
+
     ## Sets a paint source to a solid color.
     pub func set_color(color: Color):
         self.shader = .solid_color(color = color)

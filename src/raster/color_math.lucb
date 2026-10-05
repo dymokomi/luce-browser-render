@@ -1,0 +1,200 @@
+#==============================================================================================
+#
+#   color_math - the per-lane math of Skia's color-conversion stages
+#
+#   DESCRIPTION:
+#       Port of the highp stages of Skia m144's src/opts/SkRasterPipeline_opts.h that convert
+#       colors between color spaces, as one lane computes them on arm64 NEON (mad is a fused
+#       vfmaq_f32, nmad vfmsq_f32, min/max vminq/vmaxq, round vcvtnq): the transfer functions
+#       (`parametric` and `gamma_` over approx_powf, approx_log2 and approx_pow2), matrix_3x3,
+#       unpremul, unpremul_polar and premul, and the CSS color stages gradients interpolated in
+#       other color spaces end with (css_lab_to_xyz, css_oklab_to_linear_srgb, css_hcl_to_lab
+#       with Skia's sin_/cos_ approximations, css_hsl_to_srgb, css_hwb_to_srgb). Plain
+#       arithmetic is unfused, as Skia is built (-ffp-contract=off).
+#
+#       Copyright (c) 2018 Google Inc. All rights reserved.
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+## skcms_TransferFunction: v <= d ? c * v + f : (a * v + b)^g + e.
+pub struct TransferFunction:
+    pub var g: f32
+    pub var a: f32
+    pub var b: f32
+    pub var c: f32
+    pub var d: f32
+    pub var e: f32
+    pub var f: f32
+
+    ## SkRasterPipeline::appendTransferFunction's choice of `gamma_` (a pure power curve) over
+    ## `parametric`.
+    func is_gamma() -> bool:
+        return self.a == 1.0 and self.b == 0.0 and self.c == 0.0 and self.d == 0.0 and self.e == 0.0 and self.f == 0.0
+
+    ## The bits of the seven values, in skcms order (g, a, b, c, d, e, f).
+    static func from_bits(bits: u32[7]) -> TransferFunction:
+        return TransferFunction(g = f32.bits(bits[0]), a = f32.bits(bits[1]), b = f32.bits(bits[2]), c = f32.bits(bits[3]), d = f32.bits(bits[4]),
+                                e = f32.bits(bits[5]), f = f32.bits(bits[6]))
+
+# mark: Powers =================================================================================
+
+## approx_log2: the exponent, refined by the mantissa.
+func approx_log2_neon(x: f32) -> f32:
+    let bits = x.bits()
+    let e = (f32)bits * (1.0 / 8388608.0)
+    let m = f32.bits((bits & 0x007fffff) | 0x3f000000)
+    return math32.fma(-m, 1.498030302, e - 124.225514990) - 1.725879990 / (0.3520887068 + m)
+
+## approx_pow2, clamped to [0, infinity] and rounded to the bits of the result.
+func approx_pow2_neon(x: f32) -> f32:
+    let f = x - math32.floor(x)
+    var approx = math32.fma(-f, 1.490129070, x + 121.274057500)
+    approx += 27.728023300 / (4.84252568 - f)
+    approx *= 8388608.0
+    approx = f32_vmin(f32_vmax(approx, 0.0), 2139095040.0)
+    return f32.bits(f32_round_nonneg(approx))
+
+## approx_powf: x^y, exact for 0 and 1.
+pub func approx_powf_neon(x: f32, y: f32) -> f32:
+    if x == 0.0 or x == 1.0:
+        return x
+    return approx_pow2_neon(approx_log2_neon(x) * y)
+
+# mark: Transfer functions =====================================================================
+
+## The `parametric` stage on one value: the sign set aside, the function applied to |v|.
+pub func transfer_parametric(tf: const TransferFunction*, input: f32) -> f32:
+    let bits = input.bits()
+    let sign = bits & 0x80000000
+    let v = f32.bits(bits ^ sign)
+    var result: f32 = 0.0
+    if v <= tf.d:
+        result = math32.fma(tf.c, v, tf.f)
+    else:
+        result = approx_powf_neon(math32.fma(tf.a, v, tf.b), tf.g) + tf.e
+    return f32.bits(sign | result.bits())
+
+## The `gamma_` stage on one value.
+func transfer_gamma(g: f32, input: f32) -> f32:
+    let bits = input.bits()
+    let sign = bits & 0x80000000
+    let v = f32.bits(bits ^ sign)
+    return f32.bits(sign | approx_powf_neon(v, g).bits())
+
+## SkRasterPipeline::appendTransferFunction's stage on one value.
+func transfer_apply(tf: const TransferFunction*, v: f32) -> f32:
+    if tf.is_gamma():
+        return transfer_gamma(tf.g, v)
+    return transfer_parametric(tf, v)
+
+# mark: Matrices and alpha =====================================================================
+
+## matrix_3x3 (column-major `m`, SkColorSpaceXformSteps' fSrcToDstMatrix).
+func color_matrix_3x3(m: const f32[], c: f32[4]) -> f32[4]:
+    let r = math32.fma(c[0], m[0], math32.fma(c[1], m[3], c[2] * m[6]))
+    let g = math32.fma(c[0], m[1], math32.fma(c[1], m[4], c[2] * m[7]))
+    let b = math32.fma(c[0], m[2], math32.fma(c[1], m[5], c[2] * m[8]))
+    return [r, g, b, c[3]]
+
+## unpremul: rgb divided by alpha (0 where 1/alpha is not below infinity).
+func color_unpremul(c: f32[4]) -> f32[4]:
+    let inv = 1.0 / c[3]
+    let scale = inv if inv < math32.infinity else 0.0
+    return [c[0] * scale, c[1] * scale, c[2] * scale, c[3]]
+
+## unpremul_polar: the two non-hue channels divided by alpha.
+func color_unpremul_polar(c: f32[4]) -> f32[4]:
+    let inv = 1.0 / c[3]
+    let scale = inv if inv < math32.infinity else 0.0
+    return [c[0], c[1] * scale, c[2] * scale, c[3]]
+
+## premul.
+func color_premul(c: f32[4]) -> f32[4]:
+    return [c[0] * c[3], c[1] * c[3], c[2] * c[3], c[3]]
+
+# mark: CSS color stages =======================================================================
+
+## css_lab_to_xyz: CIE Lab to XYZ D50.
+func css_lab_to_xyz(c: f32[4]) -> f32[4]:
+    let k: f32 = 24389.0 / 27.0
+    let e: f32 = 216.0 / 24389.0
+    let f1 = (c[0] + 16.0) * (1.0 / 116.0)
+    let f0 = (c[1] * (1.0 / 500.0)) + f1
+    let f2 = f1 - (c[2] * (1.0 / 200.0))
+    let c0 = f0 * f0 * f0
+    let c1 = f1 * f1 * f1
+    let c2 = f2 * f2 * f2
+    let x = c0 if c0 > e else (116.0 * f0 - 16.0) * (1.0 / k)
+    let y = c1 if c[0] > k * e else c[0] * (1.0 / k)
+    let z = c2 if c2 > e else (116.0 * f2 - 16.0) * (1.0 / k)
+    let d50_x: f32 = 0.3457 / 0.3585
+    let d50_z: f32 = (1.0 - 0.3457 - 0.3585) / 0.3585
+    return [x * d50_x, y * 1.0, z * d50_z, c[3]]
+
+## css_oklab_to_linear_srgb.
+func css_oklab_to_linear_srgb(c: f32[4]) -> f32[4]:
+    let l_ = c[0] + 0.3963377774 * c[1] + 0.2158037573 * c[2]
+    let m_ = c[0] - 0.1055613458 * c[1] - 0.0638541728 * c[2]
+    let s_ = c[0] - 0.0894841775 * c[1] - 1.2914855480 * c[2]
+    let l = l_ * l_ * l_
+    let m = m_ * m_ * m_
+    let s = s_ * s_ * s_
+    return [4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+            -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s, c[3]]
+
+## sin5q_: sin(x * 2 * pi) for x in [-1/4, 1/4], a degree 5 polynomial.
+func sin5q(x: f32) -> f32:
+    let x2 = x * x
+    return x * math32.fma(math32.fma(x2, 74.4388885, -41.1693687), x2, 6.28230858)
+
+## sin_.
+func pipeline_sin(x0: f32) -> f32:
+    let one_over_pi2: f32 = 1.0 / (2.0 * 3.14159265)
+    var x = math32.fma(x0, -one_over_pi2, 0.25)
+    x = 0.25 - math32.abs(x - math32.floor(x + 0.5))
+    return sin5q(x)
+
+## cos_.
+func pipeline_cos(x0: f32) -> f32:
+    let one_over_pi2: f32 = 1.0 / (2.0 * 3.14159265)
+    var x = x0 * one_over_pi2
+    x = 0.25 - math32.abs(x - math32.floor(x + 0.5))
+    return sin5q(x)
+
+## css_hcl_to_lab: hue (degrees), chroma, lightness to L, a, b.
+func css_hcl_to_lab(c: f32[4]) -> f32[4]:
+    let hue_radians = c[0] * (3.14159265 / 180.0)
+    return [c[2], c[1] * pipeline_cos(hue_radians), c[1] * pipeline_sin(hue_radians), c[3]]
+
+## mod_: x - y * floor(x / y), with the multiply by 1 / y and a fused nmad.
+func pipeline_mod(x: f32, y: f32) -> f32:
+    return math32.fma(-y, math32.floor(x * (1.0 / y)), x)
+
+## css_hsl_to_srgb_.
+func css_hsl_to_srgb_rgb(h0: f32, s0: f32, l0: f32) -> (f32, f32, f32):
+    let h = pipeline_mod(h0, 360.0)
+    let s = s0 * 0.01
+    let l = l0 * 0.01
+    let k0 = pipeline_mod(0.0 + h * (1.0 / 30.0), 12.0)
+    let k1 = pipeline_mod(8.0 + h * (1.0 / 30.0), 12.0)
+    let k2 = pipeline_mod(4.0 + h * (1.0 / 30.0), 12.0)
+    let a = s * f32_vmin(l, 1.0 - l)
+    return (l - a * f32_vmax(-1.0, f32_vmin(f32_vmin(k0 - 3.0, 9.0 - k0), 1.0)), l - a * f32_vmax(-1.0, f32_vmin(f32_vmin(k1 - 3.0, 9.0 - k1), 1.0)),
+            l - a * f32_vmax(-1.0, f32_vmin(f32_vmin(k2 - 3.0, 9.0 - k2), 1.0)))
+
+## css_hsl_to_srgb.
+func css_hsl_to_srgb(c: f32[4]) -> f32[4]:
+    let rgb = css_hsl_to_srgb_rgb(c[0], c[1], c[2])
+    return [rgb.0, rgb.1, rgb.2, c[3]]
+
+## css_hwb_to_srgb.
+func css_hwb_to_srgb(c: f32[4]) -> f32[4]:
+    let g = c[1] * 0.01
+    let b = c[2] * 0.01
+    let gray = g / (g + b)
+    let rgb = css_hsl_to_srgb_rgb(c[0], 100.0, 50.0)
+    if (g + b) >= 1.0:
+        return [gray, gray, gray, c[3]]
+    return [rgb.0 * (1.0 - g - b) + g, rgb.1 * (1.0 - g - b) + g, rgb.2 * (1.0 - g - b) + g, c[3]]

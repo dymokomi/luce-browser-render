@@ -1,0 +1,94 @@
+#==============================================================================================
+#
+#   tests_cpu_gradient_skia - the player's gradients against Skia's pixels
+#
+#   DESCRIPTION:
+#       Linear, radial and conic gradient commands in every interpolation space and hue
+#       method Ladybird asks Skia for, compared with the pixels DisplayListPlayerSkia renders
+#       (tests_skia_reference_data_5.lucb, from luce-browser-tools'
+#       oracles/luce-browser-render/gradients). The stops have hues that differ, a
+#       half-transparent one (premultiplied interpolation, unpremul before the conversion
+#       back) and a gray one (a powerless hue).
+#
+#       The conversions into Lab and OKLab call cbrt and atan2, which libm computes; the scenes
+#       allow one level on a few pixels for that (none differs on macOS).
+#
+#==============================================================================================
+
+## The stops of the scenes.
+func test_gradient_stops() -> ColorStopData:
+    var data: ColorStopData
+    ak.vector_append_t(&data.list, gfx.ColorStop(color = test_color(230, 20, 40, 255), position = 0.0))
+    ak.vector_append_t(&data.list, gfx.ColorStop(color = test_color(30, 200, 60, 128), position = 0.35))
+    ak.vector_append_t(&data.list, gfx.ColorStop(color = test_color(20, 40, 220, 255), position = 0.7))
+    ak.vector_append_t(&data.list, gfx.ColorStop(color = test_color(128, 128, 128, 255), position = 1.0))
+    return data
+
+## A rectangular interpolation space.
+func test_rectangular(space: css_data.RectangularColorSpace) -> ColorInterpolationMethod:
+    return .rectangular_color_space(value = space)
+
+## A polar interpolation space with its hue method.
+func test_polar(space: css_data.PolarColorSpace, hue: css_data.HueInterpolationMethod) -> ColorInterpolationMethod:
+    return .polar_color_interpolation_method(value = PolarColorInterpolationMethod(color_space = space, hue_interpolation_method = hue))
+
+## The 24x16 linear gradient scene at `angle` in `method`, compared with `expected`.
+func test_linear_scene(name: str, expected: str, method: ColorInterpolationMethod, angle: f32):
+    let scene = test_scene_new(24, 16)
+    defer test_scene_release(&scene)
+    let data = LinearGradientData(gradient_angle = angle, color_stops = test_gradient_stops(), interpolation_method = method)
+    display_list_player_paint_linear_gradient(test_scene_player(&scene), PaintLinearGradient(gradient_rect = test_rect(0, 0, 24, 16), linear_gradient_data = data))
+    expect_like_skia(&scene, name, expected, 1, 8)
+
+test "cpu gradient skia: linear gradients in the rectangular spaces":
+    test_linear_scene("grad_srgb", skia_grad_srgb, test_rectangular(css_data.RectangularColorSpace.srgb), 63.0)
+    test_linear_scene("grad_srgb_linear", skia_grad_srgb_linear, test_rectangular(css_data.RectangularColorSpace.srgb_linear), 63.0)
+    test_linear_scene("grad_lab", skia_grad_lab, test_rectangular(css_data.RectangularColorSpace.lab), 63.0)
+    test_linear_scene("grad_oklab", skia_grad_oklab, test_rectangular(css_data.RectangularColorSpace.oklab), 63.0)
+    test_linear_scene("grad_display_p3", skia_grad_display_p3, test_rectangular(css_data.RectangularColorSpace.display_p3), 63.0)
+    test_linear_scene("grad_rec2020", skia_grad_rec2020, test_rectangular(css_data.RectangularColorSpace.rec2020), 63.0)
+    test_linear_scene("grad_prophoto", skia_grad_prophoto, test_rectangular(css_data.RectangularColorSpace.prophoto_rgb), 63.0)
+    test_linear_scene("grad_a98", skia_grad_a98, test_rectangular(css_data.RectangularColorSpace.a98_rgb), 63.0)
+
+test "cpu gradient skia: linear gradients in the polar spaces and hue methods":
+    test_linear_scene("grad_hsl", skia_grad_hsl, test_polar(css_data.PolarColorSpace.hsl, css_data.HueInterpolationMethod.shorter), 63.0)
+    test_linear_scene("grad_hwb_longer", skia_grad_hwb_longer, test_polar(css_data.PolarColorSpace.hwb, css_data.HueInterpolationMethod.longer), 63.0)
+    test_linear_scene("grad_lch_increasing", skia_grad_lch_increasing, test_polar(css_data.PolarColorSpace.lch, css_data.HueInterpolationMethod.increasing), 63.0)
+    test_linear_scene("grad_oklch_decreasing", skia_grad_oklch_decreasing, test_polar(css_data.PolarColorSpace.oklch, css_data.HueInterpolationMethod.decreasing), 63.0)
+    test_linear_scene("grad_oklch_angle", skia_grad_oklch_angle, test_polar(css_data.PolarColorSpace.oklch, css_data.HueInterpolationMethod.shorter), -216.8699)
+
+test "cpu gradient skia: a repeating linear gradient":
+    let scene = test_scene_new(24, 16)
+    defer test_scene_release(&scene)
+    var stops = test_gradient_stops()
+    stops.repeat_length = 0.3
+    let list = ak.vector_span(&stops.list)
+    list[0].position = 0.1
+    list[1].position = 0.2
+    list[2].position = 0.3
+    list[3].position = 0.4
+    let data = LinearGradientData(gradient_angle = 30.0, color_stops = stops, interpolation_method = test_rectangular(css_data.RectangularColorSpace.srgb))
+    display_list_player_paint_linear_gradient(test_scene_player(&scene), PaintLinearGradient(gradient_rect = test_rect(0, 0, 24, 16), linear_gradient_data = data))
+    expect_like_skia(&scene, "grad_repeating", skia_grad_repeating, 0, 0)
+
+test "cpu gradient skia: radial and conic gradients":
+    let radial = test_scene_new(24, 16)
+    defer test_scene_release(&radial)
+    let radial_data = RadialGradientData(color_stops = test_gradient_stops(), interpolation_method = test_rectangular(css_data.RectangularColorSpace.oklab))
+    display_list_player_paint_radial_gradient(test_scene_player(&radial), PaintRadialGradient(rect = test_rect(0, 0, 24, 16), radial_gradient_data = radial_data,
+                                                                                              center = test_point(10, 7), size = gfx.IntSize(m_width = 14, m_height = 6)))
+    expect_like_skia(&radial, "grad_radial", skia_grad_radial, 1, 8)
+
+    # A zero radius: MakeDegenerateGradient's last color.
+    let degenerate = test_scene_new(8, 8)
+    defer test_scene_release(&degenerate)
+    let degenerate_data = RadialGradientData(color_stops = test_gradient_stops(), interpolation_method = test_rectangular(css_data.RectangularColorSpace.srgb))
+    display_list_player_paint_radial_gradient(test_scene_player(&degenerate), PaintRadialGradient(rect = test_rect(0, 0, 8, 8), radial_gradient_data = degenerate_data,
+                                                                                                  center = test_point(0, 0), size = gfx.IntSize(m_width = 0, m_height = 0)))
+    expect_like_skia(&degenerate, "grad_radial_degenerate", skia_grad_radial_degenerate, 0, 0)
+
+    let conic = test_scene_new(24, 16)
+    defer test_scene_release(&conic)
+    let conic_data = ConicGradientData(start_angle = 30.0, color_stops = test_gradient_stops(), interpolation_method = test_polar(css_data.PolarColorSpace.hsl, css_data.HueInterpolationMethod.shorter))
+    display_list_player_paint_conic_gradient(test_scene_player(&conic), PaintConicGradient(rect = test_rect(0, 0, 24, 16), conic_gradient_data = conic_data, position = test_point(11, 8)))
+    expect_like_skia(&conic, "grad_conic", skia_grad_conic, 0, 0)

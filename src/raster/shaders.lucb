@@ -56,25 +56,29 @@ pub enum Shader:
             .solid_color(_): return true
             _: return false
 
-    ## Makes a gradient interpolate its colors premultiplied (Skia's
-    ## Interpolation::InPremul::kYes, which Ladybird's CSS gradients use) instead of
-    ## unpremultiplied. Other shaders are unchanged.
-    pub func interpolate_in_premul():
+    ## Sets how a gradient interpolates its colors (SkGradientShader::Interpolation: the
+    ## color space, the hue method, premultiplied or not; Ladybird's CSS gradients
+    ## interpolate premultiplied). Other shaders are unchanged.
+    pub func set_interpolation(interpolation: GradientInterpolation):
         match self:
             .linear_gradient(g):
                 var ng = g
-                ng.base.interpolate_premul = true
+                ng.base.interpolation = interpolation
                 self = .linear_gradient(g = ng)
             .radial_gradient(g):
                 var ng = g
-                ng.base.interpolate_premul = true
+                ng.base.interpolation = interpolation
                 self = .radial_gradient(g = ng)
             .sweep_gradient(g):
                 var ng = g
-                ng.base.interpolate_premul = true
+                ng.base.interpolation = interpolation
                 self = .sweep_gradient(g = ng)
             _:
                 return
+
+    ## Makes a gradient interpolate its colors premultiplied (Interpolation::InPremul::kYes).
+    pub func interpolate_in_premul():
+        self.set_interpolation(GradientInterpolation(in_premul = true))
 
     func push_stages(cs: ColorSpace, p: RasterPipelineBuilder*) -> bool:
         match self:

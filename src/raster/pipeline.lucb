@@ -115,8 +115,18 @@ enum Stage as u8:
     gamma_expand_destination_srgb = 81
     gamma_compress_srgb = 82
     transform_perspective = 83
+    unpremul = 84
+    unpremul_polar = 85
+    css_lab_to_xyz = 86
+    css_oklab_to_linear_srgb = 87
+    css_hcl_to_lab = 88
+    css_hsl_to_srgb = 89
+    css_hwb_to_srgb = 90
+    xform_linearize = 91
+    xform_gamut = 92
+    xform_encode = 93
 
-let stages_count: usize = 84
+let stages_count: usize = 94
 
 ## Skia's gForceHighPrecisionRasterPipeline: every pipeline compiles to highp while set.
 var force_highp: bool = false
@@ -164,6 +174,7 @@ struct Context:
     var gather: GatherCtx
     var sampler: SamplerCtx
     var transform: Transform = Transform()
+    var xform: ColorXformSteps  # the color conversion of xform_linearize, xform_gamut, xform_encode
 
 ## The tile modes of the fused bilinear / bicubic samplers (Skia appends repeat_x / mirror_x
 ## and repeat_y / mirror_y per tap).
@@ -270,6 +281,22 @@ struct RasterPipelineBuilder:
         if ts.is_finite() and not ts.is_identity():
             self.push(.transform_perspective if ts.has_perspective() else .transform)
             self.ctx.transform = ts
+
+    ## SkColorSpaceXformSteps::apply(SkRasterPipeline*): unpremul, the transfer function
+    ## (parametric or gamma_), matrix_3x3, the inverse transfer function and premul, as the
+    ## steps say.
+    func push_color_xform_steps(steps: ColorXformSteps):
+        self.ctx.xform = steps
+        if steps.unpremul:
+            self.push(.unpremul)
+        if steps.linearize:
+            self.push(.xform_linearize)
+        if steps.gamut_transform:
+            self.push(.xform_gamut)
+        if steps.encode:
+            self.push(.xform_encode)
+        if steps.premul:
+            self.push(.premultiply)
 
     ## Skia's appendMatrix of a matrix that only scales and translates x.
     func push_scale_translate_x(sx: f32, tx: f32):

@@ -115,8 +115,8 @@ pub struct RadialGradient:
                     # faster. If we got here, we know that endRadius is not equal to 0, so
                     # this produces a meaningful gradient
                     return RadialGradient.new_radial_unchecked(start_point, end_radius, new_stops, mode, transform)
-                # TODO: Consider making a degenerate gradient
-                return none
+                # Otherwise use the default degenerate case.
+                return degenerate_gradient(stops, mode)
 
             if is_nearly_zero_within_tolerance(start_radius, degenerate_threshold):
                 # If the center positions are the same, then the gradient is the radial
@@ -128,6 +128,23 @@ pub struct RadialGradient:
                 return RadialGradient.new_radial_unchecked(start_point, end_radius, copy_stops(stops), mode, transform)
 
         return create_radial(start_point, start_radius, end_point, end_radius, stops, mode, transform)
+
+    ## SkGradientShader::MakeRadial: a gradient from `center` out to `radius`. Returns
+    ## `Shader.solid_color` for a single stop or a degenerate radius
+    ## (MakeDegenerateGradient), and none for no stops, a negative radius or a transform that
+    ## is not invertible. The stops are copied.
+    pub static func new_simple(center: Point, radius: f32, stops: const GradientStop[], mode: SpreadMode, transform: Transform) -> Shader?:
+        if radius < 0.0 or stops.length == 0:
+            return none
+        if stops.length == 1:
+            return .solid_color(color = stops[0].color)
+        if transform.invert() == none:
+            return none
+        if is_nearly_zero_within_tolerance(radius, degenerate_threshold):
+            # Degenerate gradient optimization, and no special logic needed for clamped radial
+            # gradient
+            return degenerate_gradient(stops, mode)
+        return RadialGradient.new_radial_unchecked(center, radius, copy_stops(stops), mode, transform)
 
     static func new_radial_unchecked(center: Point, radius: f32, stops: Vec[GradientStop], mode: SpreadMode, transform: Transform) -> Shader?:
         let inv = invert(radius)
