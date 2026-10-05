@@ -243,7 +243,7 @@ func display_list_player_cpu_draw_external_content_impl(base: DisplayListPlayer*
     defer image.release()
     let dst_rect = cpu_rect(command.dst_rect) else return
     let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
-    cpu_canvas_draw_image_rect(canvas, &image, dst_rect, command.scaling_mode, cpu_image_color_xform(bitmap))
+    cpu_canvas_draw_image_rect(canvas, &image, dst_rect, command.scaling_mode, gfx.immutable_bitmap_color_xform(bitmap))
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:27 Web::Painting::DisplayListPlayerSkia::draw_scaled_immutable_bitmap (override).
 func display_list_player_cpu_draw_scaled_immutable_bitmap_impl(base: DisplayListPlayer*, command: DrawScaledImmutableBitmap):
@@ -255,7 +255,7 @@ func display_list_player_cpu_draw_scaled_immutable_bitmap_impl(base: DisplayList
     let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
     cpu_canvas_save(canvas)
     cpu_canvas_clip_rect(canvas, clip_rect, true)
-    cpu_canvas_draw_image_rect(canvas, &image, dst_rect, command.scaling_mode, cpu_image_color_xform(command.bitmap))
+    cpu_canvas_draw_image_rect(canvas, &image, dst_rect, command.scaling_mode, gfx.immutable_bitmap_color_xform(command.bitmap))
     cpu_canvas_restore(canvas)
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:28 Web::Painting::DisplayListPlayerSkia::draw_repeated_immutable_bitmap (override).
@@ -281,7 +281,7 @@ func display_list_player_cpu_draw_repeated_immutable_bitmap_impl(base: DisplayLi
 
     var paint = raster.Paint()
     paint.anti_alias = true
-    paint.shader = cpu_image_shader(&image, raster.SpreadMode.repeat, command.scaling_mode, matrix, cpu_image_color_xform(command.bitmap))
+    paint.shader = cpu_image_shader(&image, raster.SpreadMode.repeat, command.scaling_mode, matrix, gfx.immutable_bitmap_color_xform(command.bitmap))
     let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
     cpu_canvas_fill_rect(canvas, fill_rect, &paint)
 

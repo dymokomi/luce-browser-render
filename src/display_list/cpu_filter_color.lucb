@@ -7,11 +7,12 @@
 #       Skia m144's raster pipeline evaluates them in its highp (float) stages on aarch64
 #       (src/opts/SkRasterPipeline_opts.h): load_8888 (from_byte), unpremul, matrix_4x5 (fused
 #       multiply-adds, as NEON's mad), clamp_01 / clamp_a_01, premul, byte_tables, parametric
-#       (with approx_powf), the SkBlendModeColorFilter stages and store_8888 (to_unorm, which
-#       rounds to nearest even as vcvtnq_u32_f32 does). The color filters are those of
-#       src/effects/colorfilters: SkMatrixColorFilter, SkTableColorFilter,
-#       SkColorSpaceXformColorFilter (SRGBToLinearGamma, LinearToSRGBGamma),
-#       SkBlendModeColorFilter (kDstIn for a layer's alpha, kSrcIn for a drop shadow's color)
+#       (with raster.pipeline_approx_powf, the one color_xform runs), the
+#       SkBlendModeColorFilter stages and store_8888 (to_unorm, which rounds to nearest even
+#       as vcvtnq_u32_f32 does). The color filters are those of src/effects/colorfilters:
+#       SkMatrixColorFilter, SkTableColorFilter, SkColorSpaceXformColorFilter
+#       (SRGBToLinearGamma, LinearToSRGBGamma), SkBlendModeColorFilter (kDstIn for a layer's
+#       alpha, kSrcIn for a drop shadow's color)
 #       and the luma runtime color filter (SkLumaColorFilter).
 #
 #       Copyright (c) 2026 the luce-browser authors.
@@ -206,39 +207,5 @@ func cpu_parametric(tf: const CpuTransferFunction*, input: f32) -> f32:
     if v <= tf.d:
         result = math32.fma(tf.c, v, tf.f)
     else:
-        result = cpu_approx_powf(math32.fma(tf.a, v, tf.b), tf.g) + tf.e
+        result = raster.pipeline_approx_powf(math32.fma(tf.a, v, tf.b), tf.g) + tf.e
     return f32.bits(sign | result.bits())
-
-## approx_powf: x^y through approx_log2 and approx_pow2 (exact for 0 and 1).
-func cpu_approx_powf(x: f32, y: f32) -> f32:
-    if x == 0.0 or x == 1.0:
-        return x
-    return cpu_approx_pow2(cpu_approx_log2(x) * y)
-
-## approx_log2.
-func cpu_approx_log2(x: f32) -> f32:
-    let bits = x.bits()
-    let e = (f32)bits * (1.0 / 8388608.0)
-    let m = f32.bits((bits & 0x007fffff) | 0x3f000000)
-    # nmad(m, 1.498030302, e - 124.225514990) = (e - 124.22...) - m * 1.498...
-    return math32.fma(-m, 1.498030302, e - 124.225514990) - 1.725879990 / (0.3520887068 + m)
-
-## approx_pow2.
-func cpu_approx_pow2(x: f32) -> f32:
-    let f = cpu_fract(x)
-    var approx = math32.fma(-f, 1.490129070, x + 121.274057500)
-    approx += 27.728023300 / (4.84252568 - f)
-    approx *= 8388608.0
-    approx = cpu_min_f32(cpu_max_f32_nan0(approx), 2139095040.0)
-    return f32.bits((u32)cpu_round_even_u32(approx))
-
-## vcvtnq_u32_f32 for values up to 2^31.
-func cpu_round_even_u32(v: f32) -> u32:
-    let f = math32.floor(v)
-    let d = v - f
-    let i = (u32)f
-    if d > 0.5:
-        return i + 1
-    if d < 0.5:
-        return i
-    return i + (i & 1)

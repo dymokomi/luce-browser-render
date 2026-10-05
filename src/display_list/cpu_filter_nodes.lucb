@@ -172,8 +172,10 @@ func cpu_filter_image(ctx: const CpuFilterContext*, bitmap: const gfx.ImmutableB
     let height = cpu_irect_height(subset)
     let view = cpu_blur_view(ctx.arena, pixels, stride, subset.left, subset.top, width, height)
     var image = cpu_fr_of_pixels(view, width, height, subset.left, subset.top)
-    # An SkImage's special image has no known transparent boundary.
+    # An SkImage's special image has no known transparent boundary, and keeps the image's
+    # color space.
     image.padded = false
+    image.xform = gfx.immutable_bitmap_color_xform(bitmap)
     let transform = cpu_fm_concat(ctx.layer, cpu_fm_rect_to_rect(src.0, src.1, src.2, src.3, dst.0, dst.1, dst.2, dst.3))
     # to_skia_sampling_options: None and NearestNeighbor sample nearest, the others linear.
     let linear = scaling_mode == gfx.ScalingMode.bilinear or scaling_mode == gfx.ScalingMode.bilinear_mipmap

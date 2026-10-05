@@ -200,6 +200,18 @@ sampler on both levels, lerped), never the bilerp_clamp_8888 fast path. `tests_c
 .lucb` compares seven scenes from `oracles/luce-browser-render/images` with
 DisplayListPlayerSkia's pixels: all exact.
 
+An image tagged with a color space (ImmutableBitmap's Gfx::ColorSpace, which ImmutableBitmap::
+create gives its SkImage) is converted to the sRGB surface after sampling, as SkImageShader
+appends SkColorSpaceXformSteps (`gfx.immutable_bitmap_color_xform`: luce-color's `icc.Steps`,
+run by the raster's `color_xform` stage). Since fix/fidelity-svg the conversion reaches every
+place Skia samples such an image: the player's images and repeated images, the canvas 2D
+painter's draw_bitmap and image patterns (`gfx/painter_raster.lucb`;
+`tests_gfx_paint_color.lucb` matches PainterSkia's pixels for Display P3 and 2.2-gamma images
+exactly, from `oracles/luce-browser-render/color_managed`), and SkImageFilters::Image (a
+FilterResult keeps the image's steps and runs them after sampling, before its color filters;
+the raster pipeline's `pipeline_approx_powf` is the one the color filters use too; three
+filter scenes match exactly).
+
 ## Box shadows (fix/fidelity-3d)
 
 Box shadows draw as Skia's raster device draws a shape whose paint has
@@ -296,7 +308,7 @@ src/effects/imagefilters, SkBlurEngine):
   **arithmetic** (Skia's shortcuts, then the arithmetic blender).
 
 The canvas calls it at restore (layers with a filter, the text-shadow blur) and at save
-(backdrops, the prior layer clamped). `tests_cpu_filter*.lucb` compare 64 scenes (every node
+(backdrops, the prior layer clamped). `tests_cpu_filter*.lucb` compare 67 scenes (every node
 kind, blur at sigma 1.5 to 300, every blend mode, rotated layer matrices, backdrops) with Skia
 m144's pixels for the donor's own Gfx::Filter graphs: all exact but `image_bilinear` (1 level
 on 2 pixels: a scaled image with linear sampling goes through Skia's strict, shader-tiled image
@@ -334,8 +346,8 @@ nearest sampling's round-down, conics) was merged last, and then:
 
 1. `luce-base fmt --check` on every hand-written `.lucb`;
 2. `luce-base check -W` on raster, gfx, web_fonts and display_list, failing on any output;
-3. `luce-base test` of gfx (359 tests), web_fonts (28; the font engine's oracle and unit
-   tests moved to luce-fonts with the engine, 2026-10-03), display_list (119, `--native`) and
+3. `luce-base test` of gfx (361 tests), web_fonts (28; the font engine's oracle and unit
+   tests moved to luce-fonts with the engine, 2026-10-03), display_list (120, `--native`) and
    raster (53), and the raster integration suite (`tests/run_raster.py`, 291 scenes).
 
 ## Remaining traps, stubs and gates

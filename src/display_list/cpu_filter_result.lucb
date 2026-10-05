@@ -60,6 +60,9 @@ struct CpuFr:
     ## fColorFilter: `ops[0]` is applied first.
     var ops: CpuColorOp[12] = [CpuColorOp(), CpuColorOp(), CpuColorOp(), CpuColorOp(), CpuColorOp(), CpuColorOp(), CpuColorOp(), CpuColorOp(), CpuColorOp(), CpuColorOp(), CpuColorOp(), CpuColorOp()]
     var op_count: u32
+    ## The image's color space differs from the filter's (an SkImage tagged with one): the
+    ## steps to sRGB that SkImageShader appends after sampling it, before the color filters.
+    var xform: raster.ColorXform? = none
 
 # mark: Arena and contexts =====================================================================
 
@@ -150,11 +153,19 @@ func cpu_fr_tiled_texel(fr: const CpuFr*, x: i32, y: i32) -> CpuRgba:
         return cpu_rgba_zero()
     return cpu_fr_texel(fr, x, y)
 
-## The image sampled at layer-space pixel (x, y) (its center), before the color filters.
+## The image sampled at layer-space pixel (x, y) (its center), in the filter's color space,
+## before the color filters.
 func cpu_fr_sample_image(fr: const CpuFr*, inverse: const CpuFMatrix*, integer: (i32, i32)?, x: i32, y: i32) -> CpuRgba:
     if let origin = integer:
-        return cpu_fr_tiled_texel(fr, x - origin.0, y - origin.1)
-    return cpu_fr_sample_point(fr, inverse, (f32)x + 0.5, (f32)y + 0.5, not fr.linear)
+        return cpu_fr_converted(fr, cpu_fr_tiled_texel(fr, x - origin.0, y - origin.1))
+    return cpu_fr_converted(fr, cpu_fr_sample_point(fr, inverse, (f32)x + 0.5, (f32)y + 0.5, not fr.linear))
+
+## A color sampled from `fr`'s image in the filter's (sRGB) color space: the image's color
+## space steps, when it has some.
+func cpu_fr_converted(fr: const CpuFr*, color: CpuRgba) -> CpuRgba:
+    let x = fr.xform else return color
+    let out = x.apply([color.r, color.g, color.b, color.a])
+    return CpuRgba(r = out[0], g = out[1], b = out[2], a = out[3])
 
 ## The image sampled at the layer-space point (cx, cy): nearest-neighbor, or the raster
 ## pipeline's bilinear sampler (four taps at +/- 1/2 weighted by (1 - f) and f, accumulated
@@ -251,6 +262,7 @@ func cpu_fr_shader_sample(fr: const CpuFr*, sampler: const (CpuFMatrix, (i32, i3
         # Any point (kNonTrivialSampling): through the matrix, nearest-neighbor with
         # roundDownAtInteger, so an exact integer coordinate picks the texel before it.
         color = cpu_fr_sample_point(fr, &(*sampler).0, cx, cy, nearest or not fr.linear)
+    color = cpu_fr_converted(fr, color)
     for i in 0..<fr.op_count:
         color = cpu_color_op_apply(&fr.ops[i], color)
     return color
@@ -348,7 +360,7 @@ func cpu_fr_resolve(ctx: const CpuFilterContext*, fr: const CpuFr*, dst: CpuIRec
         bounds = cpu_irect_intersect(dst, fr.bounds) else return cpu_fr_empty()
     if cpu_irect_is_empty(bounds):
         return cpu_fr_empty()
-    if fr.op_count == 0 and not fr.clamp and not preserve_dst:
+    if fr.op_count == 0 and not fr.clamp and not preserve_dst and fr.xform == none:
         if cpu_fm_integer_translation(fr.transform) != none:
             # subset(): the same pixels, restricted.
             var subset = *fr

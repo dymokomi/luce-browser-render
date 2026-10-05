@@ -196,6 +196,19 @@ func test_filter_color(r: u32, g: u32, b: u32, a: u32) -> gfx.Color:
 
 ## The oracle's 10x8 pattern (pattern_pixel), premultiplied BGRA, as an ImmutableBitmap.
 func test_filter_pattern_bitmap(width: i32, height: i32) -> gfx.ImmutableBitmap*:
+    var color_space: gfx.ColorSpace = ---
+    gfx.color_space_construct(&color_space)
+    return test_filter_pattern_bitmap_in(width, height, color_space)
+
+## The pattern tagged with the color space of a CICP primaries and transfer function.
+func test_filter_pattern_bitmap_cicp(width: i32, height: i32, primaries: gfx.MediaColorPrimaries, transfer: gfx.MediaTransferCharacteristics) -> gfx.ImmutableBitmap*:
+    let cicp = gfx.MediaCodingIndependentCodePoints(m_color_primaries = primaries, m_transfer_characteristics = transfer, m_matrix_coefficients = gfx.MediaMatrixCoefficients.bt709,
+                                                    m_video_full_range_flag = gfx.MediaVideoFullRangeFlag.full)
+    let color_space = gfx.color_space_from_cicp(cicp) catch failure: trap("cicp")
+    return test_filter_pattern_bitmap_in(width, height, color_space)
+
+## The pattern in `color_space`.
+func test_filter_pattern_bitmap_in(width: i32, height: i32, color_space: gfx.ColorSpace) -> gfx.ImmutableBitmap*:
     let bitmap = gfx.bitmap_create_alpha_type(gfx.BitmapFormat.bgra8888, gfx.AlphaType.premultiplied, gfx.IntSize(m_width = width, m_height = height)) else trap("bitmap")
     for j in 0..<height:
         let row = gfx.bitmap_scanline(bitmap, j) else trap("scanline")
@@ -205,8 +218,6 @@ func test_filter_pattern_bitmap(width: i32, height: i32) -> gfx.ImmutableBitmap*
             let b = cpu_max_i32(0, 255 - (i + j) * 13)
             let a = 255 - ((i * 7 + j * 11) % 5) * 40
             row[(usize)i] = ((u32)a << 24) | ((u32)test_filter_premul(r, a) << 16) | ((u32)test_filter_premul(g, a) << 8) | (u32)test_filter_premul(b, a)
-    var color_space: gfx.ColorSpace = ---
-    gfx.color_space_construct(&color_space)
     return gfx.immutable_bitmap_create_color_space(bitmap, color_space)
 
 ## SkPremultiplyARGBInline's rounding: (c * a + 128) scaled by 257 / 65536.

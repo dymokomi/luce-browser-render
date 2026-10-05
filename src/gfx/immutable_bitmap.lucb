@@ -73,6 +73,18 @@ pub func immutable_bitmap_bitmap(this: const ImmutableBitmap*) -> const Bitmap*?
     # always has the bitmap.
     return this.m_impl.bitmap
 
+## The conversion Skia applies to the pixels of the bitmap's SkImage when it draws them on an
+## sRGB surface (every PaintingSurface's SkSurface is sRGB): SkImageShader appends
+## SkColorSpaceXformSteps from the image's color space (ImmutableBitmap::create gives the
+## SkImage the bitmap's Gfx::ColorSpace) after sampling. luce-color's `icc.Steps` for the
+## premultiplied pixels, run by the raster's color_xform stage; none for an sRGB (or
+## untagged) bitmap, which draws as it is.
+pub func immutable_bitmap_color_xform(this: const ImmutableBitmap*) -> raster.ColorXform?:
+    var color_space = this.m_impl.color_space
+    let source = *color_space_color_space_sk_sp(&color_space) else return none
+    let destination = icc.ColorSpace.srgb()
+    return raster.ColorXform.make(icc.Steps.make(source, .premul, &destination, .premul))
+
 ## Ported from Libraries/LibGfx/ImmutableBitmap.cpp:266 Gfx::ImmutableBitmap::get_pixel.
 pub func immutable_bitmap_get_pixel(this: const ImmutableBitmap*, x: i32, y: i32) -> Color:
     return bitmap_get_pixel(this.m_impl.bitmap else trap("VERIFY: ImmutableBitmap without pixels"), x, y)

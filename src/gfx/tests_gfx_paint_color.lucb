@@ -1,0 +1,65 @@
+#==============================================================================================
+#
+#   tests_gfx_paint_color - the painter's draw_bitmap of images in other color spaces
+#
+#   DESCRIPTION:
+#       PainterSkia::draw_bitmap draws the bitmap's SkImage, which carries its
+#       Gfx::ColorSpace, so SkImageShader converts the sampled pixels to the sRGB surface.
+#       PainterRaster does the same through the raster's color_xform stage. The pixels are
+#       the donor's (luce-browser-tools' oracles/luce-browser-render/color_managed, PainterSkia
+#       over a bitmap): a 4x3 image tagged Display P3 or BT.709 with a 2.2 gamma, drawn
+#       nearest-neighbor 2x and bilinear at 0.6 alpha onto a 12x10 bitmap.
+#
+#==============================================================================================
+
+## The oracle's scene: the image in `color_space` drawn twice onto a new 12x10 bitmap.
+func test_gfx_paint_color_scene(color_space: ColorSpace) -> Bitmap*:
+    let target = bitmap_create_alpha_type(BitmapFormat.bgra8888, AlphaType.premultiplied, IntSize(m_width = 12, m_height = 10)) else trap("create")
+    let painter = painter_create(target)
+    let source = test_gfx_paint_bitmap(BitmapFormat.bgra8888, 4, 3, [0xffff0000, 0xff00ff00, 0xff0000ff, 0xffffffff, 0xff20a0e0, 0x80804020, 0xffc08040, 0x40102030,
+                                                                     0xff336699, 0xff996633, 0xff000000, 0xff7f7f7f])
+    let image = immutable_bitmap_create_color_space(source, color_space)
+    let whole = DevicePixelRect(m_location = IntPoint(m_x = 0, m_y = 0), m_size = IntSize(m_width = 4, m_height = 3))
+    painter_draw_bitmap(painter, test_gfx_paint_rect(1.0, 1.0, 8.0, 6.0), *image, whole, ScalingMode.nearest_neighbor, none, 1.0, CompositingAndBlendingOperator.source_over)
+    painter_draw_bitmap(painter, test_gfx_paint_rect(3.5, 5.25, 7.0, 4.5), *image, whole, ScalingMode.bilinear, none, 0.6, CompositingAndBlendingOperator.source_over)
+    return target
+
+## The color space of a CICP primaries and transfer function.
+func test_gfx_paint_cicp(primaries: MediaColorPrimaries, transfer: MediaTransferCharacteristics) -> ColorSpace:
+    let cicp = MediaCodingIndependentCodePoints(m_color_primaries = primaries, m_transfer_characteristics = transfer, m_matrix_coefficients = MediaMatrixCoefficients.bt709,
+                                                m_video_full_range_flag = MediaVideoFullRangeFlag.full)
+    return color_space_from_cicp(cicp) catch failure: trap("cicp")
+
+test "gfx paint: draw_bitmap converts a Display P3 image":
+    if not tests_gfx_paint_r08_is_ported:
+        return
+    let target = test_gfx_paint_color_scene(test_gfx_paint_cicp(MediaColorPrimaries.smpte432, MediaTransferCharacteristics.srgb))
+    test_gfx_paint_expect_pixels(target, [
+        0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+        0x00000000, 0xffff0000, 0xffff0000, 0xff00ff00, 0xff00ff00, 0xff0000ff, 0xff0000ff, 0xffffffff, 0xffffffff, 0x00000000, 0x00000000, 0x00000000,
+        0x00000000, 0xffff0000, 0xffff0000, 0xff00ff00, 0xff00ff00, 0xff0000ff, 0xff0000ff, 0xffffffff, 0xffffffff, 0x00000000, 0x00000000, 0x00000000,
+        0x00000000, 0xff00a3e6, 0xff00a3e6, 0x80893b13, 0x80893b13, 0xffcb7c30, 0xffcb7c30, 0x40082031, 0x40082031, 0x00000000, 0x00000000, 0x00000000,
+        0x00000000, 0xff00a3e6, 0xff00a3e6, 0x80893b13, 0x80893b13, 0xffcb7c30, 0xffcb7c30, 0x40082031, 0x40082031, 0x00000000, 0x00000000, 0x00000000,
+        0x00000000, 0xff1b689d, 0xff1b689d, 0xffa26326, 0xffdc280f, 0xff246400, 0xff007a00, 0xff3354b0, 0xff6969d2, 0x998e8e9a, 0x99999999, 0x00000000,
+        0x00000000, 0xff1b689d, 0xff1b689d, 0xffa26326, 0xffb14837, 0xff2d5600, 0xff00610a, 0xff576394, 0xff7970af, 0x76646771, 0x73686d70, 0x00000000,
+        0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x94005e81, 0x68383b3d, 0x5d5b2c0f, 0x89714219, 0x7051371f, 0x2f0f181e, 0x2605131e, 0x00000000,
+        0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x97004967, 0x89423c36, 0x85512e11, 0x94341f0c, 0x8b2d251d, 0x76343739, 0x7335393d, 0x00000000,
+        0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x99193e5a, 0x99483d33, 0x994c2f12, 0x99150d05, 0x991b1b1b, 0x99474747, 0x994c4c4c, 0x00000000,
+    ])
+
+test "gfx paint: draw_bitmap converts a 2.2 gamma image":
+    if not tests_gfx_paint_r08_is_ported:
+        return
+    let target = test_gfx_paint_color_scene(test_gfx_paint_cicp(MediaColorPrimaries.bt709, MediaTransferCharacteristics.bt470m))
+    test_gfx_paint_expect_pixels(target, [
+        0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+        0x00000000, 0xffff0000, 0xffff0000, 0xff00ff00, 0xff00ff00, 0xff0000ff, 0xff0000ff, 0xffffffff, 0xffffffff, 0x00000000, 0x00000000, 0x00000000,
+        0x00000000, 0xffff0000, 0xffff0000, 0xff00ff00, 0xff00ff00, 0xff0000ff, 0xff0000ff, 0xffffffff, 0xffffffff, 0x00000000, 0x00000000, 0x00000000,
+        0x00000000, 0xff1aa1e1, 0xff1aa1e1, 0x8080411f, 0x8080411f, 0xffc1813e, 0xffc1813e, 0x400f2030, 0x400f2030, 0x00000000, 0x00000000, 0x00000000,
+        0x00000000, 0xff1aa1e1, 0xff1aa1e1, 0x8080411f, 0x8080411f, 0xffc1813e, 0xffc1813e, 0x400f2030, 0x400f2030, 0x00000000, 0x00000000, 0x00000000,
+        0x00000000, 0xff2f669a, 0xff2f669a, 0xff9a6630, 0xffcc2f13, 0xff366300, 0xff00791f, 0xff3352ac, 0xff6a6acc, 0x998e8e99, 0x99999999, 0x00000000,
+        0x00000000, 0xff2f669a, 0xff2f669a, 0xff9a6630, 0xffa64e3d, 0xff375611, 0xff1b601c, 0xff586292, 0xff7971ac, 0x76656770, 0x73696d70, 0x00000000,
+        0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x94155d7f, 0x68393c3d, 0x5d552f16, 0x896c4521, 0x704e3922, 0x2f11171e, 0x2609131d, 0x00000000,
+        0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x971d4865, 0x89423d37, 0x854d2f16, 0x94301e0c, 0x8b2b241c, 0x76353739, 0x73363a3d, 0x00000000,
+        0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x99213d58, 0x99463d34, 0x99492f15, 0x99100902, 0x99191919, 0x99474747, 0x994d4d4d, 0x00000000,
+    ])

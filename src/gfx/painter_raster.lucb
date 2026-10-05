@@ -15,6 +15,9 @@
 #       state belongs to the surface in Skia; here it belongs to the painter (painters do not
 #       share a surface in LibWeb).
 #
+#       An image keeps its color space: draw_bitmap and image patterns convert its sampled
+#       pixels to the sRGB surface as SkImageShader does (immutable_bitmap_color_xform).
+#
 #       Differences (FIXMEs until the raster module has these, DESIGN.md §7.3 r11d): blur
 #       mask filters (the blur_radius overloads draw without blur), image filters on paints
 #       (ignored), conic gradients (PainterSkia has none either: "Unsupported PaintStyle"),
@@ -184,7 +187,9 @@ func painter_raster_apply_paint_style(paint: raster.Paint*, style: PaintStyle*):
         if let transform = canvas_pattern_paint_style_transform(canvas_pattern):
             transformation_matrix = to_raster_transform(transform)
         let spread = raster.SpreadMode.repeat if repeat_x and repeat_y else raster.SpreadMode.pad_
-        paint.shader = raster.Pattern.new_(pixmap, spread, raster.FilterQuality.bilinear, 1.0, transformation_matrix)
+        # The image's SkImage carries its color space, converted to the sRGB surface after
+        # sampling (SkImageShader's color space steps).
+        paint.shader = raster.Pattern.new_color_managed(pixmap, spread, raster.FilterQuality.bilinear, 1.0, transformation_matrix, immutable_bitmap_color_xform(image))
     else:
         ak.dbgln("FIXME: Unsupported PaintStyle")
 
@@ -292,7 +297,10 @@ pub func painter_raster_draw_bitmap_impl(base: Painter*, dst_rect: FloatRect, sr
     var paint = raster.Paint()
     # paint.setAlpha(static_cast<u8>(global_alpha * 255))
     let alpha = (u8)(global_alpha * 255.0)
-    paint.shader = raster.Pattern.new_(pixmap, raster.SpreadMode.pad_, to_raster_filter_quality(scaling_mode), (f32)alpha / 255.0, pattern_transform)
+    # drawImageRect samples the SkImage, which carries the bitmap's color space, and converts
+    # to the sRGB surface (SkImageShader's color space steps).
+    paint.shader = raster.Pattern.new_color_managed(pixmap, raster.SpreadMode.pad_, to_raster_filter_quality(scaling_mode), (f32)alpha / 255.0, pattern_transform,
+                                                    immutable_bitmap_color_xform(&src_bitmap))
     paint.blend_mode = to_raster_blend_mode(compositing_and_blending_operator)
     paint.anti_alias = false
     let path = painter_raster_rect_path(dst_rect)

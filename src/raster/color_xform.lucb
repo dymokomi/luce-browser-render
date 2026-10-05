@@ -45,6 +45,11 @@ pub struct ColorXform:
             return none
         return ColorXform(steps = steps, src_curve = xform_curve(&steps.src_tf), dst_curve = xform_curve(&steps.dst_tf_inv))
 
+    ## Every step on one sampled premultiplied pixel (r, g, b, a), as the pipeline runs
+    ## unpremul, color_xform and premul after an image's sampling stages.
+    pub func apply(rgba: f32[4]) -> f32[4]:
+        return xform_pixel(&self, rgba)
+
 ## appendTransferFunction's choice: gamma_ for a pure power, parametric for another
 ## sRGB-ish curve, the HDR stages by kind.
 func xform_curve(tf: const icc.TransferFunction*) -> XformCurve:
@@ -80,8 +85,11 @@ func xform_approx_pow2(x: f32) -> f32:
     approx = f32_vmin(f32_vmax(approx, 0.0), 2139095040.0)
     return f32.bits(f32_round_nonneg(approx))
 
-## approx_powf: 0 and 1 pass through.
-func xform_approx_powf(x: f32, y: f32) -> f32:
+## SkRasterPipeline_opts.h's approx_powf: x^y through approx_log2 and approx_pow2 as m144's
+## highp stages compute them on arm64 NEON; 0 and 1 pass through. Shared by every stage that
+## raises to a power (the transfer functions here and the image filters' color filters);
+## scalar.lucb's approx_powf is tiny-skia's, for its own gamma color spaces.
+pub func pipeline_approx_powf(x: f32, y: f32) -> f32:
     if x == 0.0 or x == 1.0:
         return x
     return xform_approx_pow2(xform_approx_log2(x) * y)
@@ -104,23 +112,23 @@ func xform_transfer(curve: XformCurve, tf: const icc.TransferFunction*, input: f
     let v = f32.bits(bits ^ sign)
     match curve:
         .gamma:
-            return f32.bits(sign | xform_approx_powf(v, tf.g).bits())
+            return f32.bits(sign | pipeline_approx_powf(v, tf.g).bits())
         .parametric:
-            let r = math32.fma(tf.c, v, tf.f) if v <= tf.d else xform_approx_powf(math32.fma(tf.a, v, tf.b), tf.g) + tf.e
+            let r = math32.fma(tf.c, v, tf.f) if v <= tf.d else pipeline_approx_powf(math32.fma(tf.a, v, tf.b), tf.g) + tf.e
             return f32.bits(sign | r.bits())
         .pqish:
-            let p = xform_approx_powf(v, tf.c)
-            let r = xform_approx_powf(f32_vmax(math32.fma(tf.b, p, tf.a), 0.0) / math32.fma(tf.e, p, tf.d), tf.f)
+            let p = pipeline_approx_powf(v, tf.c)
+            let r = pipeline_approx_powf(f32_vmax(math32.fma(tf.b, p, tf.a), 0.0) / math32.fma(tf.e, p, tf.d), tf.f)
             return f32.bits(sign | r.bits())
         .hlgish:
             # R, G, a, b, c and K - 1 in a..f.
             let k = tf.f + 1.0
-            let r = xform_approx_powf(v * tf.a, tf.b) if v * tf.a <= 1.0 else xform_approx_exp((v - tf.e) * tf.c) + tf.d
+            let r = pipeline_approx_powf(v * tf.a, tf.b) if v * tf.a <= 1.0 else xform_approx_exp((v - tf.e) * tf.c) + tf.d
             return k * f32.bits(sign | r.bits())
         .hlginvish:
             let k = tf.f + 1.0
             let scaled = v / k
-            let r = tf.a * xform_approx_powf(scaled, tf.b) if scaled <= 1.0 else tf.c * xform_approx_log(scaled - tf.d) + tf.e
+            let r = tf.a * pipeline_approx_powf(scaled, tf.b) if scaled <= 1.0 else tf.c * xform_approx_log(scaled - tf.d) + tf.e
             return f32.bits(sign | r.bits())
         _:
             return input
@@ -130,7 +138,7 @@ func xform_ootf(ootf: f32[4], c: f32[3]) -> f32[3]:
     let y = ootf[0] * c[0] + ootf[1] * c[1] + ootf[2] * c[2]
     let bits = y.bits()
     let sign = bits & 0x80000000
-    let scale = f32.bits(sign | xform_approx_powf(f32.bits(bits ^ sign), ootf[3]).bits())
+    let scale = f32.bits(sign | pipeline_approx_powf(f32.bits(bits ^ sign), ootf[3]).bits())
     return [c[0] * scale, c[1] * scale, c[2] * scale]
 
 ## Every step of `x` on one pixel.
@@ -199,8 +207,8 @@ test "a color transform steps as Skia's pipeline does":
     let out = xform_pixel(&x, [0.6, 0.0, 0.0, 1.0])
     assert(math32.abs(out[0]) < 0.0001 and math32.abs(out[1] - 0.6) < 0.001 and math32.abs(out[2]) < 0.0001 and out[3] == 1.0)
     # A pure power is the gamma_ stage; the exact values of approx_powf.
-    assert(xform_curve(&icc.tf_2dot2) == .gamma and xform_approx_powf(0.0, 2.2) == 0.0 and xform_approx_powf(1.0, 2.2) == 1.0)
-    assert(math32.abs(xform_approx_powf(0.5, 2.0) - 0.25) < 0.0001)
+    assert(xform_curve(&icc.tf_2dot2) == .gamma and pipeline_approx_powf(0.0, 2.2) == 0.0 and pipeline_approx_powf(1.0, 2.2) == 1.0)
+    assert(math32.abs(pipeline_approx_powf(0.5, 2.0) - 0.25) < 0.0001)
 
 ## The first 16 bytes of a test draw.
 type XformTestBytes = u8[16]

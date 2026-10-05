@@ -115,3 +115,4 @@ tests_sk_path_measure.lucb
 tests_gfx_paint.lucb
 tests_gfx_paint_export.lucb
 tests_gfx_paint_draw.lucb
+tests_gfx_paint_color.lucb

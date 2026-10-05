@@ -22,6 +22,19 @@ test "cpu filter: images":
     let offset = gfx.filter_image(image, test_filter_rect(0, 0, 10, 8), test_filter_rect(5, 4, 10, 8), gfx.ScalingMode.bilinear)
     test_filter_expect("image_offset", TestFilterScene(), test_filter_graph(&offset), filter_skia_image_offset, 0, 0)
 
+test "cpu filter: images in another color space":
+    # SkImageFilters::Image of an SkImage tagged with Display P3, or with BT.709 primaries and
+    # a 2.2 gamma: converted to the sRGB layer after sampling, also before a blur.
+    let p3 = test_filter_pattern_bitmap_cicp(10, 8, gfx.MediaColorPrimaries.smpte432, gfx.MediaTransferCharacteristics.srgb)
+    let nearest = gfx.filter_image(p3, test_filter_rect(1, 1, 6, 5), test_filter_rect(3, 2, 12, 10), gfx.ScalingMode.nearest_neighbor)
+    test_filter_expect("image_p3_nearest", TestFilterScene(), test_filter_graph(&nearest), filter_skia_image_p3_nearest, 0, 0)
+    let offset = gfx.filter_image(p3, test_filter_rect(0, 0, 10, 8), test_filter_rect(5, 4, 10, 8), gfx.ScalingMode.bilinear)
+    test_filter_expect("image_p3_offset", TestFilterScene(), test_filter_graph(&offset), filter_skia_image_p3_offset, 0, 0)
+    let gamma = test_filter_pattern_bitmap_cicp(10, 8, gfx.MediaColorPrimaries.bt709, gfx.MediaTransferCharacteristics.bt470m)
+    let image = gfx.filter_image(gamma, test_filter_rect(0, 0, 10, 8), test_filter_rect(5, 4, 10, 8), gfx.ScalingMode.bilinear)
+    let blurred = gfx.filter_blur(1.5, 1.5, &image)
+    test_filter_expect("image_gamma_blur", TestFilterScene(), test_filter_graph(&blurred), filter_skia_image_gamma_blur, 0, 0)
+
 test "cpu filter: arithmetic":
     let flood = gfx.filter_flood(test_filter_color(200, 100, 50, 255), 0.8)
     let arithmetic = gfx.filter_arithmetic(none, &flood, 0.5, 0.3, 0.6, 0.0)
