@@ -23,7 +23,7 @@ pub struct Pixmap:
 
     ## Allocates a new pixmap. A pixmap is filled with transparent black by default, aka
     ## (0, 0, 0, 0). Zero size in an error. Pixmap's width is limited by i32::MAX/4.
-    pub func new_(width: u32, height: u32) -> Pixmap?:
+    pub static func new_(width: u32, height: u32) -> Pixmap?:
         let size = IntSize.from_wh(width, height) else return none
         let data_len = data_len_for_size(size) else return none
         # We cannot check that allocation was successful yet.
@@ -33,7 +33,7 @@ pub struct Pixmap:
     ## Creates a new pixmap by taking ownership over an image buffer (premultiplied RGBA
     ## pixels) allocated in `memory.heap`. The size needs to match the data provided.
     ## Pixmap's width is limited by i32::MAX/4.
-    pub func from_vec(data: u8[], size: IntSize) -> Pixmap?:
+    pub static func from_vec(data: u8[], size: IntSize) -> Pixmap?:
         let data_len = data_len_for_size(size) else return none
         if data.length != data_len:
             return none
@@ -170,7 +170,7 @@ pub struct PixmapRef:
     ## `size.width() * size.height() * BYTES_PER_PIXEL`. Zero size in an error. Width is
     ## limited by i32::MAX/4. The `data` is assumed to have premultiplied RGBA pixels
     ## (byteorder: RGBA).
-    pub func from_bytes(data: const u8[], width: u32, height: u32) -> PixmapRef?:
+    pub static func from_bytes(data: const u8[], width: u32, height: u32) -> PixmapRef?:
         let size = IntSize.from_wh(width, height) else return none
         let data_len = data_len_for_size(size) else return none
         if data.length < data_len:
@@ -244,7 +244,7 @@ pub struct PixmapMut:
     ## `size.width() * size.height() * BYTES_PER_PIXEL`. Zero size in an error. Width is
     ## limited by i32::MAX/4. The `data` is assumed to have premultiplied RGBA pixels
     ## (byteorder: RGBA).
-    pub func from_bytes(data: u8[], width: u32, height: u32) -> PixmapMut?:
+    pub static func from_bytes(data: u8[], width: u32, height: u32) -> PixmapMut?:
         let size = IntSize.from_wh(width, height) else return none
         let data_len = data_len_for_size(size) else return none
         if data.length < data_len:

@@ -20,28 +20,28 @@ pub struct Transform:
     pub var ty: f32 = 0.0
 
     ## Creates an identity transform.
-    pub func identity() -> Transform:
+    pub static func identity() -> Transform:
         return Transform()
 
     ## Creates a new `Transform`. We are using column-major-column-vector matrix notation,
     ## therefore it's ky-kx, not kx-ky.
-    pub func from_row(sx: f32, ky: f32, kx: f32, sy: f32, tx: f32, ty: f32) -> Transform:
+    pub static func from_row(sx: f32, ky: f32, kx: f32, sy: f32, tx: f32, ty: f32) -> Transform:
         return Transform(sx = sx, kx = kx, ky = ky, sy = sy, tx = tx, ty = ty)
 
     ## Creates a new translating `Transform`.
-    pub func from_translate(tx: f32, ty: f32) -> Transform:
+    pub static func from_translate(tx: f32, ty: f32) -> Transform:
         return Transform.from_row(1.0, 0.0, 0.0, 1.0, tx, ty)
 
     ## Creates a new scaling `Transform`.
-    pub func from_scale(sx: f32, sy: f32) -> Transform:
+    pub static func from_scale(sx: f32, sy: f32) -> Transform:
         return Transform.from_row(sx, 0.0, 0.0, sy, 0.0, 0.0)
 
     ## Creates a new skewing `Transform`.
-    pub func from_skew(kx: f32, ky: f32) -> Transform:
+    pub static func from_skew(kx: f32, ky: f32) -> Transform:
         return Transform.from_row(1.0, ky, kx, 1.0, 0.0, 0.0)
 
     ## Creates a new rotating `Transform`. `angle` in degrees.
-    pub func from_rotate(angle: f32) -> Transform:
+    pub static func from_rotate(angle: f32) -> Transform:
         let rads_per_deg: f32 = 3.14159265358979323846 / 180.0
         let v = angle * rads_per_deg
         let a = math32.cos(v)
@@ -51,7 +51,7 @@ pub struct Transform:
         return Transform.from_row(a, b, c, d, 0.0, 0.0)
 
     ## Creates a new rotating `Transform` at the specified position. `angle` in degrees.
-    pub func from_rotate_at(angle: f32, tx: f32, ty: f32) -> Transform:
+    pub static func from_rotate_at(angle: f32, tx: f32, ty: f32) -> Transform:
         var ts = Transform()
         ts = ts.pre_translate(tx, ty)
         ts = ts.pre_concat(Transform.from_rotate(angle))
@@ -59,7 +59,7 @@ pub struct Transform:
         return ts
 
     ## Converts `Rect` into a bounding box `Transform`.
-    pub func from_bbox(bbox: NonZeroRect) -> Transform:
+    pub static func from_bbox(bbox: NonZeroRect) -> Transform:
         return Transform.from_row(bbox.width(), 0.0, 0.0, bbox.height(), bbox.x(), bbox.y())
 
     ## Checks that transform is finite.
@@ -151,7 +151,7 @@ pub struct Transform:
     pub func post_concat(other: Transform) -> Transform:
         return concat(other, self)
 
-    func from_sin_cos(sin: f32, cos: f32) -> Transform:
+    static func from_sin_cos(sin: f32, cos: f32) -> Transform:
         return Transform.from_row(cos, sin, -sin, cos, 0.0, 0.0)
 
     ## Transforms a point using the current transform.

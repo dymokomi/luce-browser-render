@@ -134,7 +134,7 @@ pub struct PathStroker:
     var join_completed: bool  # previous join was not degenerate
 
     ## Creates a new PathStroker.
-    pub func new_() -> PathStroker:
+    pub static func new_() -> PathStroker:
         return PathStroker(
             radius = 0.0,
             inv_miter_limit = 0.0,
@@ -167,7 +167,7 @@ pub struct PathStroker:
     ## more precise, since it will be zoomed up, and small errors will be magnified. Smaller
     ## values (0 < res < 1) indicate that the result can be less precise, since it will be
     ## zoomed down, and small errors may be invisible.
-    pub func compute_resolution_scale(ts: Transform) -> f32:
+    pub static func compute_resolution_scale(ts: Transform) -> f32:
         let sx = Point.from_xy(ts.sx, ts.kx).length()
         let sy = Point.from_xy(ts.ky, ts.sy).length()
         if math32.is_finite(sx) and math32.is_finite(sy):

@@ -17,7 +17,7 @@ struct AlphaRuns:
     var runs: AlphaRun[]
     var alpha: u8[]
 
-    func new_(width: u32) -> AlphaRuns:
+    static func new_(width: u32) -> AlphaRuns:
         let runs = (new AlphaRun[(usize)width + 1] in memory.heap) else trap("raster: out of memory")
         let alpha = (new u8[(usize)width + 1] in memory.heap) else trap("raster: out of memory")
         var result = AlphaRuns(runs = runs, alpha = alpha)
@@ -29,7 +29,7 @@ struct AlphaRuns:
         free(self.alpha) in memory.heap
 
     ## Returns 0-255 given 0-256.
-    func catch_overflow(alpha: u16) -> AlphaU8:
+    static func catch_overflow(alpha: u16) -> AlphaU8:
         return (u8)(alpha - (alpha >> 8))
 
     ## Returns true if the scanline contains only a single run, of alpha value 0.
@@ -118,7 +118,7 @@ struct AlphaRuns:
     ##
     ## Allows add() to sum another run to some of the new sub-runs. i.e. adding ..CCCCC. would
     ## produce AADDEEEB, rle as A2D2E3B1.
-    func break_run(runs: AlphaRun[], alpha: u8[], x0: usize, count: usize):
+    static func break_run(runs: AlphaRun[], alpha: u8[], x0: usize, count: usize):
         var x = x0
         let orig_x = x
         var runs_offset: usize = 0
@@ -159,7 +159,7 @@ struct AlphaRuns:
     ## Cut (at offset x in the buffer) a run into two shorter runs with matching alpha
     ## values. Used by the RectClipBlitter to trim a RLE encoding to match the clipping
     ## rectangle.
-    func break_at(alpha: AlphaU8[], runs: AlphaRun[], x0: i32):
+    static func break_at(alpha: AlphaU8[], runs: AlphaRun[], x0: i32):
         var x = x0
         var alpha_i: usize = 0
         var run_i: usize = 0

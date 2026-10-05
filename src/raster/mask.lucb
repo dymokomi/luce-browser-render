@@ -30,13 +30,13 @@ pub struct Mask:
 
     ## Creates a new mask by taking ownership over a mask buffer. The size needs to match
     ## the data provided.
-    pub func new_(width: u32, height: u32) -> Mask?:
+    pub static func new_(width: u32, height: u32) -> Mask?:
         let size = IntSize.from_wh(width, height) else return none
         let data = (new u8[(usize)width * (usize)height] in memory.heap) else trap("raster: out of memory")
         return Mask(data_ = data, size_ = size)
 
     ## Creates a new mask from a `PixmapRef`.
-    pub func from_pixmap(pixmap: PixmapRef, mask_type: MaskType) -> Mask:
+    pub static func from_pixmap(pixmap: PixmapRef, mask_type: MaskType) -> Mask:
         let data_len = (usize)pixmap.width() * (usize)pixmap.height()
         let data = (new u8[data_len] in memory.heap) else trap("raster: out of memory")
         let mask = Mask(data_ = data, size_ = pixmap.size())
@@ -71,7 +71,7 @@ pub struct Mask:
 
     ## Creates a new mask by taking ownership over a mask buffer allocated in `memory.heap`.
     ## The size needs to match the data provided.
-    pub func from_vec(data: u8[], size: IntSize) -> Mask?:
+    pub static func from_vec(data: u8[], size: IntSize) -> Mask?:
         let data_len = (usize)size.width() * (usize)size.height()
         if data.length != data_len:
             return none

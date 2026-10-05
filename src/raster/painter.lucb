@@ -163,13 +163,13 @@ struct DrawTiler:
     var finished: bool
 
     # 8K is 1 too big, since 8K << supersample == 32768 which is too big for Fixed.
-    func max_dimensions() -> u32:
+    static func max_dimensions() -> u32:
         return 8192 - 1
 
-    func required(image_width: u32, image_height: u32) -> bool:
+    static func required(image_width: u32, image_height: u32) -> bool:
         return image_width > DrawTiler.max_dimensions() or image_height > DrawTiler.max_dimensions()
 
-    func new_(image_width: u32, image_height: u32) -> DrawTiler?:
+    static func new_(image_width: u32, image_height: u32) -> DrawTiler?:
         if DrawTiler.required(image_width, image_height):
             return DrawTiler(image_width = image_width, image_height = image_height, x_offset = 0, y_offset = 0, finished = false)
         return none

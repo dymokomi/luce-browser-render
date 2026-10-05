@@ -64,7 +64,7 @@ struct AdditiveBlitter:
     var offset_x: i32
 
     ## MaskAdditiveBlitter::CanHandleRect.
-    func can_handle_rect(bounds: IRect) -> bool:
+    static func can_handle_rect(bounds: IRect) -> bool:
         let width = bounds.width()
         if width > mask_max_width:
             return false
@@ -73,7 +73,7 @@ struct AdditiveBlitter:
         let storage = rb * (i64)bounds.height()
         return width <= mask_max_width and storage <= (i64)mask_max_storage
 
-    func new_mask(real_blitter: Blitter, ir: IRect, clip_bounds: IRect) -> AdditiveBlitter:
+    static func new_mask(real_blitter: Blitter, ir: IRect, clip_bounds: IRect) -> AdditiveBlitter:
         var b: AdditiveBlitter = ---
         b.kind = .mask
         b.real_blitter = real_blitter
@@ -84,7 +84,7 @@ struct AdditiveBlitter:
             b.storage[i] = 0
         return b
 
-    func new_rle(kind: AdditiveKind, real_blitter: Blitter, ir: IRect, clip_bounds: IRect, is_inverse: bool) -> AdditiveBlitter:
+    static func new_rle(kind: AdditiveKind, real_blitter: Blitter, ir: IRect, clip_bounds: IRect, is_inverse: bool) -> AdditiveBlitter:
         var sect_bounds = IRect.ltrb(0, 0, 0, 0)
         if is_inverse:
             # We use the clip bounds instead of the ir, since we may be asked to draw
@@ -222,7 +222,7 @@ struct AdditiveBlitter:
         return x >= 0 and x + width <= self.width
 
     ## Blitting 0xFF and 0 is much faster so we snap alphas close to them.
-    func snap_alpha(alpha: AlphaU8) -> AlphaU8:
+    static func snap_alpha(alpha: AlphaU8) -> AlphaU8:
         if alpha > 247:
             return 0xFF
         if alpha < 8:

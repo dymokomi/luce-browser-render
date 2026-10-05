@@ -16,7 +16,7 @@ struct FixedRect:
     var right: FDot16
     var bottom: FDot16
 
-    func from_rect(src: Rect) -> FixedRect:
+    static func from_rect(src: Rect) -> FixedRect:
         return FixedRect(left = fdot16_from_f32(src.left()), top = fdot16_from_f32(src.top()), right = fdot16_from_f32(src.right()), bottom = fdot16_from_f32(src.bottom()))
 
 func alpha_mul(value: AlphaU8, alpha256: i32) -> u8:

@@ -25,13 +25,13 @@ struct IRect:
     var right: i32
     var bottom: i32
 
-    func ltrb(left: i32, top: i32, right: i32, bottom: i32) -> IRect:
+    static func ltrb(left: i32, top: i32, right: i32, bottom: i32) -> IRect:
         return IRect(left = left, top = top, right = right, bottom = bottom)
 
-    func xywh(x: i32, y: i32, width: i32, height: i32) -> IRect:
+    static func xywh(x: i32, y: i32, width: i32, height: i32) -> IRect:
         return IRect(left = x, top = y, right = x + width, bottom = y + height)
 
-    func from_screen(r: ScreenIntRect) -> IRect:
+    static func from_screen(r: ScreenIntRect) -> IRect:
         return IRect.ltrb((i32)r.left(), (i32)r.top(), (i32)r.right(), (i32)r.bottom())
 
     func width() -> i32:

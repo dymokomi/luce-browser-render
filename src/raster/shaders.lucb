@@ -179,7 +179,7 @@ pub struct LinearGradient:
     ## Creates a new linear gradient shader. Returns `Shader.solid_color` when `stops`
     ## has a single stop, `start` and `end` are the same (degenerate), and none when there
     ## are no stops or the transform is not invertible. The stops are copied.
-    pub func new_(start: Point, end: Point, stops: const GradientStop[], mode: SpreadMode, transform: Transform) -> Shader?:
+    pub static func new_(start: Point, end: Point, stops: const GradientStop[], mode: SpreadMode, transform: Transform) -> Shader?:
         if stops.length == 0:
             return none
 
@@ -254,7 +254,7 @@ pub struct SweepGradient:
 
     ## Creates a new sweep gradient shader around `center`, from `start_angle` to
     ## `end_angle` in degrees. The stops are copied.
-    pub func new_(center: Point, start_angle: f32, end_angle: f32, stops: const GradientStop[], mode0: SpreadMode, transform: Transform) -> Shader?:
+    pub static func new_(center: Point, start_angle: f32, end_angle: f32, stops: const GradientStop[], mode0: SpreadMode, transform: Transform) -> Shader?:
         var mode = mode0
         if not math32.is_finite(start_angle) or not math32.is_finite(end_angle) or start_angle > end_angle:
             return none
@@ -329,5 +329,5 @@ pub struct Pattern:
     var transform: Transform
 
     ## Creates a new pattern shader. `opacity` will be clamped to the 0..=1 range.
-    pub func new_(pixmap: PixmapRef, spread_mode: SpreadMode, quality: FilterQuality, opacity: f32, transform: Transform) -> Shader:
+    pub static func new_(pixmap: PixmapRef, spread_mode: SpreadMode, quality: FilterQuality, opacity: f32, transform: Transform) -> Shader:
         return .pattern(p = Pattern(pixmap = pixmap, spread_mode = spread_mode, quality = quality, opacity = normalized_clamped(opacity), transform = transform))

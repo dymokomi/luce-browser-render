@@ -21,7 +21,7 @@ pub struct StrokeDash:
     var first_index: usize
 
     ## Creates a new stroke dashing object (the dash array is copied).
-    pub func new_(dash_array: const f32[], dash_offset: f32) -> StrokeDash?:
+    pub static func new_(dash_array: const f32[], dash_offset: f32) -> StrokeDash?:
         if not math32.is_finite(dash_offset):
             return none
 
@@ -162,7 +162,7 @@ struct ContourMeasureIter:
     var iter: PathSegmentsIter
     var tolerance: f32
 
-    func new_(path: const Path*, res_scale: f32) -> ContourMeasureIter:
+    static func new_(path: const Path*, res_scale: f32) -> ContourMeasureIter:
         # can't use tangents, since we need [0..1..................2] to be seen as definitely
         # not a line (it is when drawn, but not parametrically) so we compare midpoints
         let cheap_dist_limit: f32 = 0.5  # just made this value up

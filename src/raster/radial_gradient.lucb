@@ -77,7 +77,7 @@ pub struct RadialGradient:
     ## Creates a new two-point conical gradient shader. Returns `Shader.solid_color` when
     ## `stops` has a single stop, and none when there are no stops, a radius is negative,
     ## the transform is not invertible or the gradient is degenerate. The stops are copied.
-    pub func new_(start_point: Point, start_radius: f32, end_point: Point, end_radius: f32, stops: const GradientStop[], mode: SpreadMode, transform: Transform) -> Shader?:
+    pub static func new_(start_point: Point, start_radius: f32, end_point: Point, end_radius: f32, stops: const GradientStop[], mode: SpreadMode, transform: Transform) -> Shader?:
         if start_radius < 0.0 or end_radius < 0.0:
             return none
 
@@ -129,7 +129,7 @@ pub struct RadialGradient:
 
         return create_radial(start_point, start_radius, end_point, end_radius, stops, mode, transform)
 
-    func new_radial_unchecked(center: Point, radius: f32, stops: Vec[GradientStop], mode: SpreadMode, transform: Transform) -> Shader?:
+    static func new_radial_unchecked(center: Point, radius: f32, stops: Vec[GradientStop], mode: SpreadMode, transform: Transform) -> Shader?:
         let inv = invert(radius)
         let points_to_unit = Transform.from_translate(-center.x, -center.y).post_scale(inv, inv)
 

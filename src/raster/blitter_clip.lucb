@@ -35,7 +35,7 @@ struct MaskClipInfo:
     var kind: MaskClipKind
     var bounds: IRect
 
-    func of(mask: const Mask*) -> MaskClipInfo:
+    static func of(mask: const Mask*) -> MaskClipInfo:
         let w = (i32)mask.width()
         let h = (i32)mask.height()
         let data = mask.data()
@@ -235,7 +235,7 @@ struct MaskAAClipBlitter: Blitter:
     var runs: AlphaRun[]
     var aa: AlphaU8[]
 
-    func new_(blitter: Blitter, mask: const Mask*) -> MaskAAClipBlitter:
+    static func new_(blitter: Blitter, mask: const Mask*) -> MaskAAClipBlitter:
         let count = (usize)mask.width() + 1
         let runs = (new AlphaRun[count] --- in memory.heap) else trap("raster: out of memory")
         let aa = (new AlphaU8[count] --- in memory.heap) else trap("raster: out of memory")

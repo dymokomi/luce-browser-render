@@ -29,7 +29,7 @@ struct RasterClip:
     var mask: const Mask*?
 
     ## The clip of a `width` x `height` device, narrowed by `mask`.
-    func new_(width: u32, height: u32, mask: const Mask*?) -> RasterClip:
+    static func new_(width: u32, height: u32, mask: const Mask*?) -> RasterClip:
         let device = IRect.ltrb(0, 0, (i32)width, (i32)height)
         let m = mask else return RasterClip(kind = .rect, bounds = device, mask = none)
         let info = MaskClipInfo.of(m)
@@ -55,7 +55,7 @@ struct ClipWrappers:
     var aa: MaskAAClipBlitter
     var has_aa: bool
 
-    func new_() -> ClipWrappers:
+    static func new_() -> ClipWrappers:
         var w: ClipWrappers = ---
         w.has_aa = false
         return w

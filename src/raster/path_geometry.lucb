@@ -19,7 +19,7 @@ struct QuadCoeff:
     var b: F32x2
     var c: F32x2
 
-    func from_points(points: const Point[]) -> QuadCoeff:
+    static func from_points(points: const Point[]) -> QuadCoeff:
         let c = points[0].to_f32x2()
         let p1 = points[1].to_f32x2()
         let p2 = points[2].to_f32x2()
@@ -36,7 +36,7 @@ struct CubicCoeff:
     var c: F32x2
     var d: F32x2
 
-    func from_points(points: const Point[]) -> CubicCoeff:
+    static func from_points(points: const Point[]) -> CubicCoeff:
         let p0 = points[0].to_f32x2()
         let p1 = points[1].to_f32x2()
         let p2 = points[2].to_f32x2()

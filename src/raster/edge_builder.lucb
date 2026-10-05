@@ -19,7 +19,7 @@ struct ShiftedIntRect:
     var shifted_: ScreenIntRect
     var shift: i32
 
-    func new_(rect: ScreenIntRect, shift: i32) -> ShiftedIntRect?:
+    static func new_(rect: ScreenIntRect, shift: i32) -> ShiftedIntRect?:
         let s = (u32)shift
         let shifted = ScreenIntRect.from_xywh(rect.x() << s, rect.y() << s, rect.width() << s, rect.height() << s) else return none
         return ShiftedIntRect(shifted_ = shifted, shift = shift)
@@ -36,7 +36,7 @@ struct BasicEdgeBuilder:
     var edges: Vec[Edge]
     var clip_shift: i32
 
-    func new_(clip_shift: i32) -> BasicEdgeBuilder:
+    static func new_(clip_shift: i32) -> BasicEdgeBuilder:
         var b = BasicEdgeBuilder(clip_shift = clip_shift)
         b.edges.reserve(64)  # TODO: stack array + fallback
         return b
@@ -45,7 +45,7 @@ struct BasicEdgeBuilder:
     # mimicking it with Vec. The caller owns (and releases) the returned edges.
     ## `can_cull_to_the_right` is Skia's `!isKnownToBeConvex()`: if we're convex, then we
     ## need both edges, even if the right edge is past the clip.
-    func build_edges(path: const Path*, clip: const ShiftedIntRect*?, clip_shift: i32, can_cull_to_the_right: bool) -> Vec[Edge]?:
+    static func build_edges(path: const Path*, clip: const ShiftedIntRect*?, clip_shift: i32, can_cull_to_the_right: bool) -> Vec[Edge]?:
         var builder = BasicEdgeBuilder.new_(clip_shift)
         if not builder.build(path, clip, can_cull_to_the_right):
             # log::warn!("infinite or NaN segments detected during edges building")

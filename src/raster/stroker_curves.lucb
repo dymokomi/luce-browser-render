@@ -349,7 +349,7 @@ struct QuadConstruct:
     var end_set: bool
     var opposite_tangents: bool  # set if coincident tangents have opposite directions
 
-    func default() -> QuadConstruct:
+    static func default() -> QuadConstruct:
         var q: QuadConstruct
         return q
 

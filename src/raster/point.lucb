@@ -34,11 +34,11 @@ pub struct Point:
     pub var y: f32
 
     ## Creates a new `Point`.
-    pub func from_xy(x: f32, y: f32) -> Point:
+    pub static func from_xy(x: f32, y: f32) -> Point:
         return Point(x = x, y = y)
 
     ## Creates a new `Point` from `f32x2`.
-    pub func from_f32x2(r: F32x2) -> Point:
+    pub static func from_f32x2(r: F32x2) -> Point:
         return Point(x = r[0], y = r[1])
 
     ## Converts a `Point` into a `f32x2`.
@@ -46,7 +46,7 @@ pub struct Point:
         return [self.x, self.y]
 
     ## Creates a point at 0x0 position.
-    pub func zero() -> Point:
+    pub static func zero() -> Point:
         return Point(x = 0.0, y = 0.0)
 
     ## Returns true if x and y are both zero.

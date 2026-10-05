@@ -15,13 +15,13 @@ struct Conic:
     var points: Point[3]
     var weight: f32
 
-    func new_(pt0: Point, pt1: Point, pt2: Point, weight: f32) -> Conic:
+    static func new_(pt0: Point, pt1: Point, pt2: Point, weight: f32) -> Conic:
         return Conic(points = [pt0, pt1, pt2], weight = weight)
 
-    func from_points(points: const Point[], weight: f32) -> Conic:
+    static func from_points(points: const Point[], weight: f32) -> Conic:
         return Conic(points = [points[0], points[1], points[2]], weight = weight)
 
-    func zero() -> Conic:
+    static func zero() -> Conic:
         return Conic(points = [Point.zero(), Point.zero(), Point.zero()], weight = 0.0)
 
     ## SkConic::computeQuadPOW2: how many times (as a power of 2) the conic must be halved
@@ -205,7 +205,7 @@ struct Conic:
 
     ## Writes the conics of the unit arc from `u_start` to `u_stop` into `dst` (5 slots) and
     ## answers how many (0 is Rust's `None`).
-    func build_unit_arc(u_start: Point, u_stop: Point, dir: PathDirection, user_transform: Transform, dst: Conic[]) -> usize:
+    static func build_unit_arc(u_start: Point, u_stop: Point, dir: PathDirection, user_transform: Transform, dst: Conic[]) -> usize:
         # rotate by x,y so that u_start is (1.0)
         let x = u_start.dot(u_stop)
         var y = u_start.cross(u_stop)
@@ -375,7 +375,7 @@ struct AutoConicToQuads:
     ## The number of quads.
     var len: usize
 
-    func compute(pt0: Point, pt1: Point, pt2: Point, weight: f32, tolerance: f32) -> AutoConicToQuads:
+    static func compute(pt0: Point, pt1: Point, pt2: Point, weight: f32, tolerance: f32) -> AutoConicToQuads:
         let conic = Conic.new_(pt0, pt1, pt2, weight)
         let pow2 = conic.compute_quad_pow2(tolerance)
         var result: AutoConicToQuads = ---

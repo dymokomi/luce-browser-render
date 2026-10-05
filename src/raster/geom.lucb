@@ -18,7 +18,7 @@ pub struct IntSize:
     let height_: u32
 
     ## Creates a new `IntSize` from width and height; none when either is zero.
-    pub func from_wh(width: u32, height: u32) -> IntSize?:
+    pub static func from_wh(width: u32, height: u32) -> IntSize?:
         if width == 0 or height == 0:
             return none
         return IntSize(width_ = width, height_ = height)
@@ -81,7 +81,7 @@ pub struct Size:
     let height_: f32
 
     ## Creates a new `Size` from width and height.
-    pub func from_wh(width: f32, height: f32) -> Size?:
+    pub static func from_wh(width: f32, height: f32) -> Size?:
         if not (math32.is_finite(width) and width > 0.0) or not (math32.is_finite(height) and height > 0.0):
             return none
         return Size(width_ = width, height_ = height)
@@ -148,7 +148,7 @@ pub struct IntRect:
     let height_: u32
 
     ## Creates a new `IntRect`.
-    pub func from_xywh(x: i32, y: i32, width: u32, height: u32) -> IntRect?:
+    pub static func from_xywh(x: i32, y: i32, width: u32, height: u32) -> IntRect?:
         if width > (u32)i32_max or height > (u32)i32_max:
             return none
         if x +? (i32)width == none or y +? (i32)height == none:
@@ -158,7 +158,7 @@ pub struct IntRect:
         return IntRect(x_ = x, y_ = y, width_ = width, height_ = height)
 
     ## Creates a new `IntRect` from left, top, right and bottom.
-    pub func from_ltrb(left: i32, top: i32, right: i32, bottom: i32) -> IntRect?:
+    pub static func from_ltrb(left: i32, top: i32, right: i32, bottom: i32) -> IntRect?:
         let w = right -? left else return none
         let h = bottom -? top else return none
         if w < 0 or h < 0:
@@ -255,7 +255,7 @@ pub struct Rect:
     let bottom_: f32
 
     ## Creates new `Rect`.
-    pub func from_ltrb(left: f32, top: f32, right: f32, bottom: f32) -> Rect?:
+    pub static func from_ltrb(left: f32, top: f32, right: f32, bottom: f32) -> Rect?:
         if not math32.is_finite(left) or not math32.is_finite(top) or not math32.is_finite(right) or not math32.is_finite(bottom):
             return none
         if left <= right and top <= bottom:
@@ -266,7 +266,7 @@ pub struct Rect:
         return none
 
     ## Creates new `Rect`.
-    pub func from_xywh(x: f32, y: f32, w: f32, h: f32) -> Rect?:
+    pub static func from_xywh(x: f32, y: f32, w: f32, h: f32) -> Rect?:
         return Rect.from_ltrb(x, y, w + x, h + y)
 
     ## Returns the left edge.
@@ -348,7 +348,7 @@ pub struct Rect:
 
     ## Creates a Rect from Point array. Returns none if count is zero or if Point array
     ## contains an infinity or NaN.
-    pub func from_points(points: const Point[]) -> Rect?:
+    pub static func from_points(points: const Point[]) -> Rect?:
         var offset: usize = 0
         var min: f32[4] = ---
         var max: f32[4] = ---
@@ -455,7 +455,7 @@ pub struct NonZeroRect:
     let bottom_: f32
 
     ## Creates new `NonZeroRect`.
-    pub func from_ltrb(left: f32, top: f32, right: f32, bottom: f32) -> NonZeroRect?:
+    pub static func from_ltrb(left: f32, top: f32, right: f32, bottom: f32) -> NonZeroRect?:
         if not math32.is_finite(left) or not math32.is_finite(top) or not math32.is_finite(right) or not math32.is_finite(bottom):
             return none
         if left < right and top < bottom:
@@ -466,7 +466,7 @@ pub struct NonZeroRect:
         return none
 
     ## Creates new `NonZeroRect`.
-    pub func from_xywh(x: f32, y: f32, w: f32, h: f32) -> NonZeroRect?:
+    pub static func from_xywh(x: f32, y: f32, w: f32, h: f32) -> NonZeroRect?:
         return NonZeroRect.from_ltrb(x, y, w + x, h + y)
 
     ## Returns the left edge.
@@ -545,7 +545,7 @@ pub struct ScreenIntRect:
     let height_: u32
 
     ## Creates a new `ScreenIntRect`.
-    pub func from_xywh(x: u32, y: u32, width: u32, height: u32) -> ScreenIntRect?:
+    pub static func from_xywh(x: u32, y: u32, width: u32, height: u32) -> ScreenIntRect?:
         let limit = (u32)i32_max
         if x > limit or y > limit or width > limit or height > limit:
             return none
@@ -556,7 +556,7 @@ pub struct ScreenIntRect:
         return ScreenIntRect(x_ = x, y_ = y, width_ = width, height_ = height)
 
     ## Creates a new `ScreenIntRect` from checked parts.
-    func from_xywh_safe(x: u32, y: u32, width: u32, height: u32) -> ScreenIntRect:
+    static func from_xywh_safe(x: u32, y: u32, width: u32, height: u32) -> ScreenIntRect:
         return ScreenIntRect(x_ = x, y_ = y, width_ = width, height_ = height)
 
     ## Returns rect's X position.

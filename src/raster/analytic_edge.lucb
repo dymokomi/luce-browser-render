@@ -162,7 +162,7 @@ struct AnalyticEdge:
     ## Applied to cdx and cdy.
     var cubic_dshift: i32
 
-    func snap_y(y: i32) -> i32:
+    static func snap_y(y: i32) -> i32:
         let accuracy = analytic_default_accuracy
         # This approach is safer than left shift, round, then right shift
         return (i32)((((u32)y +% (u32)(fixed_one >> (accuracy + 1))) >> (u32)(16 - accuracy)) << (u32)(16 - accuracy))

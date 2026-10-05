@@ -16,7 +16,7 @@ struct ClippedEdges:
     var edges: PathEdge[18]
     var len: usize
 
-    func empty() -> ClippedEdges:
+    static func empty() -> ClippedEdges:
         var c: ClippedEdges = ---
         c.len = 0
         return c
@@ -32,7 +32,7 @@ struct EdgeClipper:
     var can_cull_to_the_right: bool
     var edges: ClippedEdges
 
-    func new_(clip: Rect, can_cull_to_the_right: bool) -> EdgeClipper:
+    static func new_(clip: Rect, can_cull_to_the_right: bool) -> EdgeClipper:
         return EdgeClipper(clip = clip, can_cull_to_the_right = can_cull_to_the_right, edges = ClippedEdges.empty())
 
     func clip_line(p0: Point, p1: Point) -> ClippedEdges?:
@@ -260,7 +260,7 @@ struct EdgeClipperIter:
     ## The next quad of `conic_quads` to clip (conic_quads.len when none is pending).
     var conic_index: usize
 
-    func new_(path: const Path*, clip: Rect, can_cull_to_the_right: bool) -> EdgeClipperIter:
+    static func new_(path: const Path*, clip: Rect, can_cull_to_the_right: bool) -> EdgeClipperIter:
         var iter: EdgeClipperIter = ---
         iter.edge_iter = edge_iter(path)
         iter.clip = clip

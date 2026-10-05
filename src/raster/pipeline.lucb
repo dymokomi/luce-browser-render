@@ -191,10 +191,10 @@ struct GradientColor:
     var b: f32
     var a: f32
 
-    func new_(r: f32, g: f32, b: f32, a: f32) -> GradientColor:
+    static func new_(r: f32, g: f32, b: f32, a: f32) -> GradientColor:
         return GradientColor(r = r, g = g, b = b, a = a)
 
-    func from_color(c: Color) -> GradientColor:
+    static func from_color(c: Color) -> GradientColor:
         return GradientColor(r = c.red(), g = c.green(), b = c.blue(), a = c.alpha())
 
     func equals(o: GradientColor) -> bool:
@@ -250,7 +250,7 @@ struct RasterPipelineBuilder:
     var force_hq_pipeline: bool
     var ctx: Context
 
-    func new_() -> RasterPipelineBuilder:
+    static func new_() -> RasterPipelineBuilder:
         return RasterPipelineBuilder(ctx = Context())
 
     ## Compiles this pipeline to highp (a test hook, as Skia's global one).

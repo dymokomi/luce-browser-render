@@ -117,7 +117,7 @@ struct RasterPipelineBlitter: Blitter:
 
     ## SkBlitter::Choose and SkRasterPipelineBlitter::Create for `paint`; none when the paint
     ## draws nothing (SkNullBlitter) or its shader cannot draw.
-    func new_(paint: const Paint*, pixmap: SubPixmapMut*) -> RasterPipelineBlitter?:
+    static func new_(paint: const Paint*, pixmap: SubPixmapMut*) -> RasterPipelineBlitter?:
         var src = PipelineSource(shader = paint.shader, blend_mode = paint.blend_mode, paint_alpha = 1.0, is_opaque = false, is_constant = false, dither = false, colorspace = paint.colorspace)
 
         # SkBlitter::Choose. We have the most fast-paths for SrcOver, so see if we can act
