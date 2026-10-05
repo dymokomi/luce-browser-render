@@ -327,7 +327,14 @@ pub struct Pattern:
     var spread_mode: SpreadMode
     var opacity: f32
     var transform: Transform
+    ## The image's pixels to the destination's color space after sampling (Skia's
+    ## SkColorSpaceXformSteps of an SkImage with a color space); none when they are sRGB.
+    var color_xform: ColorXform?
 
     ## Creates a new pattern shader. `opacity` will be clamped to the 0..=1 range.
     pub static func new_(pixmap: PixmapRef, spread_mode: SpreadMode, quality: FilterQuality, opacity: f32, transform: Transform) -> Shader:
         return .pattern(p = Pattern(pixmap = pixmap, spread_mode = spread_mode, quality = quality, opacity = normalized_clamped(opacity), transform = transform))
+
+    ## A pattern of an image in another color space, converted after sampling by `color_xform`.
+    pub static func new_color_managed(pixmap: PixmapRef, spread_mode: SpreadMode, quality: FilterQuality, opacity: f32, transform: Transform, color_xform: ColorXform?) -> Shader:
+        return .pattern(p = Pattern(pixmap = pixmap, spread_mode = spread_mode, quality = quality, opacity = normalized_clamped(opacity), transform = transform, color_xform = color_xform))

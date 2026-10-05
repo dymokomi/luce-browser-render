@@ -114,8 +114,9 @@ enum Stage as u8:
     gamma_expand_srgb = 80
     gamma_expand_destination_srgb = 81
     gamma_compress_srgb = 82
+    color_xform = 83
 
-let stages_count: usize = 83
+let stages_count: usize = 84
 
 ## Skia's gForceHighPrecisionRasterPipeline: every pipeline compiles to highp while set.
 var force_highp: bool = false
@@ -162,6 +163,7 @@ struct Context:
     var limit_y: TileCtx
     var gather: GatherCtx
     var sampler: SamplerCtx
+    var color_xform: ColorXform
     var transform: Transform = Transform()
 
 ## The tile modes of the fused bilinear / bicubic samplers (Skia appends repeat_x / mirror_x

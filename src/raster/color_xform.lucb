@@ -1,0 +1,262 @@
+#==============================================================================================
+#
+#   color_xform - the color space conversion of an image's pixels as Skia's raster pipeline
+#                 runs it
+#
+#   DESCRIPTION:
+#       Skia draws an SkImage tagged with a color space by sampling it in that space and then
+#       appending SkColorSpaceXformSteps to the shader's stages (SkImageShader::appendStages,
+#       append_misc), to the destination's sRGB: unpremul, the source's transfer function,
+#       the HLG OOTF, the gamut matrix, the destination's OOTF and inverse transfer function,
+#       premul. Which steps run, with which curves and matrix, is luce-color's port of
+#       SkColorSpaceXformSteps (`icc.Steps`); this fragment is the arithmetic of the highp
+#       stages they become (SkRasterPipeline::appendTransferFunction picks gamma_, parametric,
+#       PQish, HLGish or HLGinvish), as m144 computes them on arm64 NEON: `mad` fuses,
+#       min/max are vminq/vmaxq, approx_powf rounds half to even. One stage, `color_xform`,
+#       runs every step a pattern needs, lane by lane; it has no lowp version, so a pipeline
+#       with it is highp, as in Skia.
+#
+#       Copyright (c) 2018 Google Inc. All rights reserved.
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+from luce_color import icc
+
+## The highp stage SkRasterPipeline::appendTransferFunction appends for a transfer function.
+enum XformCurve:
+    none_
+    gamma
+    parametric
+    pqish
+    hlgish
+    hlginvish
+
+## The steps from an image's color space to the destination's, as the pipeline runs them.
+pub struct ColorXform:
+    var steps: icc.Steps
+    var src_curve: XformCurve
+    var dst_curve: XformCurve
+
+    ## The stages of `steps`, or none when no step runs.
+    pub static func make(steps: icc.Steps) -> ColorXform?:
+        if steps.is_identity():
+            return none
+        return ColorXform(steps = steps, src_curve = xform_curve(&steps.src_tf), dst_curve = xform_curve(&steps.dst_tf_inv))
+
+## appendTransferFunction's choice: gamma_ for a pure power, parametric for another
+## sRGB-ish curve, the HDR stages by kind.
+func xform_curve(tf: const icc.TransferFunction*) -> XformCurve:
+    match tf.kind():
+        .srgbish:
+            if tf.a == 1.0 and tf.b == 0.0 and tf.c == 0.0 and tf.d == 0.0 and tf.e == 0.0 and tf.f == 0.0:
+                return .gamma
+            return .parametric
+        .pqish:
+            return .pqish
+        .hlgish:
+            return .hlgish
+        .hlginvish:
+            return .hlginvish
+        _:
+            return .none_
+
+# mark: Approximations =========================================================================
+
+## approx_log2 (SkRasterPipeline_opts.h): the exponent refined by the mantissa, with nmad.
+func xform_approx_log2(x: f32) -> f32:
+    let bits = x.bits()
+    let e = (f32)bits * (1.0 / 8388608.0)
+    let m = f32.bits((bits & 0x007fffff) | 0x3f000000)
+    return math32.fma(-m, 1.498030302, e - 124.225514990) - 1.725879990 / (0.3520887068 + m)
+
+## approx_pow2: clamped to 0..+inf bits, rounded half to even (vcvtnq_u32_f32).
+func xform_approx_pow2(x: f32) -> f32:
+    let f = x - math32.floor(x)
+    var approx = math32.fma(-f, 1.490129070, x + 121.274057500)
+    approx += 27.728023300 / (4.84252568 - f)
+    approx *= 8388608.0
+    approx = f32_vmin(f32_vmax(approx, 0.0), 2139095040.0)
+    return f32.bits(f32_round_nonneg(approx))
+
+## approx_powf: 0 and 1 pass through.
+func xform_approx_powf(x: f32, y: f32) -> f32:
+    if x == 0.0 or x == 1.0:
+        return x
+    return xform_approx_pow2(xform_approx_log2(x) * y)
+
+func xform_approx_exp(x: f32) -> f32:
+    let log2_e: f32 = 1.4426950408889634074
+    return xform_approx_pow2(log2_e * x)
+
+func xform_approx_log(x: f32) -> f32:
+    let ln2: f32 = 0.69314718
+    return ln2 * xform_approx_log2(x)
+
+# mark: Stages =================================================================================
+
+## The transfer function stage `curve` with `tf` on one component (the parametric, gamma_,
+## PQish, HLGish and HLGinvish stages): the sign set aside, the curve on |v|, the sign back.
+func xform_transfer(curve: XformCurve, tf: const icc.TransferFunction*, input: f32) -> f32:
+    let bits = input.bits()
+    let sign = bits & 0x80000000
+    let v = f32.bits(bits ^ sign)
+    match curve:
+        .gamma:
+            return f32.bits(sign | xform_approx_powf(v, tf.g).bits())
+        .parametric:
+            let r = math32.fma(tf.c, v, tf.f) if v <= tf.d else xform_approx_powf(math32.fma(tf.a, v, tf.b), tf.g) + tf.e
+            return f32.bits(sign | r.bits())
+        .pqish:
+            let p = xform_approx_powf(v, tf.c)
+            let r = xform_approx_powf(f32_vmax(math32.fma(tf.b, p, tf.a), 0.0) / math32.fma(tf.e, p, tf.d), tf.f)
+            return f32.bits(sign | r.bits())
+        .hlgish:
+            # R, G, a, b, c and K - 1 in a..f.
+            let k = tf.f + 1.0
+            let r = xform_approx_powf(v * tf.a, tf.b) if v * tf.a <= 1.0 else xform_approx_exp((v - tf.e) * tf.c) + tf.d
+            return k * f32.bits(sign | r.bits())
+        .hlginvish:
+            let k = tf.f + 1.0
+            let scaled = v / k
+            let r = tf.a * xform_approx_powf(scaled, tf.b) if scaled <= 1.0 else tf.c * xform_approx_log(scaled - tf.d) + tf.e
+            return f32.bits(sign | r.bits())
+        _:
+            return input
+
+## The ootf stage: the color scaled by its luminance (weights ootf[0..3]) to ootf[3].
+func xform_ootf(ootf: f32[4], c: f32[3]) -> f32[3]:
+    let y = ootf[0] * c[0] + ootf[1] * c[1] + ootf[2] * c[2]
+    let bits = y.bits()
+    let sign = bits & 0x80000000
+    let scale = f32.bits(sign | xform_approx_powf(f32.bits(bits ^ sign), ootf[3]).bits())
+    return [c[0] * scale, c[1] * scale, c[2] * scale]
+
+## Every step of `x` on one pixel.
+func xform_pixel(x: const ColorXform*, rgba: f32[4]) -> f32[4]:
+    let flags = x.steps.flags
+    var c: f32[3] = [rgba[0], rgba[1], rgba[2]]
+    let a = rgba[3]
+    if flags.unpremul:
+        let inverse = 1.0 / a
+        let scale: f32 = inverse if inverse < f32.bits(0x7f800000) else 0.0
+        c = [c[0] * scale, c[1] * scale, c[2] * scale]
+    if flags.linearize:
+        for i in 0..<(usize)3:
+            c[i] = xform_transfer(x.src_curve, &x.steps.src_tf, c[i])
+    if flags.src_ootf:
+        c = xform_ootf(x.steps.src_ootf, c)
+    if flags.gamut_transform:
+        # matrix_3x3: mad(r, m[0], mad(g, m[3], b * m[6])) and so on, column-major.
+        let m = x.steps.src_to_dst_matrix
+        c = [math32.fma(c[0], m[0], math32.fma(c[1], m[3], c[2] * m[6])), math32.fma(c[0], m[1], math32.fma(c[1], m[4], c[2] * m[7])), math32.fma(c[0], m[2], math32.fma(c[1], m[5], c[2] * m[8]))]
+    if flags.dst_ootf:
+        c = xform_ootf(x.steps.dst_ootf, c)
+    if flags.encode:
+        for i in 0..<(usize)3:
+            c[i] = xform_transfer(x.dst_curve, &x.steps.dst_tf_inv, c[i])
+    if flags.premul:
+        c = [c[0] * a, c[1] * a, c[2] * a]
+    return [c[0], c[1], c[2], a]
+
+## The color_xform stage: the steps of the pattern's ColorXform on every lane.
+func highp_color_xform(p: HighpPipeline*):
+    let x = &p.ctx.color_xform
+    for h in 0..<(usize)2:
+        for l in 0..<(usize)4:
+            let out = xform_pixel(x, [p.r[h][l], p.g[h][l], p.b[h][l], p.a[h][l]])
+            p.r[h][l] = out[0]
+            p.g[h][l] = out[1]
+            p.b[h][l] = out[2]
+            p.a[h][l] = out[3]
+
+    highp_next_stage(p)
+
+# mark: Tests ==================================================================================
+
+test "a color transform steps as Skia's pipeline does":
+    let srgb = icc.ColorSpace.srgb()
+    assert(ColorXform.make(icc.Steps.make(&srgb, .premul, &srgb, .premul)) == none)
+    # sRGB with red and green swapped: its #990000 is sRGB's #009900, through unpremul, the
+    # sRGB parametric curve, the matrix, the inverse curve and premul.
+    var swapped = srgb
+    for col in 0..<(usize)3:
+        let red = swapped.to_xyzd50.vals[col][0]
+        swapped.to_xyzd50.vals[col][0] = swapped.to_xyzd50.vals[col][1]
+        swapped.to_xyzd50.vals[col][1] = red
+    let x = ColorXform.make(icc.Steps.make(&swapped, .premul, &srgb, .premul)) else trap("steps run")
+    assert(x.src_curve == .parametric and x.dst_curve == .parametric)
+    let out = xform_pixel(&x, [0.6, 0.0, 0.0, 1.0])
+    assert(math32.abs(out[0]) < 0.0001 and math32.abs(out[1] - 0.6) < 0.001 and math32.abs(out[2]) < 0.0001 and out[3] == 1.0)
+    # A pure power is the gamma_ stage; the exact values of approx_powf.
+    assert(xform_curve(&icc.tf_2dot2) == .gamma and xform_approx_powf(0.0, 2.2) == 0.0 and xform_approx_powf(1.0, 2.2) == 1.0)
+    assert(math32.abs(xform_approx_powf(0.5, 2.0) - 0.25) < 0.0001)
+
+## The first 16 bytes of a test draw.
+type XformTestBytes = u8[16]
+
+## The skia_oracle's test image (luce-browser-tools/oracles/luce-color/icc, `--draws`), 16x16
+## premultiplied pixels of an LCG, every fourth opaque, drawn 1:1 from `cs` into a transparent
+## sRGB pixmap: the FNV-1a of the result and its first 16 bytes.
+func xform_test_draw(cs: const icc.ColorSpace*) -> (u32, u8[16]):
+    var src = Pixmap.new_(16, 16) else trap("pixmap")
+    defer src.release()
+    var s: u32 = 0x12345678
+    let data = src.data_mut()
+    for k in 0..<(usize)256:
+        var px: u8[4] = [0, 0, 0, 0]
+        for c in 0..<(usize)4:
+            s = s *% 1664525 +% 1013904223
+            px[c] = (u8)(s >> 24)
+        let a: u8 = 255 if k % 4 == 0 else px[3]
+        for c in 0..<(usize)3:
+            data[k * 4 + c] = (u8)(((u32)px[c] * (u32)a + 127) // 255)
+        data[k * 4 + 3] = a
+    var dst = Pixmap.new_(16, 16) else trap("pixmap")
+    defer dst.release()
+    let srgb = icc.ColorSpace.srgb()
+    var paint = Paint()
+    paint.shader = Pattern.new_color_managed(src.as_ref(), .pad_, .nearest, 1.0, Transform.identity(), ColorXform.make(icc.Steps.make(cs, .premul, &srgb, .premul)))
+    dst.fill_rect(Rect.from_ltrb(0.0, 0.0, 16.0, 16.0) else trap("rect"), &paint, Transform.identity(), none)
+    var h: u32 = 2166136261
+    for b in dst.data():
+        h = (h ^ (u32)b) *% 16777619
+    var first: u8[16] = ---
+    for i in 0..<(usize)16:
+        first[i] = dst.data()[i]
+    return (h, first)
+
+test "images in other color spaces draw as Skia m144 draws them":
+    # FNV-1a and first pixels of skia_oracle --draws (libskia m144, arm64).
+    var swapped = icc.gamut_srgb()
+    for r in 0..<(usize)3:
+        let red = swapped.vals[r][0]
+        swapped.vals[r][0] = swapped.vals[r][1]
+        swapped.vals[r][1] = red
+    let prophoto = icc.primaries_prophoto_rgb.to_xyzd50() else trap("ProPhoto primaries")
+    let adobe = icc.gamut_adobe_rgb()
+    let spaces: icc.ColorSpace[7] = [
+        icc.ColorSpace.rgb(&icc.tf_srgb, &swapped) else trap("swap"),
+        icc.ColorSpace.rgb(&icc.tf_srgb, &icc.gamut_display_p3) else trap("p3"),
+        icc.ColorSpace.rgb(&icc.tf_2dot2, &adobe) else trap("adobe"),
+        icc.ColorSpace.rgb(&icc.tf_pq, &icc.gamut_rec2020) else trap("pq"),
+        icc.ColorSpace.rgb(&icc.tf_hlg, &icc.gamut_rec2020) else trap("hlg"),
+        icc.ColorSpace.srgb_linear(),
+        icc.ColorSpace.rgb(&icc.tf_prophoto_rgb, &prophoto) else trap("prophoto"),
+    ]
+    let hashes: u32[7] = [0x1d965563, 0x5de48fcf, 0xd80eb197, 0xeb8a5cba, 0xe0abf7ed, 0xd4318de4, 0xdf1215ab]
+    let firsts: XformTestBytes[7] = [
+        [205, 117, 37, 255, 214, 125, 222, 242, 52, 67, 13, 103, 22, 29, 77, 110],
+        [80, 208, 0, 255, 89, 217, 224, 242, 70, 51, 0, 103, 30, 22, 80, 110],
+        [16, 206, 0, 255, 40, 215, 223, 242, 73, 52, 2, 103, 31, 20, 79, 110],
+        [0, 255, 0, 255, 0, 255, 255, 242, 165, 60, 0, 103, 0, 0, 188, 110],
+        [0, 255, 0, 255, 0, 255, 255, 242, 87, 54, 0, 103, 23, 19, 84, 110],
+        [180, 232, 106, 255, 181, 229, 233, 242, 85, 76, 40, 103, 61, 53, 94, 110],
+        [0, 228, 0, 255, 0, 233, 228, 242, 89, 56, 0, 103, 0, 26, 88, 110],
+    ]
+    for i in 0..<(usize)7:
+        let (h, first) = xform_test_draw(&spaces[i])
+        if h != hashes[i] or first != firsts[i]:
+            print(f"color space {i}: {h:08x} {first[0]} {first[1]} {first[2]} {first[3]} {first[4]} {first[5]} {first[6]} {first[7]}")
+        assert(h == hashes[i] and first == firsts[i])

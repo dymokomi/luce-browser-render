@@ -192,13 +192,14 @@ func cpu_filter_quality(scaling_mode: gfx.ScalingMode) -> raster.FilterQuality:
         _: return raster.FilterQuality.nearest
 
 ## SkCanvas::drawImageRect(image, src = the whole image, dst, sampling, paint with
-## anti-aliasing): the image scaled onto `dst`.
-func cpu_canvas_draw_image_rect(canvas: CpuCanvas*, image: const raster.Pixmap*, dst: raster.Rect, quality: raster.FilterQuality):
+## anti-aliasing): the image scaled onto `dst`, its pixels converted by `xform` when its color
+## space is not sRGB.
+func cpu_canvas_draw_image_rect(canvas: CpuCanvas*, image: const raster.Pixmap*, dst: raster.Rect, quality: raster.FilterQuality, xform: raster.ColorXform? = none):
     let sx = dst.width() / (f32)image.width()
     let sy = dst.height() / (f32)image.height()
     var paint = raster.Paint()
     paint.anti_alias = true
-    paint.shader = raster.Pattern.new_(image.as_ref(), raster.SpreadMode.pad_, quality, 1.0, raster.Transform.from_row(sx, 0.0, 0.0, sy, dst.left(), dst.top()))
+    paint.shader = raster.Pattern.new_color_managed(image.as_ref(), raster.SpreadMode.pad_, quality, 1.0, raster.Transform.from_row(sx, 0.0, 0.0, sy, dst.left(), dst.top()), xform)
     cpu_canvas_fill_rect(canvas, dst, &paint)
 
 # mark: flush, glyph runs, rects, bitmaps ======================================================
@@ -250,7 +251,7 @@ func display_list_player_cpu_draw_external_content_impl(base: DisplayListPlayer*
     defer image.release()
     let dst_rect = cpu_rect(command.dst_rect) else return
     let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
-    cpu_canvas_draw_image_rect(canvas, &image, dst_rect, cpu_filter_quality(command.scaling_mode))
+    cpu_canvas_draw_image_rect(canvas, &image, dst_rect, cpu_filter_quality(command.scaling_mode), cpu_image_color_xform(bitmap))
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:27 Web::Painting::DisplayListPlayerSkia::draw_scaled_immutable_bitmap (override).
 func display_list_player_cpu_draw_scaled_immutable_bitmap_impl(base: DisplayListPlayer*, command: DrawScaledImmutableBitmap):
@@ -262,7 +263,7 @@ func display_list_player_cpu_draw_scaled_immutable_bitmap_impl(base: DisplayList
     let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
     cpu_canvas_save(canvas)
     cpu_canvas_clip_rect(canvas, clip_rect, true)
-    cpu_canvas_draw_image_rect(canvas, &image, dst_rect, cpu_filter_quality(command.scaling_mode))
+    cpu_canvas_draw_image_rect(canvas, &image, dst_rect, cpu_filter_quality(command.scaling_mode), cpu_image_color_xform(command.bitmap))
     cpu_canvas_restore(canvas)
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:28 Web::Painting::DisplayListPlayerSkia::draw_repeated_immutable_bitmap (override).
@@ -288,7 +289,7 @@ func display_list_player_cpu_draw_repeated_immutable_bitmap_impl(base: DisplayLi
 
     var paint = raster.Paint()
     paint.anti_alias = true
-    paint.shader = raster.Pattern.new_(image.as_ref(), raster.SpreadMode.repeat, cpu_filter_quality(command.scaling_mode), 1.0, matrix)
+    paint.shader = raster.Pattern.new_color_managed(image.as_ref(), raster.SpreadMode.repeat, cpu_filter_quality(command.scaling_mode), 1.0, matrix, cpu_image_color_xform(command.bitmap))
     let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
     cpu_canvas_fill_rect(canvas, fill_rect, &paint)
 
