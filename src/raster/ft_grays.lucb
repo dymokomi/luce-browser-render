@@ -1,0 +1,596 @@
+#==============================================================================================
+#
+#   ft_grays - FreeType's anti-aliasing rasterizer, for glyph masks
+#
+#   DESCRIPTION:
+#       Port of FreeType 2.13.3's smooth rasterizer (src/smooth/ftgrays.c, the 64-bit build:
+#       FT_INT64 is defined, so lines are walked cell by cell with `prod` and conics are drawn
+#       by forward differences) and of FT_Outline_Decompose (src/base/ftoutln.c), as
+#       FT_Outline_Get_Bitmap runs them for an 8-bit gray bitmap. Ladybird's Skia asks
+#       FreeType for every glyph mask (SkScalerContext_FreeType::generateImage), so text drawn
+#       through this rasterizer has the coverage of the reference screenshots, byte for byte:
+#       the arithmetic is integer only and the same on every platform.
+#
+#       Cells live in one growable pool instead of ftgrays' fixed render pool, so the whole
+#       bitmap is one band (FreeType bisects bands only when its pool overflows; a cell's
+#       cover and area do not depend on the band it was computed in).
+#
+#       Copyright (c) 2000-2024 by David Turner, Robert Wilhelm, and Werner Lemberg.
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: FTL (see LICENSE-freetype)
+#
+#==============================================================================================
+
+# mark: Outlines ===============================================================================
+
+## FT_CURVE_TAG's values: an on-curve point, a conic (quadratic) and a cubic control point.
+pub let ft_curve_tag_on: u8 = 1
+pub let ft_curve_tag_conic: u8 = 0
+pub let ft_curve_tag_cubic: u8 = 2
+
+## An FT_Outline as the rasterizer reads it: points in 26.6 fixed point with y growing
+## upward, their curve tags (FT_CURVE_TAG reads the low two bits), the index of each
+## contour's last point, and the fill rule (FT_OUTLINE_EVEN_ODD_FILL).
+pub struct FtOutline:
+    pub var xs: const i64[]
+    pub var ys: const i64[]
+    pub var tags: const u8[]
+    pub var contour_ends: const usize[]
+    pub var even_odd: bool
+
+## FT_Outline_Get_CBox: the bounding box of every point, control points included, as
+## (x_min, y_min, x_max, y_max); zeros for an outline without points.
+pub func ft_outline_cbox(outline: const FtOutline*) -> (i64, i64, i64, i64):
+    if outline.xs.length == 0:
+        return (0, 0, 0, 0)
+    var x_min = outline.xs[0]
+    var x_max = x_min
+    var y_min = outline.ys[0]
+    var y_max = y_min
+    for i in 1..<outline.xs.length:
+        let x = outline.xs[i]
+        if x < x_min:
+            x_min = x
+        if x > x_max:
+            x_max = x
+        let y = outline.ys[i]
+        if y < y_min:
+            y_min = y
+        if y > y_max:
+            y_max = y
+    return (x_min, y_min, x_max, y_max)
+
+# mark: The worker =============================================================================
+
+## PIXEL_BITS: the rasterizer's subpixel precision (ONE_PIXEL is 256 units).
+let gray_pixel_bits: i64 = 8
+let gray_one_pixel: i64 = 256
+
+## The null cell's index: ftgrays' dumpster cell, whose x is CELL_MAX_X_VALUE.
+let gray_null_cell: i32 = -1
+
+## TCell: one pixel's accumulated cover and area, linked to the next cell of its row.
+struct GrayCell:
+    var x: i32
+    var cover: i32
+    var area: i32
+    var next: i32
+
+## gray_TWorker: the cells of the band, the current cell and pen position, the target.
+struct GrayWorker:
+    var min_ex: i32
+    var max_ex: i32
+    var min_ey: i32
+    var max_ey: i32
+    var count_ey: i32
+    var cells: Vec[GrayCell]
+    ## The first cell of each row (`ycells`), the null cell for an empty row.
+    var ycells: Vec[i32]
+    ## The current cell, or the null cell.
+    var cell: i32
+    ## The null cell's accumulators (written to and never read, as ftgrays' dumpster).
+    var dumpster: GrayCell
+    ## The last pen position, in 1/256 pixels.
+    var x: i64
+    var y: i64
+
+    func release():
+        self.cells.release()
+        self.ycells.release()
+
+## TRUNC: the integer pixel of a 1/256 coordinate.
+func gray_trunc(x: i64) -> i32:
+    return (i32)(x >> gray_pixel_bits)
+
+## FRACT: the fraction of a 1/256 coordinate.
+func gray_fract(x: i64) -> i32:
+    return (i32)(x & (gray_one_pixel - 1))
+
+## UPSCALE: 26.6 to 1/256 pixels.
+func gray_upscale(x: i64) -> i64:
+    return x * (gray_one_pixel >> 6)
+
+## FT_UDIVPREP's reciprocal: (FT_Int64)0xFFFFFFFF / b, or 0 when `c` is false.
+func gray_udiv_prep(c: bool, b: i64) -> i64:
+    return 0xFFFFFFFF // b if c else 0
+
+## FT_UDIV: `a` divided through the reciprocal `b_r`, ((FT_UInt64)a * (FT_UInt64)b_r) >> 32.
+func gray_udiv(a: i64, b_r: i64) -> i32:
+    return (i32)(((u64)a *% (u64)b_r) >> 32)
+
+## The current cell's accumulators.
+func gray_current(ras: GrayWorker*) -> GrayCell*:
+    if ras.cell == gray_null_cell:
+        return &ras.dumpster
+    return &ras.cells.data[(usize)ras.cell]
+
+## FT_INTEGRATE: adds `a` to the current cell's cover and `a * b` to its area (TArea is
+## an int, and ADD_INT wraps).
+func gray_integrate(ras: GrayWorker*, a: i32, b: i32):
+    let cell = gray_current(ras)
+    cell.cover = cell.cover +% a
+    cell.area = cell.area +% a *% b
+
+## gray_set_cell: makes the cell at (ex, ey) current, inserting it into its row's list in x
+## order. Cells outside the band (or right of it) go to the null cell; cells left of it are
+## gathered at min_ex - 1.
+func gray_set_cell(ras: GrayWorker*, ex0: i32, ey: i32):
+    let ey_index = ey - ras.min_ey
+    if ey_index < 0 or ey_index >= ras.count_ey or ex0 >= ras.max_ex:
+        ras.cell = gray_null_cell
+        return
+    let ex = ex0 if ex0 > ras.min_ex - 1 else ras.min_ex - 1
+    # `link` is where the pointer to the next cell lives: the row's head, or a cell's next.
+    var previous = gray_null_cell
+    var cell = ras.ycells.data[(usize)ey_index]
+    while cell != gray_null_cell:
+        let x = ras.cells.data[(usize)cell].x
+        if x > ex:
+            break
+        if x == ex:
+            ras.cell = cell
+            return
+        previous = cell
+        cell = ras.cells.data[(usize)cell].next
+    let index = (i32)ras.cells.len
+    ras.cells.push(GrayCell(x = ex, cover = 0, area = 0, next = cell))
+    if previous == gray_null_cell:
+        ras.ycells.data[(usize)ey_index] = index
+    else:
+        ras.cells.data[(usize)previous].next = index
+    ras.cell = index
+
+# mark: Lines and curves =======================================================================
+
+## gray_render_line (the FT_INT64 version): a straight line from the pen to (to_x, to_y),
+## across as many cells as it touches, in any direction.
+func gray_render_line(ras: GrayWorker*, to_x: i64, to_y: i64):
+    var ey1 = gray_trunc(ras.y)
+    let ey2 = gray_trunc(to_y)
+
+    # perform vertical clipping
+    if (ey1 >= ras.max_ey and ey2 >= ras.max_ey) or (ey1 < ras.min_ey and ey2 < ras.min_ey):
+        ras.x = to_x
+        ras.y = to_y
+        return
+
+    var ex1 = gray_trunc(ras.x)
+    let ex2 = gray_trunc(to_x)
+    var fx1 = gray_fract(ras.x)
+    var fy1 = gray_fract(ras.y)
+
+    let dx = to_x - ras.x
+    let dy = to_y - ras.y
+
+    if ex1 == ex2 and ey1 == ey2:
+        # inside one cell
+        _ = 0
+    elif dy == 0:
+        # any horizontal line
+        gray_set_cell(ras, ex2, ey2)
+        ras.x = to_x
+        ras.y = to_y
+        return
+    elif dx == 0:
+        if dy > 0:
+            # vertical line up
+            while true:
+                let fy2 = (i32)gray_one_pixel
+                gray_integrate(ras, fy2 - fy1, fx1 * 2)
+                fy1 = 0
+                ey1 += 1
+                gray_set_cell(ras, ex1, ey1)
+                if ey1 == ey2:
+                    break
+        else:
+            # vertical line down
+            while true:
+                let fy2: i32 = 0
+                gray_integrate(ras, fy2 - fy1, fx1 * 2)
+                fy1 = (i32)gray_one_pixel
+                ey1 -= 1
+                gray_set_cell(ras, ex1, ey1)
+                if ey1 == ey2:
+                    break
+    else:
+        # any other line
+        var prod = dx * (i64)fy1 - dy * (i64)fx1
+        let dx_r = gray_udiv_prep(ex1 != ex2, dx)
+        let dy_r = gray_udiv_prep(ey1 != ey2, dy)
+
+        # The fundamental value `prod' determines which side and the exact coordinate where
+        # the line exits current cell. It is also easily updated when moving from one cell
+        # to the next.
+        while true:
+            var fx2: i32
+            var fy2: i32
+            if prod - dx * gray_one_pixel > 0 and prod <= 0:
+                # left
+                fx2 = 0
+                fy2 = gray_udiv(-prod, -dx_r)
+                prod -= dy * gray_one_pixel
+                gray_integrate(ras, fy2 - fy1, fx1 + fx2)
+                fx1 = (i32)gray_one_pixel
+                fy1 = fy2
+                ex1 -= 1
+            elif prod - dx * gray_one_pixel + dy * gray_one_pixel > 0 and prod - dx * gray_one_pixel <= 0:
+                # up
+                prod -= dx * gray_one_pixel
+                fx2 = gray_udiv(-prod, dy_r)
+                fy2 = (i32)gray_one_pixel
+                gray_integrate(ras, fy2 - fy1, fx1 + fx2)
+                fx1 = fx2
+                fy1 = 0
+                ey1 += 1
+            elif prod + dy * gray_one_pixel >= 0 and prod - dx * gray_one_pixel + dy * gray_one_pixel <= 0:
+                # right
+                prod += dy * gray_one_pixel
+                fx2 = (i32)gray_one_pixel
+                fy2 = gray_udiv(prod, dx_r)
+                gray_integrate(ras, fy2 - fy1, fx1 + fx2)
+                fx1 = 0
+                fy1 = fy2
+                ex1 += 1
+            else:
+                # down
+                fx2 = gray_udiv(prod, -dy_r)
+                fy2 = 0
+                prod += dx * gray_one_pixel
+                gray_integrate(ras, fy2 - fy1, fx1 + fx2)
+                fx1 = fx2
+                fy1 = (i32)gray_one_pixel
+                ey1 -= 1
+            gray_set_cell(ras, ex1, ey1)
+            if ex1 == ex2 and ey1 == ey2:
+                break
+
+    let fx2 = gray_fract(to_x)
+    let fy2 = gray_fract(to_y)
+    gray_integrate(ras, fy2 - fy1, fx1 + fx2)
+    ras.x = to_x
+    ras.y = to_y
+
+## gray_render_conic (the FT_INT64 version): a quadratic arc from the pen, drawn as the
+## lines between points computed by forward differences at a power-of-two step.
+func gray_render_conic(ras: GrayWorker*, control_x: i64, control_y: i64, to_x: i64, to_y: i64):
+    let p0x = ras.x
+    let p0y = ras.y
+    let p1x = gray_upscale(control_x)
+    let p1y = gray_upscale(control_y)
+    let p2x = gray_upscale(to_x)
+    let p2y = gray_upscale(to_y)
+
+    # short-cut the arc that crosses the current band
+    if (gray_trunc(p0y) >= ras.max_ey and gray_trunc(p1y) >= ras.max_ey and gray_trunc(p2y) >= ras.max_ey) or (gray_trunc(p0y) < ras.min_ey and gray_trunc(p1y) < ras.min_ey and gray_trunc(p2y) < ras.min_ey):
+        ras.x = p2x
+        ras.y = p2y
+        return
+
+    let bx = p1x - p0x
+    let by = p1y - p0y
+    let ax = p2x - p1x - bx  # p0.x + p2.x - 2 * p1.x
+    let ay = p2y - p1y - by  # p0.y + p2.y - 2 * p1.y
+
+    var dx = ax if ax >= 0 else -ax
+    let dy = ay if ay >= 0 else -ay
+    if dx < dy:
+        dx = dy
+
+    if dx <= gray_one_pixel // 4:
+        gray_render_line(ras, p2x, p2y)
+        return
+
+    # We can calculate the number of necessary segments because each bisection predictably
+    # reduces deviation exactly 4-fold. Even 32-bit deviation would vanish after 16
+    # bisections.
+    var shift: i64 = 16
+    while true:
+        dx >>= 2
+        shift -= 1
+        if not (dx > gray_one_pixel // 4):
+            break
+    var count = (u32)0x10000 >> (u32)shift
+
+    # Q << 32 = (B << (33 - N)) + (A << (32 - 2*N)), R << 32 = A << (33 - 2*N): positions are
+    # computed on 64-bit values scaled by 2^32.
+    var rx = (i64)((u64)ax << (u64)(shift + shift))
+    var ry = (i64)((u64)ay << (u64)(shift + shift))
+    var qx = (i64)((u64)bx << (u64)(shift + 17)) +% rx
+    var qy = (i64)((u64)by << (u64)(shift + 17)) +% ry
+
+    rx = rx *% 2
+    ry = ry *% 2
+
+    var px = (i64)((u64)p0x << 32)
+    var py = (i64)((u64)p0y << 32)
+
+    while true:
+        px = px +% qx
+        py = py +% qy
+        qx = qx +% rx
+        qy = qy +% ry
+        gray_render_line(ras, px >> 32, py >> 32)
+        count -= 1
+        if count == 0:
+            break
+
+## A point of the curve stacks.
+struct GrayVector:
+    var x: i64
+    var y: i64
+
+## gray_split_cubic: splits the cubic at base[0..3] in two at t = 1/2, into base[0..6].
+func gray_split_cubic(arc: GrayVector[], base: usize):
+    var a: i64
+    var b: i64
+    var c: i64
+
+    arc[base + 6].x = arc[base + 3].x
+    a = arc[base + 0].x + arc[base + 1].x
+    b = arc[base + 1].x + arc[base + 2].x
+    c = arc[base + 2].x + arc[base + 3].x
+    arc[base + 5].x = c >> 1
+    c += b
+    arc[base + 4].x = c >> 2
+    arc[base + 1].x = a >> 1
+    a += b
+    arc[base + 2].x = a >> 2
+    arc[base + 3].x = (a + c) >> 3
+
+    arc[base + 6].y = arc[base + 3].y
+    a = arc[base + 0].y + arc[base + 1].y
+    b = arc[base + 1].y + arc[base + 2].y
+    c = arc[base + 2].y + arc[base + 3].y
+    arc[base + 5].y = c >> 1
+    c += b
+    arc[base + 4].y = c >> 2
+    arc[base + 1].y = a >> 1
+    a += b
+    arc[base + 2].y = a >> 2
+    arc[base + 3].y = (a + c) >> 3
+
+func gray_abs(x: i64) -> i64:
+    return x if x >= 0 else -x
+
+## gray_render_cubic: a cubic arc from the pen, split in halves until each piece is flat
+## enough (its control points within half a pixel of the chord's trisection points).
+func gray_render_cubic(ras: GrayWorker*, control1: GrayVector, control2: GrayVector, to: GrayVector):
+    var arc: GrayVector[16 * 3 + 1]  # enough to accommodate bisections
+    var top: usize = 0
+
+    arc[0] = GrayVector(x = gray_upscale(to.x), y = gray_upscale(to.y))
+    arc[1] = GrayVector(x = gray_upscale(control2.x), y = gray_upscale(control2.y))
+    arc[2] = GrayVector(x = gray_upscale(control1.x), y = gray_upscale(control1.y))
+    arc[3] = GrayVector(x = ras.x, y = ras.y)
+
+    # short-cut the arc that crosses the current band
+    if (gray_trunc(arc[0].y) >= ras.max_ey and gray_trunc(arc[1].y) >= ras.max_ey and gray_trunc(arc[2].y) >= ras.max_ey and gray_trunc(arc[3].y) >= ras.max_ey) or (gray_trunc(arc[0].y) < ras.min_ey and gray_trunc(arc[1].y) < ras.min_ey and gray_trunc(arc[2].y) < ras.min_ey and gray_trunc(arc[3].y) < ras.min_ey):
+        ras.x = arc[0].x
+        ras.y = arc[0].y
+        return
+
+    while true:
+        # with each split, control points quickly converge towards chord trisection points
+        # and the vanishing distances below indicate when the segment is flat enough to draw
+        let flat_limit = gray_one_pixel // 2
+        if gray_abs(2 * arc[top].x - 3 * arc[top + 1].x + arc[top + 3].x) > flat_limit or gray_abs(2 * arc[top].y - 3 * arc[top + 1].y + arc[top + 3].y) > flat_limit or gray_abs(arc[top].x - 3 * arc[top + 2].x + 2 * arc[top + 3].x) > flat_limit or gray_abs(arc[top].y - 3 * arc[top + 2].y + 2 * arc[top + 3].y) > flat_limit:
+            gray_split_cubic(arc, top)
+            top += 3
+            continue
+
+        gray_render_line(ras, arc[top].x, arc[top].y)
+
+        if top == 0:
+            return
+        top -= 3
+
+## gray_move_to: starts a new contour at `to`.
+func gray_move_to(ras: GrayWorker*, to: GrayVector):
+    let x = gray_upscale(to.x)
+    let y = gray_upscale(to.y)
+    gray_set_cell(ras, gray_trunc(x), gray_trunc(y))
+    ras.x = x
+    ras.y = y
+
+# mark: FT_Outline_Decompose ===================================================================
+
+## FT_CURVE_TAG.
+func ft_curve_tag(flag: u8) -> u8:
+    return flag & 3
+
+## The point `index` of `outline`.
+func ft_outline_point(outline: const FtOutline*, index: usize) -> GrayVector:
+    return GrayVector(x = outline.xs[index], y = outline.ys[index])
+
+## FT_Outline_Decompose with ftgrays' emitters (shift 0, delta 0): walks every contour and
+## draws its lines, conic arcs (with the implied on-curve midpoints between two conic control
+## points) and cubic arcs. False for an invalid outline (FT_THROW(Invalid_Outline)).
+func ft_outline_decompose(outline: const FtOutline*, ras: GrayWorker*) -> bool:
+    var last: i64 = -1
+    for n in 0..<outline.contour_ends.length:
+        let first = (usize)(last + 1)
+        last = (i64)outline.contour_ends[n]
+        if last < (i64)first:
+            return false
+        var limit = (usize)last
+
+        var v_start = ft_outline_point(outline, first)
+        let v_last = ft_outline_point(outline, (usize)last)
+        var v_control = v_start
+
+        var tag = ft_curve_tag(outline.tags[first])
+
+        # A contour cannot start with a cubic control point!
+        if tag == ft_curve_tag_cubic:
+            return false
+
+        # check first point to determine origin
+        var started_before_first = false
+        if tag == ft_curve_tag_conic:
+            # first point is conic control. Yes, this happens.
+            if ft_curve_tag(outline.tags[(usize)last]) == ft_curve_tag_on:
+                # start at last point if it is on the curve
+                v_start = v_last
+                limit -= 1
+            else:
+                # if both first and last points are conic, start at their middle and record
+                # its position for closure
+                v_start.x = (v_start.x + v_last.x) // 2
+                v_start.y = (v_start.y + v_last.y) // 2
+            started_before_first = true
+
+        gray_move_to(ras, v_start)
+
+        # Iterate as ftoutln.c does, with `point` pointing at the point last read; when the
+        # first point is a conic control point, iteration starts one before it.
+        var closed = false
+        var at = first
+        var before_first = started_before_first
+        while true:
+            # while ( point < limit ): point++
+            if before_first:
+                before_first = false
+            else:
+                if not (at < limit):
+                    break
+                at += 1
+            tag = ft_curve_tag(outline.tags[at])
+            if tag == ft_curve_tag_on:
+                # emit a single line_to
+                let vec = ft_outline_point(outline, at)
+                gray_render_line(ras, gray_upscale(vec.x), gray_upscale(vec.y))
+                continue
+            if tag == ft_curve_tag_conic:
+                # consume conic arcs
+                v_control = ft_outline_point(outline, at)
+                var done_contour = false
+                while true:
+                    # Do_Conic:
+                    if at < limit:
+                        at += 1
+                        let next_tag = ft_curve_tag(outline.tags[at])
+                        let vec = ft_outline_point(outline, at)
+                        if next_tag == ft_curve_tag_on:
+                            gray_render_conic(ras, v_control.x, v_control.y, vec.x, vec.y)
+                            break
+                        if next_tag != ft_curve_tag_conic:
+                            return false
+                        let v_middle = GrayVector(x = (v_control.x + vec.x) // 2, y = (v_control.y + vec.y) // 2)
+                        gray_render_conic(ras, v_control.x, v_control.y, v_middle.x, v_middle.y)
+                        v_control = vec
+                        continue
+                    gray_render_conic(ras, v_control.x, v_control.y, v_start.x, v_start.y)
+                    done_contour = true
+                    break
+                if done_contour:
+                    closed = true
+                    break
+                continue
+            # FT_CURVE_TAG_CUBIC
+            if at + 1 > limit or ft_curve_tag(outline.tags[at + 1]) != ft_curve_tag_cubic:
+                return false
+            at += 2
+            let vec1 = ft_outline_point(outline, at - 2)
+            let vec2 = ft_outline_point(outline, at - 1)
+            if at <= limit:
+                let vec = ft_outline_point(outline, at)
+                gray_render_cubic(ras, vec1, vec2, vec)
+                continue
+            gray_render_cubic(ras, vec1, vec2, v_start)
+            closed = true
+            break
+
+        if not closed:
+            # close the contour with a line segment
+            gray_render_line(ras, gray_upscale(v_start.x), gray_upscale(v_start.y))
+    return true
+
+# mark: Sweeping and rendering =================================================================
+
+## FT_FILL_RULE: scales a cell's area to a coverage byte and applies the fill rule (`fill`
+## is INT_MIN for non-zero, whose higher coverages are clamped, and 0x100 for even-odd,
+## whose higher bits are dropped when the byte is stored).
+func gray_fill_rule(area: i32, fill: i32) -> i32:
+    var coverage = area >> (gray_pixel_bits * 2 + 1 - 8)
+    if (coverage & fill) != 0:
+        coverage = ~coverage
+    if coverage > 255 and (fill & i32_min) != 0:
+        coverage = 255
+    return coverage
+
+## gray_sweep: turns the cells of every row into coverage bytes in the target, whose row
+## `y` (counted upward from the bottom) is `buffer[(rows - 1 - y) * pitch ..]`.
+func gray_sweep(ras: GrayWorker*, even_odd: bool, buffer: u8[], rows: i32, pitch: i32):
+    let fill: i32 = 0x100 if even_odd else i32_min
+    for y in ras.min_ey..<ras.max_ey:
+        var cell = ras.ycells.data[(usize)(y - ras.min_ey)]
+        var x = ras.min_ex
+        var cover: i32 = 0
+        let line = (usize)((rows - 1 - y) * pitch)
+
+        while cell != gray_null_cell:
+            let c = ras.cells.data[(usize)cell]
+            if cover != 0 and c.x > x:
+                let coverage = (u8)gray_fill_rule(cover, fill)
+                for i in x..<c.x:
+                    buffer[line + (usize)i] = coverage
+
+            cover = cover +% c.cover *% (i32)(gray_one_pixel * 2)
+            let area = cover -% c.area
+
+            if area != 0 and c.x >= ras.min_ex:
+                buffer[line + (usize)c.x] = (u8)gray_fill_rule(area, fill)
+
+            x = c.x + 1
+            cell = c.next
+
+        if cover != 0:
+            # only if cropped
+            let coverage = (u8)gray_fill_rule(cover, fill)
+            for i in x..<ras.max_ex:
+                buffer[line + (usize)i] = coverage
+
+## FT_Outline_Get_Bitmap into an 8-bit gray bitmap (gray_raster_render with
+## FT_RASTER_FLAG_AA): draws `outline` into `buffer`, `width` x `rows` bytes whose rows are
+## `pitch` bytes apart, top row first. The bitmap's (0, 0) is the outline's origin, at the
+## bottom-left corner. Coverage is written where the outline has some; the rest of the
+## buffer is left as it is (Skia clears it first). False for an invalid outline.
+pub func ft_outline_render_gray(outline: const FtOutline*, buffer: u8[], width: i32, rows: i32, pitch: i32) -> bool:
+    # return immediately if the outline is empty
+    if outline.xs.length == 0 or outline.contour_ends.length == 0:
+        return true
+    if outline.xs.length != outline.contour_ends[outline.contour_ends.length - 1] + 1:
+        return false
+    if width <= 0 or rows <= 0:
+        return true
+
+    var ras = GrayWorker(min_ex = 0, max_ex = width, min_ey = 0, max_ey = rows, count_ey = rows, cell = gray_null_cell)
+    defer ras.release()
+    ras.ycells.reserve((usize)rows)
+    for _ in 0..<rows:
+        ras.ycells.push(gray_null_cell)
+
+    if not ft_outline_decompose(outline, &ras):
+        return false
+    gray_sweep(&ras, outline.even_odd, buffer, rows, pitch)
+    return true

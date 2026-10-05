@@ -31,6 +31,8 @@ woff2_loader.lucb
 font_cascade_list.lucb
 text_layout.lucb
 sk_font.lucb
+sk_mask_gamma.lucb
+sk_scaler_context.lucb
 path.lucb
 tests_support.lucb
 tests_oracle.lucb

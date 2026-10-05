@@ -1,0 +1,189 @@
+#==============================================================================================
+#
+#   cpu_glyph_run - text blobs on the CPU canvas, placed and masked as Skia's CPU text does
+#
+#   DESCRIPTION:
+#       SkCanvas::drawTextBlob on a raster device, for DisplayListPlayerCpu's glyph runs:
+#       a port of Skia m144's skcpu::GlyphRunListPainter::drawForBitmapDevice
+#       (src/core/SkGlyphRunPainter.cpp) and prepare_for_direct_mask_drawing, over
+#       web_fonts' strikes (sk_scaler_context.lucb) and raster's Draw::paintMasks:
+#
+#       - text too big for the glyph cache (SkStrikeSpec::ShouldDrawAsPath: a side of the
+#         text matrix over 256) is filled as paths;
+#       - otherwise every glyph is drawn as a mask from the strike of the run's font and the
+#         device matrix. Its device position is rounded as SkGlyphPositionRoundingSpec says:
+#         along an axis that keeps a subpixel position, the position plus 1/8 is split into
+#         an integer pixel and a quarter-pixel field (SkPackedGlyphID), whose mask the
+#         glyph cache renders at that offset; along the other axis it is rounded to the
+#         nearest pixel. So the same glyph at the same quarter-pixel phase always has the
+#         same pixels, wherever it is drawn.
+#
+#       Masks are made per draw (Skia keeps them in its strike cache; the pixels are the
+#       same, as a mask depends only on the strike, the glyph and the field).
+#
+#       Copyright (c) 2018 The Android Open Source Project
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+# mark: Matrices ===============================================================================
+
+## SkMatrix::preTranslate (affine matrices).
+func cpu_pre_translate(m: raster.Transform, dx: f32, dy: f32) -> raster.Transform:
+    var result = m
+    if m.sx == 1.0 and m.sy == 1.0 and m.kx == 0.0 and m.ky == 0.0:
+        result.tx = m.tx + dx
+        result.ty = m.ty + dy
+    else:
+        result.tx = m.tx + (m.sx * dx + m.kx * dy)
+        result.ty = m.ty + (m.ky * dx + m.sy * dy)
+    return result
+
+## SkMatrix::mapPoint (affine matrices: Affine_vpts, which the simpler kinds agree with).
+func cpu_map_point(m: raster.Transform, x: f32, y: f32) -> (f32, f32):
+    return (x * m.sx + y * m.kx + m.tx, y * m.sy + x * m.ky + m.ty)
+
+## SkStrikeSpec::ShouldDrawAsPath for a fill paint: whether a side of the text matrix (the
+## font's size, then `position`) is longer than 256, Skia's limit for cached glyphs.
+func cpu_should_draw_as_path(font: const web_fonts.SkFont*, position: raster.Transform) -> bool:
+    let size = font.size
+    # SkFontPriv::MakeTextMatrix(font).postConcat(viewMatrix): the 2x2 part scaled.
+    let sx = position.sx * size
+    let kx = position.kx * size
+    let ky = position.ky * size
+    let sy = position.sy * size
+    let max_size_squared: f32 = 256.0 * 256.0
+    return sx * sx + ky * ky > max_size_squared or kx * kx + sy * sy > max_size_squared
+
+# mark: Positions ==============================================================================
+
+## SkGlyphPositionRoundingSpec for a strike: what is added to a device position before it
+## is floored, and which quarter-pixel fields are kept.
+struct CpuRoundingSpec:
+    var half_x: f32
+    var half_y: f32
+    var keep_x: bool
+    var keep_y: bool
+
+## SkGlyphPositionRoundingSpec(isSubpixel, axisAlignment): HalfAxisSampleFreq and
+## IgnorePositionFieldMask.
+func cpu_rounding_spec(strike: const web_fonts.SkStrike*) -> CpuRoundingSpec:
+    # SkPackedGlyphID::kSubpixelRound: 1 / (1 << (kSubPixelPosLen + 1)).
+    let subpixel_round: f32 = 0.125
+    if not strike.subpixel:
+        return CpuRoundingSpec(half_x = 0.5, half_y = 0.5, keep_x = false, keep_y = false)
+    match strike.axis_alignment:
+        .x: return CpuRoundingSpec(half_x = subpixel_round, half_y = 0.5, keep_x = true, keep_y = false)
+        .y: return CpuRoundingSpec(half_x = 0.5, half_y = subpixel_round, keep_x = false, keep_y = true)
+        _: return CpuRoundingSpec(half_x = subpixel_round, half_y = subpixel_round, keep_x = true, keep_y = true)
+
+## SkPackedGlyphID::PackIDSkPoint's field for one axis: the quarter-pixel phase of a
+## position that already has the rounding constant added (0 when the axis keeps none).
+func cpu_subpixel_field(value: f32, keep: bool) -> u32:
+    if not keep:
+        return 0
+    let shifted = (value - math32.floor(value)) + 1.0
+    return (u32)((i32)(shifted * 4.0) & 3)
+
+# mark: Drawing ================================================================================
+
+## A mask the run made, kept so a repeated glyph at the same phase reuses it.
+struct CpuGlyphEntry:
+    var glyph: u32
+    var sub_x: u32
+    var sub_y: u32
+    var mask: web_fonts.SkGlyphMask
+
+## The glyphs of `blob` (at the blob's origin offset by (x, y)) as masks of `strike`, drawn
+## with `paint`: prepare_for_direct_mask_drawing, then Draw::paintMasks.
+func cpu_canvas_draw_glyph_masks(canvas: CpuCanvas*, blob: const web_fonts.SkTextBlob*, strike: const web_fonts.SkStrike*, position: raster.Transform, paint: const raster.Paint*):
+    let count = ak.vector_size(&blob.glyphs)
+    if count == 0:
+        return
+    let spec = cpu_rounding_spec(strike)
+    # The mapping from source space to device space with the rounding constant added, so
+    # flooring gives the device result.
+    var rounding = position
+    rounding.tx = position.tx + spec.half_x
+    rounding.ty = position.ty + spec.half_y
+
+    let entries = (new CpuGlyphEntry[count] --- in memory.heap) else trap("display_list: out of memory")
+    var entry_count: usize = 0
+    let placed = (new raster.DeviceMask[count] --- in memory.heap) else trap("display_list: out of memory")
+    var placed_count: usize = 0
+    defer:
+        for i in 0..<entry_count:
+            entries[i].mask.release()
+        free(entries) in memory.heap
+        free(placed) in memory.heap
+
+    for i in 0..<count:
+        let glyph = *ak.vector_at_const(&blob.glyphs, i)
+        let origin = *ak.vector_at_const(&blob.positions, i)
+        if not (math32.is_finite(origin.m_x) and math32.is_finite(origin.m_y)):
+            continue
+        let (mapped_x, mapped_y) = cpu_map_point(rounding, origin.m_x, origin.m_y)
+        let sub_x = cpu_subpixel_field(mapped_x, spec.keep_x)
+        let sub_y = cpu_subpixel_field(mapped_y, spec.keep_y)
+
+        var found: usize? = none
+        for e in 0..<entry_count:
+            if entries[e].glyph == glyph and entries[e].sub_x == sub_x and entries[e].sub_y == sub_y:
+                found = e
+                break
+        var index: usize
+        if let e = found:
+            index = e
+        else:
+            entries[entry_count] = CpuGlyphEntry(glyph = glyph, sub_x = sub_x, sub_y = sub_y, mask = web_fonts.sk_strike_glyph_mask(strike, glyph, sub_x, sub_y))
+            index = entry_count
+            entry_count += 1
+        let mask = &entries[index].mask
+        # An empty glyph is dropped (its digest's action is kDrop).
+        if mask.is_empty():
+            continue
+        let x = cpu_floor_to_int(mapped_x)
+        let y = cpu_floor_to_int(mapped_y)
+        placed[placed_count] = raster.DeviceMask(image = mask.image, left = x + mask.left, top = y + mask.top, width = mask.width, height = mask.height)
+        placed_count += 1
+
+    if placed_count > 0:
+        cpu_canvas_target(canvas).fill_masks(placed[..<placed_count], paint, cpu_canvas_draw_mask(canvas))
+
+## sk_float_floor2int: floor, saturated to the int range.
+func cpu_floor_to_int(x: f32) -> i32:
+    let f = math32.floor(x)
+    if not (f < 2147483520.0):
+        return i32_max_value
+    if not (f > -2147483648.0):
+        return i32_min_value
+    return (i32)f
+
+let i32_max_value: i32 = 2147483647
+let i32_min_value: i32 = -2147483648
+
+## SkCanvas::drawTextBlob(blob, x, y, paint) for `glyph_run`'s cached text blob in `color`
+## (DisplayListPlayerSkia's paint: only a color), through the current transform and clip.
+func cpu_canvas_draw_text_blob(canvas: CpuCanvas*, glyph_run: const web_fonts.GlyphRun*, x: f32, y: f32, color: gfx.Color):
+    let blob = web_fonts.glyph_run_cached_skia_text_blob(glyph_run) else return
+    if cpu_canvas_is_clip_empty(canvas):
+        return
+    # positionMatrix: the draw matrix pre-translated by the run list's origin.
+    let position = cpu_pre_translate(cpu_canvas_transform(canvas), x, y)
+
+    if cpu_should_draw_as_path(&blob.font, position):
+        # The paths get the font's anti-aliasing (runFont.hasSomeAntiAliasing()).
+        var path = text_blob_path(glyph_run) else return
+        defer path.release()
+        let path_paint = cpu_color_paint(color, true)
+        cpu_canvas_save(canvas)
+        cpu_canvas_translate(canvas, x, y)
+        cpu_canvas_fill_path(canvas, &path, &path_paint, raster.FillRule.winding)
+        cpu_canvas_restore(canvas)
+        return
+
+    let device = web_fonts.SkMatrix22(scale_x = position.sx, skew_x = position.kx, skew_y = position.ky, scale_y = position.sy)
+    let strike = web_fonts.sk_strike_make(&blob.font, device, gfx.color_red(&color), gfx.color_green(&color), gfx.color_blue(&color)) else return
+    let paint = cpu_color_paint(color, false)
+    cpu_canvas_draw_glyph_masks(canvas, blob, &strike, position, &paint)

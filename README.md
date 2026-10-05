@@ -35,4 +35,5 @@ luce-fonts; its text-blob bounds and glyph intercepts, which test GlyphRun, run 
 
 ## License
 
-BSD-2-Clause, as Ladybird; see `LICENSE`.
+BSD-2-Clause, as Ladybird; see `LICENSE`. The raster module ports Skia (`LICENSE-skia`), tiny-skia
+(`LICENSE-tiny-skia`) and FreeType's gray rasterizer (`LICENSE-freetype`, the FreeType License).

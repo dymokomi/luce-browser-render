@@ -60,10 +60,11 @@ donor's PathImplSkia: the SVG strings (by length and hash) and the bounds match 
 
 - `to_raster_path` is r10's `path_to_raster_path` with the SkPath's fill type (`winding` or
   `even_odd`; Gfx::WindingRule has no inverse types).
-- Glyph runs are drawn from the run's cached text blob, as `drawTextBlob` draws them: each
-  glyph's outline from r09's `sk_font_get_path` of the blob's font (already at the blob's
-  scale, which resolves r51a's blob-scale FIXME) placed at the blob's position. A run without a
-  blob draws nothing, as in the donor.
+- Glyph runs are drawn from the run's cached text blob, as `drawTextBlob` draws them on a
+  raster device (see *Glyph masks* below): as glyph masks, or, for text too big for Skia's
+  glyph cache, as each glyph's outline from r09's `sk_font_get_path` of the blob's font
+  (already at the blob's scale, which resolves r51a's blob-scale FIXME) placed at the blob's
+  position. A run without a blob draws nothing, as in the donor.
 - `apply_gfx_filter` is gone: layers with image filters, the text-shadow blur and backdrop
   filters go through `cpu_filter.lucb`'s evaluator (see *Image filters*).
 
@@ -83,6 +84,41 @@ donor's PathImplSkia: the SVG strings (by length and hash) and the bounds match 
   skew) applied when the filtered layer is drawn back (bilinear, anti-aliased).
 - Backdrop layers start as the prior layer's pixels, clamped at their edges
   (SaveLayerRec's default kClamp), through the backdrop filter.
+
+## Glyph masks
+
+Ladybird's test mode makes Skia hand every glyph to FreeType (the FontConfig font manager), and
+Skia's CPU text draws masks, not paths. The player does the same (fix/fidelity-text):
+
+- **Positions** (`display_list/cpu_glyph_run.lucb`, skcpu::GlyphRunListPainter's
+  drawForBitmapDevice and prepare_for_direct_mask_drawing): text whose matrix has a side over
+  256 is filled as paths; otherwise each glyph's device position gets SkGlyphPositionRoundingSpec's
+  rounding constant and is floored. Along the axis the baseline lies on (x for horizontal text,
+  y for text rotated a quarter turn, both otherwise: computeAxisAlignmentForHText) the position
+  keeps a quarter-pixel field (SkPackedGlyphID); along the other axis it is rounded to the
+  nearest pixel. The same glyph at the same phase therefore always has the same pixels, which is
+  what makes Ref tests whose sides place text a fraction of a pixel apart agree.
+- **Strikes** (`web_fonts/sk_scaler_context.lucb`): SkScalerContextRec for the font and the device
+  matrix (relaxed 2x2, computeMatrices with its Givens rotation, the remaining matrix as
+  FT_Set_Transform's), FT_Set_Char_Size through luce-fonts' scale (integer ppem for TrueType),
+  the glyph's bounds from its outline's control box offset by the subpixel phase, and the mask:
+  the outline moved onto the mask's grid and rendered by FreeType's rasterizer.
+- **Rasterizer** (`raster/ft_grays.lucb`): FreeType 2.13.3's smooth rasterizer (ftgrays.c, 64-bit
+  build) and FT_Outline_Decompose, integer only; `tests_ft_grays.lucb` matches
+  FT_Outline_Get_Bitmap byte for byte.
+- **Mask gamma** (`web_fonts/sk_mask_gamma.lucb`): Ladybird's Skia is built with
+  SK_GAMMA_APPLY_TO_A8, so A8 masks go through SkMaskGamma's pre-blend table for the paint's
+  luminance (contrast 128/255, sRGB device). The tables use powf; off macOS an entry may differ
+  by one level (the tests allow it there).
+- **Blitting** (`raster/draw_masks.lucb`): Draw::paintMasks through the clip (region, AA clip or
+  rectangle) with the pipeline blitter's blit_mask.
+
+Hinting: the outlines are luce-fonts' unhinted FreeType outlines. That is what FreeType's v40
+TrueType interpreter produces for glyphs without instructions (SerenitySans, the test font), so
+those masks are FreeType's. Glyphs with TrueType instructions (Lato) are not hinted (no bytecode
+interpreter), CFF glyphs are not hinted (no CFF hinter), and fonts that FreeType autohints (no
+instructions, no fpgm/prep and maxSizeOfInstructions 0: Ahem, Noto Emoji) are drawn unhinted (no
+autohinter).
 
 ## Image filters
 
@@ -150,8 +186,8 @@ nearest sampling's round-down, conics) was merged last, and then:
 1. `luce-base fmt --check` on every hand-written `.lucb`;
 2. `luce-base check -W` on raster, gfx, web_fonts and display_list, failing on any output;
 3. `luce-base test` of gfx (359 tests), web_fonts (28; the font engine's oracle and unit
-   tests moved to luce-fonts with the engine, 2026-10-03), display_list (104, `--native`) and
-   raster (31), and the raster integration suite (`tests/run_raster.py`, 291 scenes).
+   tests moved to luce-fonts with the engine, 2026-10-03), display_list (109, `--native`) and
+   raster (38), and the raster integration suite (`tests/run_raster.py`, 291 scenes).
 
 ## Remaining traps, stubs and gates
 
@@ -173,10 +209,12 @@ nearest sampling's round-down, conics) was merged last, and then:
 
 The player's 36 scenes against DisplayListPlayerSkia match exactly except:
 
-- **Glyphs.** Skia draws small glyphs from FreeType's hinted glyph masks (outlines snapped to
-  the pixel grid, which can move a stem or a baseline by up to a pixel); the player fills the
-  unhinted outlines (r09 has no hinting). `glyph_run`: 142 pixels by up to 73 levels;
-  `glyph_run_scaled`: 296 by up to 147; `text_shadow` (blurred): 489 by up to 17.
+- **Glyphs.** SerenitySans' glyph runs match exactly (`glyph_run` and the five scenes of
+  `tests_cpu_glyph_run.lucb`: every quarter-pixel phase, five text colors on three
+  backgrounds, vertical text, a blob at scale 1.5). Lato carries TrueType instructions that
+  FreeType's interpreter runs for Skia's masks (stems and heights snapped along y) and that are
+  not run here: `glyph_run_scaled`: 275 pixels by up to 108 levels; `text_shadow` (blurred):
+  307 by up to 20.
 - **Box-shadow blur** (SkMaskFilter::MakeBlur) is r51a's three box blurs of the coverage, not
   Skia's SkMaskBlurFilter: 32 and 29 pixels by 1 level.
 - **draw_rect**: Skia strokes an axis-aligned rectangle with SkScan::AntiFrameRect, the player

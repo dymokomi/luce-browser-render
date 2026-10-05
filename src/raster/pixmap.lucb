@@ -132,6 +132,11 @@ pub struct Pixmap:
         var m = self.as_mut()
         m.fill_path(path, paint, fill_rule, transform, mask)
 
+    ## Draws glyph coverage masks onto the pixmap. See `PixmapMut.fill_masks` for details.
+    pub func fill_masks(masks: const DeviceMask[], paint: const Paint*, mask: const Mask*?):
+        var m = self.as_mut()
+        m.fill_masks(masks, paint, mask)
+
     ## Strokes a path. See `PixmapMut.stroke_path` for details.
     pub func stroke_path(path: const Path*, paint: const Paint*, stroke: const Stroke*, transform: Transform, mask: const Mask*?):
         var m = self.as_mut()
@@ -303,6 +308,11 @@ pub struct PixmapMut:
     ## Draws a filled path onto the pixmap. Returns silently when nothing to draw.
     pub func fill_path(path: const Path*, paint: const Paint*, fill_rule: FillRule, transform: Transform, mask: const Mask*?):
         draw_fill_path(&self, path, paint, fill_rule, transform, mask)
+
+    ## Draws 8-bit coverage masks already placed on the device (a glyph run drawn from
+    ## Skia's glyph cache, Draw::paintMasks) with `paint`, through `mask`.
+    pub func fill_masks(masks: const DeviceMask[], paint: const Paint*, mask: const Mask*?):
+        draw_paint_masks(&self, masks, paint, mask)
 
     ## Strokes a path. Stroking is implemented using two separate algorithms: 1. If a stroke
     ## width is wider than 1px (after applying the transformation), a path will be converted

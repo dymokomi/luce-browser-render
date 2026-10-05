@@ -47,11 +47,12 @@ func to_raster_path(path: const gfx.Path*) -> CpuPath?:
         _: trap("VERIFY_NOT_REACHED")
     return CpuPath(path = outline, fill_rule = fill_rule)
 
-## The path SkCanvas::drawTextBlob fills for `glyph_run`'s cached text blob
-## (GlyphRun::ensure_text_blob, which the recorder called with the device pixel scale): glyph
-## i's outline at the blob font's size (SkFont::getPath through region r09's font reader,
-## already at the blob's scale) placed at the blob's position i. None when the run has no
-## blob (`cached_skia_text_blob()` is null) or no outlines. The caller releases the path.
+## The path SkCanvas::drawTextBlob fills for `glyph_run`'s cached text blob when its glyphs
+## are too big for the glyph cache (GlyphRun::ensure_text_blob, which the recorder called
+## with the device pixel scale): glyph i's outline at the blob font's size (SkFont::getPath
+## through region r09's font reader, already at the blob's scale) placed at the blob's
+## position i. None when the run has no blob (`cached_skia_text_blob()` is null) or no
+## outlines. The caller releases the path. Smaller glyphs are masks (cpu_glyph_run.lucb).
 func text_blob_path(glyph_run: const web_fonts.GlyphRun*) -> raster.Path?:
     let blob = web_fonts.glyph_run_cached_skia_text_blob(glyph_run) else return none
     var builder = raster.PathBuilder.new_()
@@ -217,26 +218,20 @@ func display_list_player_cpu_flush_impl(base: DisplayListPlayer*):
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:25 Web::Painting::DisplayListPlayerSkia::draw_glyph_run (override).
 func display_list_player_cpu_draw_glyph_run_impl(base: DisplayListPlayer*, command: DrawGlyphRun):
-    var blob = text_blob_path(command.glyph_run) else return
-    defer blob.release()
-
-    let paint = cpu_color_paint(command.color, true)
+    if web_fonts.glyph_run_cached_skia_text_blob(command.glyph_run) == none:
+        return
 
     let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
     let translation = command.translation
 
     match command.orientation:
         .horizontal:
-            cpu_canvas_save(canvas)
-            cpu_canvas_translate(canvas, translation.m_x, translation.m_y)
-            cpu_canvas_fill_path(canvas, &blob, &paint, raster.FillRule.winding)
-            cpu_canvas_restore(canvas)
+            cpu_canvas_draw_text_blob(canvas, command.glyph_run, translation.m_x, translation.m_y, command.color)
         .vertical:
             cpu_canvas_save(canvas)
             cpu_canvas_translate(canvas, (f32)command.rect.m_size.m_width, 0.0)
             cpu_canvas_rotate(canvas, 90.0, (f32)command.rect.m_location.m_x, (f32)command.rect.m_location.m_y)
-            cpu_canvas_translate(canvas, translation.m_x, translation.m_y)
-            cpu_canvas_fill_path(canvas, &blob, &paint, raster.FillRule.winding)
+            cpu_canvas_draw_text_blob(canvas, command.glyph_run, translation.m_x, translation.m_y, command.color)
             cpu_canvas_restore(canvas)
         _:
             _ = 0

@@ -55,5 +55,8 @@ image_shader.lucb
 radial_gradient.lucb
 painter.lucb
 draw.lucb
+draw_masks.lucb
+ft_grays.lucb
 tests_path.lucb
 tests_core.lucb
+tests_ft_grays.lucb

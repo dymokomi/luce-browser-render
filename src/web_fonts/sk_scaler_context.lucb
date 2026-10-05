@@ -1,0 +1,313 @@
+#==============================================================================================
+#
+#   sk_scaler_context - glyph masks as Skia's glyph cache makes them with FreeType
+#
+#   DESCRIPTION:
+#       New code of the luce-browser port (DESIGN.md §7.3): the part of Skia m144 that turns
+#       a glyph of a strike into an 8-bit coverage mask, for Ladybird's test mode, where
+#       Skia's FontConfig font manager hands every glyph to FreeType:
+#
+#       - SkScalerContext::MakeRecAndEffects and SkScalerContextRec (src/core/
+#         SkScalerContext.cpp): the device matrix's 2x2 part, relaxed to 1/1024
+#         (sk_relax), the text matrix, computeMatrices(kFull) with its Givens rotation
+#         (src/utils/SkMatrix22.cpp), and computeAxisAlignmentForHText, which decides
+#         along which axes glyph positions keep a subpixel offset;
+#       - SkScalerContext_FreeType (src/ports/SkFontHost_FreeType.cpp and
+#         SkFontHost_FreeType_common.cpp): FT_Set_Char_Size at the scale and FT_Set_Transform
+#         with the remaining matrix, the glyph's bounds from its outline's control box
+#         offset by the subpixel position (generateMetrics), and the mask: the outline moved
+#         by the subpixel offset onto the mask's pixel grid and rendered by FreeType's
+#         rasterizer (generateGlyphImage, FT_Outline_Get_Bitmap: raster's ft_grays).
+#
+#       Outlines come from luce-fonts' FreeType loader (FT_Load_Glyph at the scale). Skia
+#       asks for FT_LOAD_TARGET_NORMAL; the glyphs of the test fonts carry no instructions,
+#       and FreeType's v40 interpreter leaves such outlines as they are, so they are the
+#       unhinted ones (glyphs with TrueType instructions or CFF hints are drawn unhinted:
+#       there is no bytecode interpreter or CFF hinter). A8 masks from FreeType get no mask
+#       gamma (SkScalerContextFTUtils applies the pre-blend to LCD masks only).
+#
+#       Copyright (c) 2006-2014 The Android Open Source Project, Google Inc.
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+# mark: Matrices ===============================================================================
+
+## SkAxisAlignment: the device axis the text's baseline lies along, if any.
+pub enum SkAxisAlignment as u8:
+    none_ = 0
+    x = 1
+    y = 2
+
+## The 2x2 part of an SkMatrix: x' = scale_x * x + skew_x * y, y' = skew_y * x + scale_y * y.
+pub struct SkMatrix22:
+    pub var scale_x: f32
+    pub var skew_x: f32
+    pub var skew_y: f32
+    pub var scale_y: f32
+
+## sk_relax: `x` rounded to 1/1024 (sk_float_round in double).
+func sk_relax(x: f32) -> f32:
+    let n = (f32)math.floor((f64)(x * 1024.0) + 0.5)
+    return n / 1024.0
+
+## muladdmul: a * b + c * d computed in double, rounded once to float (SkMatrix's concat).
+func sk_muladdmul(a0: f32, b0: f32, a1: f32, b1: f32) -> f32:
+    return (f32)((f64)a0 * (f64)b0 + (f64)a1 * (f64)b1)
+
+## SkScalarCopySign.
+func sk_copy_sign(x: f32, sign: f32) -> f32:
+    return math32.copysign(x, sign)
+
+## SkFloatToFixed: x * 65536 truncated toward zero, saturated to the int range.
+func sk_float_to_fixed(x: f32) -> i64:
+    var v = x * 65536.0
+    if v > 2147483520.0:
+        v = 2147483520.0
+    if v < -2147483648.0:
+        v = -2147483648.0
+    return (i64)(i32)v
+
+# mark: The strike =============================================================================
+
+## A strike's scaler context: what SkStrikeSpec::MakeMask builds for a font drawn with a
+## device matrix (SkScalerContextRec), set up as SkScalerContext_FreeType sets up FreeType.
+pub struct SkStrike:
+    pub var face: const opentype.SfntFace*
+    ## SkFont::isSubpixel: glyph positions keep a quarter-pixel offset along the baseline.
+    pub var subpixel: bool
+    ## computeAxisAlignmentForHText.
+    pub var axis_alignment: SkAxisAlignment
+    ## False when the matrix is singular (computeMatrices failed): every glyph is empty.
+    var valid: bool
+    ## FT_Set_Char_Size's 16.16 scales.
+    var x_scale: i64
+    var y_scale: i64
+    ## FT_Set_Transform's matrix (fMatrix22), 16.16, when it is not the identity.
+    var has_matrix: bool
+    var xx: i64
+    var xy: i64
+    var yx: i64
+    var yy: i64
+    ## The mask pre-blend (fPreBlend's green table) for the paint's luminance.
+    var gamma: u8[256]
+
+## SkComputeGivensRotation: the rotation G (as (sin, cos)) that maps `h` onto the x axis.
+func sk_givens_rotation(a: f32, b: f32) -> (f32, f32):
+    if b == 0.0:
+        return (0.0, sk_copy_sign(1.0, a))
+    if a == 0.0:
+        return (-sk_copy_sign(1.0, b), 0.0)
+    if math32.abs(b) > math32.abs(a):
+        let t = a / b
+        let u = sk_copy_sign(math32.sqrt(1.0 + t * t), b)
+        let s = -1.0 / u
+        return (s, -s * t)
+    let t = b / a
+    let u = sk_copy_sign(math32.sqrt(1.0 + t * t), a)
+    let cos = 1.0 / u
+    return (-cos * t, cos)
+
+## SkStrikeSpec::MakeMask's scaler context for `font` drawn through a device matrix whose
+## 2x2 part is `device` with a paint of color (`r`, `g`, `b`) (MakeRecAndEffects,
+## PreprocessRec, SkScalerContext_FreeType's constructor), or none when the font has no face.
+pub func sk_strike_make(font: const SkFont*, device: SkMatrix22, r: u8, g: u8, b: u8) -> SkStrike?:
+    let typeface = font.typeface else return none
+    let face = typeface.face
+
+    # MakeRecAndEffects: the device matrix's 2x2 part, relaxed.
+    var post = SkMatrix22(scale_x = 1.0, skew_x = 0.0, skew_y = 0.0, scale_y = 1.0)
+    if device.scale_x != 1.0 or device.scale_y != 1.0:
+        post.scale_x = sk_relax(device.scale_x)
+        post.scale_y = sk_relax(device.scale_y)
+    if device.skew_x != 0.0 or device.skew_y != 0.0:
+        post.skew_x = sk_relax(device.skew_x)
+        post.skew_y = sk_relax(device.skew_y)
+
+    # computeAxisAlignmentForHText (SkFont's default flags have kBaselineSnap).
+    var alignment = SkAxisAlignment.none_
+    if post.skew_y == 0.0:
+        alignment = SkAxisAlignment.x
+    elif post.scale_x == 0.0:
+        alignment = SkAxisAlignment.y
+
+    var strike = SkStrike(face = face, subpixel = font.subpixel, axis_alignment = alignment, valid = false, x_scale = 0, y_scale = 0, has_matrix = false, xx = 0x10000, xy = 0, yx = 0, yy = 0x10000)
+    sk_mask_gamma_table(strike.gamma, r, g, b)
+
+    # computeMatrices(kFull): A is the text matrix (the size) followed by the 2x2 part.
+    let size = font.size
+    let a = SkMatrix22(scale_x = post.scale_x * size, skew_x = post.skew_x * size, skew_y = post.skew_y * size, scale_y = post.scale_y * size)
+    let skewed_or_flipped = a.skew_x != 0.0 or a.skew_y != 0.0 or a.scale_x < 0.0 or a.scale_y < 0.0
+    var ga = a
+    if skewed_or_flipped:
+        # QR by Givens rotations: G maps where A maps the horizontal baseline onto x.
+        let (sin, cos) = sk_givens_rotation(a.scale_x, a.skew_y)
+        let rot = SkMatrix22(scale_x = cos, skew_x = -sin, skew_y = sin, scale_y = cos)
+        ga = SkMatrix22(scale_x = sk_muladdmul(rot.scale_x, a.scale_x, rot.skew_x, a.skew_y), skew_x = sk_muladdmul(rot.scale_x, a.skew_x, rot.skew_x, a.scale_y), skew_y = sk_muladdmul(rot.skew_y, a.scale_x, rot.scale_y, a.skew_y), scale_y = sk_muladdmul(rot.skew_y, a.skew_x, rot.scale_y, a.scale_y))
+
+    let nearly_zero: f32 = 1.0 / 4096.0
+    if math32.abs(ga.scale_x) <= nearly_zero or math32.abs(ga.scale_y) <= nearly_zero or not (math32.is_finite(ga.scale_x) and math32.is_finite(ga.skew_x) and math32.is_finite(ga.skew_y) and math32.is_finite(ga.scale_y)):
+        return strike
+    let sx = math32.abs(ga.scale_x)
+    let sy = math32.abs(ga.scale_y)
+
+    # The remaining matrix: identity unless skewed or flipped, else A without the scale.
+    var remaining = SkMatrix22(scale_x = 1.0, skew_x = 0.0, skew_y = 0.0, scale_y = 1.0)
+    if skewed_or_flipped:
+        let ix = 1.0 / sx
+        let iy = 1.0 / sy
+        remaining = SkMatrix22(scale_x = a.scale_x * ix, skew_x = a.skew_x * iy, skew_y = a.skew_y * ix, scale_y = a.scale_y * iy)
+
+    # FT_Set_Char_Size at the scale (luce-fonts rounds the ppem as tt_size_reset does).
+    strike.x_scale = opentype.sfnt_face_ft_scale(face, sx)
+    strike.y_scale = opentype.sfnt_face_ft_scale(face, sy)
+    if sx < 1.0 or sy < 1.0:
+        # FreeType does not go below 1 px: the matrix makes up the difference.
+        let upem = (f32)face.units_per_em
+        let x_ppem = upem * ((f32)strike.x_scale * (1.0 / 65536.0)) / 64.0
+        let y_ppem = upem * ((f32)strike.y_scale * (1.0 / 65536.0)) / 64.0
+        let px = sx / x_ppem
+        let py = sy / y_ppem
+        remaining = SkMatrix22(scale_x = remaining.scale_x * px, skew_x = remaining.skew_x * py, skew_y = remaining.skew_y * px, scale_y = remaining.scale_y * py)
+
+    strike.xx = sk_float_to_fixed(remaining.scale_x)
+    strike.xy = sk_float_to_fixed(-remaining.skew_x)
+    strike.yx = sk_float_to_fixed(-remaining.skew_y)
+    strike.yy = sk_float_to_fixed(remaining.scale_y)
+    strike.has_matrix = strike.xx != 0x10000 or strike.xy != 0 or strike.yx != 0 or strike.yy != 0x10000
+    strike.valid = true
+    return strike
+
+# mark: Glyph masks ============================================================================
+
+## A glyph's A8 mask as the glyph cache holds it (SkGlyph's bounds and image): `width` x
+## `height` coverage bytes, top row first, whose top-left pixel is at (left, top) from the
+## glyph's integer device position. An empty glyph has no image.
+pub struct SkGlyphMask:
+    pub var left: i32
+    pub var top: i32
+    pub var width: i32
+    pub var height: i32
+    pub var image: u8[]
+
+    ## Whether the glyph draws nothing (SkGlyph::isEmpty).
+    pub func is_empty() -> bool:
+        return self.width == 0 or self.height == 0
+
+    ## Free the image.
+    pub func release():
+        if self.image.length > 0:
+            free(self.image) in memory.heap
+        self.image = self.image[..<0]
+
+## An empty glyph.
+func sk_glyph_mask_empty() -> SkGlyphMask:
+    var mask = SkGlyphMask(left = 0, top = 0, width = 0, height = 0)
+    return mask
+
+## sk_saturate_cast<int16_t> of a float.
+func sk_saturate_i16(x: f32) -> i32:
+    if not (x < 32767.0):
+        return 32767
+    if not (x > -32768.0):
+        return -32768
+    return (i32)x
+
+## sk_saturate_cast<uint16_t> of a float.
+func sk_saturate_u16(x: f32) -> i32:
+    if not (x < 65535.0):
+        return 65535
+    if not (x > 0.0):
+        return 0
+    return (i32)x
+
+## FT_Load_Glyph's outline of `glyph` at the strike's scale with its transform applied, in
+## 26.6 with y up, or none when the glyph has no outline.
+func sk_strike_load_outline(strike: const SkStrike*, glyph: u32) -> opentype.SfntOutline?:
+    var outline: opentype.SfntOutline
+    if strike.x_scale == strike.y_scale:
+        outline = opentype.sfnt_face_load_outline(strike.face, glyph, strike.y_scale) else return none
+    else:
+        # A non-uniform scale: the outline in font units, scaled per axis (FreeType scales
+        # inside its loader; this differs from it by the rounding of the origin shift).
+        outline = opentype.sfnt_face_load_outline(strike.face, glyph, 0x10000) else return none
+        for i in 0..<outline.xs.length():
+            let px = outline.xs.at(i)
+            *px = opentype.ft_mul_fix(*px, strike.x_scale)
+            let py = outline.ys.at(i)
+            *py = opentype.ft_mul_fix(*py, strike.y_scale)
+    if strike.has_matrix:
+        # FT_Outline_Transform (FT_Vector_Transform on every point).
+        for i in 0..<outline.xs.length():
+            let px = outline.xs.at(i)
+            let py = outline.ys.at(i)
+            let x = *px
+            let y = *py
+            *px = opentype.ft_mul_fix(x, strike.xx) + opentype.ft_mul_fix(y, strike.xy)
+            *py = opentype.ft_mul_fix(x, strike.yx) + opentype.ft_mul_fix(y, strike.yy)
+    return outline
+
+## The mask of `glyph` at the subpixel position (`sub_x`, `sub_y`), each a quarter-pixel
+## field 0..3 of SkPackedGlyphID (SkGlyph's getSubXFixed is the field << 14):
+## SkScalerContext_FreeType::generateMetrics for its bounds, then generateImage. The caller
+## releases the mask.
+pub func sk_strike_glyph_mask(strike: const SkStrike*, glyph: u32, sub_x: u32, sub_y: u32) -> SkGlyphMask:
+    if not strike.valid:
+        return sk_glyph_mask_empty()
+    var outline = sk_strike_load_outline(strike, glyph) else return sk_glyph_mask_empty()
+    defer outline.release()
+    if outline.contour_ends.length() == 0:
+        # getBoundsOfCurrentOutlineGlyph: no contours, no bounds.
+        return sk_glyph_mask_empty()
+
+    let view = raster.FtOutline(xs = outline.xs.view(), ys = outline.ys.view(), tags = outline.tags.view(), contour_ends = outline.contour_ends.view(), even_odd = false)
+    let (x_min, y_min, x_max, y_max) = raster.ft_outline_cbox(&view)
+
+    # generateMetrics: the control box in Skia's y-down space, offset by the subpixel
+    # position (updateGlyphBoundsIfSubpixel), rounded out (SaturateGlyphBounds).
+    let sub_x_fixed = (i64)sub_x << 14
+    let sub_y_fixed = (i64)sub_y << 14
+    var left = (f32)x_min * 0.015625
+    var top = -((f32)y_max * 0.015625)
+    var right = (f32)x_max * 0.015625
+    var bottom = -((f32)y_min * 0.015625)
+    let is_empty = not (left < right and top < bottom)
+    if strike.subpixel and not is_empty:
+        let dx = (f32)sub_x_fixed * (1.0 / 65536.0)
+        let dy = (f32)sub_y_fixed * (1.0 / 65536.0)
+        left += dx
+        top += dy
+        right += dx
+        bottom += dy
+    left = math32.floor(left)
+    top = math32.floor(top)
+    right = math32.ceil(right)
+    bottom = math32.ceil(bottom)
+    var mask = SkGlyphMask(left = sk_saturate_i16(left), top = sk_saturate_i16(top), width = sk_saturate_u16(right - left), height = sk_saturate_u16(bottom - top))
+    if mask.width == 0 or mask.height == 0:
+        return sk_glyph_mask_empty()
+
+    # generateGlyphImage: the outline moved by the subpixel offset onto the mask's grid
+    # (what Skia does in one FT_Outline_Translate), then FT_Outline_Get_Bitmap.
+    var dx: i64 = 0
+    var dy: i64 = 0
+    if strike.subpixel:
+        dx = sub_x_fixed >> 10
+        dy = -(sub_y_fixed >> 10)
+    let shift_x = dx - ((x_min + dx) & ~(i64)63)
+    let shift_y = dy - ((y_min + dy) & ~(i64)63)
+    for i in 0..<outline.xs.length():
+        let px = outline.xs.at(i)
+        *px = *px + shift_x
+        let py = outline.ys.at(i)
+        *py = *py + shift_y
+
+    mask.image = (new u8[(usize)mask.width * (usize)mask.height] in memory.heap) else trap("web_fonts: out of memory")
+    let moved = raster.FtOutline(xs = outline.xs.view(), ys = outline.ys.view(), tags = outline.tags.view(), contour_ends = outline.contour_ends.view(), even_odd = false)
+    _ = raster.ft_outline_render_gray(&moved, mask.image, mask.width, mask.height, mask.width)
+
+    # SK_GAMMA_APPLY_TO_A8: the coverage through the pre-blend table.
+    for i in 0..<mask.image.length:
+        mask.image[i] = strike.gamma[(usize)mask.image[i]]
+    return mask

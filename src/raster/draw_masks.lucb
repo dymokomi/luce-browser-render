@@ -1,0 +1,71 @@
+#==============================================================================================
+#
+#   draw_masks - drawing 8-bit coverage masks: glyphs drawn from Skia's glyph cache
+#
+#   DESCRIPTION:
+#       Port of Skia m144's skcpu::Draw::paintMasks (src/core/SkDraw_text.cpp) for kA8
+#       masks: the masks of a glyph run, each already placed at its integer device position,
+#       blitted with the paint through the clip. A region clip goes through
+#       SkRgnClipBlitter (Skia walks the region's rectangles; MaskRegionClipBlitter walks the
+#       mask's rows, which blits the same pixels), an anti-aliased clip through
+#       SkAAClipBlitterWrapper, and a rectangle clips each mask's bounds.
+#
+#       Copyright (c) 2018 Google Inc.
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+## A glyph's 8-bit coverage placed on the device (SkGlyph::mask(position) of a kA8 glyph):
+## `width` x `height` coverage bytes of `image`, top row first and `width` bytes per row,
+## whose top-left pixel is at (left, top).
+pub struct DeviceMask:
+    pub var image: const u8[]
+    pub var left: i32
+    pub var top: i32
+    pub var width: i32
+    pub var height: i32
+
+## check_glyph_position: whether a mask at (x, y) stays well inside device space, so its
+## bounds cannot overflow (positions outside INT_MAX - (INT16_MAX + UINT16_MAX) are dropped).
+func check_glyph_position(x: i32, y: i32) -> bool:
+    let high: i64 = (i64)i32_max - (32767 + 65535)
+    let low: i64 = (i64)i32_min - (-32768)
+    return (i64)x <= high and (i64)x >= low and (i64)y <= high and (i64)y >= low
+
+## Draw::paintMasks: blits every mask of `masks` onto `pixmap` with `paint`, through `mask`
+## (the clip, as fill_path takes it).
+func draw_paint_masks(pixmap: PixmapMut*, masks: const DeviceMask[], paint: const Paint*, mask: const Mask*?):
+    let clip = RasterClip.new_(pixmap.width(), pixmap.height(), mask)
+    if clip.is_empty():
+        return
+    var subpix = pixmap.as_subpixmap()
+    var device = choose_blitter(paint, &subpix)
+    defer device.release()
+    var blitter = device.view() else return
+
+    # SkAAClipBlitterWrapper: an anti-aliased clip scales the coverage.
+    var wrappers = ClipWrappers.new_()
+    defer wrappers.release()
+    if not clip.is_bw():
+        let m = clip.mask else trap("unreachable")
+        blitter = wrappers.wrap_aa(blitter, m)
+
+    let use_region = clip.kind == MaskClipKind.region
+    var region: MaskRegionClipBlitter = ---
+    if use_region:
+        let m = clip.mask else trap("unreachable")
+        region = MaskRegionClipBlitter(blitter = blitter, mask = m)
+
+    let clip_bounds = clip.bounds
+    for glyph in masks:
+        if not check_glyph_position(glyph.left, glyph.top):
+            continue
+        let bounds = IRect.xywh(glyph.left, glyph.top, glyph.width, glyph.height)
+        let blit = BlitMask(image = glyph.image, bounds = bounds, row_bytes = (u32)glyph.width)
+        # Only the part inside the clip's bounds is blitted.
+        let clipped = bounds.intersect(clip_bounds) else continue
+        if use_region:
+            region.blit_mask(&blit, clipped)
+        else:
+            blitter.blit_mask(&blit, clipped)

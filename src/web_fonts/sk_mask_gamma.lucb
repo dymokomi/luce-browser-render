@@ -1,0 +1,118 @@
+#==============================================================================================
+#
+#   sk_mask_gamma - the gamma and contrast Skia applies to glyph coverage
+#
+#   DESCRIPTION:
+#       Port of Skia m144's SkMaskGamma (src/core/SkMaskGamma.cpp and .h: SkTMaskGamma<3, 3,
+#       3>, SkTMaskGamma_build_correcting_lut, the sRGB luminance) and of the parts of
+#       SkScalerContext that pick a table (setLuminanceColor, PreprocessRec,
+#       GetMaskPreBlend). Ladybird's Skia is built with SK_GAMMA_APPLY_TO_A8, so FreeType's
+#       A8 glyph masks go through the pre-blend table of the paint's luminance
+#       (SkScalerContextFTUtils::generateGlyphImage): a correction that makes dark text on
+#       a light background a little lighter and lighter text a little bolder, as a linear
+#       blend of the coverage would look in sRGB.
+#
+#       Ladybird's surfaces have default surface props (text contrast SK_GAMMA_CONTRAST 0.5,
+#       text gamma SK_GAMMA_EXPONENT 0, which means sRGB) and an sRGB color space, which is
+#       not linear, so the scaler context flags keep both the fake gamma and the contrast
+#       boost (kFakeGammaAndBoostContrast).
+#
+#       Copyright (c) 2012 Google Inc.
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+## The luminance bits of SkMaskGamma (SkTMaskGamma<3, 3, 3>): 8 tables.
+let sk_mask_gamma_lum_bits: u32 = 3
+
+## SkSRGBColorSpaceLuminance::toLuma.
+func sk_srgb_to_luma(luminance: f32) -> f32:
+    # The magic numbers are derived from the sRGB specification.
+    if luminance <= 0.04045:
+        return luminance / 12.92
+    return math32.pow((luminance + 0.055) / 1.055, 2.4)
+
+## SkSRGBColorSpaceLuminance::fromLuma.
+func sk_srgb_from_luma(luma: f32) -> f32:
+    if luma <= 0.0031308:
+        return luma * 12.92
+    return 1.055 * math32.pow(luma, 1.0 / 2.4) - 0.055
+
+## apply_contrast.
+func sk_apply_contrast(srca: f32, contrast: f32) -> f32:
+    return srca + ((1.0 - srca) * contrast * srca)
+
+## sk_float_round2int of a table value, as SkToU8 keeps it.
+func sk_round_to_u8(x: f32) -> u8:
+    return (u8)(i32)math.floor((f64)x + 0.5)
+
+## sk_t_scale255<3>: a 3-bit luminance spread over 8 bits.
+func sk_scale255_3(base0: u32) -> u32:
+    let base = base0 << (8 - sk_mask_gamma_lum_bits)
+    var lum = base
+    var i = sk_mask_gamma_lum_bits
+    while i < 8:
+        lum |= base >> i
+        i += sk_mask_gamma_lum_bits
+    return lum
+
+## SkTMaskGamma_build_correcting_lut: the table that corrects coverage for a source of
+## luminance `src_i`, for the sRGB device (gamma 0) and `contrast`.
+func sk_build_correcting_lut(table: u8[], src_i: u32, contrast: f32):
+    let src = (f32)src_i / 255.0
+    let lin_src = sk_srgb_to_luma(src)
+    # Guess at the dst. The perceptual inverse provides smaller visual discontinuities when
+    # slight changes to desaturated colors cause a channel to map to a different correcting
+    # lut with neighboring srcI.
+    let dst = 1.0 - src
+    let lin_dst = sk_srgb_to_luma(dst)
+
+    # Contrast value tapers off to 0 as the src luminance becomes white
+    let adjusted_contrast = contrast * lin_dst
+
+    # Remove discontinuity and instability when src is close to dst. The value 1/256 is
+    # arbitrary and appears to contain the instability.
+    if math32.abs(src - dst) < (1.0 / 256.0):
+        var ii: f32 = 0.0
+        for i in 0..<256:
+            let raw_srca = ii / 255.0
+            let srca = sk_apply_contrast(raw_srca, adjusted_contrast)
+            table[i] = sk_round_to_u8(255.0 * srca)
+            ii += 1.0
+        return
+    var ii: f32 = 0.0
+    for i in 0..<256:
+        # 'rawSrca += 1.0f / 255.0f' and even 'rawSrca = i * (1.0f / 255.0f)' can add up to
+        # more than 1.0f.
+        let raw_srca = ii / 255.0
+        let srca = sk_apply_contrast(raw_srca, adjusted_contrast)
+        let dsta = 1.0 - srca
+
+        # Calculate the output we want.
+        let lin_out = (lin_src * srca + dsta * lin_dst)
+        let out = sk_srgb_from_luma(lin_out)
+
+        # Undo what the blit blend will do.
+        let result = (out - dst) / (src - dst)
+        table[i] = sk_round_to_u8(255.0 * result)
+        ii += 1.0
+
+## SkMaskGamma::CanonicalColor's channel: the top three bits spread over eight.
+func sk_canonical_channel(channel: u32) -> u32:
+    return sk_scale255_3(channel >> (8 - sk_mask_gamma_lum_bits))
+
+## The pre-blend table a glyph mask of an A8 strike goes through for text in color
+## (r, g, b): SkScalerContextRec::setLuminanceColor (CanonicalColor), PreprocessRec's
+## luminance for A8 (SkComputeLuminance, canonical again), and SkMaskGamma::preBlend's
+## green table of SkMaskGamma(contrast 128/255, gamma 0).
+pub func sk_mask_gamma_table(table: u8[], r: u8, g: u8, b: u8):
+    let cr = sk_canonical_channel((u32)r)
+    let cg = sk_canonical_channel((u32)g)
+    let cb = sk_canonical_channel((u32)b)
+    let lum = (cr * 54 + cg * 183 + cb * 19) >> 8
+    let canonical = sk_canonical_channel(lum)
+    # SkScalerContextRec's contrast is stored as a byte: InternalContrastFromExternal(0.5).
+    let contrast = (f32)(u32)(0.5 * 255.0 + 0.5) / 255.0
+    let index = canonical >> (8 - sk_mask_gamma_lum_bits)
+    sk_build_correcting_lut(table, sk_scale255_3(index), contrast)
