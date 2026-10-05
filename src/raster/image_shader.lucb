@@ -98,6 +98,11 @@ func pattern_push_stages(patt: const Pattern*, cs: ColorSpace, p: RasterPipeline
     if quality == .bicubic:
         p.push(.clamp_gamut)
 
+    # Transform color space and alpha type to match shader convention (dst CS, premul alpha).
+    if let xform = patt.color_xform:
+        p.ctx.color_xform = xform
+        p.push(.color_xform)
+
     if let stage = colorspace_expand_stage(cs):
         # TODO: it would be better to gamma-expand prior to sampling, but there isn't
         # currently an intermediate pipeline stage for that.

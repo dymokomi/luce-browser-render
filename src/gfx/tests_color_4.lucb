@@ -364,12 +364,13 @@ let cicp_cases: CicpCase[336] = [
 
 ## The transfer function and matrix of a color space as float bits, in CicpCase's order.
 func color_space_bits(color_space: const SkColorSpace*) -> u32[16]:
-    let tf = color_space.fTransferFn
+    let tf = color_space.transfer_function
+    let m = color_space.to_xyzd50
     let values: f32[16] = [
         tf.g, tf.a, tf.b, tf.c, tf.d, tf.e, tf.f,
-        color_space.fToXYZD50.vals[0][0], color_space.fToXYZD50.vals[0][1], color_space.fToXYZD50.vals[0][2],
-        color_space.fToXYZD50.vals[1][0], color_space.fToXYZD50.vals[1][1], color_space.fToXYZD50.vals[1][2],
-        color_space.fToXYZD50.vals[2][0], color_space.fToXYZD50.vals[2][1], color_space.fToXYZD50.vals[2][2],
+        m.vals[0][0], m.vals[0][1], m.vals[0][2],
+        m.vals[1][0], m.vals[1][1], m.vals[1][2],
+        m.vals[2][0], m.vals[2][1], m.vals[2][2],
     ]
     var bits: u32[16]
     for i in 0..<16:

@@ -46,6 +46,7 @@ highp.lucb
 highp_image.lucb
 highp_blend.lucb
 highp_shaders.lucb
+color_xform.lucb
 lowp.lucb
 lowp_stages.lucb
 lowp_image.lucb

@@ -26,6 +26,12 @@ def package "luce-browser-render" {
         str path = "../luce-fonts"
     }
 
+    def dependency "luce-color" {
+        str owner = "dymokomi"
+        str version = "^0.6.0"
+        str path = "../luce-color"
+    }
+
     def dependency "luce-browser-css" {
         str owner = "dymokomi"
         str version = "^0.4.0"
