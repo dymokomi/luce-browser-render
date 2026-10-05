@@ -1,13 +1,13 @@
 #==============================================================================================
 #
-#   tests_cpu_canvas - the CPU canvas: states, clips, layers, culling, blur and shapes
+#   tests_cpu_canvas - the CPU canvas: states, clips, layers, culling and shapes
 #
 #   DESCRIPTION:
 #       Tests of the CpuCanvas mechanics the player relies on, with expectations that
 #       follow from SkCanvas's documented behaviour: save/restore bookkeeping, integer and
 #       anti-aliased clips, clip differences, quickReject's one-pixel outset, layer
-#       compositing (opacity, the luminance color filter, plus-darker), the blur, and
-#       SkRRect's radius normalization.
+#       compositing (opacity, the luminance color filter, plus-darker) and SkRRect's radius
+#       normalization. The mask blur is checked against Skia in tests_cpu_shadow_skia.lucb.
 #
 #==============================================================================================
 
@@ -167,42 +167,6 @@ test "cpu canvas: plus-darker":
     assert(p.red() == 47)
     assert(p.green() == 0)
     assert(p.blue() == 0)
-
-# mark: Blur ===================================================================================
-
-test "cpu blur: box widths":
-    assert(cpu_blur_box_width(0.0) == 0)
-    assert(cpu_blur_box_width(0.2) == 0)
-    assert(cpu_blur_box_width(1.0) == 2)
-    assert(cpu_blur_box_width(2.0) == 4)
-    assert(cpu_blur_box_width(3.0) == 6)
-    assert(cpu_blur_box_width(10.0) == 19)
-
-test "cpu blur: a point spreads symmetrically and keeps its weight":
-    var mask = raster.Mask.new_(21, 21) else trap("mask")
-    defer mask.release()
-    mask.data_mut()[10 * 21 + 10] = 255
-    cpu_blur_mask(&mask, 2.0)
-    let data = mask.data()
-    var total: u32 = 0
-    for v in data:
-        total += v
-    # Rounding in each pass loses or gains a little.
-    assert(total > 200 and total < 310)
-    # Symmetric about the centre.
-    assert(data[10 * 21 + 8] == data[10 * 21 + 12])
-    assert(data[8 * 21 + 10] == data[12 * 21 + 10])
-    assert(data[10 * 21 + 10] > data[10 * 21 + 12])
-    assert(data[0] == 0)
-
-test "cpu blur: a flat area stays flat":
-    var mask = raster.Mask.new_(30, 30) else trap("mask")
-    defer mask.release()
-    cpu_mask_fill_rect(&mask, 0, 0, 30, 30, 200)
-    cpu_blur_mask(&mask, 1.5)
-    assert(mask.data()[15 * 30 + 15] == 200)
-    # The edges fade (outside the buffer counts as transparent).
-    assert(mask.data()[15 * 30] < 200)
 
 # mark: Rounded rectangles =====================================================================
 

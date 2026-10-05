@@ -1,0 +1,51 @@
+#==============================================================================================
+#
+#   tests_cpu_shadow_skia - the player's box shadows against Skia's pixels
+#
+#   DESCRIPTION:
+#       Outer and inner box shadows drawn through the blur mask filter port (cpu_mask_blur),
+#       compared with the pixels DisplayListPlayerSkia renders (tests_skia_reference_data_7
+#       .lucb, from luce-browser-tools' oracles/luce-browser-render/shadows): rectangles
+#       (BlurRect's nine-patch, and a rectangle too small for one), rounded rectangles (the
+#       nine-patch of a blurred small copy, with SkMaskBlurFilter's small and three-box blurs),
+#       an oval and a small rounded rectangle (whole blurred masks), and nested rectangles.
+#
+#==============================================================================================
+
+## CornerRadii with the same horizontal and vertical radius per corner.
+func test_shadow_radii(tl: i32, tr: i32, br: i32, bl: i32) -> CornerRadii:
+    return CornerRadii(top_left = CornerRadius(horizontal_radius = tl, vertical_radius = tl), top_right = CornerRadius(horizontal_radius = tr, vertical_radius = tr),
+                       bottom_right = CornerRadius(horizontal_radius = br, vertical_radius = br), bottom_left = CornerRadius(horizontal_radius = bl, vertical_radius = bl))
+
+## The 40x32 outer box shadow scene, compared with `expected`.
+func test_outer_shadow_scene(name: str, expected: str, blur: i32, shadow: gfx.DevicePixelRect, shadow_radii: CornerRadii, content: gfx.DevicePixelRect, content_radii: CornerRadii):
+    let scene = test_scene_new(40, 32)
+    defer test_scene_release(&scene)
+    display_list_player_paint_outer_box_shadow(test_scene_player(&scene), PaintOuterBoxShadow(color = test_color(200, 0, 120, 255), blur_radius = blur, device_content_rect = content,
+                                                                                              content_corner_radii = content_radii, shadow_rect = shadow, shadow_corner_radii = shadow_radii))
+    expect_like_skia(&scene, name, expected, 0, 0)
+
+test "cpu shadow skia: rectangles":
+    let square = test_shadow_radii(0, 0, 0, 0)
+    test_outer_shadow_scene("shadow_rect", skia_shadow_rect, 5, test_rect(8, 6, 22, 18), square, test_rect(6, 4, 22, 18), square)
+    test_outer_shadow_scene("shadow_rect_sigma3", skia_shadow_rect_sigma3, 7, test_rect(9, 8, 20, 14), square, test_rect(7, 6, 20, 14), square)
+    test_outer_shadow_scene("shadow_rect_small", skia_shadow_rect_small, 9, test_rect(14, 12, 8, 6), square, test_rect(12, 10, 8, 6), square)
+
+test "cpu shadow skia: rounded rectangles and an oval":
+    let corners = test_shadow_radii(6, 3, 8, 2)
+    test_outer_shadow_scene("shadow_rrect", skia_shadow_rrect, 6, test_rect(6, 5, 28, 22), corners, test_rect(4, 3, 28, 22), corners)
+    let five = test_shadow_radii(5, 5, 5, 5)
+    test_outer_shadow_scene("shadow_rrect_sigma1", skia_shadow_rrect_sigma1, 3, test_rect(6, 5, 28, 22), five, test_rect(4, 3, 28, 22), five)
+    let round = test_shadow_radii(30, 30, 30, 30)
+    test_outer_shadow_scene("shadow_oval", skia_shadow_oval, 4, test_rect(8, 6, 24, 18), round, test_rect(6, 4, 24, 18), round)
+    let four = test_shadow_radii(4, 4, 4, 4)
+    test_outer_shadow_scene("shadow_rrect_small", skia_shadow_rrect_small, 6, test_rect(12, 10, 12, 10), four, test_rect(10, 8, 12, 10), four)
+
+test "cpu shadow skia: an inner shadow of nested rectangles":
+    let scene = test_scene_new(40, 32)
+    defer test_scene_release(&scene)
+    let square = test_shadow_radii(0, 0, 0, 0)
+    display_list_player_paint_inner_box_shadow(test_scene_player(&scene), PaintInnerBoxShadow(color = test_color(0, 60, 200, 255), blur_radius = 6, device_content_rect = test_rect(4, 4, 32, 24),
+                                                                                              content_corner_radii = square, outer_shadow_rect = test_rect(0, 0, 40, 32), inner_shadow_rect = test_rect(9, 8, 24, 18),
+                                                                                              inner_shadow_corner_radii = square))
+    expect_like_skia(&scene, "shadow_inner", skia_shadow_inner, 0, 0)

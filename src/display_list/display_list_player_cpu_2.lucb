@@ -24,28 +24,11 @@
 
 # mark: Blurred shapes =========================================================================
 
-## SkMatrix::mapRadius: a local length scaled by the transform's average scale.
-func cpu_map_radius(transform: raster.Transform, radius: f32) -> f32:
-    let determinant = transform.sx * transform.sy - transform.kx * transform.ky
-    return radius * math32.sqrt(math32.abs(determinant))
-
 ## The anti-aliased device coverage of `path` in the current transform.
 func cpu_canvas_path_coverage(canvas: CpuCanvas*, path: const raster.Path*, fill_rule: raster.FillRule, anti_alias: bool) -> raster.Mask:
     var mask = raster.Mask.new_(cpu_canvas_target(canvas).width(), cpu_canvas_target(canvas).height()) else trap("CpuCanvas: empty size")
     mask.fill_path(path, fill_rule, anti_alias, cpu_canvas_transform(canvas))
     return mask
-
-## Fills `path` with `paint` under SkMaskFilter::MakeBlur(kNormal_SkBlurStyle, sigma).
-func cpu_canvas_fill_path_blurred(canvas: CpuCanvas*, path: const raster.Path*, paint: const raster.Paint*, sigma: f32):
-    if not (sigma > 0.0):
-        cpu_canvas_fill_path(canvas, path, paint, raster.FillRule.winding)
-        return
-    if cpu_canvas_is_clip_empty(canvas):
-        return
-    var coverage = cpu_canvas_path_coverage(canvas, path, raster.FillRule.winding, paint.anti_alias)
-    defer coverage.release()
-    cpu_blur_mask(&coverage, cpu_map_radius(cpu_canvas_transform(canvas), sigma))
-    cpu_canvas_fill_coverage(canvas, &coverage, paint)
 
 # mark: Shadows and rounded rectangles =========================================================
 
@@ -58,25 +41,58 @@ func display_list_player_cpu_paint_outer_box_shadow_impl(base: DisplayListPlayer
     cpu_canvas_save(canvas)
     cpu_canvas_clip_path(canvas, &content_rrect, raster.FillRule.winding, true, true)
     let paint = cpu_color_paint(command.color, true)
-    if let shadow_path = cpu_rrect_path_for(command.shadow_rect, &command.shadow_corner_radii):
-        var shadow_rounded_rect = shadow_path
-        cpu_canvas_fill_path_blurred(canvas, &shadow_rounded_rect, &paint, (f32)(command.blur_radius // 2))
-        shadow_rounded_rect.release()
+    # SkMaskFilter::MakeBlur(kNormal_SkBlurStyle, blur_radius / 2) makes no filter for sigma 0.
+    let sigma = (f32)(command.blur_radius // 2)
+    if let shadow_rect = cpu_rect(command.shadow_rect):
+        if sigma > 0.0:
+            cpu_canvas_fill_rrect_blurred(canvas, shadow_rect, cpu_radii(&command.shadow_corner_radii), &paint, sigma)
+        else:
+            var shadow_rounded_rect = cpu_rrect_path(shadow_rect, cpu_radii(&command.shadow_corner_radii))
+            cpu_canvas_fill_path(canvas, &shadow_rounded_rect, &paint, raster.FillRule.winding)
+            shadow_rounded_rect.release()
     cpu_canvas_restore(canvas)
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:37 Web::Painting::DisplayListPlayerSkia::paint_inner_box_shadow (override).
+## Op(outer, inner, kDifference) is not ported (no SkPathOps): two rectangles, the inner inside
+## the outer, make the nested rectangles Op makes; otherwise the difference is the outer
+## shape's coverage less the inner's.
 func display_list_player_cpu_paint_inner_box_shadow_impl(base: DisplayListPlayer*, command: PaintInnerBoxShadow):
-    var outer_path = cpu_rrect_path_for(command.outer_shadow_rect, &command.content_corner_radii) else return
-    defer outer_path.release()
-    var inner_path = cpu_rrect_path_for(command.inner_shadow_rect, &command.inner_shadow_corner_radii) else return
-    defer inner_path.release()
+    let outer_rect = cpu_rect(command.outer_shadow_rect) else return
+    let inner_rect = cpu_rect(command.inner_shadow_rect) else return
     var clip_path = cpu_rrect_path_for(command.device_content_rect, &command.content_corner_radii) else return
     defer clip_path.release()
-
     let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
     if cpu_canvas_is_clip_empty(canvas):
         return
-    # Op(outer_path, inner_path, kDifference_SkPathOp, &result_path), filled anti-aliased.
+    let outer_radii = cpu_normalize_radii(outer_rect, cpu_radii(&command.content_corner_radii))
+    let inner_radii = cpu_normalize_radii(inner_rect, cpu_radii(&command.inner_shadow_corner_radii))
+    let path_paint = cpu_color_paint(command.color, true)
+    let ts = cpu_canvas_transform(canvas)
+    let sigma = cpu_xformed_sigma(ts, (f32)(command.blur_radius // 2))
+    cpu_canvas_save(canvas)
+    cpu_canvas_clip_path(canvas, &clip_path, raster.FillRule.winding, true, false)
+    defer cpu_canvas_restore(canvas)
+
+    let both_rects = cpu_rrect_kind(outer_rect, &outer_radii) == CpuRRectKind.rect and cpu_rrect_kind(inner_rect, &inner_radii) == CpuRRectKind.rect
+    let inside = inner_rect.left() >= outer_rect.left() and inner_rect.top() >= outer_rect.top() and inner_rect.right() <= outer_rect.right() and inner_rect.bottom() <= outer_rect.bottom()
+    let nested = both_rects and inside and (ts.is_identity() or ts.is_scale_translate())
+    if nested and command.blur_radius // 2 > 0:
+        let outer_device = outer_rect.transform(ts) else return
+        let inner_device = inner_rect.transform(ts) else return
+        match cpu_filter_nested_rects_to_nine([outer_device.left(), outer_device.top(), outer_device.right(), outer_device.bottom()],
+                                              [inner_device.left(), inner_device.top(), inner_device.right(), inner_device.bottom()], sigma):
+            .mask(value):
+                var expanded = value
+                cpu_canvas_blit_mask(canvas, &expanded, &path_paint)
+                cpu_a8_mask_release(&expanded)
+                return
+            _:
+                _ = 0
+
+    var outer_path = cpu_rrect_path(outer_rect, outer_radii)
+    defer outer_path.release()
+    var inner_path = cpu_rrect_path(inner_rect, inner_radii)
+    defer inner_path.release()
     var result = cpu_canvas_path_coverage(canvas, &outer_path, raster.FillRule.winding, true)
     defer result.release()
     var inner = cpu_canvas_path_coverage(canvas, &inner_path, raster.FillRule.winding, true)
@@ -85,15 +101,11 @@ func display_list_player_cpu_paint_inner_box_shadow_impl(base: DisplayListPlayer
     let inner_data = inner.data()
     for i in 0..<result_data.length:
         result_data[i] = raster.premultiply_u8(result_data[i], 255 - inner_data[i])
-
-    let path_paint = cpu_color_paint(command.color, true)
-    let sigma = (f32)(command.blur_radius // 2)
-    if sigma > 0.0:
-        cpu_blur_mask(&result, cpu_map_radius(cpu_canvas_transform(canvas), sigma))
-    cpu_canvas_save(canvas)
-    cpu_canvas_clip_path(canvas, &clip_path, raster.FillRule.winding, true, false)
-    cpu_canvas_fill_coverage(canvas, &result, &path_paint)
-    cpu_canvas_restore(canvas)
+    if command.blur_radius // 2 > 0:
+        let device_bounds = outer_path.bounds().transform(ts) else return
+        cpu_canvas_fill_coverage_blurred(canvas, &result, device_bounds, &path_paint, sigma)
+    else:
+        cpu_canvas_fill_coverage(canvas, &result, &path_paint)
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:38 Web::Painting::DisplayListPlayerSkia::paint_text_shadow (override).
 func display_list_player_cpu_paint_text_shadow_impl(base: DisplayListPlayer*, command: PaintTextShadow):

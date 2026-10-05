@@ -1,0 +1,376 @@
+#==============================================================================================
+#
+#   cpu_mask_blur_filter - Skia's blur of 8-bit coverage masks
+#
+#   DESCRIPTION:
+#       Port of the mask blurs of Skia m144 that SkMaskFilter::MakeBlur (box shadows) runs on
+#       the CPU: SkMaskBlurFilter (src/core/SkMaskBlurFilter.cpp: below sigma 2 a direct
+#       Gaussian of SkGaussFilter's Bessel factors in 8.8 fixed point, rows of the
+#       vertical pass then the horizontal one; from sigma 2 PlanGauss's three box passes as
+#       one sliding window per row and column, scaled by a 32-bit weight), SkBlurMask::BoxBlur
+#       around it, and SkBlurMask::BlurRect (src/core/SkBlurMask.cpp: the analytic blur of a
+#       rectangle from a profile of the Gaussian's cubic approximation). The SIMD lanes of
+#       Skia's fp88 code are written out per value; their sums are the same integers.
+#
+#       Copyright 2017 Google Inc.
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+# mark: Masks ==================================================================================
+
+## An 8-bit coverage mask (SkMask, kA8_Format) at (left, top) in device space; `width` bytes
+## per row. `image` is in memory.heap (free it with cpu_a8_mask_release), or empty for a mask
+## whose bounds only were computed.
+struct CpuA8Mask:
+    var image: u8[]
+    var left: i32
+    var top: i32
+    var width: i32
+    var height: i32
+
+## A zeroed mask over the bounds.
+func cpu_a8_mask_new(left: i32, top: i32, width: i32, height: i32) -> CpuA8Mask:
+    let size = (usize)width * (usize)height
+    let image = (new u8[size] in memory.heap) else trap("out of memory")
+    for i in 0..<size:
+        image[i] = 0
+    return CpuA8Mask(image = image, left = left, top = top, width = width, height = height)
+
+## Frees the mask's pixels.
+func cpu_a8_mask_release(mask: CpuA8Mask*):
+    if mask.image.length > 0:
+        free(mask.image) in memory.heap
+    mask.image = mask.image[..<0]
+
+# mark: SkGaussFilter ==========================================================================
+
+## SkGaussFilter(sigma) for 0 <= sigma < 2: the Bessel-function Gaussian of "Scale-Space for
+## Discrete Signals", normalized; the factors of radius 0 up to 4.
+func cpu_gauss_filter(sigma: f64) -> (f64[6], usize):
+    let var_ = sigma * sigma
+    var gauss: f64[6] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    var b: f64[6] = [cpu_bessel_i0(var_), cpu_bessel_i1(var_), 0.0, 0.0, 0.0, 0.0]
+    let d = math.exp(var_)
+    gauss[0] = b[0] / d
+    gauss[1] = b[1] / d
+    # The recurrence relation of "Numerical Recipes" 6.5.16, until a factor is under 1%.
+    var n: usize = 1
+    while gauss[n] > 1.0 / 100.0:
+        b[n + 1] = -(2.0 * (f64)n / var_) * b[n] + b[n - 1]
+        gauss[n + 1] = b[n + 1] / d
+        n += 1
+    # normalize: sum from the smallest, divide, and put the slop into gauss[0].
+    var sum: f64 = 0.0
+    var i = n - 1
+    while i >= 1:
+        sum += 2.0 * gauss[i]
+        i -= 1
+    sum += gauss[0]
+    for k in 0..<n:
+        gauss[k] /= sum
+    sum = 0.0
+    i = n - 1
+    while i >= 1:
+        sum += 2.0 * gauss[i]
+        i -= 1
+    gauss[0] = 1.0 - sum
+    return (gauss, n)
+
+## BesselI_0 by its series (Abramowitz and Stegun 9.6.12), to a term under 1e-6.
+func cpu_bessel_i0(t: f64) -> f64:
+    let t_squared_over_4 = t * t / 4.0
+    var sum: f64 = 1.0
+    var factor: f64 = 1.0
+    var k: f64 = 1.0
+    while factor > 1.0 / 1000000.0:
+        factor *= t_squared_over_4 / (k * k)
+        sum += factor
+        k += 1.0
+    return sum
+
+## BesselI_1 by its series.
+func cpu_bessel_i1(t: f64) -> f64:
+    let t_squared_over_4 = t * t / 4.0
+    var sum = t / 2.0
+    var factor = sum
+    var k: f64 = 1.0
+    while factor > 1.0 / 1000000.0:
+        factor *= t_squared_over_4 / (k * (k + 1.0))
+        sum += factor
+        k += 1.0
+    return sum
+
+# mark: Small blur =============================================================================
+
+## mulhi of 8.8 fixed point by a 0.16 factor.
+func cpu_mulhi(a: u32, b: u32) -> u32:
+    return (a * b) >> 16
+
+## One output of the direct Gaussian over `values`: kHalf plus every value in reach times its
+## factor (values out of range are 0), as an 8.8 sum (16-bit lanes wrap) truncated to a byte.
+func cpu_direct_gauss_at(values: const u32[], out: i64, radius: i64, factors: const u32[]) -> u8:
+    var sum: u32 = 0x80
+    for j in 0..=2 * radius:
+        let index = out - j
+        if index < 0 or index >= (i64)values.length:
+            continue
+        let k = j - radius
+        let factor = factors[(usize)(k if k >= 0 else -k)]
+        sum = (sum + cpu_mulhi(values[(usize)index] << 8, factor)) & 0xffff
+    return (u8)((sum >> 8) & 0xff)
+
+## small_blur: the vertical pass into the destination's columns radius.., then the horizontal
+## pass along each row; the destination grows by the radius on every side.
+func cpu_small_blur(sigma: f64, src: const CpuA8Mask*) -> (CpuA8Mask, i32):
+    let filter = cpu_gauss_filter(sigma)
+    let radius = (i32)filter.1 - 1
+    var factors: u32[6] = [0, 0, 0, 0, 0, 0]
+    for i in 0..<filter.1:
+        factors[i] = (u32)math.round(filter.0[i] * 65536.0)
+    var dst = cpu_a8_mask_new(src.left - radius, src.top - radius, src.width + 2 * radius, src.height + 2 * radius)
+    let r = (i64)radius
+    let src_w = (usize)src.width
+    let src_h = (usize)src.height
+    let dst_w = (usize)dst.width
+    let dst_h = (usize)dst.height
+    let longest = src_h if src_h > src_w else src_w
+    var line = (new u32[longest] in memory.heap) else trap("out of memory")
+    defer free(line) in memory.heap
+    # Vertical: dst(x + r, y) from source column x.
+    for x in 0..<src_w:
+        for y in 0..<src_h:
+            line[y] = (u32)src.image[y * src_w + x]
+        for y in 0..<dst_h:
+            dst.image[y * dst_w + x + (usize)r] = cpu_direct_gauss_at(line[..<src_h], (i64)y, r, factors)
+    # Horizontal, in place: dst(x, y) from the vertical results dst(x' + r, y).
+    for y in 0..<dst_h:
+        for x in 0..<src_w:
+            line[x] = (u32)dst.image[y * dst_w + x + (usize)r]
+        for x in 0..<dst_w:
+            dst.image[y * dst_w + x] = cpu_direct_gauss_at(line[..<src_w], (i64)x, r, factors)
+    return (dst, radius)
+
+# mark: PlanGauss ==============================================================================
+
+## PlanGauss: three box passes of `window` (two of window - 1 and a last of window - 1 or
+## window), as one 32-bit weight; the border the blur adds on each side.
+struct CpuPlanGauss:
+    var weight: u64
+    var border: i32
+    var sliding_window: i32
+    var pass0: usize
+    var pass1: usize
+    var pass2: usize
+
+func cpu_plan_gauss(sigma: f64) -> CpuPlanGauss:
+    let possible_window = (i32)math.floor(sigma * 3.0 * math.sqrt(2.0 * 3.14159265358979323846) / 4.0 + 0.5)
+    let window = possible_window if possible_window > 1 else 1
+    let odd = window & 1 == 1
+    let border = 3 * ((window - 1) // 2) if odd else 3 * (window // 2) - 1
+    let window2 = (i64)window * (i64)window
+    let window3 = window2 * (i64)window
+    let divisor = window3 if odd else window3 + window2
+    let weight = (u64)math.round(1.0 / (f64)divisor * 4294967296.0)
+    return CpuPlanGauss(weight = weight, border = border, sliding_window = 2 * border + 1, pass0 = (usize)(window - 1), pass1 = (usize)(window - 1),
+                        pass2 = (usize)(window - 1 if odd else window))
+
+## Scan::finalScale.
+func cpu_plan_final_scale(weight: u64, sum: u32) -> u8:
+    return (u8)((weight * (u64)sum + 0x80000000) >> 32)
+
+## Scan::blur of `count` source values read at `src[src_start + i * src_stride]` into
+## `out_count` values written at `dst[dst_start + i * dst_stride]`: forward over the source
+## and the no-change tail, then backward from the end for the rest, with three ring buffers.
+func cpu_plan_scan(plan: const CpuPlanGauss*, src: const u8[], src_start: usize, src_stride: usize, count: usize, dst: u8[], dst_start: usize, dst_stride: usize,
+                   out_count: usize, buffer: u32[]):
+    let no_change_count = (usize)(plan.sliding_window - (i32)count) if plan.sliding_window > (i32)count else 0
+    let end0 = plan.pass0
+    let end1 = end0 + plan.pass1
+    let end2 = end1 + plan.pass2
+    var c0: usize = 0
+    var c1: usize = end0
+    var c2: usize = end1
+    for i in 0..<end2:
+        buffer[i] = 0
+    var sum0: u32 = 0
+    var sum1: u32 = 0
+    var sum2: u32 = 0
+    var written: usize = 0
+    let steps = count + no_change_count
+    for i in 0..<steps:
+        let leading_edge: u32 = (u32)src[src_start + i * src_stride] if i < count else 0
+        sum0 +%= leading_edge
+        sum1 +%= sum0
+        sum2 +%= sum1
+        dst[dst_start + written * dst_stride] = cpu_plan_final_scale(plan.weight, sum2)
+        written += 1
+        cpu_plan_step(buffer, &sum0, &sum1, &sum2, leading_edge, &c0, &c1, &c2, end0, end1, end2)
+    # Starting from the right, fill in the rest of the buffer.
+    for i in 0..<end2:
+        buffer[i] = 0
+    sum0 = 0
+    sum1 = 0
+    sum2 = 0
+    var cursor = out_count
+    var src_index = count
+    while cursor > written:
+        cursor -= 1
+        src_index -= 1
+        let leading_edge = (u32)src[src_start + src_index * src_stride]
+        sum0 +%= leading_edge
+        sum1 +%= sum0
+        sum2 +%= sum1
+        dst[dst_start + cursor * dst_stride] = cpu_plan_final_scale(plan.weight, sum2)
+        cpu_plan_step(buffer, &sum0, &sum1, &sum2, leading_edge, &c0, &c1, &c2, end0, end1, end2)
+
+## The tail of each step of Scan::blur: each pass drops its oldest value from its ring buffer
+## (the passes are at least 3 long from sigma 2).
+func cpu_plan_step(buffer: u32[], sum0: u32*, sum1: u32*, sum2: u32*, leading_edge: u32, c0: usize*, c1: usize*, c2: usize*, end0: usize, end1: usize, end2: usize):
+    *sum2 = *sum2 -% buffer[*c2]
+    buffer[*c2] = *sum1
+    *c2 = *c2 + 1 if *c2 + 1 < end2 else end1
+    *sum1 = *sum1 -% buffer[*c1]
+    buffer[*c1] = *sum0
+    *c1 = *c1 + 1 if *c1 + 1 < end1 else end0
+    *sum0 = *sum0 -% buffer[*c0]
+    buffer[*c0] = leading_edge
+    *c0 = *c0 + 1 if *c0 + 1 < end0 else 0
+
+## SkMaskBlurFilter::blur from sigma 2: each row blurred into a transposed buffer, then each
+## of its rows (the columns) blurred into the destination, which grows by the border.
+func cpu_plan_blur(sigma: f64, src: const CpuA8Mask*) -> (CpuA8Mask, i32):
+    let plan = cpu_plan_gauss(sigma)
+    let border = plan.border
+    var dst = cpu_a8_mask_new(src.left - border, src.top - border, src.width + 2 * border, src.height + 2 * border)
+    let src_w = (usize)src.width
+    let src_h = (usize)src.height
+    let dst_w = (usize)dst.width
+    let dst_h = (usize)dst.height
+    let buffer_size = plan.pass0 + plan.pass1 + plan.pass2
+    var buffer = (new u32[buffer_size + 1] in memory.heap) else trap("out of memory")
+    defer free(buffer) in memory.heap
+    # Blur horizontally, and transpose: tmp is dst_w rows of src_h.
+    let tmp_w = src_h
+    let tmp_h = dst_w
+    var tmp = (new u8[tmp_w * tmp_h + 1] in memory.heap) else trap("out of memory")
+    defer free(tmp) in memory.heap
+    for y in 0..<src_h:
+        cpu_plan_scan(&plan, src.image, y * src_w, 1, src_w, tmp, y, tmp_w, tmp_h, buffer)
+    # Blur vertically (in memory order because of the transposition), and transpose back.
+    for y in 0..<tmp_h:
+        cpu_plan_scan(&plan, tmp, y * tmp_w, 1, tmp_w, dst.image, y, dst_w, dst_h, buffer)
+    return (dst, border)
+
+# mark: SkBlurMask =============================================================================
+
+## SkMaskBlurFilter's sigma: pinned to [0, 135].
+func cpu_mask_blur_sigma(sigma: f32) -> f64:
+    return math.min(math.max((f64)sigma, 0.0), 135.0)
+
+## SkMaskBlurFilter::hasNoBlur (the historical 1/3 threshold).
+func cpu_mask_blur_has_no_blur(sigma: f64) -> bool:
+    return sigma < 1.0 / 3.0 and sigma <= 1.0 / 3.0
+
+## The border SkMaskBlurFilter::blur adds on each side for `sigma` (the margin when only the
+## bounds are wanted).
+func cpu_mask_blur_border(sigma: f64) -> i32:
+    if sigma < 2.0:
+        return (i32)cpu_gauss_filter(sigma).1 - 1
+    return cpu_plan_gauss(sigma).border
+
+## SkBlurMask::BoxBlur(kNormal) of `src` (with pixels): the blurred mask and its margin; none
+## when there is no blur.
+func cpu_box_blur(src: const CpuA8Mask*, sigma0: f32) -> (CpuA8Mask, i32)?:
+    let sigma = cpu_mask_blur_sigma(sigma0)
+    if cpu_mask_blur_has_no_blur(sigma):
+        return none
+    if sigma < 2.0:
+        return cpu_small_blur(sigma, src)
+    return cpu_plan_blur(sigma, src)
+
+## gaussianIntegral: the cubic approximation of the Gaussian's integral beyond x.
+func cpu_gaussian_integral(x: f32) -> f32:
+    if x > 1.5:
+        return 0.0
+    if x < -1.5:
+        return 1.0
+    let x2 = x * x
+    let x3 = x2 * x
+    if x > 0.5:
+        return 0.5625 - (x3 / 6.0 - 3.0 * x2 * 0.25 + 1.125 * x)
+    if x > -0.5:
+        return 0.5 - (0.75 * x - x3 / 3.0)
+    return 0.4375 + (-x3 / 6.0 - 3.0 * x2 * 0.25 - 1.125 * x)
+
+## SkBlurMask::ComputeBlurProfile: the pre-inverted (255 - x) profile of a blurred half-plane.
+func cpu_blur_profile(profile: u8[], sigma: f32):
+    let size = profile.length
+    let center = (i32)(size >> 1)
+    let invr = 1.0 / (2.0 * sigma)
+    profile[0] = 255
+    for x in 1..<size:
+        let scaled_x = ((f32)(center - (i32)x) - 0.5) * invr
+        let gi = cpu_gaussian_integral(scaled_x)
+        profile[x] = 255 - (u8)(255.0 * gi)
+
+## SkBlurMask::ComputeBlurredScanline (with its unsigned arithmetic).
+func cpu_blurred_scanline(pixels: u8[], profile: const u8[], width: u32, sigma: f32):
+    let profile_size = (u32)math32.ceil(6.0 * sigma)
+    let sw = width -% profile_size
+    # nearest odd number less than the profile size represents the center of the (2x scaled)
+    # profile
+    let center = (i32)(profile_size & ~(u32)1) - 1
+    let w = (i32)(sw -% (u32)center)
+    for x in 0..<width:
+        if profile_size <= sw:
+            # ProfileLookup: how far are we from the original edge?
+            let dx = cpu_abs_i32((((i32)x << 1) + 1) - (i32)width) - w
+            var ox = dx >> 1
+            if ox < 0:
+                ox = 0
+            pixels[x] = profile[(usize)ox]
+        else:
+            let span = (f32)sw / (2.0 * sigma)
+            let gi_x = 1.5 - ((f32)x + 0.5) / (2.0 * sigma)
+            pixels[x] = (u8)(255.0 * (cpu_gaussian_integral(gi_x) - cpu_gaussian_integral(gi_x + span)))
+
+## |v|.
+func cpu_abs_i32(v: i32) -> i32:
+    return -v if v < 0 else v
+
+## SkBlurMask::BlurRect(kNormal): the bounds of `rect` (left, top, right, bottom) blurred by
+## `sigma` (rounded, grown by half the profile), their pixels when `render`; none when the
+## profile is empty.
+func cpu_blur_rect(sigma: f32, rect: f32[4], render: bool) -> (CpuA8Mask, i32)?:
+    let profile_size = (i32)math32.ceil(6.0 * sigma)
+    if profile_size <= 0:
+        return none
+    let pad = profile_size // 2
+    let left = cpu_round_to_int(rect[0] - (f32)pad)
+    let top = cpu_round_to_int(rect[1] - (f32)pad)
+    let right = cpu_round_to_int(rect[2] + (f32)pad)
+    let bottom = cpu_round_to_int(rect[3] + (f32)pad)
+    if not render:
+        let empty = (new u8[0] in memory.heap) else trap("out of memory")
+        return (CpuA8Mask(image = empty, left = left, top = top, width = right - left, height = bottom - top), pad)
+    var dst = cpu_a8_mask_new(left, top, right - left, bottom - top)
+    var profile = (new u8[(usize)profile_size] in memory.heap) else trap("out of memory")
+    defer free(profile) in memory.heap
+    cpu_blur_profile(profile, sigma)
+    var horizontal = (new u8[(usize)dst.width] in memory.heap) else trap("out of memory")
+    defer free(horizontal) in memory.heap
+    var vertical = (new u8[(usize)dst.height] in memory.heap) else trap("out of memory")
+    defer free(vertical) in memory.heap
+    cpu_blurred_scanline(horizontal, profile, (u32)dst.width, sigma)
+    cpu_blurred_scanline(vertical, profile, (u32)dst.height, sigma)
+    for y in 0..<(usize)dst.height:
+        for x in 0..<(usize)dst.width:
+            dst.image[y * (usize)dst.width + x] = cpu_mul_div_255_round((u32)horizontal[x], (u32)vertical[y])
+    return (dst, pad)
+
+## SkMulDiv255Round.
+func cpu_mul_div_255_round(a: u32, b: u32) -> u8:
+    let prod = a * b + 128
+    return (u8)((prod + (prod >> 8)) >> 8)

@@ -201,6 +201,25 @@ sampler on both levels, lerped), never the bilerp_clamp_8888 fast path. `tests_c
 .lucb` compares seven scenes from `oracles/luce-browser-render/images` with
 DisplayListPlayerSkia's pixels: all exact.
 
+## Box shadows (fix/fidelity-3d)
+
+Box shadows draw as Skia's raster device draws a shape whose paint has
+SkMaskFilter::MakeBlur(kNormal, blur_radius / 2) (`display_list/cpu_mask_blur.lucb` over
+`cpu_mask_blur_filter.lucb`): the sigma through SkMatrix::mapRadius (at most 128); a rectangle
+through filterRectsToNine (SkBlurMask::BlurRect's analytic profile on a small rectangle, the
+nine-patch stretched to the blurred bounds); a rounded rectangle under a scale and translation
+through filterRRectToNine (a small copy drawn anti-aliased into a mask and blurred); anything
+else (an oval, a shape too small for a nine-patch, a rotated one) through DrawToMask and
+SkBlurMask::BoxBlur on the whole mask; and a sigma under 1/3 as a plain fill. The blur is
+SkMaskBlurFilter: below sigma 2 the direct Gaussian of SkGaussFilter's Bessel factors in 8.8
+fixed point, from 2 PlanGauss's three box passes in one sliding window with a 32-bit weight.
+The nine-patch is expanded into one mask and blitted through the clip, which blits the coverage
+draw_nine's pieces blit. An inner shadow of two rectangles, the inner inside the outer, is the
+nested rectangles SkPathOps' difference gives (the nine-patch of the blurred frame, the center
+left); other inner shadows still blur the outer coverage less the inner (no SkPathOps).
+`tests_cpu_shadow_skia.lucb` compares eight scenes from `oracles/luce-browser-render/shadows`:
+all exact, and the player's two shadow scenes are now exact too.
+
 ## Image filters
 
 r10 builds a gfx.Filter as the graph of SkImageFilters the donor builds and leaves evaluation to
@@ -297,8 +316,6 @@ The player's 36 scenes against DisplayListPlayerSkia match exactly except:
   FreeType's interpreter runs for Skia's masks (stems and heights snapped along y) and that are
   not run here: `glyph_run_scaled`: 275 pixels by up to 108 levels; `text_shadow` (blurred):
   307 by up to 20.
-- **Box-shadow blur** (SkMaskFilter::MakeBlur) is r51a's three box blurs of the coverage, not
-  Skia's SkMaskBlurFilter: 32 and 29 pixels by 1 level.
 - **draw_rect**: Skia strokes an axis-aligned rectangle with SkScan::AntiFrameRect, the player
   fills the frame's even-odd path: 17 pixels by 1 level.
 - The image-filter deviations above; a layer whose filter needs the whole matrix under

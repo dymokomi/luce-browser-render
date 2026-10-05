@@ -1,0 +1,402 @@
+#==============================================================================================
+#
+#   cpu_mask_blur - shapes drawn with SkMaskFilter::MakeBlur(kNormal_SkBlurStyle, sigma)
+#
+#   DESCRIPTION:
+#       Port of how Skia m144's raster device draws a rectangle, a rounded rectangle or a path
+#       whose paint has a blur mask filter (skcpu::Draw::drawRect, drawRRect,
+#       drawRRectNinePatch and drawDevPath; SkMaskFilterBase::filterRects, filterRRect,
+#       filterPath and draw_nine; SkBlurMaskFilterImpl::filterRectsToNine and
+#       filterRRectToNine; skcpu::DrawToMask): a rectangle blurs analytically
+#       (SkBlurMask::BlurRect) into a small nine-patch, a rounded rectangle draws a small copy
+#       of itself into a mask and blurs that (SkMaskBlurFilter), and anything else (an oval,
+#       a shape too small for a nine-patch, a rotated one) is drawn into a device mask that is
+#       blurred whole. The nine-patch is expanded to the shape's blurred bounds here and drawn
+#       as one mask: draw_nine's pieces (masks, stretched rows and columns, the filled center)
+#       blit the same coverage. The sigma is SkBlurMaskFilterImpl::computeXformedSigma's
+#       (SkMatrix::mapRadius, at most 128). A sigma that blurs nothing draws the shape plainly.
+#
+#       Copyright 2006 The Android Open Source Project
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+## The kMaxMargin of compute_mask_bounds.
+let cpu_mask_max_margin: i32 = 128
+
+# mark: Sigma ==================================================================================
+
+## SkMatrix::mapRadius: the geometric mean of the lengths of (radius, 0) and (0, radius)
+## mapped as vectors.
+func cpu_map_radius(transform: raster.Transform, radius: f32) -> f32:
+    var v0 = raster.Point.from_xy(radius, 0.0)
+    var v1 = raster.Point.from_xy(0.0, radius)
+    if transform.has_perspective():
+        var origin = raster.Point.from_xy(0.0, 0.0)
+        transform.map_point(&origin)
+        transform.map_point(&v0)
+        transform.map_point(&v1)
+        v0 = v0.sub(origin)
+        v1 = v1.sub(origin)
+    else:
+        var linear = transform
+        linear.tx = 0.0
+        linear.ty = 0.0
+        linear.map_point(&v0)
+        linear.map_point(&v1)
+    return math32.sqrt(v0.length() * v1.length())
+
+## SkBlurMaskFilterImpl::computeXformedSigma.
+func cpu_xformed_sigma(transform: raster.Transform, sigma: f32) -> f32:
+    return math32.min(cpu_map_radius(transform, sigma), 128.0)
+
+# mark: Nine-patches ===========================================================================
+
+## draw_nine's coverage over `outer` (left, top, right, bottom) from the small `mask` whose
+## stretchable row and column are at `center`: corners from the mask's corners, edges
+## stretched from its center row and column, and the center 255 (`fill_center`) or untouched.
+func cpu_expand_nine_patch(mask: const CpuA8Mask*, outer: CpuIRect, center_x: i32, center_y: i32, fill_center: bool) -> CpuA8Mask:
+    let width = outer.right - outer.left
+    let height = outer.bottom - outer.top
+    var result = cpu_a8_mask_new(outer.left, outer.top, width, height)
+    # innerR, relative to `outer`.
+    let inner_left = center_x
+    let inner_top = center_y
+    let inner_right = width + (center_x + 1 - mask.width)
+    let inner_bottom = height + (center_y + 1 - mask.height)
+    for y in 0..<height:
+        let in_rows = y >= inner_top and y < inner_bottom
+        let my = y if y < inner_top else (center_y if in_rows else y - (height - mask.height))
+        for x in 0..<width:
+            let in_columns = x >= inner_left and x < inner_right
+            var value: u8 = 0
+            if in_rows and in_columns:
+                value = 255 if fill_center else 0
+            else:
+                let mx = x if x < inner_left else (center_x if in_columns else x - (width - mask.width))
+                value = mask.image[(usize)(my * mask.width + mx)]
+            result.image[(usize)(y * width + x)] = value
+    return result
+
+## What a nine-patch filter answers (SkMaskFilterBase::FilterReturn): the expanded mask, no
+## mask and no plain fill (kFalse), or the fall back to a mask of the whole shape
+## (kUnimplemented).
+enum CpuNineResult:
+    mask(value: CpuA8Mask)
+    nothing
+    unimplemented
+
+## SkBlurMaskFilterImpl::filterRectsToNine for one device rectangle (left, top, right, bottom).
+func cpu_filter_rect_to_nine(rect: f32[4], sigma: f32) -> CpuNineResult:
+    if cpu_rect_exceeds(rect, 32767.0):
+        return .unimplemented
+    let src_bounds = cpu_round_out(rect)
+    # The bounds only, to know the margin.
+    var bounds_only = cpu_blur_rect(sigma, rect, false) else return .nothing
+    let dst = bounds_only.0
+    cpu_a8_mask_release(&bounds_only.0)
+    # The smallest rectangle that blurs the same at every edge, plus one stretchable center
+    # row and column (one more pixel on each side for fractional edges).
+    var small_w = dst.width - (src_bounds.right - src_bounds.left) + 2
+    var small_h = dst.height - (src_bounds.bottom - src_bounds.top) + 2
+    let center_x = small_w
+    let center_y = small_h
+    small_w += 1
+    small_h += 1
+    let dx = (f32)((src_bounds.right - src_bounds.left) - small_w)
+    let dy = (f32)((src_bounds.bottom - src_bounds.top) - small_h)
+    if dx < 0.0 or dy < 0.0:
+        return .unimplemented
+    let small: f32[4] = [rect[0], rect[1], rect[2] - dx, rect[3] - dy]
+    if small[2] - small[0] < 2.0 or small[3] - small[1] < 2.0:
+        return .unimplemented
+    var filtered = cpu_blur_rect(sigma, small, true) else return .nothing
+    defer cpu_a8_mask_release(&filtered.0)
+    let outer = CpuIRect(left = dst.left, top = dst.top, right = dst.left + dst.width, bottom = dst.top + dst.height)
+    return .mask(value = cpu_expand_nine_patch(&filtered.0, outer, center_x, center_y, true))
+
+## SkBlurMaskFilterImpl::filterRectsToNine for two nested device rectangles (the even-odd
+## frame between them): the small frame is drawn into a mask and blurred; the center is left.
+func cpu_filter_nested_rects_to_nine(outer_rect: f32[4], inner_rect: f32[4], sigma: f32) -> CpuNineResult:
+    if cpu_rect_exceeds(outer_rect, 32767.0):
+        return .unimplemented
+    let blur_sigma = cpu_mask_blur_sigma(sigma)
+    if cpu_mask_blur_has_no_blur(blur_sigma):
+        return .nothing
+    let margin = cpu_mask_blur_border(blur_sigma)
+    let src_bounds = cpu_round_out(outer_rect)
+    let outer = CpuIRect(left = src_bounds.left - margin, top = src_bounds.top - margin, right = src_bounds.right + margin, bottom = src_bounds.bottom + margin)
+    var small_w = 2 * margin + 2
+    var small_h = 2 * margin + 2
+    # SkRect::roundIn of the inner rectangle.
+    let inner_ir = CpuIRect(left = (i32)math32.ceil(inner_rect[0]), top = (i32)math32.ceil(inner_rect[1]), right = (i32)math32.floor(inner_rect[2]), bottom = (i32)math32.floor(inner_rect[3]))
+    let center_x = small_w + (inner_ir.left - src_bounds.left)
+    let center_y = small_h + (inner_ir.top - src_bounds.top)
+    small_w += 1
+    small_h += 1
+    let dx = (f32)((inner_ir.right - inner_ir.left) - small_w)
+    let dy = (f32)((inner_ir.bottom - inner_ir.top) - small_h)
+    if dx < 0.0 or dy < 0.0:
+        return .unimplemented
+    let small0: f32[4] = [outer_rect[0], outer_rect[1], outer_rect[2] - dx, outer_rect[3] - dy]
+    if small0[2] - small0[0] < 2.0 or small0[3] - small0[1] < 2.0:
+        return .unimplemented
+    let small1: f32[4] = [inner_rect[0], inner_rect[1], inner_rect[2] - dx, inner_rect[3] - dy]
+    # draw_rects_into_mask: both rectangles as one even-odd path, anti-aliased.
+    let r0 = raster.Rect.from_ltrb(small0[0], small0[1], small0[2], small0[3]) else return .nothing
+    let r1 = raster.Rect.from_ltrb(small1[0], small1[1], small1[2], small1[3]) else return .nothing
+    var builder = raster.PathBuilder.new_()
+    builder.push_rect(r0)
+    builder.push_rect(r1)
+    var frame = builder.finish() else return .nothing
+    defer frame.release()
+    var src = cpu_path_mask(&frame, raster.FillRule.even_odd, cpu_round_out(small0))
+    defer cpu_a8_mask_release(&src)
+    var filtered = cpu_box_blur(&src, sigma) else return .nothing
+    defer cpu_a8_mask_release(&filtered.0)
+    return .mask(value = cpu_expand_nine_patch(&filtered.0, outer, center_x, center_y, false))
+
+## SkBlurMaskFilterImpl::filterRRectToNine for a device rounded rectangle that is neither a
+## rectangle nor an oval.
+func cpu_filter_rrect_to_nine(rect: raster.Rect, radii: CpuRadii, sigma: f32) -> CpuNineResult:
+    let bounds: f32[4] = [rect.left(), rect.top(), rect.right(), rect.bottom()]
+    if cpu_rect_exceeds(bounds, 32767.0):
+        return .unimplemented
+    let blur_sigma = cpu_mask_blur_sigma(sigma)
+    if cpu_mask_blur_has_no_blur(blur_sigma):
+        return .unimplemented
+    let margin = cpu_mask_blur_border(blur_sigma)
+    let src_bounds = cpu_round_out(bounds)
+    let outer = CpuIRect(left = src_bounds.left - margin, top = src_bounds.top - margin, right = src_bounds.right + margin, bottom = src_bounds.bottom + margin)
+
+    # The larger radius per side (rounded up) and the margin on each side of one stretchable
+    # pixel.
+    let left_unstretched = (i32)math32.ceil(math32.max(radii.x[0], radii.x[3])) + margin
+    let right_unstretched = (i32)math32.ceil(math32.max(radii.x[1], radii.x[2])) + margin
+    let total_small_width = left_unstretched + right_unstretched + 1
+    if (f32)total_small_width >= rect.width():
+        return .unimplemented
+    let top_unstretched = (i32)math32.ceil(math32.max(radii.y[0], radii.y[1])) + margin
+    let bottom_unstretched = (i32)math32.ceil(math32.max(radii.y[3], radii.y[2])) + margin
+    let total_small_height = top_unstretched + bottom_unstretched + 1
+    if (f32)total_small_height >= rect.height():
+        return .unimplemented
+
+    # The small rounded rectangle, drawn anti-aliased into a mask, then blurred.
+    let small_rect = raster.Rect.from_ltrb(0.0, 0.0, (f32)total_small_width, (f32)total_small_height) else return .nothing
+    var small_path = cpu_rrect_path(small_rect, radii)
+    defer small_path.release()
+    var src = cpu_path_mask(&small_path, raster.FillRule.winding, CpuIRect(left = 0, top = 0, right = total_small_width, bottom = total_small_height))
+    defer cpu_a8_mask_release(&src)
+    var filtered = cpu_box_blur(&src, sigma) else return .nothing
+    defer cpu_a8_mask_release(&filtered.0)
+    return .mask(value = cpu_expand_nine_patch(&filtered.0, outer, margin + left_unstretched, margin + top_unstretched, true))
+
+## rect_exceeds.
+func cpu_rect_exceeds(r: f32[4], v: f32) -> bool:
+    return r[0] < -v or r[1] < -v or r[2] > v or r[3] > v or r[2] - r[0] > v or r[3] - r[1] > v
+
+## SkRect::roundOut.
+func cpu_round_out(r: f32[4]) -> CpuIRect:
+    return CpuIRect(left = (i32)math32.floor(r[0]), top = (i32)math32.floor(r[1]), right = (i32)math32.ceil(r[2]), bottom = (i32)math32.ceil(r[3]))
+
+# mark: Device masks ===========================================================================
+
+## The anti-aliased coverage of the device `path` over `bounds` (SkScan::AntiFillPath into an
+## A8 mask, as draw_into_mask draws it).
+func cpu_path_mask(path: const raster.Path*, fill_rule: raster.FillRule, bounds: CpuIRect) -> CpuA8Mask:
+    let width = bounds.right - bounds.left
+    let height = bounds.bottom - bounds.top
+    var result = cpu_a8_mask_new(bounds.left, bounds.top, width, height)
+    var mask = raster.Mask.new_((u32)width, (u32)height) else trap("CpuCanvas: empty mask")
+    defer mask.release()
+    mask.fill_path(path, fill_rule, true, raster.Transform.from_translate(-(f32)bounds.left, -(f32)bounds.top))
+    let data = mask.data()
+    for i in 0..<data.length:
+        result.image[i] = data[i]
+    return result
+
+## skcpu::DrawToMask then filterMask: the device `path`'s coverage over its bounds (outset by
+## half a pixel, rounded out, kept within the clip bounds plus the blur's margin), blurred;
+## none when the bounds are empty or nothing blurs.
+func cpu_blurred_path_mask(path: const raster.Path*, fill_rule: raster.FillRule, clip: CpuIRect, sigma: f32) -> CpuA8Mask?:
+    let blur_sigma = cpu_mask_blur_sigma(sigma)
+    if cpu_mask_blur_has_no_blur(blur_sigma):
+        return none
+    let margin = math32.min((f32)cpu_mask_blur_border(blur_sigma), (f32)cpu_mask_max_margin)
+    let b = path.bounds()
+    var bounds = cpu_round_out([b.left() - 0.5, b.top() - 0.5, b.right() + 0.5, b.bottom() + 0.5])
+    let m = (i32)margin
+    bounds.left = cpu_max_i32(bounds.left, clip.left - m)
+    bounds.top = cpu_max_i32(bounds.top, clip.top - m)
+    bounds.right = cpu_min_i32(bounds.right, clip.right + m)
+    bounds.bottom = cpu_min_i32(bounds.bottom, clip.bottom + m)
+    if bounds.left >= bounds.right or bounds.top >= bounds.bottom:
+        return none
+    var src = cpu_path_mask(path, fill_rule, bounds)
+    defer cpu_a8_mask_release(&src)
+    let blurred = cpu_box_blur(&src, sigma) else return none
+    return blurred.0
+
+# mark: Drawing ================================================================================
+
+## Blits `mask` with `paint` through the canvas's clip (blitMask through the raster clip).
+func cpu_canvas_blit_mask(canvas: CpuCanvas*, mask: const CpuA8Mask*, paint: const raster.Paint*):
+    if mask.width <= 0 or mask.height <= 0:
+        return
+    let placed: raster.DeviceMask[1] = [raster.DeviceMask(image = mask.image, left = mask.left, top = mask.top, width = mask.width, height = mask.height)]
+    cpu_canvas_target(canvas).fill_masks(placed, paint, cpu_canvas_draw_mask(canvas))
+
+## skcpu::Draw::drawDevPath with the blur mask filter, for the device `path` (filterPath): a
+## rectangle goes through filterRects, anything else through a whole blurred mask; when the
+## filter declines, the path is filled plainly.
+func cpu_canvas_fill_dev_path_blurred(canvas: CpuCanvas*, path: const raster.Path*, fill_rule: raster.FillRule, paint: const raster.Paint*, sigma: f32):
+    if let rect = cpu_path_as_rect(path):
+        match cpu_filter_rect_to_nine(rect, sigma):
+            .mask(value):
+                var expanded = value
+                cpu_canvas_blit_mask(canvas, &expanded, paint)
+                cpu_a8_mask_release(&expanded)
+                return
+            .nothing:
+                cpu_canvas_target(canvas).fill_path(path, paint, fill_rule, raster.Transform.identity(), cpu_canvas_draw_mask(canvas))
+                return
+            .unimplemented:
+                _ = 0
+    let state = cpu_canvas_state(canvas)
+    let clip = CpuIRect(left = state.clip_left, top = state.clip_top, right = state.clip_right, bottom = state.clip_bottom)
+    if let blurred = cpu_blurred_path_mask(path, fill_rule, clip, sigma):
+        var mask = blurred
+        cpu_canvas_blit_mask(canvas, &mask, paint)
+        cpu_a8_mask_release(&mask)
+        return
+    cpu_canvas_target(canvas).fill_path(path, paint, fill_rule, raster.Transform.identity(), cpu_canvas_draw_mask(canvas))
+
+## filterPath's mask route for a shape given as device `coverage` (a mask of the layer's size)
+## with device `bounds`: the coverage over the bounds outset by half a pixel (within the clip
+## plus the margin), blurred and blitted; the coverage itself when nothing blurs.
+func cpu_canvas_fill_coverage_blurred(canvas: CpuCanvas*, coverage: raster.Mask*, bounds: raster.Rect, paint: const raster.Paint*, sigma: f32):
+    let blur_sigma = cpu_mask_blur_sigma(sigma)
+    if cpu_mask_blur_has_no_blur(blur_sigma):
+        cpu_canvas_fill_coverage(canvas, coverage, paint)
+        return
+    let state = cpu_canvas_state(canvas)
+    let m = (i32)math32.min((f32)cpu_mask_blur_border(blur_sigma), (f32)cpu_mask_max_margin)
+    var b = cpu_round_out([bounds.left() - 0.5, bounds.top() - 0.5, bounds.right() + 0.5, bounds.bottom() + 0.5])
+    b.left = cpu_max_i32(cpu_max_i32(b.left, state.clip_left - m), 0)
+    b.top = cpu_max_i32(cpu_max_i32(b.top, state.clip_top - m), 0)
+    b.right = cpu_min_i32(cpu_min_i32(b.right, state.clip_right + m), (i32)coverage.width())
+    b.bottom = cpu_min_i32(cpu_min_i32(b.bottom, state.clip_bottom + m), (i32)coverage.height())
+    if b.left >= b.right or b.top >= b.bottom:
+        return
+    var src = cpu_a8_mask_new(b.left, b.top, b.right - b.left, b.bottom - b.top)
+    defer cpu_a8_mask_release(&src)
+    let data = coverage.data()
+    let stride = (usize)coverage.width()
+    for y in 0..<(usize)src.height:
+        for x in 0..<(usize)src.width:
+            src.image[y * (usize)src.width + x] = data[((usize)b.top + y) * stride + (usize)b.left + x]
+    var blurred = cpu_box_blur(&src, sigma) else return
+    cpu_canvas_blit_mask(canvas, &blurred.0, paint)
+    cpu_a8_mask_release(&blurred.0)
+
+## SkPathRaw::isRect of a device path: the rectangle (left, top, right, bottom) of a path made
+## of one closed axis-aligned rectangle; none otherwise.
+func cpu_path_as_rect(path: const raster.Path*) -> f32[4]?:
+    let verbs = path.verbs_view()
+    let points = path.points_view()
+    if verbs.length < 4 or points.length < 4:
+        return none
+    if verbs[0] != raster.PathVerb.move:
+        return none
+    var count: usize = 1
+    for i in 1..<verbs.length:
+        match verbs[i]:
+            .line: count += 1
+            .close: _ = 0
+            _: return none
+    if count != 4 and not (count == 5 and points[4].x == points[0].x and points[4].y == points[0].y):
+        return none
+    for i in 0..<4usize:
+        let a = points[i]
+        let b = points[(i + 1) % 4]
+        if a.x != b.x and a.y != b.y:
+            return none
+    let bounds = path.bounds()
+    if bounds.width() == 0.0 or bounds.height() == 0.0:
+        return none
+    return [bounds.left(), bounds.top(), bounds.right(), bounds.bottom()]
+
+## SkCanvas::drawRRect of `rect` with `radii` and a blur mask filter of `sigma`, in the
+## current transform: a rectangle as drawRect, an oval as drawOval, other rounded rectangles
+## through drawRRectNinePatch when the transform keeps them axis-aligned; paths otherwise.
+func cpu_canvas_fill_rrect_blurred(canvas: CpuCanvas*, rect: raster.Rect, radii0: CpuRadii, paint: const raster.Paint*, sigma0: f32):
+    if cpu_canvas_is_clip_empty(canvas):
+        return
+    let ts = cpu_canvas_transform(canvas)
+    let sigma = cpu_xformed_sigma(ts, sigma0)
+    let radii = cpu_normalize_radii(rect, radii0)
+    let kind = cpu_rrect_kind(rect, &radii)
+    if kind == CpuRRectKind.nine_patch and ts.is_scale_translate() or kind == CpuRRectKind.nine_patch and ts.is_identity():
+        let device = cpu_rrect_transform(rect, &radii, ts)
+        match cpu_filter_rrect_to_nine(device.0, device.1, sigma):
+            .mask(value):
+                var expanded = value
+                cpu_canvas_blit_mask(canvas, &expanded, paint)
+                cpu_a8_mask_release(&expanded)
+                return
+            _:
+                _ = 0
+    # drawPath(SkPath::Rect / Oval / RRect): the device path, then drawDevPath.
+    var path = cpu_rrect_path(rect, radii)
+    defer path.release()
+    if not path.transform(ts):
+        return
+    cpu_canvas_fill_dev_path_blurred(canvas, &path, raster.FillRule.winding, paint, sigma)
+
+## SkRRect's type, as far as the blurred draw cares.
+enum CpuRRectKind:
+    rect
+    oval
+    nine_patch
+
+## SkRRect::computeType: a rectangle when every corner is square, an oval when all radii are
+## equal and reach half the sides; anything else takes the nine-patch path.
+func cpu_rrect_kind(rect: raster.Rect, radii: const CpuRadii*) -> CpuRRectKind:
+    var all_square = radii.x[0] == 0.0 or radii.y[0] == 0.0
+    var all_equal = true
+    for i in 1..<4usize:
+        if radii.x[i] != 0.0 and radii.y[i] != 0.0:
+            all_square = false
+        if radii.x[i] != radii.x[i - 1] or radii.y[i] != radii.y[i - 1]:
+            all_equal = false
+    if all_square:
+        return CpuRRectKind.rect
+    if all_equal and radii.x[0] >= rect.width() * 0.5 and radii.y[0] >= rect.height() * 0.5:
+        return CpuRRectKind.oval
+    return CpuRRectKind.nine_patch
+
+## SkRRect::transform by a scale and translation: the mapped rectangle and the radii
+## DeduceRRectFromContour reads back from the mapped contour, normalized again.
+func cpu_rrect_transform(rect: raster.Rect, radii: const CpuRadii*, ts: raster.Transform) -> (raster.Rect, CpuRadii):
+    let mapped = rect.transform(ts) else return (rect, *radii)
+    let l = rect.left()
+    let t = rect.top()
+    let r = rect.right()
+    let b = rect.bottom()
+    let corner_x: f32[4] = [l, r, r, l]
+    let corner_y: f32[4] = [t, t, b, b]
+    let inward_x: f32[4] = [1.0, -1.0, -1.0, 1.0]
+    let inward_y: f32[4] = [1.0, 1.0, -1.0, -1.0]
+    var result = *radii
+    for i in 0..<4usize:
+        var corner = raster.Point.from_xy(corner_x[i], corner_y[i])
+        var along_x = raster.Point.from_xy(corner_x[i] + inward_x[i] * radii.x[i], corner_y[i])
+        var along_y = raster.Point.from_xy(corner_x[i], corner_y[i] + inward_y[i] * radii.y[i])
+        ts.map_point(&corner)
+        ts.map_point(&along_x)
+        ts.map_point(&along_y)
+        result.x[i] = math32.abs(along_x.x - corner.x)
+        result.y[i] = math32.abs(along_y.y - corner.y)
+    return (mapped, cpu_normalize_radii(mapped, result))

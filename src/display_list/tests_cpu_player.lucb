@@ -175,7 +175,7 @@ test "cpu player: paint_outer_box_shadow":
     var none_radii: CornerRadii
     display_list_player_paint_outer_box_shadow(test_scene_player(&scene), PaintOuterBoxShadow(color = test_color(0, 0, 0, 255), blur_radius = 4,
                                                                                               device_content_rect = test_rect(6, 6, 12, 12), content_corner_radii = none_radii, shadow_rect = test_rect(8, 8, 12, 12), shadow_corner_radii = none_radii))
-    expect_like_skia(&scene, "outer_box_shadow", skia_outer_box_shadow, 1, 32)
+    expect_like_skia(&scene, "outer_box_shadow", skia_outer_box_shadow, 0, 0)
 
 test "cpu player: paint_inner_box_shadow":
     let scene = test_scene_new(24, 24)
@@ -184,7 +184,7 @@ test "cpu player: paint_inner_box_shadow":
     display_list_player_paint_inner_box_shadow(test_scene_player(&scene), PaintInnerBoxShadow(color = test_color(0, 0, 0, 255), blur_radius = 4,
                                                                                               device_content_rect = test_rect(4, 4, 16, 16), content_corner_radii = none_radii, outer_shadow_rect = test_rect(0, 0, 24, 24),
                                                                                               inner_shadow_rect = test_rect(8, 8, 12, 12), inner_shadow_corner_radii = none_radii))
-    expect_like_skia(&scene, "inner_box_shadow", skia_inner_box_shadow, 1, 29)
+    expect_like_skia(&scene, "inner_box_shadow", skia_inner_box_shadow, 0, 0)
 
 # mark: Ellipses, rects and lines ==============================================================
 
