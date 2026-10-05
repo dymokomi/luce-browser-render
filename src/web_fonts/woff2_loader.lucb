@@ -5,10 +5,9 @@
 #   DESCRIPTION:
 #       Port of Libraries/LibGfx/Font/WOFF2/Loader.cpp (lines 1-76). The donor hands the
 #       bytes to Google's woff2 library (woff2::ConvertWOFF2ToTTF), here luce-fonts'
-#       opentype.woff2_to_sfnt, which needs a Brotli decoder; the Luce ecosystem has none yet
-#       (DESIGN.md §7.1: "Brotli: missing"), so convert_to_ttf fails and WOFF2 fonts do not
-#       load. WOFF2ByteBufferOut, the output sink the library writes through, carries the
-#       converted font.
+#       opentype.woff2_to_sfnt (luce-fonts 0.6), which decodes as that library does, byte
+#       for byte, over luce-compress's Brotli decoder. WOFF2ByteBufferOut, the output sink
+#       the library writes through, carries the converted font.
 #
 #==============================================================================================
 
@@ -51,7 +50,7 @@ pub func woff2_convert_to_ttf(bytes: const u8[]) -> ak.ByteBuffer!:
     var ttf_buffer = try ak.byte_buffer_create_uninitialized(0)
     var output = woff2_byte_buffer_out_create(&ttf_buffer)
     # woff2::ConvertWOFF2ToTTF(bytes.data(), bytes.size(), &output): luce-fonts'
-    # woff2_to_sfnt. FIXME: it has no Brotli decoder yet, so the conversion fails.
+    # woff2_to_sfnt.
     let ttf = opentype.woff2_to_sfnt(bytes) catch:
         error(ak.ak_error, "Failed to convert the WOFF2 font to TTF")
     defer free(ttf)

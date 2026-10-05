@@ -20,8 +20,8 @@ var tests_r10_four_cc_is_ported: bool = true
 # mark: The WOFF and WOFF2 loaders ================================================================
 
 test "woff_loaders":
-    ## WOFF::try_load_from_bytes makes a typeface of what luce-fonts unwraps, and both loaders
-    ## fail with AK's error on what it rejects.
+    ## WOFF::try_load_from_bytes and WOFF2::try_load_from_bytes make typefaces of what
+    ## luce-fonts unwraps, and fail with AK's error on what it rejects.
     with memory.heap:
         let font = test_read_file("tests/web_fonts/fonts/HashSans.woff")
         let typeface = woff_try_load_from_bytes(ak.byte_buffer_bytes_const(&font)) else trap("HashSans.woff does not load")
@@ -32,11 +32,18 @@ test "woff_loaders":
             assert(failure.code == ak.ak_error)
             recover none
         assert(rejected == none)
+        # TestWOFF2's tolerate_incorrect_sfnt_size and malformed_woff2.
         let woff2 = test_read_file("tests/web_fonts/woff/incorrect_sfnt_size.woff2")
-        let not_converted: Typeface*? = woff2_try_load_from_bytes(ak.byte_buffer_bytes_const(&woff2)) catch failure:
-            assert(failure.code == ak.ak_error)
-            recover none
-        assert(not_converted == none)
+        let converted = woff2_try_load_from_bytes(ak.byte_buffer_bytes_const(&woff2)) else trap("incorrect_sfnt_size.woff2 does not load")
+        assert(test_fly_text(typeface_family(converted)) == "Test")
+        assert(typeface_glyph_count(converted) == 4)
+        let malformed: str[2] = ["tests/web_fonts/woff/incorrect_compressed_size.woff2", "tests/web_fonts/woff/invalid_numtables.woff2"]
+        for path in malformed:
+            let bytes = test_read_file(path)
+            let not_converted: Typeface*? = woff2_try_load_from_bytes(ak.byte_buffer_bytes_const(&bytes)) catch failure:
+                assert(failure.code == ak.ak_error)
+                recover none
+            assert(not_converted == none)
 
 test "woff2_byte_buffer_out":
     ## WOFF2ByteBufferOut's two writes and size.

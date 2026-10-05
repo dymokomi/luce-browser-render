@@ -37,8 +37,7 @@ struct DeviceBlitter:
     ## The blitter, none for SkNullBlitter.
     func view() -> Blitter?:
         if self.kind == .pipeline:
-            let blitter: RasterPipelineBlitter* = &self.pipeline
-            return blitter
+            return &self.pipeline
         return none
 
     func release():
