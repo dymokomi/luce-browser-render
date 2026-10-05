@@ -49,3 +49,17 @@ test "cpu shadow skia: an inner shadow of nested rectangles":
                                                                                               content_corner_radii = square, outer_shadow_rect = test_rect(0, 0, 40, 32), inner_shadow_rect = test_rect(9, 8, 24, 18),
                                                                                               inner_shadow_corner_radii = square))
     expect_like_skia(&scene, "shadow_inner", skia_shadow_inner, 0, 0)
+
+test "cpu shadow skia: inner shadows of rounded rectangles (SkPathOps' difference)":
+    let blurred = test_scene_new(40, 32)
+    defer test_scene_release(&blurred)
+    display_list_player_paint_inner_box_shadow(test_scene_player(&blurred), PaintInnerBoxShadow(color = test_color(0, 60, 200, 255), blur_radius = 6, device_content_rect = test_rect(4, 4, 32, 24),
+                                                                                                content_corner_radii = test_shadow_radii(6, 4, 8, 3), outer_shadow_rect = test_rect(0, 0, 40, 32),
+                                                                                                inner_shadow_rect = test_rect(10, 9, 22, 16), inner_shadow_corner_radii = test_shadow_radii(3, 2, 5, 1)))
+    expect_like_skia(&blurred, "shadow_inner_rrect", skia_shadow_inner_rrect, 0, 0)
+    let sharp = test_scene_new(40, 32)
+    defer test_scene_release(&sharp)
+    display_list_player_paint_inner_box_shadow(test_scene_player(&sharp), PaintInnerBoxShadow(color = test_color(180, 40, 0, 200), blur_radius = 0, device_content_rect = test_rect(4, 4, 32, 24),
+                                                                                              content_corner_radii = test_shadow_radii(5, 5, 5, 5), outer_shadow_rect = test_rect(1, 1, 38, 30),
+                                                                                              inner_shadow_rect = test_rect(9, 8, 22, 16), inner_shadow_corner_radii = test_shadow_radii(4, 4, 4, 4)))
+    expect_like_skia(&sharp, "shadow_inner_rrect_sharp", skia_shadow_inner_rrect_sharp, 0, 0)

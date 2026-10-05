@@ -204,17 +204,21 @@ func cpu_round_out(r: f32[4]) -> CpuIRect:
 # mark: Device masks ===========================================================================
 
 ## The anti-aliased coverage of the device `path` over `bounds` (SkScan::AntiFillPath into an
-## A8 mask, as draw_into_mask draws it).
+## A8 mask through a blitter, as draw_into_mask draws it: the scan converter may take its
+## mask accumulator, which an SkAAClip's forced run-length path does not): an opaque white fill
+## onto transparent pixels leaves the coverage in the alpha channel.
 func cpu_path_mask(path: const raster.Path*, fill_rule: raster.FillRule, bounds: CpuIRect) -> CpuA8Mask:
     let width = bounds.right - bounds.left
     let height = bounds.bottom - bounds.top
     var result = cpu_a8_mask_new(bounds.left, bounds.top, width, height)
-    var mask = raster.Mask.new_((u32)width, (u32)height) else trap("CpuCanvas: empty mask")
-    defer mask.release()
-    mask.fill_path(path, fill_rule, true, raster.Transform.from_translate(-(f32)bounds.left, -(f32)bounds.top))
-    let data = mask.data()
-    for i in 0..<data.length:
-        result.image[i] = data[i]
+    var pixmap = raster.Pixmap.new_((u32)width, (u32)height) else trap("CpuCanvas: empty mask")
+    defer pixmap.release()
+    var white = raster.Paint()
+    white.set_color_rgba8(255, 255, 255, 255)
+    pixmap.fill_path(path, &white, fill_rule, raster.Transform.from_translate(-(f32)bounds.left, -(f32)bounds.top), none)
+    let data = pixmap.data()
+    for i in 0..<(usize)width * (usize)height:
+        result.image[i] = data[i * 4 + 3]
     return result
 
 ## skcpu::DrawToMask then filterMask: the device `path`'s coverage over its bounds (outset by
@@ -330,7 +334,8 @@ func cpu_path_as_rect(path: const raster.Path*) -> f32[4]?:
 
 ## SkCanvas::drawRRect of `rect` with `radii` and a blur mask filter of `sigma`, in the
 ## current transform: a rectangle as drawRect, an oval as drawOval, other rounded rectangles
-## through drawRRectNinePatch when the transform keeps them axis-aligned; paths otherwise.
+## through filterRRect (SkRRect::transform, then drawRRectNinePatch) when the transform keeps
+## rectangles rectangles (quarter turns and flips included); paths otherwise.
 func cpu_canvas_fill_rrect_blurred(canvas: CpuCanvas*, rect: raster.Rect, radii0: CpuRadii, paint: const raster.Paint*, sigma0: f32):
     if cpu_canvas_is_clip_empty(canvas):
         return
@@ -338,7 +343,7 @@ func cpu_canvas_fill_rrect_blurred(canvas: CpuCanvas*, rect: raster.Rect, radii0
     let sigma = cpu_xformed_sigma(ts, sigma0)
     let radii = cpu_normalize_radii(rect, radii0)
     let kind = cpu_rrect_kind(rect, &radii)
-    if kind == CpuRRectKind.nine_patch and ts.is_scale_translate() or kind == CpuRRectKind.nine_patch and ts.is_identity():
+    if kind == CpuRRectKind.nine_patch and cpu_rect_stays_rect(ts):
         let device = cpu_rrect_transform(rect, &radii, ts)
         match cpu_filter_rrect_to_nine(device.0, device.1, sigma):
             .mask(value):
@@ -377,26 +382,55 @@ func cpu_rrect_kind(rect: raster.Rect, radii: const CpuRadii*) -> CpuRRectKind:
         return CpuRRectKind.oval
     return CpuRRectKind.nine_patch
 
-## SkRRect::transform by a scale and translation: the mapped rectangle and the radii
-## DeduceRRectFromContour reads back from the mapped contour, normalized again.
+## SkMatrix::preservesAxisAlignment (rectStaysRect): no perspective, and either a scale
+## (no skew) or a quarter turn (no scale terms), each nonzero.
+func cpu_rect_stays_rect(ts: raster.Transform) -> bool:
+    if ts.has_perspective():
+        return false
+    if ts.kx == 0.0 and ts.ky == 0.0:
+        return ts.sx != 0.0 and ts.sy != 0.0
+    return ts.sx == 0.0 and ts.sy == 0.0 and ts.kx != 0.0 and ts.ky != 0.0
+
+## SkRRect::transform by a matrix that keeps rectangles rectangles: the mapped rectangle, and
+## the radii DeduceRRectFromContour reads back from the rounded rectangle's contour
+## (SkPathRawShapes::RRect, clockwise from start index 6) mapped point by point: each conic's
+## corner point names the corner it is at in the mapped rectangle, the two legs its radii;
+## setRectRadii normalizes them again.
 func cpu_rrect_transform(rect: raster.Rect, radii: const CpuRadii*, ts: raster.Transform) -> (raster.Rect, CpuRadii):
     let mapped = rect.transform(ts) else return (rect, *radii)
     let l = rect.left()
     let t = rect.top()
     let r = rect.right()
     let b = rect.bottom()
-    let corner_x: f32[4] = [l, r, r, l]
-    let corner_y: f32[4] = [t, t, b, b]
-    let inward_x: f32[4] = [1.0, -1.0, -1.0, 1.0]
-    let inward_y: f32[4] = [1.0, 1.0, -1.0, -1.0]
-    var result = *radii
+    # Each conic: its start, its corner and its end, in contour order (lower-left first).
+    var pts: raster.Point[12] = [
+        raster.Point.from_xy(l, t + radii.y[0]), raster.Point.from_xy(l, t), raster.Point.from_xy(l + radii.x[0], t),
+        raster.Point.from_xy(r - radii.x[1], t), raster.Point.from_xy(r, t), raster.Point.from_xy(r, t + radii.y[1]),
+        raster.Point.from_xy(r, b - radii.y[2]), raster.Point.from_xy(r, b), raster.Point.from_xy(r - radii.x[2], b),
+        raster.Point.from_xy(l + radii.x[3], b), raster.Point.from_xy(l, b), raster.Point.from_xy(l, b - radii.y[3]),
+    ]
+    ts.map_points(pts)
+    var result = CpuRadii(x = [0.0, 0.0, 0.0, 0.0], y = [0.0, 0.0, 0.0, 0.0])
     for i in 0..<4usize:
-        var corner = raster.Point.from_xy(corner_x[i], corner_y[i])
-        var along_x = raster.Point.from_xy(corner_x[i] + inward_x[i] * radii.x[i], corner_y[i])
-        var along_y = raster.Point.from_xy(corner_x[i], corner_y[i] + inward_y[i] * radii.y[i])
-        ts.map_point(&corner)
-        ts.map_point(&along_x)
-        ts.map_point(&along_y)
-        result.x[i] = math32.abs(along_x.x - corner.x)
-        result.y[i] = math32.abs(along_y.y - corner.y)
+        let start = pts[i * 3]
+        let corner = pts[i * 3 + 1]
+        let end = pts[i * 3 + 2]
+        let v10 = raster.Point.from_xy(corner.x - start.x, corner.y - start.y)
+        let v21 = raster.Point.from_xy(end.x - corner.x, end.y - corner.y)
+        var dx = math32.abs(v21.x)
+        var dy = math32.abs(v10.y)
+        if v10.x != 0.0:
+            dx = math32.abs(v10.x)
+            dy = math32.abs(v21.y)
+        elif v10.y == 0.0:
+            dx = math32.abs(v21.x)
+            dy = math32.abs(v21.y)
+        # kUpperLeft, kUpperRight, kLowerRight, kLowerLeft.
+        var index: usize = 2
+        if corner.x == mapped.left():
+            index = 0 if corner.y == mapped.top() else 3
+        elif corner.y == mapped.top():
+            index = 1
+        result.x[index] = dx
+        result.y[index] = dy
     return (mapped, cpu_normalize_radii(mapped, result))

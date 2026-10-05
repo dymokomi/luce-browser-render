@@ -63,6 +63,11 @@ struct CpuFr:
     ## The image's color space differs from the filter's (an SkImage tagged with one): the
     ## steps to sRGB that SkImageShader appends after sampling it, before the color filters.
     var xform: raster.ColorXform? = none
+    ## An SkImage under a transform that does not keep rectangles rectangles is drawn as its
+    ## rectangle's path, anti-aliased: the coverage of that path over `coverage_area` (layer
+    ## space, a row of `coverage_area`'s width per pixel row).
+    var coverage: (const u8[])? = none
+    var coverage_area: CpuIRect = CpuIRect(left = 0, top = 0, right = 0, bottom = 0)
 
 # mark: Arena and contexts =====================================================================
 
@@ -96,6 +101,33 @@ func cpu_ctx_with_source(ctx: const CpuFilterContext*, source: CpuFr) -> CpuFilt
 ## The empty FilterResult (transparent black).
 func cpu_fr_empty() -> CpuFr:
     return CpuFr(pixels = none, width = 0, height = 0, transform = cpu_fm_identity(), bounds = cpu_irect_empty(), clamp = false, op_count = 0)
+
+## Draw::drawBitmap's path for an SkImage whose transform does not keep rectangles
+## rectangles: drawRect falls back to the rectangle's path, filled anti-aliased (AAA), so its
+## coverage within the layer bounds is computed once for every sample.
+func cpu_fr_attach_coverage(ctx: const CpuFilterContext*, fr: CpuFr*):
+    fr.coverage = none
+    if fr.padded or fr.clamp or cpu_fm_is_scale_translate(fr.transform) or not cpu_fr_has_image(fr):
+        return
+    let mapped = cpu_fm_map_irect(fr.transform, cpu_irect(0, 0, fr.width, fr.height))
+    let area = cpu_irect_intersect(mapped, fr.bounds) else return
+    if cpu_irect_is_empty(area):
+        return
+    # The path's coverage as an opaque white fill leaves it in the alpha channel.
+    var pixmap = raster.Pixmap.new_((u32)cpu_irect_width(area), (u32)cpu_irect_height(area)) else return
+    var rect = raster.PathBuilder.from_rect(raster.Rect.from_ltrb(0.0, 0.0, (f32)fr.width, (f32)fr.height) else trap("VERIFY: an image rectangle"))
+    defer rect.release()
+    let to_area = cpu_fm_concat(cpu_fm_translate(-(f32)area.left, -(f32)area.top), fr.transform)
+    var white = raster.Paint()
+    white.set_color_rgba8(255, 255, 255, 255)
+    pixmap.fill_path(&rect, &white, raster.FillRule.winding, cpu_fm_transform(to_area), none)
+    let pixels = pixmap.data_mut()
+    let count = (usize)cpu_irect_width(area) * (usize)cpu_irect_height(area)
+    for i in 0..<count:
+        pixels[i] = pixels[i * 4 + 3]
+    fr.coverage = pixels[..<count]
+    fr.coverage_area = area
+    ak.vector_append_t(&ctx.arena.pixmaps, pixmap)
 
 ## Whether `fr` has an image (FilterResult's operator bool).
 func cpu_fr_has_image(fr: const CpuFr*) -> bool:
@@ -174,7 +206,11 @@ func cpu_fr_sample_point(fr: const CpuFr*, inverse: const CpuFMatrix*, cx: f32, 
     let u = cpu_fm_pipeline_x(*inverse, cx, cy)
     let v = cpu_fm_pipeline_y(*inverse, cx, cy)
     if nearest:
-        return cpu_fr_nearest_texel(fr, u, v)
+        let texel = cpu_fr_nearest_texel(fr, u, v)
+        if not fr.padded and not fr.clamp and not cpu_fm_is_scale_translate(fr.transform):
+            let coverage = cpu_fr_rect_coverage(fr, cx, cy)
+            return CpuRgba(r = texel.r * coverage, g = texel.g * coverage, b = texel.b * coverage, a = texel.a * coverage)
+        return texel
     var coverage: f32 = 1.0
     var clamp = fr.clamp
     if not fr.padded and not fr.clamp:
@@ -206,14 +242,19 @@ func cpu_fr_sample_point(fr: const CpuFr*, inverse: const CpuFMatrix*, cx: f32, 
         return CpuRgba(r = sum.r * coverage, g = sum.g * coverage, b = sum.b * coverage, a = sum.a * coverage)
     return sum
 
-## The part of the pixel centered at (cx, cy) that the image's transformed rectangle covers
-## (for a scale-and-translate transform; others count the pixel center only).
+## The part of the pixel centered at (cx, cy) that the image's transformed rectangle covers:
+## SkScan::AntiFillRect's for a scale-and-translate transform, otherwise the anti-aliased
+## coverage of the rectangle's path (cpu_fr_attach_coverage).
 func cpu_fr_rect_coverage(fr: const CpuFr*, cx: f32, cy: f32) -> f32:
-    let rect = cpu_fm_map_rect(fr.transform, 0.0, 0.0, (f32)fr.width, (f32)fr.height)
     if not cpu_fm_is_scale_translate(fr.transform):
-        if cx >= rect.0 and cx < rect.2 and cy >= rect.1 and cy < rect.3:
-            return 1.0
-        return 0.0
+        let mask = fr.coverage else return 0.0
+        let x = cpu_f32_to_i32(math32.floor(cx))
+        let y = cpu_f32_to_i32(math32.floor(cy))
+        let area = fr.coverage_area
+        if x < area.left or y < area.top or x >= area.right or y >= area.bottom:
+            return 0.0
+        return (f32)mask[(usize)(y - area.top) * (usize)cpu_irect_width(area) + (usize)(x - area.left)] * (1.0 / 255.0)
+    let rect = cpu_fm_map_rect(fr.transform, 0.0, 0.0, (f32)fr.width, (f32)fr.height)
     let overlap_x = cpu_clamp_unit(cpu_min_f32(cx + 0.5, rect.2) - cpu_max_f32(cx - 0.5, rect.0))
     let overlap_y = cpu_clamp_unit(cpu_min_f32(cy + 0.5, rect.3) - cpu_max_f32(cy - 0.5, rect.1))
     return overlap_x * overlap_y
@@ -374,6 +415,8 @@ func cpu_fr_resolve(ctx: const CpuFilterContext*, fr: const CpuFr*, dst: CpuIRec
 
 ## Draws `fr` with kSrc into the image `target` covering `bounds` (lowp when it can run so).
 func cpu_fr_draw_src(fr: const CpuFr*, target: u8[], bounds: CpuIRect):
+    if cpu_fr_draw_as_path(fr, target, bounds):
+        return
     let width = cpu_irect_width(bounds)
     let sampler = cpu_fr_sampler(fr)
     let lowp = cpu_fr_is_lowp(fr)
@@ -384,6 +427,34 @@ func cpu_fr_draw_src(fr: const CpuFr*, target: u8[], bounds: CpuIRect):
                 cpu_store_lowp(target, offset, cpu_fr_pixel_lowp(fr, &sampler, bounds.left + x, bounds.top + y))
             else:
                 cpu_store_rgba(target, offset, cpu_fr_pixel(fr, &sampler, bounds.left + x, bounds.top + y))
+
+## FilterResult::draw of an SkImage (no transparent boundary) whose transform does not keep
+## rectangles rectangles: drawSpecial's Draw::drawBitmap fills the image's rectangle as a path,
+## anti-aliased, with a clamped image shader (make_paint_with_image) through the raster module,
+## source-over into the transparent `target`. False when `fr` is not such an image or has color
+## filters (which the paint would carry), and the caller samples it itself.
+func cpu_fr_draw_as_path(fr: const CpuFr*, target: u8[], bounds: CpuIRect) -> bool:
+    if fr.padded or fr.clamp or fr.op_count != 0 or cpu_fm_is_scale_translate(fr.transform):
+        return false
+    let pixels = fr.pixels else return false
+    let image = raster.PixmapRef.from_bytes(pixels, (u32)fr.width, (u32)fr.height) else return false
+    var canvas = raster.PixmapMut.from_bytes(target, (u32)cpu_irect_width(bounds), (u32)cpu_irect_height(bounds)) else return false
+    # The layer bounds crop (FilterResult::draw's clipRect of fLayerBounds) within `bounds`.
+    var clip = raster.Mask.new_((u32)cpu_irect_width(bounds), (u32)cpu_irect_height(bounds)) else return false
+    defer clip.release()
+    if let visible = cpu_irect_intersect(fr.bounds, bounds):
+        let rect = raster.Rect.from_ltrb((f32)(visible.left - bounds.left), (f32)(visible.top - bounds.top), (f32)(visible.right - bounds.left), (f32)(visible.bottom - bounds.top)) else return false
+        var path = raster.PathBuilder.from_rect(rect)
+        defer path.release()
+        clip.fill_path(&path, raster.FillRule.winding, true, raster.Transform.identity())
+    let to_target = cpu_fm_transform(cpu_fm_concat(cpu_fm_translate(-(f32)bounds.left, -(f32)bounds.top), fr.transform))
+    let quality = raster.FilterQuality.bilinear if fr.linear else raster.FilterQuality.nearest
+    var paint = raster.Paint()
+    paint.shader = raster.Pattern.new_color_managed(image, raster.SpreadMode.pad_, quality, 1.0, raster.Transform.identity(), fr.xform)
+    var rect = raster.PathBuilder.from_rect(raster.Rect.from_ltrb(0.0, 0.0, (f32)fr.width, (f32)fr.height) else trap("VERIFY: an image rectangle"))
+    defer rect.release()
+    canvas.fill_path(&rect, &paint, raster.FillRule.winding, to_target, &clip)
+    return true
 
 ## Draws `fr` over the image `target` (whose pixel (0, 0) is at (left, top)) with source-over,
 ## as FilterResult::draw into a Builder surface does.
@@ -446,6 +517,7 @@ func cpu_fr_apply_transform(ctx: const CpuFilterContext*, fr: const CpuFr*, tran
     transformed.bounds = cpu_fm_map_irect(transform, transformed.bounds)
     if not cpu_irect_intersects(transformed.bounds, ctx.desired):
         return cpu_fr_empty()
+    cpu_fr_attach_coverage(ctx, &transformed)
     return transformed
 
 # mark: Builder ================================================================================

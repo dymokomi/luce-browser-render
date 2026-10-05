@@ -30,8 +30,8 @@ func cpu_fr_is_lowp(fr: const CpuFr*) -> bool:
     # shader-tiled (strict) image shader, whose stages are float.
     if not fr.padded and fr.linear and cpu_fm_integer_translation(fr.transform) == none:
         return false
-    # The color space steps have no lowp stage.
-    if fr.xform != none:
+    # The color space steps and matrix_perspective have no lowp stage.
+    if fr.xform != none or cpu_fm_has_perspective(fr.transform):
         return false
     for i in 0..<fr.op_count:
         let kind = fr.ops[i].kind

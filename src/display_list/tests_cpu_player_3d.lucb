@@ -174,3 +174,27 @@ test "cpu player 3d: a rectangle under an affine rotateX is SkScan::AntiFillRect
     display_list_player_fill_path(player, test_fill_path(frame, test_color(0, 0, 0, 255), gfx.WindingRule.even_odd, 1.0))
     display_list_player_restore(player, Restore())
     expect_like_skia(&scene, "rotate_x_affine_rect", skia_rotate_x_affine_rect, 0, 0)
+
+## A blurred rounded-rectangle shadow in a transform context of `matrix` about (20, 20).
+func test_turned_shadow_scene(name: str, expected: str, matrix: gfx.FloatMatrix4X4, color: gfx.Color, blur: i32, radii: CornerRadii):
+    let scene = test_scene_new(40, 40)
+    defer test_scene_release(&scene)
+    let player = test_scene_player(&scene)
+    display_list_player_save(player, Save())
+    display_list_player_apply_transform(player, test_float_point(20.0, 20.0), matrix)
+    let square = CornerRadii(top_left = CornerRadius(horizontal_radius = 0, vertical_radius = 0), top_right = CornerRadius(horizontal_radius = 0, vertical_radius = 0),
+                             bottom_right = CornerRadius(horizontal_radius = 0, vertical_radius = 0), bottom_left = CornerRadius(horizontal_radius = 0, vertical_radius = 0))
+    display_list_player_paint_outer_box_shadow(player, PaintOuterBoxShadow(color = color, blur_radius = blur, device_content_rect = test_rect(3, 2, 30, 32), content_corner_radii = square,
+                                                                           shadow_rect = test_rect(5, 4, 30, 32), shadow_corner_radii = radii))
+    display_list_player_restore(player, Restore())
+    expect_like_skia(&scene, name, expected, 0, 0)
+
+test "cpu player 3d: a rounded-rectangle shadow turned a quarter or mirrored stays a rounded rectangle":
+    let quarter = test_matrix([[0.0, -1.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]])
+    let corners = CornerRadii(top_left = CornerRadius(horizontal_radius = 6, vertical_radius = 6), top_right = CornerRadius(horizontal_radius = 3, vertical_radius = 3),
+                              bottom_right = CornerRadius(horizontal_radius = 8, vertical_radius = 8), bottom_left = CornerRadius(horizontal_radius = 2, vertical_radius = 2))
+    test_turned_shadow_scene("shadow_rrect_quarter_turn", skia_shadow_rrect_quarter_turn, quarter, test_color(200, 0, 120, 255), 6, corners)
+    let mirror = test_matrix([[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]])
+    let elliptic = CornerRadii(top_left = CornerRadius(horizontal_radius = 7, vertical_radius = 4), top_right = CornerRadius(horizontal_radius = 2, vertical_radius = 2),
+                               bottom_right = CornerRadius(horizontal_radius = 5, vertical_radius = 5), bottom_left = CornerRadius(horizontal_radius = 3, vertical_radius = 6))
+    test_turned_shadow_scene("shadow_rrect_mirror", skia_shadow_rrect_mirror, mirror, test_color(0, 90, 160, 255), 5, elliptic)

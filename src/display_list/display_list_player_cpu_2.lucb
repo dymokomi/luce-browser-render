@@ -53,8 +53,10 @@ func display_list_player_cpu_paint_outer_box_shadow_impl(base: DisplayListPlayer
     cpu_canvas_restore(canvas)
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:37 Web::Painting::DisplayListPlayerSkia::paint_inner_box_shadow (override).
-## Op(outer, inner, kDifference) is not ported (no SkPathOps): two rectangles, the inner inside
-## the outer, make the nested rectangles Op makes; otherwise the difference is the outer
+## Op(outer, inner, kDifference): two rectangles, the inner inside the outer, make the nested
+## rectangles Op makes (filterRectsToNine); nested rounded rectangles make the two contours Op
+## writes (cpu_inner_shadow_difference), drawn with the blur mask filter. Shapes that touch or
+## cross would need SkPathOps' merge, which is not ported: their difference is the outer
 ## shape's coverage less the inner's.
 func display_list_player_cpu_paint_inner_box_shadow_impl(base: DisplayListPlayer*, command: PaintInnerBoxShadow):
     let outer_rect = cpu_rect(command.outer_shadow_rect) else return
@@ -89,6 +91,21 @@ func display_list_player_cpu_paint_inner_box_shadow_impl(base: DisplayListPlayer
             _:
                 _ = 0
 
+    if let difference0 = cpu_inner_shadow_difference(outer_rect, outer_radii, inner_rect, inner_radii):
+        # SkPathOps' difference of nested rounded rectangles, drawn with the blur mask filter.
+        var difference = difference0
+        defer difference.release()
+        if command.blur_radius // 2 > 0:
+            var device_path = difference.clone()
+            defer device_path.release()
+            if device_path.transform(ts):
+                cpu_canvas_fill_dev_path_blurred(canvas, &device_path, raster.FillRule.even_odd, &path_paint, sigma)
+        else:
+            cpu_canvas_fill_path(canvas, &difference, &path_paint, raster.FillRule.even_odd)
+        return
+
+    # Rectangles that touch or cross, which SkPathOps merges (not ported): the outer coverage
+    # less the inner one.
     var outer_path = cpu_rrect_path(outer_rect, outer_radii)
     defer outer_path.release()
     var inner_path = cpu_rrect_path(inner_rect, inner_radii)

@@ -150,3 +150,63 @@ func cpu_rrect_path_for(rect: gfx.DevicePixelRect, corner_radii: const CornerRad
 ## SkPath::addOval of `rect`; none for an empty rectangle.
 func cpu_oval_path(rect: raster.Rect) -> raster.Path?:
     return raster.PathBuilder.from_oval(rect)
+
+# mark: Inner shadow paths =====================================================================
+
+## Op(outer, inner, kDifference_SkPathOp) of two rounded rectangles when the inner one lies
+## inside the outer one, clear of its rounded corners (the case paint_inner_box_shadow meets):
+## SkPathOps rebuilds both contours as it found them, even-odd, each counter-clockwise from the
+## top of its left side, its square corners as lines (a rectangle's last line back to the start
+## is written out). None when the rectangles touch or cross, which SkPathOps would merge (not
+## ported).
+func cpu_inner_shadow_difference(outer: raster.Rect, outer_radii: CpuRadii, inner: raster.Rect, inner_radii: CpuRadii) -> raster.Path?:
+    if not (inner.left() > outer.left() and inner.top() > outer.top() and inner.right() < outer.right() and inner.bottom() < outer.bottom()):
+        return none
+    # Clear of the outer corners' quarter-ellipse boxes.
+    let corner_boxes: f32[16] = [
+        outer.left(), outer.top(), outer.left() + outer_radii.x[0], outer.top() + outer_radii.y[0],
+        outer.right() - outer_radii.x[1], outer.top(), outer.right(), outer.top() + outer_radii.y[1],
+        outer.right() - outer_radii.x[2], outer.bottom() - outer_radii.y[2], outer.right(), outer.bottom(),
+        outer.left(), outer.bottom() - outer_radii.y[3], outer.left() + outer_radii.x[3], outer.bottom(),
+    ]
+    for c in 0..<4usize:
+        let box = corner_boxes[c * 4..<c * 4 + 4]
+        if inner.left() < box[2] and inner.right() > box[0] and inner.top() < box[3] and inner.bottom() > box[1]:
+            return none
+    var builder = raster.PathBuilder.new_()
+    cpu_pathops_rrect_contour(&builder, outer, outer_radii)
+    cpu_pathops_rrect_contour(&builder, inner, inner_radii)
+    return builder.finish()
+
+## One contour of cpu_inner_shadow_difference: counter-clockwise from (left, top + the top-left
+## vertical radius), a quarter conic of weight sqrt(2) / 2 per rounded corner.
+func cpu_pathops_rrect_contour(builder: raster.PathBuilder*, rect: raster.Rect, radii: CpuRadii):
+    let l = rect.left()
+    let t = rect.top()
+    let r = rect.right()
+    let b = rect.bottom()
+    let w = cpu_quarter_conic_weight
+    let rounded = [radii.x[0] > 0.0 and radii.y[0] > 0.0, radii.x[1] > 0.0 and radii.y[1] > 0.0, radii.x[2] > 0.0 and radii.y[2] > 0.0, radii.x[3] > 0.0 and radii.y[3] > 0.0]
+    let start_y = t + radii.y[0] if rounded[0] else t
+    builder.move_to(l, start_y)
+    if rounded[3]:
+        builder.line_to(l, b - radii.y[3])
+        builder.conic_to(l, b, l + radii.x[3], b, w)
+    else:
+        builder.line_to(l, b)
+    if rounded[2]:
+        builder.line_to(r - radii.x[2], b)
+        builder.conic_to(r, b, r, b - radii.y[2], w)
+    else:
+        builder.line_to(r, b)
+    if rounded[1]:
+        builder.line_to(r, t + radii.y[1])
+        builder.conic_to(r, t, r - radii.x[1], t, w)
+    else:
+        builder.line_to(r, t)
+    if rounded[0]:
+        builder.line_to(l + radii.x[0], t)
+        builder.conic_to(l, t, l, start_y, w)
+    else:
+        builder.line_to(l, t)
+    builder.close()

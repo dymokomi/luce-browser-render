@@ -142,6 +142,21 @@ test "cpu filter: displacement map":
     let rg = gfx.filter_displacement_map(none, &turbulence, 30.0, gfx.ChannelSelector.red, gfx.ChannelSelector.green)
     test_filter_expect("displacement_turbulence", TestFilterScene(width = 48, height = 48), test_filter_graph(&rg), filter_skia_displacement_turbulence, 0, 0)
 
+# mark: Perspective ============================================================================
+
+test "cpu filter: a layer matrix with perspective":
+    # Every node takes any matrix, so the layer matrix is the whole CTM: the offset, the image's
+    # rectangle and the noise's coordinates map through its perspective.
+    let scene = TestFilterScene(perspective = true)
+    let gray = gfx.filter_color(gfx.ColorFilterType.grayscale, 0.7)
+    test_filter_expect("persp_grayscale", scene, test_filter_graph(&gray), filter_skia_persp_grayscale, 0, 0)
+    let offset = gfx.filter_offset(3.0, 2.0)
+    test_filter_expect("persp_offset", scene, test_filter_graph(&offset), filter_skia_persp_offset, 0, 0)
+    let image = gfx.filter_image(test_filter_pattern_bitmap(10, 8), test_filter_rect(0, 0, 10, 8), test_filter_rect(4, 3, 10, 8), gfx.ScalingMode.bilinear)
+    test_filter_expect("persp_image", scene, test_filter_graph(&image), filter_skia_persp_image, 0, 0)
+    let noise = gfx.filter_turbulence(gfx.TurbulenceType.fractal_noise, 0.15, 0.2, 2, 3.0, gfx.IntSize(m_width = 0, m_height = 0))
+    test_filter_expect("persp_turbulence", scene, test_filter_graph(&noise), filter_skia_persp_turbulence, 0, 0)
+
 # mark: Backdrops ==============================================================================
 
 test "cpu filter: backdrops":

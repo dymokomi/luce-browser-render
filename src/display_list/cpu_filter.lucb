@@ -65,7 +65,9 @@ struct CpuFilterImage:
     var left: i32
     var top: i32
 
-## An affine SkMatrix: x' = sx * x + kx * y + tx, y' = ky * x + sy * y + ty.
+## An SkMatrix: x' = sx * x + kx * y + tx, y' = ky * x + sy * y + ty, divided by
+## w = persp0 * x + persp1 * y + persp2 under perspective (a layer matrix that keeps the whole
+## CTM, for filters whose every node takes any matrix).
 struct CpuFMatrix:
     var sx: f32 = 1.0
     var kx: f32 = 0.0
@@ -73,6 +75,9 @@ struct CpuFMatrix:
     var ky: f32 = 0.0
     var sy: f32 = 1.0
     var ty: f32 = 0.0
+    var persp0: f32 = 0.0
+    var persp1: f32 = 0.0
+    var persp2: f32 = 1.0
 
 ## skif's kRoundEpsilon: the tolerance for near-integer bounds and translations.
 let cpu_filter_round_epsilon: f32 = 0.001
@@ -143,26 +148,46 @@ func cpu_fm_translate(tx: f32, ty: f32) -> CpuFMatrix:
 
 ## The layer matrix passed to the public entry points as an SkMatrix.
 func cpu_fm_of_transform(t: raster.Transform) -> CpuFMatrix:
-    return CpuFMatrix(sx = t.sx, kx = t.kx, tx = t.tx, ky = t.ky, sy = t.sy, ty = t.ty)
+    return CpuFMatrix(sx = t.sx, kx = t.kx, tx = t.tx, ky = t.ky, sy = t.sy, ty = t.ty, persp0 = t.persp0, persp1 = t.persp1, persp2 = t.persp2)
+
+## The matrix as a raster.Transform (SkMatrix's arithmetic, perspective included).
+func cpu_fm_transform(m: CpuFMatrix) -> raster.Transform:
+    return raster.Transform.from_all(m.sx, m.kx, m.tx, m.ky, m.sy, m.ty, m.persp0, m.persp1, m.persp2)
+
+## SkMatrix::hasPerspective.
+func cpu_fm_has_perspective(m: CpuFMatrix) -> bool:
+    return m.persp0 != 0.0 or m.persp1 != 0.0 or m.persp2 != 1.0
 
 ## SkMatrix::isScaleTranslate.
 func cpu_fm_is_scale_translate(m: CpuFMatrix) -> bool:
-    return m.kx == 0.0 and m.ky == 0.0
+    return m.kx == 0.0 and m.ky == 0.0 and not cpu_fm_has_perspective(m)
+
+## SkMatrix::mapPoint under perspective (Persp_pts' divide).
+func cpu_fm_map_perspective(m: CpuFMatrix, x: f32, y: f32) -> raster.Point:
+    var p = raster.Point.from_xy(x, y)
+    cpu_fm_transform(m).map_point(&p)
+    return p
 
 ## SkMatrix::mapPoint.
 func cpu_fm_map_x(m: CpuFMatrix, x: f32, y: f32) -> f32:
+    if cpu_fm_has_perspective(m):
+        return cpu_fm_map_perspective(m, x, y).x
     if cpu_fm_is_scale_translate(m):
         return x * m.sx + m.tx
     return x * m.sx + y * m.kx + m.tx
 
 func cpu_fm_map_y(m: CpuFMatrix, x: f32, y: f32) -> f32:
+    if cpu_fm_has_perspective(m):
+        return cpu_fm_map_perspective(m, x, y).y
     if cpu_fm_is_scale_translate(m):
         return y * m.sy + m.ty
     return x * m.ky + y * m.sy + m.ty
 
-## The raster pipeline's matrix stages (matrix_translate, matrix_scale_translate, matrix_2x3)
-## mapping a sample point, with NEON's fused multiply-adds.
+## The raster pipeline's matrix stages (matrix_translate, matrix_scale_translate, matrix_2x3,
+## matrix_perspective) mapping a sample point, with NEON's fused multiply-adds.
 func cpu_fm_pipeline_x(m: CpuFMatrix, x: f32, y: f32) -> f32:
+    if cpu_fm_has_perspective(m):
+        return raster.perspective_sample_point(cpu_fm_transform(m), x, y).x
     if cpu_fm_is_scale_translate(m):
         if m.sx == 1.0:
             return x + m.tx
@@ -170,6 +195,8 @@ func cpu_fm_pipeline_x(m: CpuFMatrix, x: f32, y: f32) -> f32:
     return math32.fma(x, m.sx, math32.fma(y, m.kx, m.tx))
 
 func cpu_fm_pipeline_y(m: CpuFMatrix, x: f32, y: f32) -> f32:
+    if cpu_fm_has_perspective(m):
+        return raster.perspective_sample_point(cpu_fm_transform(m), x, y).y
     if cpu_fm_is_scale_translate(m):
         if m.sy == 1.0:
             return y + m.ty
@@ -178,6 +205,8 @@ func cpu_fm_pipeline_y(m: CpuFMatrix, x: f32, y: f32) -> f32:
 
 ## SkMatrix::setConcat(a, b): the matrix applying `b`, then `a`.
 func cpu_fm_concat(a: CpuFMatrix, b: CpuFMatrix) -> CpuFMatrix:
+    if cpu_fm_has_perspective(a) or cpu_fm_has_perspective(b):
+        return cpu_fm_of_transform(cpu_fm_transform(a).pre_concat(cpu_fm_transform(b)))
     if cpu_fm_is_scale_translate(a) and cpu_fm_is_scale_translate(b):
         return CpuFMatrix(sx = a.sx * b.sx, tx = a.sx * b.tx + a.tx, sy = a.sy * b.sy, ty = a.sy * b.ty + a.ty)
     # SkMatrix's muladdmul: (a * b + c * d) in double.
@@ -190,6 +219,9 @@ func cpu_muladdmul(a: f32, b: f32, c: f32, d: f32) -> f32:
 
 ## SkMatrix::invert, or none when `m` is singular.
 func cpu_fm_invert(m: CpuFMatrix) -> CpuFMatrix?:
+    if cpu_fm_has_perspective(m):
+        let inverse = cpu_fm_transform(m).invert() else return none
+        return cpu_fm_of_transform(inverse)
     if cpu_fm_is_scale_translate(m):
         if m.sx == 0.0 or m.sy == 0.0:
             return none
@@ -210,6 +242,11 @@ func cpu_fm_invert(m: CpuFMatrix) -> CpuFMatrix?:
 
 ## SkMatrix::mapRect of (l, t, r, b), as (l, t, r, b).
 func cpu_fm_map_rect(m: CpuFMatrix, l: f32, t: f32, r: f32, b: f32) -> (f32, f32, f32, f32):
+    if cpu_fm_has_perspective(m):
+        # The rectangle's path, cut at w = 0 and mapped, bounded (empty when nothing is left).
+        let rect = raster.Rect.from_ltrb(l, t, r, b) else return (0.0, 0.0, 0.0, 0.0)
+        let mapped = rect.transform(cpu_fm_transform(m)) else return (0.0, 0.0, 0.0, 0.0)
+        return (mapped.left(), mapped.top(), mapped.right(), mapped.bottom())
     let x0 = cpu_fm_map_x(m, l, t)
     let y0 = cpu_fm_map_y(m, l, t)
     let x1 = cpu_fm_map_x(m, r, t)
@@ -271,6 +308,8 @@ func cpu_fm_integer_translation(m: CpuFMatrix) -> (i32, i32)?:
     let tx = math32.floor(m.tx + 0.5)
     let ty = math32.floor(m.ty + 0.5)
     let e = cpu_filter_round_epsilon
+    if cpu_fm_has_perspective(m):
+        return none
     if math32.abs(1.0 - m.sx) <= e and math32.abs(m.kx) <= e and math32.abs(tx - m.tx) <= e and math32.abs(m.ky) <= e and math32.abs(1.0 - m.sy) <= e and math32.abs(ty - m.ty) <= e:
         return ((i32)tx, (i32)ty)
     return none
@@ -279,14 +318,17 @@ func cpu_fm_integer_translation(m: CpuFMatrix) -> (i32, i32)?:
 func cpu_fm_map_size(m: CpuFMatrix, width: f32, height: f32) -> (f32, f32):
     if cpu_fm_is_scale_translate(m):
         return (math32.abs(m.sx * width), math32.abs(m.sy * height))
-    let xx = m.sx * width
-    let xy = m.ky * width
-    let yx = m.kx * height
-    let yy = m.sy * height
-    return (math32.sqrt(xx * xx + xy * xy), math32.sqrt(yx * yx + yy * yy))
+    let x_axis = cpu_fm_map_vector(m, width, 0.0)
+    let y_axis = cpu_fm_map_vector(m, 0.0, height)
+    return (math32.sqrt(x_axis.0 * x_axis.0 + x_axis.1 * x_axis.1), math32.sqrt(y_axis.0 * y_axis.0 + y_axis.1 * y_axis.1))
 
 ## Mapping::map<Vector>: SkMatrix::mapVector.
 func cpu_fm_map_vector(m: CpuFMatrix, x: f32, y: f32) -> (f32, f32):
+    if cpu_fm_has_perspective(m):
+        # mapVectors under perspective: the mapped point less the mapped origin.
+        let origin = cpu_fm_map_perspective(m, 0.0, 0.0)
+        let p = cpu_fm_map_perspective(m, x, y)
+        return (p.x - origin.x, p.y - origin.y)
     if cpu_fm_is_scale_translate(m):
         return (x * m.sx, y * m.sy)
     return (x * m.sx + y * m.kx, x * m.ky + y * m.sy)

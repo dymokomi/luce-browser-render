@@ -218,18 +218,23 @@ Box shadows draw as Skia's raster device draws a shape whose paint has
 SkMaskFilter::MakeBlur(kNormal, blur_radius / 2) (`display_list/cpu_mask_blur.lucb` over
 `cpu_mask_blur_filter.lucb`): the sigma through SkMatrix::mapRadius (at most 128); a rectangle
 through filterRectsToNine (SkBlurMask::BlurRect's analytic profile on a small rectangle, the
-nine-patch stretched to the blurred bounds); a rounded rectangle under a scale and translation
-through filterRRectToNine (a small copy drawn anti-aliased into a mask and blurred); anything
-else (an oval, a shape too small for a nine-patch, a rotated one) through DrawToMask and
-SkBlurMask::BoxBlur on the whole mask; and a sigma under 1/3 as a plain fill. The blur is
+nine-patch stretched to the blurred bounds); a rounded rectangle under a matrix that keeps
+rectangles rectangles through SkRRect::transform (since fix/fidelity-svg also quarter turns and
+mirrors: the radii DeduceRRectFromContour reads back from the mapped contour) and
+filterRRectToNine (a small copy drawn anti-aliased into a mask and blurred); anything else (an
+oval, a shape too small for a nine-patch, a skewed or rotated one) through DrawToMask (the
+path's AAA coverage through a blitter, which may take the scan converter's mask accumulator)
+and SkBlurMask::BoxBlur on the whole mask; and a sigma under 1/3 as a plain fill. The blur is
 SkMaskBlurFilter: below sigma 2 the direct Gaussian of SkGaussFilter's Bessel factors in 8.8
 fixed point, from 2 PlanGauss's three box passes in one sliding window with a 32-bit weight.
 The nine-patch is expanded into one mask and blitted through the clip, which blits the coverage
 draw_nine's pieces blit. An inner shadow of two rectangles, the inner inside the outer, is the
 nested rectangles SkPathOps' difference gives (the nine-patch of the blurred frame, the center
-left); other inner shadows still blur the outer coverage less the inner (no SkPathOps).
-`tests_cpu_shadow_skia.lucb` compares eight scenes from `oracles/luce-browser-render/shadows`:
-all exact, and the player's two shadow scenes are now exact too.
+left); nested rounded rectangles are the two contours Op writes for them (even-odd, each
+counter-clockwise from the top of its left side), drawn with the blur mask filter; shapes that
+touch or cross still blur the outer coverage less the inner (SkPathOps' merge is not ported).
+`tests_cpu_shadow_skia.lucb` compares ten scenes from `oracles/luce-browser-render/shadows`
+(and `tests_cpu_player_3d.lucb` two turned ones): all exact.
 
 ## Strokes and dashes (fix/fidelity-svg)
 
@@ -308,7 +313,7 @@ src/effects/imagefilters, SkBlurEngine):
   **arithmetic** (Skia's shortcuts, then the arithmetic blender).
 
 The canvas calls it at restore (layers with a filter, the text-shadow blur) and at save
-(backdrops, the prior layer clamped). `tests_cpu_filter*.lucb` compare 67 scenes (every node
+(backdrops, the prior layer clamped). `tests_cpu_filter*.lucb` compare 71 scenes (every node
 kind, blur at sigma 1.5 to 300, every blend mode, rotated layer matrices, backdrops) with Skia
 m144's pixels for the donor's own Gfx::Filter graphs: all exact but `image_bilinear` (1 level
 on 2 pixels: a scaled image with linear sampling goes through Skia's strict, shader-tiled image
@@ -347,7 +352,7 @@ nearest sampling's round-down, conics) was merged last, and then:
 1. `luce-base fmt --check` on every hand-written `.lucb`;
 2. `luce-base check -W` on raster, gfx, web_fonts and display_list, failing on any output;
 3. `luce-base test` of gfx (361 tests), web_fonts (28; the font engine's oracle and unit
-   tests moved to luce-fonts with the engine, 2026-10-03), display_list (120, `--native`) and
+   tests moved to luce-fonts with the engine, 2026-10-03), display_list (123, `--native`) and
    raster (53), and the raster integration suite (`tests/run_raster.py`, 291 scenes).
 
 ## Remaining traps, stubs and gates
@@ -378,5 +383,9 @@ The player's 36 scenes against DisplayListPlayerSkia match exactly except:
   307 by up to 20.
 - **draw_rect**: Skia strokes an axis-aligned rectangle with SkScan::AntiFrameRect, the player
   fills the frame's even-odd path: 17 pixels by 1 level.
-- The image-filter deviations above; a layer whose filter needs the whole matrix under
-  perspective evaluates the filter with the affine part only (cpu_filter's CpuFMatrix).
+- The image-filter deviations above. Under perspective (since fix/fidelity-svg) a layer whose
+  filter takes any matrix keeps the whole CTM: CpuFMatrix carries the perspective row (points
+  and vectors through SkMatrix's divide, samples through matrix_perspective, rectangles cut at
+  w = 0), and an SkImage under a transform that does not keep rectangles rectangles is drawn as
+  drawSpecial draws it, its rectangle's path filled anti-aliased with a clamped image shader
+  (four scenes exact).

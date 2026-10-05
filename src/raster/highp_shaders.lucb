@@ -37,6 +37,15 @@ func highp_transform_perspective(p: HighpPipeline*):
 
     highp_next_stage(p)
 
+## matrix_perspective on one point: (x, y) through the row-major 3x3 matrix `ts`, divided
+## by its z with NEON's rcp_precise, as the stage computes each lane.
+pub func perspective_sample_point(ts: Transform, x: f32, y: f32) -> Point:
+    let r = math32.fma(x, ts.sx, math32.fma(y, ts.kx, ts.tx))
+    let g = math32.fma(x, ts.ky, math32.fma(y, ts.sy, ts.ty))
+    let z = math32.fma(x, ts.persp0, math32.fma(y, ts.persp1, ts.persp2))
+    let rcp = f4_rcp_precise(f32[4](z))[0]
+    return Point.from_xy(r * rcp, g * rcp)
+
 # matrix_scale_translate with a unit y scale (y = y * 1 + 0 is y).
 func highp_scale_translate_x(p: HighpPipeline*):
     let m = p.ctx.scale_translate_x
