@@ -189,6 +189,18 @@ may differ on another libm; the scenes allow one level on 8 pixels).
 LibGfx's ColorStop now starts with a NaN position (`color_stop_init_fields`), which the CSS
 color-stop fix-up relies on to space stops without a position.
 
+## Images (fix/fidelity-3d)
+
+The player samples images as `to_skia_sampling_options` asks: nearest, bilinear, or bilinear
+with linear mipmaps for BilinearMipmap (LibWeb's choice for a minified image). The raster
+module's mipmapped pattern follows SkImageShader with SkMipmapAccessor (`raster/mipmap.lucb`):
+SkMipmap's levels built by the HQ downsampler (2x box or 1-2-1 filters in 16-bit lanes),
+ComputeLevel's level from the inverse matrix's scale (log2f, -0.5 bias), the upper level at its
+floor and the lower one blended by its fraction (`bilinear_mipmap`: the general bilinear
+sampler on both levels, lerped), never the bilerp_clamp_8888 fast path. `tests_cpu_image_skia
+.lucb` compares seven scenes from `oracles/luce-browser-render/images` with
+DisplayListPlayerSkia's pixels: all exact.
+
 ## Image filters
 
 r10 builds a gfx.Filter as the graph of SkImageFilters the donor builds and leaves evaluation to

@@ -119,6 +119,44 @@ func sampler_tap(p: HighpPipeline*, x0: F8, y0: F8, scalex: F8, scaley: F8, r: F
 ## In bilinear interpolation, the 4 pixels at +/- 0.5 offsets from the sample pixel center
 ## are combined in direct proportion to their area overlapping that logical query pixel.
 func highp_bilinear(p: HighpPipeline*):
+    highp_bilinear_sample(p)
+    highp_next_stage(p)
+
+## mipmap_linear_init, the bilinear sampler on the upper level, mipmap_linear_update (the
+## coordinates scaled to the lower level, sampled there), mipmap_linear_finish (the two
+## lerped by the lower level's weight: mad(lower - upper, weight, upper)).
+func highp_bilinear_mipmap(p: HighpPipeline*):
+    let x = p.r
+    let y = p.g
+    highp_bilinear_sample(p)
+    let upper: F8[4] = [p.r, p.g, p.b, p.a]
+    let m = &p.ctx.mipmap
+    p.r = f8_mul(x, f8_splat(m.scale_x))
+    p.g = f8_mul(y, f8_splat(m.scale_y))
+    # The lower level's image and contexts for its sampling.
+    let saved_src = p.pixmap_src
+    let saved_gather = p.ctx.gather
+    let saved_limit_x = p.ctx.limit_x
+    let saved_limit_y = p.ctx.limit_y
+    p.pixmap_src = m.lower else trap("unreachable: bilinear_mipmap without a lower level")
+    p.ctx.gather = m.lower_gather
+    p.ctx.limit_x = m.lower_limit_x
+    p.ctx.limit_y = m.lower_limit_y
+    highp_bilinear_sample(p)
+    p.pixmap_src = saved_src
+    p.ctx.gather = saved_gather
+    p.ctx.limit_x = saved_limit_x
+    p.ctx.limit_y = saved_limit_y
+    let w = f8_splat(m.lower_weight)
+    p.r = f8_fma(f8_sub(p.r, upper[0]), w, upper[0])
+    p.g = f8_fma(f8_sub(p.g, upper[1]), w, upper[1])
+    p.b = f8_fma(f8_sub(p.b, upper[2]), w, upper[2])
+    p.a = f8_fma(f8_sub(p.a, upper[3]), w, upper[3])
+
+    highp_next_stage(p)
+
+## The bilinear sampler at (r, g), its result in r, g, b, a (and the dst registers).
+func highp_bilinear_sample(p: HighpPipeline*):
     let cx = p.r
     let cy = p.g
     let half_ = f8_splat(0.5)
@@ -146,8 +184,6 @@ func highp_bilinear(p: HighpPipeline*):
     p.dg = g
     p.db = b
     p.da = a
-
-    highp_next_stage(p)
 
 ## A cubic's weight polynomial at t: mad(t, mad(t, mad(t, D, C), B), A).
 func bicubic_wts(t: F8, a: f32, b: f32, c: f32, d: f32) -> F8:

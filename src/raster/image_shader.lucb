@@ -4,9 +4,10 @@
 #
 #   DESCRIPTION:
 #       Port of Skia m144's SkImageShader::appendStages (src/shaders/SkImageShader.cpp)
-#       for tiny-skia's Pattern: an 8888 premultiplied image without mipmaps, sampled
-#       nearest, bilinear or bicubic (FilterQuality::Bicubic is SkCubicResampler::Mitchell)
-#       with one tile mode on both axes. It picks Skia's stages: bilinear becomes nearest for
+#       for tiny-skia's Pattern: an 8888 premultiplied image sampled nearest, bilinear or
+#       bicubic (FilterQuality::Bicubic is SkCubicResampler::Mitchell), or bilinear with
+#       linear mipmaps (SkMipmapAccessor's levels, mipmap.lucb), with one tile mode on both
+#       axes. It picks Skia's stages: bilinear becomes nearest for
 #       an integer translate (tweak_sampling); clamped bilinear and bicubic use the fused
 #       bilerp_clamp_8888 / bicubic_clamp_8888; other bilinear and bicubic sampling runs the
 #       sampler; nearest tiles and gathers with integer coordinates snapping left/up;
@@ -46,7 +47,10 @@ func cubic_resampler_matrix(b: f32, c: f32) -> f32[16]:
 
 ## The stages of a pattern: false when its transform cannot be inverted.
 func pattern_push_stages(patt: const Pattern*, cs: ColorSpace, p: RasterPipelineBuilder*) -> bool:
-    let inv = patt.transform.invert() else return false  # failed to invert a pattern transform. Nothing will be rendered
+    let base_inv = patt.transform.invert() else return false  # failed to invert a pattern transform. Nothing will be rendered
+    if patt.mipmap_linear:
+        return pattern_push_mipmap_stages(patt, cs, p, base_inv.normalize_perspective())
+    let inv = base_inv
 
     # tweak_sampling: when the matrix is just an integer translate, bilerp == nearest neighbor.
     var quality = patt.quality
@@ -103,4 +107,74 @@ func pattern_push_stages(patt: const Pattern*, cs: ColorSpace, p: RasterPipeline
         # currently an intermediate pipeline stage for that.
         p.push(stage)
 
+    return true
+
+# mark: Mipmaps ================================================================================
+
+## The gather and tile contexts of an image level (MipLevelHelper::allocAndInit for bilinear).
+func mip_level_contexts(pm: PixmapRef) -> (GatherCtx, TileCtx, TileCtx):
+    let width = (f32)pm.width()
+    let height = (f32)pm.height()
+    let bias: u32 = 0xFFFFFFFF
+    return (GatherCtx(width = width, height = height, round_down_at_integer = 0), TileCtx(scale = width, inv_scale = 1.0 / width, mirror_bias_dir = bias),
+            TileCtx(scale = height, inv_scale = 1.0 / height, mirror_bias_dir = bias))
+
+## SkImageShader::appendStages for SkSamplingOptions(kLinear, kLinear): SkMipmapAccessor picks
+## the upper level (the base, or the mip level at floor(level)) and, when the level has a
+## fraction, the lower one with that weight; the image is sampled by the general bilinear
+## sampler (the fast bilerp_clamp_8888 is not for linear mipmaps), in both levels when there
+## are two (mipmap_linear_init, update and finish around them).
+func pattern_push_mipmap_stages(patt: const Pattern*, cs: ColorSpace, p: RasterPipelineBuilder*, base_inv: Transform) -> bool:
+    var level: f32 = 0.0
+    var linear = false
+    if let scale = decompose_scale(base_inv):
+        level = mipmap_compute_level(1.0 / scale.0, 1.0 / scale.1)
+        if level <= 0.0:
+            level = 0.0
+        else:
+            linear = true
+    # In linear mode the level is the lower of the two to interpolate between: its floor.
+    let level_num = (usize)math32.floor(level)
+    let lower_weight = level - (f32)level_num
+
+    let base = patt.pixmap
+    var upper = base
+    var ctx = MipmapCtx(levels = Vec[Pixmap](), upper = none, lower = none, lower_weight = 0.0, scale_x = 1.0, scale_y = 1.0)
+    if level_num > 0 or (linear and lower_weight > 0.0):
+        ctx.levels = mipmap_build(base)
+        if level_num > 0:
+            if level_num - 1 < ctx.levels.len:
+                upper = ctx.levels.data[level_num - 1].as_ref()
+                ctx.upper = upper
+            else:
+                linear = false
+        if linear and level_num < ctx.levels.len:
+            let lower = ctx.levels.data[level_num].as_ref()
+            ctx.lower = lower
+            ctx.lower_weight = lower_weight
+            ctx.scale_x = (f32)lower.width() / (f32)upper.width()
+            ctx.scale_y = (f32)lower.height() / (f32)upper.height()
+            let contexts = mip_level_contexts(lower)
+            ctx.lower_gather = contexts.0
+            ctx.lower_limit_x = contexts.1
+            ctx.lower_limit_y = contexts.2
+
+    # The upper level's inverse scale (SkMipmapAccessor's fUpperInv) after the total inverse.
+    let upper_inv = Transform.from_scale((f32)upper.width() / (f32)base.width(), (f32)upper.height() / (f32)base.height())
+    let inv = base_inv.post_concat(upper_inv)
+
+    p.ctx.mipmap.release()
+    p.ctx.mipmap = ctx
+    p.push(.seed_shader)
+    p.push_transform(inv)
+    let contexts = mip_level_contexts(upper)
+    p.ctx.gather = contexts.0
+    p.ctx.limit_x = contexts.1
+    p.ctx.limit_y = contexts.2
+    p.ctx.sampler = SamplerCtx(spread_mode = patt.spread_mode)
+    # tweak_sampling would make an integer translate nearest; a minifying matrix is not one.
+    p.push(.bilinear_mipmap if p.ctx.mipmap.lower != none else .bilinear)
+
+    if let stage = colorspace_expand_stage(cs):
+        p.push(stage)
     return true

@@ -1,0 +1,136 @@
+#==============================================================================================
+#
+#   mipmap - the mip levels of an image and the level a scale samples
+#
+#   DESCRIPTION:
+#       Port of Skia m144's SkMipmap (src/core/SkMipmap.cpp: ComputeLevelCount, Build,
+#       ComputeLevel) with its HQ downsampler for 8888 pixels
+#       (src/core/SkMipmapHQDownSampler.cpp: a 2x box filter, or a 1-2-1 triangle filter
+#       along an odd dimension, summed in 16-bit lanes and shifted down), and of
+#       SkMipmapAccessor's choice of levels (src/core/SkMipmapAccessor.cpp) for linear
+#       mipmap sampling. Levels halve each dimension down to 1x1, flooring odd sizes.
+#
+#       Copyright 2015 Google Inc.
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
+#
+#==============================================================================================
+
+## SkMipmap::ComputeLevelCount: the levels below the base, down to 1x1.
+func mipmap_level_count(width: u32, height: u32) -> usize:
+    let largest = width if width > height else height
+    if largest < 2:
+        return 0
+    var significant_bits: usize = 0
+    var v = largest
+    while v != 0:
+        significant_bits += 1
+        v >>= 1
+    return significant_bits - 1
+
+## The four channels of a pixel as 16-bit lanes (ColorTypeFilter_8888::Expand).
+func mip_expand(p: PremultipliedColorU8) -> u32[4]:
+    return [(u32)p.red(), (u32)p.green(), (u32)p.blue(), (u32)p.alpha()]
+
+## ColorTypeFilter_8888::Compact of `sum` shifted right by `bits` (the cast to bytes keeps the
+## low 8 bits).
+func mip_compact(sum: u32[4], bits: u32) -> PremultipliedColorU8:
+    return PremultipliedColorU8.from_rgba_unchecked((u8)((sum[0] >> bits) & 0xff), (u8)((sum[1] >> bits) & 0xff), (u8)((sum[2] >> bits) & 0xff), (u8)((sum[3] >> bits) & 0xff))
+
+## a + b + b + c, lane by lane (add_121).
+func mip_add_121(a: u32[4], b: u32[4], c: u32[4]) -> u32[4]:
+    return [a[0] + b[0] + b[0] + c[0], a[1] + b[1] + b[1] + c[1], a[2] + b[2] + b[2] + c[2], a[3] + b[3] + b[3] + c[3]]
+
+func mip_add(a: u32[4], b: u32[4]) -> u32[4]:
+    return [a[0] + b[0], a[1] + b[1], a[2] + b[2], a[3] + b[3]]
+
+## HQDownSampler::buildLevel: `dst` (half of `src`, floored) from `src`, with the filter that
+## covers `src`'s odd or even width and height.
+func mip_build_level(dst: Pixmap*, src: PixmapRef):
+    let width = (usize)src.width()
+    let height = (usize)src.height()
+    let s = src.pixels()
+    let d = dst.pixels_mut()
+    let dst_width = (usize)dst.width()
+    # The taps along each axis: 1 (a dimension of 1), 2 (even) or 3 (odd).
+    let taps_x: usize = 1 if width == 1 else (3 if width & 1 == 1 else 2)
+    let taps_y: usize = 1 if height == 1 else (3 if height & 1 == 1 else 2)
+    for y in 0..<(usize)dst.height():
+        let row0 = 2 * y * width
+        for x in 0..<dst_width:
+            let x0 = 2 * x
+            # The columns of the taps, summed down (1-2-1 for three rows).
+            var columns: u32[3][4] = ---
+            for i in 0..<taps_x:
+                let c0 = mip_expand(s[row0 + x0 + i])
+                if taps_y == 1:
+                    columns[i] = c0
+                elif taps_y == 2:
+                    columns[i] = mip_add(c0, mip_expand(s[row0 + width + x0 + i]))
+                else:
+                    columns[i] = mip_add_121(c0, mip_expand(s[row0 + width + x0 + i]), mip_expand(s[row0 + 2 * width + x0 + i]))
+            var sum = columns[0]
+            if taps_x == 2:
+                sum = mip_add(columns[0], columns[1])
+            elif taps_x == 3:
+                if taps_y == 3:
+                    # downsample_3_3: a + (add_121 of the middle column << 1) + c.
+                    let b = columns[1]
+                    sum = mip_add(mip_add(columns[0], [b[0] << 1, b[1] << 1, b[2] << 1, b[3] << 1]), columns[2])
+                elif taps_y == 2:
+                    # downsample_3_2: a + (b0 + b0 + b1 + b1) + c.
+                    let b = columns[1]
+                    sum = mip_add(mip_add(columns[0], mip_add(b, b)), columns[2])
+                else:
+                    sum = mip_add_121(columns[0], columns[1], columns[2])
+            # The weights add up to 2^shift: one bit per 2-tap axis, two per 3-tap axis.
+            var shift: u32 = 0
+            shift += 1 if taps_x == 2 else (2 if taps_x == 3 else 0)
+            shift += 1 if taps_y == 2 else (2 if taps_y == 3 else 0)
+            d[y * dst_width + x] = mip_compact(sum, shift)
+
+## SkMipmap::Build: the levels below `src`, each half the one above (floored, at least 1).
+func mipmap_build(src: PixmapRef) -> Vec[Pixmap]:
+    var levels: Vec[Pixmap]
+    let count = mipmap_level_count(src.width(), src.height())
+    var width = src.width()
+    var height = src.height()
+    for i in 0..<count:
+        width = width >> 1 if width >> 1 > 0 else 1
+        height = height >> 1 if height >> 1 > 0 else 1
+        var level = Pixmap.new_(width, height) else trap("raster: out of memory")
+        let above = src if i == 0 else levels.data[i - 1].as_ref()
+        mip_build_level(&level, above)
+        levels.push(level)
+    return levels
+
+## SkMipmap::ComputeLevel: the fractional level for sampling at `scale_x`, `scale_y` (image
+## pixels per device pixel inverted); -1 when the image is not minified.
+func mipmap_compute_level(scale_x: f32, scale_y: f32) -> f32:
+    # Use the smallest scale to match the GPU impl.
+    let scale = math32.min(scale_x, scale_y)
+    if scale >= 1.0 or scale <= 0.0 or not math32.is_finite(scale):
+        return -1.0
+    # The -0.5 bias here is to emulate GPU's sharpen mipmap option.
+    let level = math32.max(-math32.log2(scale) - 0.5, 0.0)
+    if not math32.is_finite(level):
+        return -1.0
+    return level
+
+## SkMatrix::decomposeScale's axis lengths of `inv`; none under perspective or when an axis
+## (nearly) vanishes.
+func decompose_scale(inv: Transform) -> (f32, f32)?:
+    if inv.has_perspective():
+        return none
+    let sx = point_length(inv.sx, inv.ky)
+    let sy = point_length(inv.kx, inv.sy)
+    if not math32.is_finite(sx) or not math32.is_finite(sy) or is_nearly_zero(sx) or is_nearly_zero(sy):
+        return none
+    return (sx, sy)
+
+## SkPoint::Length: in float, or in double when the squares overflow.
+func point_length(x: f32, y: f32) -> f32:
+    let mag2 = x * x + y * y
+    if math32.is_finite(mag2):
+        return math32.sqrt(mag2)
+    return (f32)math.sqrt((f64)x * (f64)x + (f64)y * (f64)y)

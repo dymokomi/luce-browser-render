@@ -1,0 +1,41 @@
+#==============================================================================================
+#
+#   tests_cpu_image_skia - the player's images against Skia's pixels
+#
+#   DESCRIPTION:
+#       Scaled and repeated images sampled as to_skia_sampling_options asks (nearest,
+#       bilinear, bilinear with linear mipmaps), compared with the pixels
+#       DisplayListPlayerSkia renders (tests_skia_reference_data_6.lucb, from luce-browser-tools'
+#       oracles/luce-browser-render/images): no mip level (a minification under sqrt(2)), a
+#       fractional level (two levels blended), deep levels, an anisotropic scale, odd image
+#       sizes (the 1-2-1 downsampling filters) and a repeated mipmapped image.
+#
+#==============================================================================================
+
+## The 40x32 scene of `image` scaled onto `dst` with `scaling_mode`, compared with `expected`.
+func test_scaled_image_scene(name: str, expected: str, width: i32, height: i32, dst: gfx.DevicePixelRect, scaling_mode: gfx.ScalingMode):
+    with memory.heap:
+        let scene = test_scene_new(40, 32)
+        defer test_scene_release(&scene)
+        let command = DrawScaledImmutableBitmap(dst_rect = dst, clip_rect = test_rect(0, 0, 40, 32), bitmap = test_filter_pattern_bitmap(width, height), scaling_mode = scaling_mode)
+        display_list_player_draw_scaled_immutable_bitmap(test_scene_player(&scene), command)
+        expect_like_skia(&scene, name, expected, 0, 0)
+
+test "cpu image skia: mipmapped minification":
+    test_scaled_image_scene("image_mip_level_0", skia_image_mip_level_0, 37, 29, test_rect(3, 2, 30, 24), gfx.ScalingMode.bilinear_mipmap)
+    test_scaled_image_scene("image_mip_fraction", skia_image_mip_fraction, 37, 29, test_rect(2, 3, 15, 11), gfx.ScalingMode.bilinear_mipmap)
+    test_scaled_image_scene("image_mip_deep", skia_image_mip_deep, 64, 48, test_rect(1, 1, 9, 7), gfx.ScalingMode.bilinear_mipmap)
+    test_scaled_image_scene("image_mip_aniso", skia_image_mip_aniso, 64, 48, test_rect(0, 0, 30, 10), gfx.ScalingMode.bilinear_mipmap)
+
+test "cpu image skia: bilinear and nearest minification":
+    test_scaled_image_scene("image_bilinear_down", skia_image_bilinear_down, 37, 29, test_rect(2, 3, 15, 11), gfx.ScalingMode.bilinear)
+    test_scaled_image_scene("image_nearest_down", skia_image_nearest_down, 37, 29, test_rect(2, 3, 15, 11), gfx.ScalingMode.nearest_neighbor)
+
+test "cpu image skia: a repeated mipmapped image":
+    with memory.heap:
+        let scene = test_scene_new(40, 32)
+        defer test_scene_release(&scene)
+        let command = DrawRepeatedImmutableBitmap(dst_rect = test_rect(3, 2, 13, 10), clip_rect = test_rect(0, 0, 40, 32),
+                                                  bitmap = test_filter_pattern_bitmap(37, 29), scaling_mode = gfx.ScalingMode.bilinear_mipmap, repeat = DrawRepeatedImmutableBitmapRepeat(x = true, y = true))
+        display_list_player_draw_repeated_immutable_bitmap(test_scene_player(&scene), command)
+        expect_like_skia(&scene, "image_mip_repeated", skia_image_mip_repeated, 0, 0)

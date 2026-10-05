@@ -174,21 +174,22 @@ func cpu_pixmap_of_immutable_bitmap(image: const gfx.ImmutableBitmap*) -> raster
     cpu_copy_bitmap_into_pixmap(bitmap, &pixmap)
     return pixmap
 
-## `to_skia_sampling_options`: the raster filter quality of a scaling mode (the mipmapped
-## mode samples bilinearly; the raster module has no mipmaps).
-func cpu_filter_quality(scaling_mode: gfx.ScalingMode) -> raster.FilterQuality:
+## An image shader (SkImage::makeShader) of `image` with `to_skia_sampling_options`'s sampling
+## for `scaling_mode`: nearest, bilinear, or bilinear with linear mipmaps.
+func cpu_image_shader(image: const raster.Pixmap*, spread_mode: raster.SpreadMode, scaling_mode: gfx.ScalingMode, transform: raster.Transform) -> raster.Shader:
     match scaling_mode:
-        .bilinear, .bilinear_mipmap: return raster.FilterQuality.bilinear
-        _: return raster.FilterQuality.nearest
+        .bilinear_mipmap: return raster.Pattern.new_mipmapped(image.as_ref(), spread_mode, 1.0, transform)
+        .bilinear: return raster.Pattern.new_(image.as_ref(), spread_mode, raster.FilterQuality.bilinear, 1.0, transform)
+        _: return raster.Pattern.new_(image.as_ref(), spread_mode, raster.FilterQuality.nearest, 1.0, transform)
 
 ## SkCanvas::drawImageRect(image, src = the whole image, dst, sampling, paint with
 ## anti-aliasing): the image scaled onto `dst`.
-func cpu_canvas_draw_image_rect(canvas: CpuCanvas*, image: const raster.Pixmap*, dst: raster.Rect, quality: raster.FilterQuality):
+func cpu_canvas_draw_image_rect(canvas: CpuCanvas*, image: const raster.Pixmap*, dst: raster.Rect, scaling_mode: gfx.ScalingMode):
     let sx = dst.width() / (f32)image.width()
     let sy = dst.height() / (f32)image.height()
     var paint = raster.Paint()
     paint.anti_alias = true
-    paint.shader = raster.Pattern.new_(image.as_ref(), raster.SpreadMode.pad_, quality, 1.0, raster.Transform.from_row(sx, 0.0, 0.0, sy, dst.left(), dst.top()))
+    paint.shader = cpu_image_shader(image, raster.SpreadMode.pad_, scaling_mode, raster.Transform.from_row(sx, 0.0, 0.0, sy, dst.left(), dst.top()))
     cpu_canvas_fill_rect(canvas, dst, &paint)
 
 # mark: flush, glyph runs, rects, bitmaps ======================================================
@@ -240,7 +241,7 @@ func display_list_player_cpu_draw_external_content_impl(base: DisplayListPlayer*
     defer image.release()
     let dst_rect = cpu_rect(command.dst_rect) else return
     let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
-    cpu_canvas_draw_image_rect(canvas, &image, dst_rect, cpu_filter_quality(command.scaling_mode))
+    cpu_canvas_draw_image_rect(canvas, &image, dst_rect, command.scaling_mode)
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:27 Web::Painting::DisplayListPlayerSkia::draw_scaled_immutable_bitmap (override).
 func display_list_player_cpu_draw_scaled_immutable_bitmap_impl(base: DisplayListPlayer*, command: DrawScaledImmutableBitmap):
@@ -252,7 +253,7 @@ func display_list_player_cpu_draw_scaled_immutable_bitmap_impl(base: DisplayList
     let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
     cpu_canvas_save(canvas)
     cpu_canvas_clip_rect(canvas, clip_rect, true)
-    cpu_canvas_draw_image_rect(canvas, &image, dst_rect, cpu_filter_quality(command.scaling_mode))
+    cpu_canvas_draw_image_rect(canvas, &image, dst_rect, command.scaling_mode)
     cpu_canvas_restore(canvas)
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:28 Web::Painting::DisplayListPlayerSkia::draw_repeated_immutable_bitmap (override).
@@ -278,7 +279,7 @@ func display_list_player_cpu_draw_repeated_immutable_bitmap_impl(base: DisplayLi
 
     var paint = raster.Paint()
     paint.anti_alias = true
-    paint.shader = raster.Pattern.new_(image.as_ref(), raster.SpreadMode.repeat, cpu_filter_quality(command.scaling_mode), 1.0, matrix)
+    paint.shader = cpu_image_shader(&image, raster.SpreadMode.repeat, command.scaling_mode, matrix)
     let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
     cpu_canvas_fill_rect(canvas, fill_rect, &paint)
 

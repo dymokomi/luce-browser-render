@@ -125,8 +125,9 @@ enum Stage as u8:
     xform_linearize = 91
     xform_gamut = 92
     xform_encode = 93
+    bilinear_mipmap = 94
 
-let stages_count: usize = 94
+let stages_count: usize = 95
 
 ## Skia's gForceHighPrecisionRasterPipeline: every pipeline compiles to highp while set.
 var force_highp: bool = false
@@ -175,6 +176,7 @@ struct Context:
     var sampler: SamplerCtx
     var transform: Transform = Transform()
     var xform: ColorXformSteps  # the color conversion of xform_linearize, xform_gamut, xform_encode
+    var mipmap: MipmapCtx  # the mip levels a mipmapped pattern samples
 
 ## The tile modes of the fused bilinear / bicubic samplers (Skia appends repeat_x / mirror_x
 ## and repeat_y / mirror_y per tap).
@@ -249,6 +251,29 @@ struct ScaleTranslateCtx:
     var sx: f32
     var tx: f32
 
+## The mip levels of a mipmapped pattern (SkMipmapAccessor's upper and lower levels and
+## SkRasterPipelineContexts::MipmapCtx). The pipeline owns `levels`.
+struct MipmapCtx:
+    var levels: Vec[Pixmap]
+    ## The level sampled instead of the source pixmap, if any.
+    var upper: PixmapRef?
+    ## The level below it and its weight (bilinear_mipmap).
+    var lower: PixmapRef?
+    var lower_weight: f32
+    ## The lower level's size over the upper's.
+    var scale_x: f32
+    var scale_y: f32
+    var lower_gather: GatherCtx
+    var lower_limit_x: TileCtx
+    var lower_limit_y: TileCtx
+
+    func release():
+        for i in 0..<self.levels.len:
+            self.levels.data[i].release()
+        self.levels.release()
+        self.upper = none
+        self.lower = none
+
 struct TileCtx:
     var scale: f32
     var inv_scale: f32  # cache of 1/scale
@@ -319,6 +344,7 @@ struct RasterPipelineBuilder:
     ## Frees the builder's context (when it is not compiled).
     func release():
         self.ctx.gradient.release()
+        self.ctx.mipmap.release()
 
     ## Compiles the pipeline; the builder's context moves into it.
     func compile() -> RasterPipeline:
@@ -402,7 +428,9 @@ struct RasterPipeline:
     var lowp_tail_functions: LowpStageFn[33]
     var ctx: Context
 
-    func run(rect: ScreenIntRect, aa_mask_ctx: AAMaskCtx, mask_ctx: MaskCtx, pixmap_src: PixmapRef, pixmap_dst: SubPixmapMut*):
+    func run(rect: ScreenIntRect, aa_mask_ctx: AAMaskCtx, mask_ctx: MaskCtx, pixmap_src0: PixmapRef, pixmap_dst: SubPixmapMut*):
+        # A mipmapped pattern samples its upper level instead of the source image.
+        let pixmap_src = self.ctx.mipmap.upper else pixmap_src0
         if self.is_lowp:
             lowp_start(self.lowp_functions[..<self.len], self.lowp_tail_functions[..<self.len], rect, aa_mask_ctx, mask_ctx, &self.ctx, pixmap_src, pixmap_dst)
         else:
@@ -410,3 +438,4 @@ struct RasterPipeline:
 
     func release():
         self.ctx.gradient.release()
+        self.ctx.mipmap.release()

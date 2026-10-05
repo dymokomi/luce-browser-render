@@ -69,3 +69,5 @@ tests_cpu_player_3d.lucb
 tests_skia_reference_data_4.lucb
 tests_cpu_gradient_skia.lucb
 tests_skia_reference_data_5.lucb
+tests_cpu_image_skia.lucb
+tests_skia_reference_data_6.lucb
