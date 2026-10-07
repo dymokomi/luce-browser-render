@@ -13,7 +13,8 @@
 #       a shape too small for a nine-patch, a rotated one) is drawn into a device mask that is
 #       blurred whole. The nine-patch is expanded to the shape's blurred bounds here and drawn
 #       as one mask: draw_nine's pieces (masks, stretched rows and columns, the filled center)
-#       blit the same coverage. The sigma is SkBlurMaskFilterImpl::computeXformedSigma's
+#       blit the same coverage. The GPU player takes the nine-patch itself (CpuNinePatch,
+#       cpu_blurred_rrect_nine) and stretches it in its shader. The sigma is SkBlurMaskFilterImpl::computeXformedSigma's
 #       (SkMatrix::mapRadius, at most 128). A sigma that blurs nothing draws the shape plainly.
 #
 #       Copyright 2006 The Android Open Source Project
@@ -53,13 +54,46 @@ func cpu_xformed_sigma(transform: raster.Transform, sigma: f32) -> f32:
 
 # mark: Nine-patches ===========================================================================
 
-## draw_nine's coverage over `outer` (left, top, right, bottom) from the small `mask` whose
-## stretchable row and column are at `center`: corners from the mask's corners, edges
-## stretched from its center row and column, and the center 255 (`fill_center`) or untouched.
-func cpu_expand_nine_patch(mask: const CpuA8Mask*, outer: CpuIRect, center_x: i32, center_y: i32, fill_center: bool) -> CpuA8Mask:
-    let width = outer.right - outer.left
-    let height = outer.bottom - outer.top
-    var result = cpu_a8_mask_new(outer.left, outer.top, width, height)
+## A blurred shape's coverage as draw_nine takes it: the small `mask` covers the whole of
+## `left`, `top`, `width`, `height` (device pixels) with its corners, its row `center_y` and
+## column `center_x` stretched along the edges, and the center 255 (`fill_center`) or left
+## alone. Unless `stretched`, `mask` is the whole coverage at those bounds as it is.
+pub struct CpuNinePatch:
+    pub var mask: CpuA8Mask
+    pub var left: i32
+    pub var top: i32
+    pub var width: i32
+    pub var height: i32
+    pub var center_x: i32
+    pub var center_y: i32
+    pub var fill_center: bool
+    pub var stretched: bool
+
+## A nine-patch of the small `mask` over `outer` (see CpuNinePatch); it takes the mask.
+func cpu_nine_patch(mask: CpuA8Mask, outer: CpuIRect, center_x: i32, center_y: i32, fill_center: bool) -> CpuNinePatch:
+    return CpuNinePatch(mask = mask, left = outer.left, top = outer.top, width = outer.right - outer.left, height = outer.bottom - outer.top,
+                        center_x = center_x, center_y = center_y, fill_center = fill_center, stretched = true)
+
+## The whole `mask` as a nine-patch that stretches nothing; it takes the mask.
+func cpu_whole_patch(mask: CpuA8Mask) -> CpuNinePatch:
+    return CpuNinePatch(mask = mask, left = mask.left, top = mask.top, width = mask.width, height = mask.height)
+
+## Frees the nine-patch's mask.
+pub func cpu_nine_patch_release(nine: CpuNinePatch*):
+    cpu_a8_mask_release(&nine.mask)
+
+## draw_nine's coverage over the nine-patch's bounds, as one mask; releases the small mask.
+func cpu_expand_nine_patch(nine: CpuNinePatch*) -> CpuA8Mask:
+    if not nine.stretched:
+        return nine.mask
+    let mask = &nine.mask
+    defer cpu_a8_mask_release(&nine.mask)
+    let center_x = nine.center_x
+    let center_y = nine.center_y
+    let fill_center = nine.fill_center
+    let width = nine.width
+    let height = nine.height
+    var result = cpu_a8_mask_new(nine.left, nine.top, width, height)
     # innerR, relative to `outer`.
     let inner_left = center_x
     let inner_top = center_y
@@ -83,7 +117,7 @@ func cpu_expand_nine_patch(mask: const CpuA8Mask*, outer: CpuIRect, center_x: i3
 ## mask and no plain fill (kFalse), or the fall back to a mask of the whole shape
 ## (kUnimplemented).
 enum CpuNineResult:
-    mask(value: CpuA8Mask)
+    mask(value: CpuNinePatch)
     nothing
     unimplemented
 
@@ -111,10 +145,9 @@ func cpu_filter_rect_to_nine(rect: f32[4], sigma: f32) -> CpuNineResult:
     let small: f32[4] = [rect[0], rect[1], rect[2] - dx, rect[3] - dy]
     if small[2] - small[0] < 2.0 or small[3] - small[1] < 2.0:
         return .unimplemented
-    var filtered = cpu_blur_rect(sigma, small, true) else return .nothing
-    defer cpu_a8_mask_release(&filtered.0)
+    let filtered = cpu_blur_rect(sigma, small, true) else return .nothing
     let outer = CpuIRect(left = dst.left, top = dst.top, right = dst.left + dst.width, bottom = dst.top + dst.height)
-    return .mask(value = cpu_expand_nine_patch(&filtered.0, outer, center_x, center_y, true))
+    return .mask(value = cpu_nine_patch(filtered.0, outer, center_x, center_y, true))
 
 ## SkBlurMaskFilterImpl::filterRectsToNine for two nested device rectangles (the even-odd
 ## frame between them): the small frame is drawn into a mask and blurred; the center is left.
@@ -153,9 +186,8 @@ func cpu_filter_nested_rects_to_nine(outer_rect: f32[4], inner_rect: f32[4], sig
     defer frame.release()
     var src = cpu_path_mask(&frame, raster.FillRule.even_odd, cpu_round_out(small0))
     defer cpu_a8_mask_release(&src)
-    var filtered = cpu_box_blur(&src, sigma) else return .nothing
-    defer cpu_a8_mask_release(&filtered.0)
-    return .mask(value = cpu_expand_nine_patch(&filtered.0, outer, center_x, center_y, false))
+    let filtered = cpu_box_blur(&src, sigma) else return .nothing
+    return .mask(value = cpu_nine_patch(filtered.0, outer, center_x, center_y, false))
 
 ## SkBlurMaskFilterImpl::filterRRectToNine for a device rounded rectangle that is neither a
 ## rectangle nor an oval.
@@ -189,9 +221,8 @@ func cpu_filter_rrect_to_nine(rect: raster.Rect, radii: CpuRadii, sigma: f32) ->
     defer small_path.release()
     var src = cpu_path_mask(&small_path, raster.FillRule.winding, CpuIRect(left = 0, top = 0, right = total_small_width, bottom = total_small_height))
     defer cpu_a8_mask_release(&src)
-    var filtered = cpu_box_blur(&src, sigma) else return .nothing
-    defer cpu_a8_mask_release(&filtered.0)
-    return .mask(value = cpu_expand_nine_patch(&filtered.0, outer, margin + left_unstretched, margin + top_unstretched, true))
+    let filtered = cpu_box_blur(&src, sigma) else return .nothing
+    return .mask(value = cpu_nine_patch(filtered.0, outer, margin + left_unstretched, margin + top_unstretched, true))
 
 ## rect_exceeds.
 func cpu_rect_exceeds(r: f32[4], v: f32) -> bool:
@@ -245,6 +276,12 @@ func cpu_blurred_path_mask(path: const raster.Path*, fill_rule: raster.FillRule,
 
 # mark: Drawing ================================================================================
 
+## Blits the nine-patch `nine` expanded, with `paint`, and releases it.
+func cpu_canvas_blit_nine_patch(canvas: CpuCanvas*, nine: CpuNinePatch*, paint: const raster.Paint*):
+    var expanded = cpu_expand_nine_patch(nine)
+    cpu_canvas_blit_mask(canvas, &expanded, paint)
+    cpu_a8_mask_release(&expanded)
+
 ## Blits `mask` with `paint` through the canvas's clip (blitMask through the raster clip).
 func cpu_canvas_blit_mask(canvas: CpuCanvas*, mask: const CpuA8Mask*, paint: const raster.Paint*):
     if mask.width <= 0 or mask.height <= 0:
@@ -259,9 +296,8 @@ func cpu_canvas_fill_dev_path_blurred(canvas: CpuCanvas*, path: const raster.Pat
     if let rect = cpu_path_as_rect(path):
         match cpu_filter_rect_to_nine(rect, sigma):
             .mask(value):
-                var expanded = value
-                cpu_canvas_blit_mask(canvas, &expanded, paint)
-                cpu_a8_mask_release(&expanded)
+                var nine = value
+                cpu_canvas_blit_nine_patch(canvas, &nine, paint)
                 return
             .nothing:
                 cpu_canvas_target(canvas).fill_path(path, paint, fill_rule, raster.Transform.identity(), cpu_canvas_draw_mask(canvas))
@@ -347,9 +383,8 @@ func cpu_canvas_fill_rrect_blurred(canvas: CpuCanvas*, rect: raster.Rect, radii0
         let device = cpu_rrect_transform(rect, &radii, ts)
         match cpu_filter_rrect_to_nine(device.0, device.1, sigma):
             .mask(value):
-                var expanded = value
-                cpu_canvas_blit_mask(canvas, &expanded, paint)
-                cpu_a8_mask_release(&expanded)
+                var nine = value
+                cpu_canvas_blit_nine_patch(canvas, &nine, paint)
                 return
             _:
                 _ = 0
@@ -360,11 +395,13 @@ func cpu_canvas_fill_rrect_blurred(canvas: CpuCanvas*, rect: raster.Rect, radii0
         return
     cpu_canvas_fill_dev_path_blurred(canvas, &path, raster.FillRule.winding, paint, sigma)
 
-## The mask cpu_canvas_fill_rrect_blurred blits for `rect` with `radii0` and a blur of `sigma0`
-## under the identity transform, not limited by a clip: what the GPU player keeps in its atlas
-## (a whole-pixel translation moves the mask as it moves the shape). None when the blur draws
-## the shape plainly instead. The caller releases the mask.
-pub func cpu_blurred_rrect_mask(rect: raster.Rect, radii0: CpuRadii, sigma0: f32) -> CpuA8Mask?:
+## The coverage cpu_canvas_fill_rrect_blurred blits for `rect` with `radii0` and a blur of
+## `sigma0` under the identity transform, as the nine-patch it is made from (a shape blurred
+## whole is a nine-patch that stretches nothing): what the GPU player keeps in its atlas (a
+## whole-pixel translation moves the mask as it moves the shape). The whole shape's mask is
+## limited to `clip` plus the blur's margin, as the CPU player limits it to its clip; none
+## clips nothing. None when the blur draws the shape plainly instead. The caller releases it.
+pub func cpu_blurred_rrect_nine(rect: raster.Rect, radii0: CpuRadii, sigma0: f32, clip: raster.Rect? = none) -> CpuNinePatch?:
     let sigma = cpu_xformed_sigma(raster.Transform.identity(), sigma0)
     let radii = cpu_normalize_radii(rect, radii0)
     if cpu_rrect_kind(rect, &radii) == CpuRRectKind.nine_patch:
@@ -378,9 +415,58 @@ pub func cpu_blurred_rrect_mask(rect: raster.Rect, radii0: CpuRadii, sigma0: f32
             .mask(value): return value
             .nothing: return none
             .unimplemented: _ = 0
-    let b = path.bounds()
-    let clip = cpu_round_out([b.left(), b.top(), b.right(), b.bottom()])
-    return cpu_blurred_path_mask(&path, raster.FillRule.winding, clip, sigma)
+    let b = clip else path.bounds()
+    let limit = cpu_round_out([b.left(), b.top(), b.right(), b.bottom()])
+    let mask = cpu_blurred_path_mask(&path, raster.FillRule.winding, limit, sigma) else return none
+    return cpu_whole_patch(mask)
+
+## SkBlurMaskFilterImpl::filterRectsToNine for two nested whole-pixel rectangles (left, top,
+## right, bottom): the inner box shadow's frame, blurred by `sigma0` under the identity
+## transform; none when Skia would draw it some other way. The caller releases it.
+pub func cpu_blurred_frame_nine(outer: f32[4], inner: f32[4], sigma0: f32) -> CpuNinePatch?:
+    let sigma = cpu_xformed_sigma(raster.Transform.identity(), sigma0)
+    match cpu_filter_nested_rects_to_nine(outer, inner, sigma):
+        .mask(value): return value
+        _: return none
+
+## What paint_inner_box_shadow blits (see cpu_inner_shadow_patch).
+pub enum CpuInnerShadow:
+    patch(value: CpuNinePatch)
+    nothing
+    unsupported
+
+## The coverage DisplayListPlayerCpu's paint_inner_box_shadow blits for the frame between
+## `outer` (with the content's radii) and `inner` (with the shadow's), blurred by
+## `blur_radius` / 2 under the identity transform, before its clip to the content: the
+## frame's nine-patch for two nested rectangles, the blurred even-odd difference of the
+## rounded rectangles (limited to `clip` plus the blur's margin), or the difference's plain
+## coverage without a blur (limited to `clip`). Unsupported for shapes that touch or cross,
+## which the CPU player composes from two coverages. The caller releases the patch.
+pub func cpu_inner_shadow_patch(outer: raster.Rect, outer_radii0: CpuRadii, inner: raster.Rect, inner_radii0: CpuRadii, blur_radius: i32, clip: raster.Rect) -> CpuInnerShadow:
+    let outer_radii = cpu_normalize_radii(outer, outer_radii0)
+    let inner_radii = cpu_normalize_radii(inner, inner_radii0)
+    let sigma = cpu_xformed_sigma(raster.Transform.identity(), (f32)(blur_radius // 2))
+    let both_rects = cpu_rrect_kind(outer, &outer_radii) == CpuRRectKind.rect and cpu_rrect_kind(inner, &inner_radii) == CpuRRectKind.rect
+    let inside = inner.left() >= outer.left() and inner.top() >= outer.top() and inner.right() <= outer.right() and inner.bottom() <= outer.bottom()
+    if both_rects and inside and blur_radius // 2 > 0:
+        match cpu_filter_nested_rects_to_nine([outer.left(), outer.top(), outer.right(), outer.bottom()], [inner.left(), inner.top(), inner.right(), inner.bottom()], sigma):
+            .mask(value): return .patch(value = value)
+            _: _ = 0
+    var difference = cpu_inner_shadow_difference(outer, outer_radii, inner, inner_radii) else return .unsupported
+    defer difference.release()
+    let limit = cpu_round_out([clip.left(), clip.top(), clip.right(), clip.bottom()])
+    if blur_radius // 2 > 0:
+        if let blurred = cpu_blurred_path_mask(&difference, raster.FillRule.even_odd, limit, sigma):
+            return .patch(value = cpu_whole_patch(blurred))
+    let b = difference.bounds()
+    var bounds = cpu_round_out([b.left(), b.top(), b.right(), b.bottom()])
+    bounds.left = cpu_max_i32(bounds.left, limit.left)
+    bounds.top = cpu_max_i32(bounds.top, limit.top)
+    bounds.right = cpu_min_i32(bounds.right, limit.right)
+    bounds.bottom = cpu_min_i32(bounds.bottom, limit.bottom)
+    if bounds.left >= bounds.right or bounds.top >= bounds.bottom:
+        return .nothing
+    return .patch(value = cpu_whole_patch(cpu_path_mask(&difference, raster.FillRule.even_odd, bounds)))
 
 ## SkRRect's type, as far as the blurred draw cares.
 enum CpuRRectKind:

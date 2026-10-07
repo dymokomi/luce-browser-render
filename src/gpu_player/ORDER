@@ -6,6 +6,7 @@ images.lucb
 recorder.lucb
 recorder_state.lucb
 recorder_draws.lucb
+recorder_shadows.lucb
 replay.lucb
 compositor.lucb
 generated_shaders.lucb

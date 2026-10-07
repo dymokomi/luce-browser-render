@@ -52,7 +52,7 @@ float clip_coverage(vec2 p, float mode, vec4 rect, vec4 radii0, vec4 radii1) {
     return mode < 1.5 ? inside : 1.0 - inside;
 }
 
-// What the clip mask (nested clips, rendered into an r8 texture of the tile by clip.frag)
+// What the clip mask (nested clips, rendered into an r8 texture of the tile by tile.frag's clip kind)
 // lets through at `p`, when `use` is set; 1 otherwise.
 float mask_coverage(sampler2D mask, vec2 p, float use) {
     return use > 0.5 ? texelFetch(mask, ivec2(floor(p)), 0).r : 1.0;

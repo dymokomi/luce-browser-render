@@ -10,7 +10,7 @@
 #       pixels the CPU player's fill would cover, limited to the tile), placed in the atlas
 #       for this tile, and drawn as a mask: Ganesh's software path renderer does the same for
 #       paths it has no GPU method for. Images are textures kept per bitmap (images.lucb),
-#       sampled nearest or bilinear in the shader.
+#       sampled nearest or bilinear in the shader. Shadows are in recorder_shadows.lucb.
 #
 #       Copyright (c) 2026 the luce-browser authors.
 #       SPDX-License-Identifier: BSD-2-Clause
@@ -19,22 +19,26 @@
 
 # mark: Masks ===================================================================================
 
-## A `mask` draw of the atlas texels of `entry` at `dst` (whole pixels) in `color`. The
-## atlas's texture now: making room may have replaced it.
+## A `mask` draw of the atlas texels of `entry` at `dst` (whole pixels) in `color`; a
+## nine-patch entry stretches over `dst` (see tile.frag's kind 2). The atlas's texture now:
+## making room may have replaced it.
 func gpu_mask_draw(this: DisplayListPlayerGpu*, entry: GpuAtlasEntry, dst: GpuRect, color: f32[4]):
     if not dst.intersects(this.state.clip):
         return
     let texture = this.atlas.texture else return
-    var draw = GpuDraw(kind = GpuDrawKind.mask, scissor = this.state.clip, area = dst, image = texture)
-    draw.uniforms[0] = (f32)dst.x
-    draw.uniforms[1] = (f32)dst.y
-    draw.uniforms[2] = (f32)dst.width
-    draw.uniforms[3] = (f32)dst.height
-    draw.uniforms[4] = (f32)entry.x
-    draw.uniforms[5] = (f32)entry.y
+    var draw = gpu_shader_draw(this, GpuDrawKind.mask, gpu_kind_mask, dst)
+    draw.image = texture
+    draw.data[0] = (f32)dst.x
+    draw.data[1] = (f32)dst.y
+    draw.data[2] = (f32)entry.x
+    draw.data[3] = (f32)entry.y
     for i in 0..<(usize)4:
-        draw.uniforms[8 + i] = color[i]
-    gpu_clip_uniforms(this, &draw.uniforms[0], 12, 24, 25)
+        draw.data[4 + i] = color[i]
+    if let nine = entry.nine:
+        draw.data[8] = (f32)nine.center_x
+        draw.data[9] = (f32)nine.center_y
+        draw.data[10] = (f32)(dst.width + 1 - entry.width)
+        draw.data[11] = (f32)(dst.height + 1 - entry.height) * (1.0 if nine.fill_center else -1.0)
     gpu_append(this, draw)
 
 # mark: Glyph runs ==============================================================================
@@ -221,60 +225,6 @@ func gpu_draw_line_impl(base: display_list.DisplayListPlayer*, command: display_
         return
     gpu_mask_draw(this, entry, area.translated(this.state.dx, this.state.dy), gpu_premultiplied(command.color))
 
-# mark: Shadows =================================================================================
-
-func gpu_outer_box_shadow_impl(base: display_list.DisplayListPlayer*, command: display_list.PaintOuterBoxShadow):
-    # DisplayListPlayerCpu::paint_outer_box_shadow: the shadow's rounded rectangle, blurred,
-    # outside the content's rounded rectangle. The blurred mask is the CPU player's
-    # (cpu_blurred_rrect_mask), made once per shape, size and blur and kept in the atlas, as
-    # Skia keeps blur masks in its SkMaskCache.
-    let this = gpu_player_of(base)
-    if not gpu_recording(this):
-        return
-    if (command.color.m_value >> 24) == 0:
-        return
-    let shadow = gpu_rect_of(command.shadow_rect)
-    if shadow.width < 0 or shadow.height < 0:
-        return
-    let content = gpu_rect_of(command.device_content_rect).translated(this.state.dx, this.state.dy)
-    let saved = this.state
-    defer this.state = saved
-    # A clip around the shadow joins the clip mask; the content's outside is the analytic one.
-    if not gpu_push_mask(this):
-        return
-    this.state.rounded = GpuRoundedClip(rect = [(f32)content.x, (f32)content.y, (f32)content.width, (f32)content.height],
-                                        radii = gpu_normalized_radii(content, &command.content_corner_radii), mode = 2.0)
-    let placed = shadow.translated(this.state.dx, this.state.dy)
-    let sigma = (f32)(command.blur_radius // 2)
-    if sigma <= 0.0:
-        gpu_fill_shape(this, placed, gpu_normalized_radii(placed, &command.shadow_corner_radii), command.color, 0.0, false)
-        return
-    let device = this.device else return
-    let radii = display_list.cpu_radii(&command.shadow_corner_radii)
-    var key = gpu_hash(gpu_hash_start, ((u64)(u32)shadow.width << 32) | (u64)(u32)shadow.height)
-    for i in 0..<(usize)4:
-        key = gpu_hash(key, ((u64)(i64)(radii.x[i] * 64.0) << 32) | (u64)(i64)(radii.y[i] * 64.0))
-    key = gpu_hash(key, (u64)(i64)(sigma * 64.0) | 0x20000000000)
-    var entry = this.atlas.find(key) else GpuAtlasEntry()
-    if entry.width == 0:
-        let local = raster.Rect.from_xywh(0.0, 0.0, (f32)shadow.width, (f32)shadow.height) else return
-        var made = display_list.cpu_blurred_rrect_mask(local, radii, sigma)
-        if made == none:
-            gpu_fill_shape(this, placed, gpu_normalized_radii(placed, &command.shadow_corner_radii), command.color, 0.0, false)
-            return
-        var mask = made else return
-        defer display_list.cpu_a8_mask_release(&mask)
-        if mask.width <= 0 or mask.height <= 0:
-            return
-        if mask.width > 2048 or mask.height > 2048:
-            gpu_give_up(this, GpuFallback.shadow)
-            return
-        entry = gpu_place(this, device, key, mask.image, mask.width, mask.height, mask.left, mask.top) else return
-    if not gpu_recording(this):
-        return
-    let dst = GpuRect(x = placed.x + entry.left, y = placed.y + entry.top, width = entry.width, height = entry.height)
-    gpu_mask_draw(this, entry, dst, gpu_premultiplied(command.color))
-
 # mark: Images ==================================================================================
 
 func gpu_scaled_bitmap_impl(base: display_list.DisplayListPlayer*, command: display_list.DrawScaledImmutableBitmap):
@@ -298,21 +248,23 @@ func gpu_scaled_bitmap_impl(base: display_list.DisplayListPlayer*, command: disp
             filter = 2.0 if dst.width < width or dst.height < height else 1.0
         _: filter = 0.0
     if gfx.immutable_bitmap_color_xform(command.bitmap) != none:
-        gpu_give_up(this, GpuFallback.image)
+        gpu_give_up(this, GpuFallback.color_managed_image)
         return
     let device = this.device else return
     let found = this.images.texture_of(device, bitmap, filter > 1.5) catch failure:
         gpu_give_up(this, GpuFallback.image)
         return
     let texture = found else return
-    var draw = GpuDraw(kind = GpuDrawKind.image, scissor = clip, area = area, image = texture)
-    draw.uniforms[0] = (f32)dst.x
-    draw.uniforms[1] = (f32)dst.y
-    draw.uniforms[2] = (f32)dst.width
-    draw.uniforms[3] = (f32)dst.height
-    draw.uniforms[4] = (f32)width
-    draw.uniforms[5] = (f32)height
-    draw.uniforms[6] = filter
-    draw.uniforms[7] = 1.0
-    gpu_clip_uniforms(this, &draw.uniforms[0], 8, 20, 21)
+    var draw = gpu_shader_draw(this, GpuDrawKind.image, gpu_kind_image, area)
+    draw.scissor = clip
+    draw.image = texture
+    let k = gpu_uniform_header
+    draw.uniforms[k] = (f32)dst.x
+    draw.uniforms[k + 1] = (f32)dst.y
+    draw.uniforms[k + 2] = (f32)dst.width
+    draw.uniforms[k + 3] = (f32)dst.height
+    draw.uniforms[k + 4] = (f32)width
+    draw.uniforms[k + 5] = (f32)height
+    draw.uniforms[k + 6] = filter
+    draw.uniforms[k + 7] = 1.0
     gpu_append(this, draw)

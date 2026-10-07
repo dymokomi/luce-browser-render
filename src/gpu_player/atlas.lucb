@@ -7,8 +7,9 @@
 #       tallest mask, filled left to right), as Skia's text atlas and WebRender's glyph cache
 #       pack. Glyph masks are kept by key (the strike, the glyph and its quarter-pixel phase:
 #       the same key always has the same pixels, see display_list's cpu_glyph_run), so a glyph
-#       is rastered once per process, not once per draw. Path coverage is placed without a key:
-#       it lives until the atlas starts again.
+#       is rastered once per process, not once per draw. Shadows are kept by shape and blur, as
+#       the small nine-patch Skia blurs (GpuNine: the shader stretches it). Coverage made for
+#       one tile is placed without a key: it lives until the atlas starts again.
 #
 #       When a mask does not fit (`fits`), the player first draws what it has recorded into its
 #       tile (texture frames that keep their contents let it add the rest later), then makes
@@ -25,8 +26,18 @@
 pub let gpu_atlas_size: i32 = 2048
 pub let gpu_atlas_largest: i32 = 4096
 
-## A mask in the atlas: where its texels are, and where it sits relative to the point it is
-## drawn at (a glyph mask's left and top).
+## How a nine-patch mask (a blurred shadow's, display_list's CpuNinePatch) covers more than
+## its texels: drawn `width` by `height`, its row `center_y` and column `center_x` stretched
+## along the edges, the center covered (`fill_center`) or not.
+pub struct GpuNine:
+    pub var width: i32
+    pub var height: i32
+    pub var center_x: i32
+    pub var center_y: i32
+    pub var fill_center: bool
+
+## A mask in the atlas: where its texels are, where it sits relative to the point it is
+## drawn at (a glyph mask's left and top), and how it stretches when it is a nine-patch.
 pub struct GpuAtlasEntry:
     pub var x: i32
     pub var y: i32
@@ -34,6 +45,7 @@ pub struct GpuAtlasEntry:
     pub var height: i32
     pub var left: i32
     pub var top: i32
+    pub var nine: GpuNine?
 
 ## The coverage atlas (see the header).
 pub struct GpuAtlas:
@@ -100,7 +112,7 @@ pub struct GpuAtlas:
     ## Places `coverage` (`width` by `height` bytes, top-down) and uploads it; keeps it for `key`
     ## unless `key` is none. None when it is larger than the atlas; a full atlas starts again
     ## first (see the header).
-    pub func place(device: gpu.Device, key: u64?, coverage: const u8[], width: i32, height: i32, left: i32, top: i32) -> GpuAtlasEntry?!:
+    pub func place(device: gpu.Device, key: u64?, coverage: const u8[], width: i32, height: i32, left: i32, top: i32, nine: GpuNine? = none) -> GpuAtlasEntry?!:
         let texture = try self.texture_on(device)
         if width <= 0 or height <= 0 or width > self.size or height > self.size:
             return none
@@ -110,7 +122,7 @@ pub struct GpuAtlas:
             self.shelf_height = 0
         if self.shelf_y + height > self.size:
             self.reset()
-        let entry = GpuAtlasEntry(x = self.shelf_x, y = self.shelf_y, width = width, height = height, left = left, top = top)
+        let entry = GpuAtlasEntry(x = self.shelf_x, y = self.shelf_y, width = width, height = height, left = left, top = top, nine = nine)
         self.shelf_x += width + 1
         self.shelf_height = gpu_max(self.shelf_height, height + 1)
         if self.batch == none:

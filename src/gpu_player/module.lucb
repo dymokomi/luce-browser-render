@@ -15,17 +15,18 @@
 #                     uncovers (compositor.lucb);
 #         raster      a tile is drawn by DisplayListPlayerGpu (recorder*.lucb): the commands
 #                     it supports become GPU draws (rectangles batched into one triangle draw,
-#                     runs of rounded rectangles and of glyph and path masks from one coverage
-#                     atlas as instanced draws, the innermost rounded clip analytic and the
-#                     ones around it in an r8 clip mask, images from textures kept per bitmap,
-#                     mipmapped when drawn smaller). A tile that meets a command it does not
+#                     runs of rounded rectangles and of glyph, path and shadow masks from one
+#                     coverage atlas as instanced draws, the innermost rounded clip analytic
+#                     and the ones around it in an r8 clip mask, images from textures kept per
+#                     bitmap, mipmapped when drawn smaller; one fragment program,
+#                     shaders/tile.frag, for every draw). A tile that meets a command it does not
 #                     support is drawn by the CPU player instead and uploaded (per tile, so
 #                     the page stays correct).
 #
 #       Drawing is in the encoded (sRGB byte) space with premultiplied colors, as Skia's
 #       legacy raster blends: tiles are rgba8_linear textures, composited straight onto a
 #       target that blends on encoded values (an encoded window surface) and through a frame
-#       texture decoded for any other (shaders/composite.frag).
+#       texture decoded for any other. tools/shaders.sh embeds the shaders.
 #
 #       Copyright (c) 2026 the luce-browser authors.
 #       SPDX-License-Identifier: BSD-2-Clause
@@ -89,7 +90,8 @@ pub func gpu_rect_of(rect: gfx.DevicePixelRect) -> GpuRect:
     return GpuRect(x = rect.m_location.m_x, y = rect.m_location.m_y, width = rect.m_size.m_width, height = rect.m_size.m_height)
 
 ## Counts of what the players did since the last reset: tiles drawn on the GPU and on the CPU,
-## tiles composited, and the commands that sent tiles to the CPU, by GpuFallback.
+## tiles composited, and the commands that sent tiles to the CPU, by GpuFallback: `fallbacks`
+## counts the reason that decided, `reasons` every reason a CPU tile met.
 pub struct GpuPlayerStats:
     pub var gpu_tiles: u64
     pub var cpu_tiles: u64
@@ -97,7 +99,8 @@ pub struct GpuPlayerStats:
     pub var composited_tiles: u64
     pub var resident_tiles: u64
     pub var resident_bytes: u64
-    pub var fallbacks: u64[16]
+    pub var fallbacks: u64[24]
+    pub var reasons: u64[24]
 
 ## The process's counts (main thread only, as every GPU call is).
 var gpu_player_stats_the: GpuPlayerStats = GpuPlayerStats()

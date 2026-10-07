@@ -84,9 +84,8 @@ func display_list_player_cpu_paint_inner_box_shadow_impl(base: DisplayListPlayer
         match cpu_filter_nested_rects_to_nine([outer_device.left(), outer_device.top(), outer_device.right(), outer_device.bottom()],
                                               [inner_device.left(), inner_device.top(), inner_device.right(), inner_device.bottom()], sigma):
             .mask(value):
-                var expanded = value
-                cpu_canvas_blit_mask(canvas, &expanded, &path_paint)
-                cpu_a8_mask_release(&expanded)
+                var nine = value
+                cpu_canvas_blit_nine_patch(canvas, &nine, &path_paint)
                 return
             _:
                 _ = 0

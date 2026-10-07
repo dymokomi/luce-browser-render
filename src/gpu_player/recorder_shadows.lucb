@@ -1,0 +1,171 @@
+#==============================================================================================
+#
+#   recorder_shadows - DisplayListPlayerGpu's box shadows: blurred masks kept in the atlas
+#
+#   DESCRIPTION:
+#       Box shadows draw what the CPU player blits: the coverage of a blurred shape, made by
+#       display_list's own mask code (Skia's SkBlurMaskFilter port), so the pixels are the
+#       reference's. Skia blurs a rectangle or a rounded rectangle as a small nine-patch whose
+#       center row and column stretch over the shape (filterRectsToNine, filterRRectToNine);
+#       the player keeps that small mask in the atlas, keyed by the shape's size, radii and
+#       blur, and tile.frag stretches it (GpuNine), as Skia keeps blur masks in its
+#       SkMaskCache. A shape blurred whole (an oval, a shape too small for a nine-patch, an
+#       inner shadow's rounded frame) is kept whole when it is small, and made for the part a
+#       tile shows otherwise. A whole-pixel translation moves a mask as it moves the shape.
+#
+#         outer   the shadow's shape, blurred, outside the content's rounded rectangle (the
+#                 analytic clip, which keeps the outside);
+#         inner   the frame between the content's rounded rectangle and the shadow's,
+#                 blurred, inside the content's (cpu_inner_shadow_patch).
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+## The largest side of a mask blurred whole that the atlas keeps; larger ones are made per tile.
+let gpu_whole_mask_side: i32 = 1024
+
+## Places the patch's mask in the atlas (kept for `key` unless none), with its stretching.
+## None when there is nothing to draw or the tile was given up.
+func gpu_place_patch(this: DisplayListPlayerGpu*, device: gpu.Device, key: u64?, patch: const display_list.CpuNinePatch*) -> GpuAtlasEntry?:
+    let mask = patch.mask
+    if mask.width <= 0 or mask.height <= 0 or patch.width <= 0 or patch.height <= 0:
+        return none
+    var nine: GpuNine? = none
+    if patch.stretched:
+        nine = GpuNine(width = patch.width, height = patch.height, center_x = patch.center_x, center_y = patch.center_y, fill_center = patch.fill_center)
+    return gpu_place(this, device, key, mask.image, mask.width, mask.height, patch.left, patch.top, nine)
+
+## Draws a placed patch with its shape's origin at (`x`, `y`) of the tile, in `color`.
+func gpu_patch_draw(this: DisplayListPlayerGpu*, entry: GpuAtlasEntry, x: i32, y: i32, color: gfx.Color):
+    var width = entry.width
+    var height = entry.height
+    if let nine = entry.nine:
+        width = nine.width
+        height = nine.height
+    gpu_mask_draw(this, entry, GpuRect(x = x + entry.left, y = y + entry.top, width = width, height = height), gpu_premultiplied(color))
+
+## Whether a patch is a mask blurred whole too large for the atlas to keep.
+func gpu_patch_too_large(patch: const display_list.CpuNinePatch*) -> bool:
+    return not patch.stretched and (patch.width > gpu_whole_mask_side or patch.height > gpu_whole_mask_side)
+
+## The part of the tile the state's scissor shows, in the coordinates of a shape drawn at
+## (`x`, `y`) of the tile.
+func gpu_visible_part(this: const DisplayListPlayerGpu*, x: i32, y: i32) -> raster.Rect?:
+    let part = this.state.clip.translated(-x, -y)
+    return raster.Rect.from_xywh((f32)part.x, (f32)part.y, (f32)part.width, (f32)part.height)
+
+# mark: Outer shadows ============================================================================
+
+func gpu_outer_box_shadow_impl(base: display_list.DisplayListPlayer*, command: display_list.PaintOuterBoxShadow):
+    # DisplayListPlayerCpu::paint_outer_box_shadow: the shadow's rounded rectangle, blurred,
+    # outside the content's rounded rectangle.
+    let this = gpu_player_of(base)
+    if not gpu_recording(this):
+        return
+    if (command.color.m_value >> 24) == 0:
+        return
+    let shadow = gpu_rect_of(command.shadow_rect)
+    if shadow.width < 0 or shadow.height < 0:
+        return
+    let content = gpu_rect_of(command.device_content_rect).translated(this.state.dx, this.state.dy)
+    let saved = this.state
+    defer this.state = saved
+    # A clip around the shadow joins the clip mask; the content's outside is the analytic one.
+    if not gpu_push_mask(this):
+        return
+    this.state.rounded = GpuRoundedClip(rect = [(f32)content.x, (f32)content.y, (f32)content.width, (f32)content.height],
+                                        radii = gpu_normalized_radii(content, &command.content_corner_radii), mode = 2.0)
+    let placed = shadow.translated(this.state.dx, this.state.dy)
+    let sigma = (f32)(command.blur_radius // 2)
+    if sigma <= 0.0:
+        gpu_fill_shape(this, placed, gpu_normalized_radii(placed, &command.shadow_corner_radii), command.color, 0.0, false)
+        return
+    let device = this.device else return
+    let radii = display_list.cpu_radii(&command.shadow_corner_radii)
+    var key = gpu_hash(gpu_hash_start, ((u64)(u32)shadow.width << 32) | (u64)(u32)shadow.height)
+    for i in 0..<(usize)4:
+        key = gpu_hash(key, ((u64)(i64)(radii.x[i] * 64.0) << 32) | (u64)(i64)(radii.y[i] * 64.0))
+    key = gpu_hash(key, (u64)(i64)(sigma * 64.0) | 0x20000000000)
+    var entry = this.atlas.find(key) else GpuAtlasEntry()
+    if entry.width == 0:
+        let local = raster.Rect.from_xywh(0.0, 0.0, (f32)shadow.width, (f32)shadow.height) else return
+        var made = display_list.cpu_blurred_rrect_nine(local, radii, sigma)
+        if made == none:
+            gpu_fill_shape(this, placed, gpu_normalized_radii(placed, &command.shadow_corner_radii), command.color, 0.0, false)
+            return
+        var patch = made else return
+        var kept: u64? = key
+        if gpu_patch_too_large(&patch):
+            display_list.cpu_nine_patch_release(&patch)
+            patch = display_list.cpu_blurred_rrect_nine(local, radii, sigma, gpu_visible_part(this, placed.x, placed.y)) else return
+            kept = none
+        defer display_list.cpu_nine_patch_release(&patch)
+        entry = gpu_place_patch(this, device, kept, &patch) else return
+    if not gpu_recording(this):
+        return
+    gpu_patch_draw(this, entry, placed.x, placed.y, command.color)
+
+# mark: Inner shadows ============================================================================
+
+func gpu_inner_box_shadow_impl(base: display_list.DisplayListPlayer*, command: display_list.PaintInnerBoxShadow):
+    # DisplayListPlayerCpu::paint_inner_box_shadow: the frame between the content's rounded
+    # rectangle and the shadow's, blurred, inside the content's rounded rectangle (its
+    # anti-aliased clip path; the analytic clip here).
+    let this = gpu_player_of(base)
+    if not gpu_recording(this):
+        return
+    if (command.color.m_value >> 24) == 0:
+        return
+    let outer = gpu_rect_of(command.outer_shadow_rect)
+    let inner = gpu_rect_of(command.inner_shadow_rect)
+    if outer.width <= 0 or outer.height <= 0 or inner.width < 0 or inner.height < 0:
+        return
+    let content = gpu_rect_of(command.device_content_rect).translated(this.state.dx, this.state.dy)
+    let saved = this.state
+    defer this.state = saved
+    this.state.clip = this.state.clip.intersected(content)
+    if this.state.clip.is_empty() or not gpu_push_mask(this):
+        return
+    this.state.rounded = GpuRoundedClip(rect = [(f32)content.x, (f32)content.y, (f32)content.width, (f32)content.height],
+                                        radii = gpu_normalized_radii(content, &command.content_corner_radii), mode = 1.0)
+    let device = this.device else return
+    # The frame relative to the outer rectangle's corner, so its mask is kept by shape.
+    let x = outer.x + this.state.dx
+    let y = outer.y + this.state.dy
+    let local_outer = raster.Rect.from_xywh(0.0, 0.0, (f32)outer.width, (f32)outer.height) else return
+    let local_inner = raster.Rect.from_xywh((f32)(inner.x - outer.x), (f32)(inner.y - outer.y), (f32)inner.width, (f32)inner.height) else return
+    let outer_radii = display_list.cpu_radii(&command.content_corner_radii)
+    let inner_radii = display_list.cpu_radii(&command.inner_shadow_corner_radii)
+    let shown = content.translated(-x, -y)
+    var key = gpu_hash(gpu_hash_start, ((u64)(u32)outer.width << 32) | (u64)(u32)outer.height)
+    key = gpu_hash(key, ((u64)(u32)(inner.x - outer.x) << 48) | ((u64)(u32)(inner.y - outer.y) << 32) | ((u64)(u32)inner.width << 16) | (u64)(u32)inner.height)
+    key = gpu_hash(key, ((u64)(u32)shown.x << 48) | ((u64)(u32)shown.y << 32) | ((u64)(u32)shown.width << 16) | (u64)(u32)shown.height)
+    for i in 0..<(usize)4:
+        key = gpu_hash(key, ((u64)(i64)(outer_radii.x[i] * 64.0) << 32) | (u64)(i64)(outer_radii.y[i] * 64.0))
+        key = gpu_hash(key, ((u64)(i64)(inner_radii.x[i] * 64.0) << 32) | (u64)(i64)(inner_radii.y[i] * 64.0))
+    key = gpu_hash(key, (u64)(u32)command.blur_radius | 0x30000000000)
+    var entry = this.atlas.find(key) else GpuAtlasEntry()
+    if entry.width == 0:
+        let whole = raster.Rect.from_xywh((f32)shown.x, (f32)shown.y, (f32)shown.width, (f32)shown.height) else return
+        var patch = display_list.CpuNinePatch()
+        match display_list.cpu_inner_shadow_patch(local_outer, outer_radii, local_inner, inner_radii, command.blur_radius, whole):
+            .patch(value): patch = value
+            .nothing: return
+            _:
+                gpu_give_up(this, GpuFallback.inner_shadow)
+                return
+        var kept: u64? = key
+        if gpu_patch_too_large(&patch):
+            display_list.cpu_nine_patch_release(&patch)
+            let part = gpu_visible_part(this, x, y) else return
+            match display_list.cpu_inner_shadow_patch(local_outer, outer_radii, local_inner, inner_radii, command.blur_radius, part):
+                .patch(value): patch = value
+                _: return
+            kept = none
+        defer display_list.cpu_nine_patch_release(&patch)
+        entry = gpu_place_patch(this, device, kept, &patch) else return
+    if not gpu_recording(this):
+        return
+    gpu_patch_draw(this, entry, x, y, command.color)
