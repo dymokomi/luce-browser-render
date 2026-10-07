@@ -23,12 +23,12 @@
 ## An 8-bit coverage mask (SkMask, kA8_Format) at (left, top) in device space; `width` bytes
 ## per row. `image` is in memory.heap (free it with cpu_a8_mask_release), or empty for a mask
 ## whose bounds only were computed.
-struct CpuA8Mask:
-    var image: u8[]
-    var left: i32
-    var top: i32
-    var width: i32
-    var height: i32
+pub struct CpuA8Mask:
+    pub var image: u8[]
+    pub var left: i32
+    pub var top: i32
+    pub var width: i32
+    pub var height: i32
 
 ## A zeroed mask over the bounds.
 func cpu_a8_mask_new(left: i32, top: i32, width: i32, height: i32) -> CpuA8Mask:
@@ -39,7 +39,7 @@ func cpu_a8_mask_new(left: i32, top: i32, width: i32, height: i32) -> CpuA8Mask:
     return CpuA8Mask(image = image, left = left, top = top, width = width, height = height)
 
 ## Frees the mask's pixels.
-func cpu_a8_mask_release(mask: CpuA8Mask*):
+pub func cpu_a8_mask_release(mask: CpuA8Mask*):
     if mask.image.length > 0:
         free(mask.image) in memory.heap
     mask.image = mask.image[..<0]

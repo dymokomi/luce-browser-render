@@ -341,7 +341,7 @@ func cpu_stroke_of(command: const StrokePath*) -> raster.Stroke:
                          line_join = cpu_line_join(command.join_style), dash = dash)
 
 ## Frees a stroke's dash.
-func cpu_stroke_release(stroke: raster.Stroke*):
+pub func cpu_stroke_release(stroke: raster.Stroke*):
     if let dash = stroke.dash:
         var d = dash
         d.release()
@@ -396,15 +396,18 @@ func cpu_normalize(x: f32, y: f32) -> (f32, f32):
         return (0.0, 0.0)
     return (x / length, y / length)
 
-## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:44 Web::Painting::DisplayListPlayerSkia::draw_line (override).
-func display_list_player_cpu_draw_line_impl(base: DisplayListPlayer*, command: DrawLine):
+## The line `draw_line` strokes: its path and its stroke (the caller releases both). Shared
+## with the GPU player, which rasters the same stroke into its coverage atlas.
+pub struct CpuLine:
+    pub var path: raster.Path
+    pub var stroke: raster.Stroke
+
+## DisplayListPlayerSkia::draw_line's path and stroke for `command`; none for no line.
+pub func cpu_line_of(command: const DrawLine*) -> CpuLine?:
     var from_x = (f32)command.from_.m_x
     var from_y = (f32)command.from_.m_y
     var to_x = (f32)command.to.m_x
     var to_y = (f32)command.to.m_y
-    let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
-
-    let paint = cpu_color_paint(command.color, true)
     var stroke = raster.Stroke(width = (f32)command.thickness)
 
     match command.style:
@@ -435,15 +438,26 @@ func display_list_player_cpu_draw_line_impl(base: DisplayListPlayer*, command: D
             to_y += dy * ((f32)command.thickness / 2.0)
         _:
             _ = 0
-    defer cpu_stroke_release(&stroke)
 
     # canvas.drawLine(from, to, paint)
     var builder = raster.PathBuilder.new_()
     builder.move_to(from_x, from_y)
     builder.line_to(to_x, to_y)
-    var line = builder.finish() else return
-    defer line.release()
-    cpu_canvas_stroke_path(canvas, &line, &paint, &stroke)
+    let finished = builder.finish()
+    if finished == none:
+        cpu_stroke_release(&stroke)
+        return none
+    let line = finished else return none
+    return CpuLine(path = line, stroke = stroke)
+
+## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:44 Web::Painting::DisplayListPlayerSkia::draw_line (override).
+func display_list_player_cpu_draw_line_impl(base: DisplayListPlayer*, command: DrawLine):
+    var line = cpu_line_of(&command) else return
+    defer line.path.release()
+    defer cpu_stroke_release(&line.stroke)
+    let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
+    let paint = cpu_color_paint(command.color, true)
+    cpu_canvas_stroke_path(canvas, &line.path, &paint, &line.stroke)
 
 # mark: Backdrop filters, rects, clips, nesting ================================================
 

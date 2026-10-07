@@ -77,7 +77,7 @@ func test_gpu_frame(compositor: GpuCompositor*, texture: gpu.Texture, scene: con
     defer frame.release()
     let target = try frame.value().target()
     defer target.release()
-    try gpu_compositor_draw(compositor, scene.list, snapshot, target.value(), gpu.Format.rgba8, test_width, test_height, 1.0)
+    try gpu_compositor_draw(compositor, scene.list, snapshot, target.value(), gpu.Format.rgba8, test_width, test_height)
     _ = try frame.value().present(gpu.Color(0.0, 0.0, 0.0, 0.0))
     try texture.read(out)
 
@@ -169,6 +169,29 @@ test "gpu player: a path filled with a color is the CPU player's coverage":
                                                       winding_rule = gfx.WindingRule.even_odd, should_anti_alias = display_list.ShouldAntiAlias.yes)), 1)
     let snapshots = [test_snapshot(0.0, 0.0)]
     _ = test_compare("path", &scene, snapshots, 2, 0)
+
+test "gpu player: lines are the CPU player's strokes":
+    let scene = test_list()
+    test_background(&scene)
+    let styles = [gfx.LineStyle.solid, gfx.LineStyle.dotted, gfx.LineStyle.dashed]
+    for i in 0..<(i32)3:
+        test_add(&scene, .draw_line(display_list.DrawLine(color = test_rgba(0, 0, 200, 255), from_ = gfx.IntPoint(m_x = 20, m_y = 30 + i * 40), to = gfx.IntPoint(m_x = 650, m_y = 30 + i * 40),
+                                                          thickness = 1 + i * 2, style = styles[(usize)i], alternate_color = test_rgba(0, 0, 0, 0))), 1)
+    test_add(&scene, .draw_line(display_list.DrawLine(color = test_rgba(200, 0, 0, 255), from_ = gfx.IntPoint(m_x = 600, m_y = 10), to = gfx.IntPoint(m_x = 600, m_y = 290),
+                                                      thickness = 3, style = gfx.LineStyle.solid, alternate_color = test_rgba(0, 0, 0, 0))), 1)
+    let snapshots = [test_snapshot(0.0, 0.0), test_snapshot(0.0, 21.0)]
+    _ = test_compare("lines", &scene, snapshots, 2, 0)
+
+test "gpu player: outer box shadows are the CPU player's blurred masks":
+    let scene = test_list()
+    test_background(&scene)
+    for i in 0..<(i32)3:
+        let x = 40 + i * 220
+        test_add(&scene, .paint_outer_box_shadow(display_list.PaintOuterBoxShadow(color = test_rgba(0, 0, 0, 90), blur_radius = 6 + i * 8, device_content_rect = test_box(x, 60, 160, 120),
+                                                                                  content_corner_radii = test_radii(i * 10), shadow_rect = test_box(x + 4, 66, 160, 120), shadow_corner_radii = test_radii(i * 10))), 1)
+        test_add(&scene, .fill_rect_with_rounded_corners(display_list.FillRectWithRoundedCorners(rect = test_box(x, 60, 160, 120), color = test_rgba(255, 255, 255, 255), corner_radii = test_radii(i * 10))), 1)
+    let snapshots = [test_snapshot(0.0, 0.0), test_snapshot(0.0, 13.0)]
+    _ = test_compare("shadows", &scene, snapshots, 40, 300)
 
 test "gpu player: images are sampled as the CPU player samples them":
     let scene = test_list()

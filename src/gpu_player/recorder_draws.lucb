@@ -126,12 +126,12 @@ func gpu_fill_path_impl(base: display_list.DisplayListPlayer*, command: display_
         gpu_give_up(this, GpuFallback.atlas_full)
         return
     let anti_alias = command.should_anti_alias == display_list.ShouldAntiAlias.yes
-    # A path of moderate size is rastered whole, once: its coverage is the same wherever a
-    # whole-pixel translation puts it, so every tile it crosses shares it. A larger one is
-    # rastered for the part this tile shows.
+    # A small path is rastered whole, once: its coverage is the same wherever a whole-pixel
+    # translation puts it, so every tile it crosses shares it. A larger one (a box's border)
+    # is rastered for the part this tile shows, so the atlas is not filled with its interior.
     var area = bounds
     var key: u64? = none
-    if bounds.width <= 1024 and bounds.height <= 1024:
+    if bounds.width * bounds.height <= 512 * 512 and bounds.width <= 2048 and bounds.height <= 2048:
         var hash = gpu_hash(gpu_hash_start, (u64)(void*)(command.path.m_impl else return))
         hash = gpu_hash(hash, ((u64)(u32)bounds.x << 32) | (u64)(u32)bounds.y)
         hash = gpu_hash(hash, ((u64)(u32)bounds.width << 32) | (u64)(u32)bounds.height)
@@ -162,17 +162,139 @@ func gpu_fill_path_impl(base: display_list.DisplayListPlayer*, command: display_
 func gpu_path_coverage(command: const display_list.FillPath*, area: GpuRect, anti_alias: bool) -> u8[]?:
     var path = display_list.to_raster_path(&command.path) else return none
     defer path.path.release()
-    var pixmap = raster.Pixmap.new_((u32)area.width, (u32)area.height) else return none
+    var pixmap = gpu_coverage_pixmap(area) else return none
     defer pixmap.release()
+    var paint = gpu_white_paint(anti_alias)
+    pixmap.fill_path(&path.path, &paint, display_list.cpu_fill_rule(command.winding_rule), raster.Transform.from_translate((f32)-area.x, (f32)-area.y), none)
+    return gpu_alpha_of(&pixmap)
+
+## A transparent pixmap the size of `area`.
+func gpu_coverage_pixmap(area: GpuRect) -> raster.Pixmap?:
+    return raster.Pixmap.new_((u32)area.width, (u32)area.height)
+
+## Opaque white, anti-aliased or not: what coverage is drawn with.
+func gpu_white_paint(anti_alias: bool) -> raster.Paint:
     var paint = raster.Paint()
     paint.set_color(raster.Color.from_rgba8(255, 255, 255, 255))
     paint.anti_alias = anti_alias
-    pixmap.fill_path(&path.path, &paint, display_list.cpu_fill_rule(command.winding_rule), raster.Transform.from_translate((f32)-area.x, (f32)-area.y), none)
-    let coverage = (new u8[(usize)area.width * (usize)area.height] --- in memory.heap) else trap("gpu_player: out of memory")
+    return paint
+
+## The alpha channel of `pixmap`, one byte a pixel (in memory.heap).
+func gpu_alpha_of(pixmap: const raster.Pixmap*) -> u8[]:
+    let coverage = (new u8[(usize)pixmap.width() * (usize)pixmap.height()] --- in memory.heap) else trap("gpu_player: out of memory")
     let pixels = pixmap.pixels()
     for index in 0..<coverage.length:
         coverage[index] = pixels[index].alpha()
     return coverage
+
+# mark: Lines ===================================================================================
+
+func gpu_draw_line_impl(base: display_list.DisplayListPlayer*, command: display_list.DrawLine):
+    # DisplayListPlayerCpu::draw_line's stroke (cpu_line_of) as coverage: a short line once per
+    # shape (whole-pixel endpoints make it the same wherever it is), a long one for the part
+    # this tile shows.
+    let this = gpu_player_of(base)
+    if not gpu_recording(this):
+        return
+    if (command.color.m_value >> 24) == 0:
+        return
+    let local = gpu_rect_of(display_list.draw_line_bounding_rect(&command))
+    let bounds = GpuRect(x = local.x - 1, y = local.y - 1, width = local.width + 2, height = local.height + 2)
+    if not bounds.translated(this.state.dx, this.state.dy).intersects(this.state.clip):
+        return
+    let device = this.device else return
+    let texture = this.atlas.texture_on(device) catch failure:
+        gpu_give_up(this, GpuFallback.atlas_full)
+        return
+    var area = bounds
+    var key: u64? = none
+    if bounds.width * bounds.height <= 512 * 512 and bounds.width <= 2048 and bounds.height <= 2048:
+        var hash = gpu_hash(gpu_hash_start, ((u64)(u32)(command.to.m_x - command.from_.m_x) << 32) | (u64)(u32)(command.to.m_y - command.from_.m_y))
+        hash = gpu_hash(hash, ((u64)(u32)(command.from_.m_x - bounds.x) << 32) | (u64)(u32)(command.from_.m_y - bounds.y))
+        key = gpu_hash(hash, ((u64)(u32)command.thickness << 8) | (u64)command.style | 0x10000000000)
+    else:
+        area = bounds.translated(this.state.dx, this.state.dy).intersected(this.state.clip).translated(-this.state.dx, -this.state.dy)
+    var entry = GpuAtlasEntry()
+    if let k = key:
+        if let found = this.atlas.find(k):
+            entry = found
+    if entry.width == 0:
+        var line = display_list.cpu_line_of(&command) else return
+        defer line.path.release()
+        defer display_list.cpu_stroke_release(&line.stroke)
+        var pixmap = gpu_coverage_pixmap(area) else return
+        defer pixmap.release()
+        var paint = gpu_white_paint(true)
+        pixmap.stroke_path(&line.path, &paint, &line.stroke, raster.Transform.from_translate((f32)-area.x, (f32)-area.y), none)
+        let coverage = gpu_alpha_of(&pixmap)
+        defer free(coverage) in memory.heap
+        let placed = this.atlas.place(device, key, coverage, area.width, area.height, 0, 0) catch failure:
+            gpu_give_up(this, GpuFallback.atlas_full)
+            return
+        entry = placed else return
+    if not gpu_recording(this):
+        return
+    gpu_mask_draw(this, texture, entry, area.translated(this.state.dx, this.state.dy), gpu_premultiplied(command.color))
+
+# mark: Shadows =================================================================================
+
+func gpu_outer_box_shadow_impl(base: display_list.DisplayListPlayer*, command: display_list.PaintOuterBoxShadow):
+    # DisplayListPlayerCpu::paint_outer_box_shadow: the shadow's rounded rectangle, blurred,
+    # outside the content's rounded rectangle. The blurred mask is the CPU player's
+    # (cpu_blurred_rrect_mask), made once per shape, size and blur and kept in the atlas, as
+    # Skia keeps blur masks in its SkMaskCache.
+    let this = gpu_player_of(base)
+    if not gpu_recording(this):
+        return
+    if (command.color.m_value >> 24) == 0:
+        return
+    if this.state.rounded != none:
+        gpu_give_up(this, GpuFallback.nested_rounded_clip)
+        return
+    let shadow = gpu_rect_of(command.shadow_rect)
+    if shadow.width < 0 or shadow.height < 0:
+        return
+    let content = gpu_rect_of(command.device_content_rect).translated(this.state.dx, this.state.dy)
+    let saved = this.state
+    defer this.state = saved
+    this.state.rounded = GpuRoundedClip(rect = [(f32)content.x, (f32)content.y, (f32)content.width, (f32)content.height],
+                                        radii = gpu_normalized_radii(content, &command.content_corner_radii), mode = 2.0)
+    let placed = shadow.translated(this.state.dx, this.state.dy)
+    let sigma = (f32)(command.blur_radius // 2)
+    if sigma <= 0.0:
+        gpu_fill_shape(this, placed, gpu_normalized_radii(placed, &command.shadow_corner_radii), command.color, 0.0, false)
+        return
+    let device = this.device else return
+    let texture = this.atlas.texture_on(device) catch failure:
+        gpu_give_up(this, GpuFallback.atlas_full)
+        return
+    let radii = display_list.cpu_radii(&command.shadow_corner_radii)
+    var key = gpu_hash(gpu_hash_start, ((u64)(u32)shadow.width << 32) | (u64)(u32)shadow.height)
+    for i in 0..<(usize)4:
+        key = gpu_hash(key, ((u64)(i64)(radii.x[i] * 64.0) << 32) | (u64)(i64)(radii.y[i] * 64.0))
+    key = gpu_hash(key, (u64)(i64)(sigma * 64.0) | 0x20000000000)
+    var entry = this.atlas.find(key) else GpuAtlasEntry()
+    if entry.width == 0:
+        let local = raster.Rect.from_xywh(0.0, 0.0, (f32)shadow.width, (f32)shadow.height) else return
+        var made = display_list.cpu_blurred_rrect_mask(local, radii, sigma)
+        if made == none:
+            gpu_fill_shape(this, placed, gpu_normalized_radii(placed, &command.shadow_corner_radii), command.color, 0.0, false)
+            return
+        var mask = made else return
+        defer display_list.cpu_a8_mask_release(&mask)
+        if mask.width <= 0 or mask.height <= 0:
+            return
+        if mask.width > 2048 or mask.height > 2048:
+            gpu_give_up(this, GpuFallback.shadow)
+            return
+        let stored = this.atlas.place(device, key, mask.image, mask.width, mask.height, mask.left, mask.top) catch failure:
+            gpu_give_up(this, GpuFallback.atlas_full)
+            return
+        entry = stored else return
+    if not gpu_recording(this):
+        return
+    let dst = GpuRect(x = placed.x + entry.left, y = placed.y + entry.top, width = entry.width, height = entry.height)
+    gpu_mask_draw(this, texture, entry, dst, gpu_premultiplied(command.color))
 
 # mark: Images ==================================================================================
 

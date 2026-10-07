@@ -17,9 +17,11 @@
 #                   such a command, since an effect's group cannot be split between planes.
 #                   They are drawn again whenever an offset changes.
 #
-#       A layer is a maximal run of consecutive commands of one kind (and one S): paint order
-#       is kept by compositing layers in order. A layer's tiles also depend on the offsets of
-#       scroll frames other than S (a scroller inside the page): `gpu_layer_key` hashes them.
+#       A layer is a maximal run of consecutive commands of one kind, one S and one set of inner
+#       scroll frames (the scroll nodes below S: a scroller or a sticky box inside the page):
+#       paint order is kept by compositing layers in order. A layer's tiles depend on the offsets
+#       of its inner frames, which `gpu_layer_key` hashes, so a sticky header redraws its own
+#       layer only.
 #
 #       Copyright (c) 2026 the luce-browser authors.
 #       SPDX-License-Identifier: BSD-2-Clause
@@ -32,12 +34,15 @@ pub enum GpuLayerKind as u8:
     scrolled = 1
     dynamic = 2
 
-## A run of commands `first..<end` of one kind; `frame` is S for a scrolled layer.
+## A run of commands `first..<end` of one kind; `frame` is S for a scrolled layer, `inner` the
+## scroll frames below S its commands lie in (up to four; more make the layer dynamic).
 pub struct GpuLayer:
     pub var first: usize
     pub var end: usize
     pub var kind: GpuLayerKind
     pub var frame: u64
+    pub var inner: u64[4]
+    pub var inner_count: usize
 
 ## What the chain of a visual context node holds, for classifying commands.
 struct GpuNodeClass:
@@ -45,6 +50,11 @@ struct GpuNodeClass:
     var frame: u64
     ## Whether a node other than a scroll node lies above that outermost scroll node.
     var above: bool
+    ## The scroll frames of the scroll nodes below the outermost one (`inner_count` of them,
+    ## more than four marks the chain as needing a dynamic layer), and their hash.
+    var inner: u64[4]
+    var inner_count: usize
+    var inner_hash: u64
     ## Whether the chain holds an effects node a dynamic command shares.
     var tainted: bool
     ## Whether this node is an effects node a dynamic command lies under.
@@ -80,11 +90,21 @@ pub func gpu_layers_of(list: const display_list.DisplayList*) -> ak.Vector[GpuLa
     var index: usize = 0
     while index < count:
         let kind = kinds[index]
-        let frame = gpu_command_frame(ak.vector_at_const(commands, index), classes, kind)
+        let item = ak.vector_at_const(commands, index)
+        let frame = gpu_command_frame(item, classes, kind)
+        let inner = gpu_command_inner(item, classes, kind)
         var end = index + 1
-        while end < count and kinds[end] == kind and gpu_command_frame(ak.vector_at_const(commands, end), classes, kinds[end]) == frame:
+        while end < count and kinds[end] == kind:
+            let next = ak.vector_at_const(commands, end)
+            if gpu_command_frame(next, classes, kind) != frame or gpu_command_inner(next, classes, kind) != inner:
+                break
             end += 1
-        ak.vector_append_t(&layers, GpuLayer(first = index, end = end, kind = kind, frame = frame))
+        var layer = GpuLayer(first = index, end = end, kind = kind, frame = frame)
+        if kind == GpuLayerKind.scrolled:
+            let class = classes[(usize)item.context_index]
+            layer.inner = class.inner
+            layer.inner_count = class.inner_count
+        ak.vector_append_t(&layers, layer)
         index = end
     return layers
 
@@ -98,8 +118,16 @@ func gpu_classify_nodes(tree: const display_list.AccumulatedVisualContextTree*, 
         let parent = classes[(usize)node.parent_index]
         var own = GpuNodeClass()
         if parent.frame != 0:
-            own.frame = parent.frame
-            own.above = parent.above
+            own = parent
+            own.marked = false
+            own.tainted = false
+            match node.data:
+                .scroll_data(scroll):
+                    if own.inner_count < 4:
+                        own.inner[own.inner_count] = scroll.scroll_frame_index
+                    own.inner_count += 1
+                    own.inner_hash = gpu_hash(own.inner_hash, scroll.scroll_frame_index)
+                _: _ = 0
         else:
             match node.data:
                 .scroll_data(scroll):
@@ -120,13 +148,19 @@ func gpu_command_kind(item: const display_list.DisplayListCommandListItem*, clas
     let class = classes[(usize)item.context_index]
     if class.frame == 0:
         return GpuLayerKind.fixed
-    return GpuLayerKind.dynamic if class.above else GpuLayerKind.scrolled
+    return GpuLayerKind.dynamic if class.above or class.inner_count > 4 else GpuLayerKind.scrolled
 
 ## The scroll frame a command of `kind` moves with (0 unless scrolled).
 func gpu_command_frame(item: const display_list.DisplayListCommandListItem*, classes: GpuNodeClass[], kind: GpuLayerKind) -> u64:
     if kind != GpuLayerKind.scrolled:
         return 0
     return classes[(usize)item.context_index].frame
+
+## The hash of the inner scroll frames a command of `kind` lies in (0 unless scrolled).
+func gpu_command_inner(item: const display_list.DisplayListCommandListItem*, classes: GpuNodeClass[], kind: GpuLayerKind) -> u64:
+    if kind != GpuLayerKind.scrolled:
+        return 0
+    return classes[(usize)item.context_index].inner_hash
 
 ## Marks the effects nodes of `context`'s chain (stopping at one already marked).
 func gpu_mark_effects(tree: const display_list.AccumulatedVisualContextTree*, classes: GpuNodeClass[], context: u64):
@@ -150,20 +184,24 @@ func gpu_taint_nodes(tree: const display_list.AccumulatedVisualContextTree*, cla
 
 # mark: Keys and offsets ========================================================================
 
-## The hash of what `layer`'s tiles depend on besides their plane: the offsets of every scroll
-## frame but the layer's own (all of them for a dynamic layer, none for a fixed one).
+## The hash of what `layer`'s tiles depend on besides their plane: the offsets of its inner
+## scroll frames (of every frame for a dynamic layer, of none for a fixed one).
 pub func gpu_layer_key(layer: const GpuLayer*, snapshot: const display_list.ScrollStateSnapshot*) -> u64:
-    if layer.kind == GpuLayerKind.fixed:
-        return 0
-    var hash: u64 = 14695981039346656037
-    let offsets = ak.vector_span_const(&snapshot.m_device_offsets)
-    for index in 0..<offsets.length:
-        if layer.kind == GpuLayerKind.scrolled and (u64)index == layer.frame:
-            continue
-        let point = display_list.float_point_to_int_point(offsets[index])
-        hash = (hash ^ (u64)(u32)point.m_x) *% 1099511628211
-        hash = (hash ^ (u64)(u32)point.m_y) *% 1099511628211
+    var hash = gpu_hash_start
+    match layer.kind:
+        .fixed: return 0
+        .scrolled:
+            for i in 0..<layer.inner_count:
+                hash = gpu_hash(gpu_hash(hash, layer.inner[i]), gpu_offset_bits(snapshot, layer.inner[i]))
+        _:
+            for index in 0..<ak.vector_size(&snapshot.m_device_offsets):
+                hash = gpu_hash(hash, gpu_offset_bits(snapshot, (u64)index))
     return hash
+
+## Frame `index`'s offset as the player applies it, packed in 64 bits.
+func gpu_offset_bits(snapshot: const display_list.ScrollStateSnapshot*, index: u64) -> u64:
+    let point = display_list.float_point_to_int_point(display_list.scroll_state_snapshot_device_offset_for_index(snapshot, index))
+    return ((u64)(u32)point.m_x << 32) | (u64)(u32)point.m_y
 
 ## Where `layer`'s plane lies on the viewport: its scroll frame's offset as the player applies
 ## it (rounded toward zero), nothing for the other kinds.

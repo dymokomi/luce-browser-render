@@ -360,6 +360,28 @@ func cpu_canvas_fill_rrect_blurred(canvas: CpuCanvas*, rect: raster.Rect, radii0
         return
     cpu_canvas_fill_dev_path_blurred(canvas, &path, raster.FillRule.winding, paint, sigma)
 
+## The mask cpu_canvas_fill_rrect_blurred blits for `rect` with `radii0` and a blur of `sigma0`
+## under the identity transform, not limited by a clip: what the GPU player keeps in its atlas
+## (a whole-pixel translation moves the mask as it moves the shape). None when the blur draws
+## the shape plainly instead. The caller releases the mask.
+pub func cpu_blurred_rrect_mask(rect: raster.Rect, radii0: CpuRadii, sigma0: f32) -> CpuA8Mask?:
+    let sigma = cpu_xformed_sigma(raster.Transform.identity(), sigma0)
+    let radii = cpu_normalize_radii(rect, radii0)
+    if cpu_rrect_kind(rect, &radii) == CpuRRectKind.nine_patch:
+        match cpu_filter_rrect_to_nine(rect, radii, sigma):
+            .mask(value): return value
+            _: _ = 0
+    var path = cpu_rrect_path(rect, radii)
+    defer path.release()
+    if let bounds = cpu_path_as_rect(&path):
+        match cpu_filter_rect_to_nine(bounds, sigma):
+            .mask(value): return value
+            .nothing: return none
+            .unimplemented: _ = 0
+    let b = path.bounds()
+    let clip = cpu_round_out([b.left(), b.top(), b.right(), b.bottom()])
+    return cpu_blurred_path_mask(&path, raster.FillRule.winding, clip, sigma)
+
 ## SkRRect's type, as far as the blurred draw cares.
 enum CpuRRectKind:
     rect

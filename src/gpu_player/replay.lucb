@@ -128,18 +128,17 @@ func gpu_append_quad(vertices: ak.Vector[gpu.Vertex]*, record: const GpuRectReco
 
 # mark: CPU tiles ===============================================================================
 
-## Draws commands `layer.first..<layer.end` with the CPU player into `surface` (a square of
-## `size` pixels) from `origin` of the layer's plane, then uploads it into `texture` through
-## `pixels` (size * size * 4 bytes).
-pub func gpu_cpu_tile(player: display_list.DisplayListPlayerCpu*, list: display_list.DisplayList*, snapshot: const display_list.ScrollStateSnapshot*, layer: const GpuLayer*,
-                      origin: gfx.IntPoint, surface: gfx.PaintingSurface*, texture: gpu.Texture, pixels: u8[]) -> !:
-    gfx.painting_surface_lock_context(surface)
-    var pixmap = gfx.painting_surface_begin_raster(surface)
-    memory.set(pixmap.data_mut(), 0)
-    gfx.painting_surface_end_raster(surface)
-    gfx.painting_surface_unlock_context(surface)
-    display_list.display_list_player_execute_tile((display_list.DisplayListPlayer*)player, list, snapshot, surface, layer.first, layer.end, origin)
+## Draws commands `layer.first..<layer.end` with the CPU player into a new surface of a tile
+## from `origin` of the layer's plane, then uploads it into `texture` through `pixels` (a
+## tile's bytes). The player and the surface are made here, with the caller's allocator: the
+## CPU player keeps its pixels where an engine's collector expects them, and nothing the
+## compositor keeps points there.
+pub func gpu_cpu_tile(list: display_list.DisplayList*, snapshot: const display_list.ScrollStateSnapshot*, layer: const GpuLayer*,
+                      origin: gfx.IntPoint, texture: gpu.Texture, pixels: u8[]) -> !:
+    let player = display_list.display_list_player_cpu_create()
+    let surface = gfx.painting_surface_create_with_size(gfx.IntSize(m_width = gpu_tile_size, m_height = gpu_tile_size), gfx.BitmapFormat.bgra8888, gfx.AlphaType.premultiplied)
     let bitmap = gfx.painting_surface_bitmap(surface)
+    display_list.display_list_player_execute_tile((display_list.DisplayListPlayer*)player, list, snapshot, surface, layer.first, layer.end, origin)
     let width = gfx.bitmap_width(bitmap)
     let height = gfx.bitmap_height(bitmap)
     for y in 0..<height:

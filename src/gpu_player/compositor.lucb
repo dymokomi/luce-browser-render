@@ -49,8 +49,8 @@ pub struct GpuCompositor:
     var atlas: GpuAtlas
     var images: GpuImageCache
     var player: DisplayListPlayerGpu*?
-    var cpu_player: display_list.DisplayListPlayerCpu*?
-    var scratch: gfx.PaintingSurface*?
+    ## The allocator the CPU player draws with (the caller's; see gpu_cpu_tile).
+    var cpu_allocator: memory.Allocator?
     var pixels: u8[]
     var vertices: ak.Vector[gpu.Vertex]
     var list: const display_list.DisplayList*?
@@ -70,7 +70,8 @@ pub func gpu_compositor_create() -> GpuCompositor*:
 
 ## Releases everything the compositor holds (main thread, as every GPU call).
 pub func gpu_compositor_destroy(this: GpuCompositor*):
-    gpu_compositor_drop_device(this)
+    with memory.heap:
+        gpu_compositor_drop_device(this)
     if this.pixels.length > 0:
         free(this.pixels) in memory.heap
     free(this) in memory.heap
@@ -137,10 +138,6 @@ func gpu_compositor_open(this: GpuCompositor*, target: const gpu.RenderTarget*) 
     this.device = device
     this.pipelines = try gpu_pipelines_create(device)
     this.player = display_list_player_gpu_create(&this.atlas, &this.images)
-    if this.cpu_player == none:
-        this.cpu_player = display_list.display_list_player_cpu_create()
-    if this.scratch == none:
-        this.scratch = gfx.painting_surface_create_with_size(gfx.IntSize(m_width = gpu_tile_size, m_height = gpu_tile_size), gfx.BitmapFormat.bgra8888, gfx.AlphaType.premultiplied)
     if this.pixels.length == 0:
         this.pixels = try new u8[(usize)(gpu_tile_size * gpu_tile_size * 4)] --- in memory.heap
     return device
@@ -149,11 +146,23 @@ func gpu_compositor_open(this: GpuCompositor*, target: const gpu.RenderTarget*) 
 
 ## Draws `list` at `snapshot`'s scroll offsets onto `target` (a frame target of `target_format`,
 ## none for a presentation surface), the page's device pixel (0, 0) at the target's top left,
-## `scale` device pixels a point, covering `width` by `height` device pixels.
+## one device pixel a backing pixel of the target, covering `width` by `height` device pixels.
+## Everything the compositor keeps is in the process heap (an engine's collected heap would not
+## see the compositor's pointers into it); tiles the CPU player draws are drawn with
+## `cpu_allocator`, the heap the engine's painting uses (the process heap when none).
 pub func gpu_compositor_draw(this: GpuCompositor*, list: display_list.DisplayList*, snapshot: const display_list.ScrollStateSnapshot*, target: const gpu.RenderTarget*,
-                             target_format: gpu.Format?, width: i32, height: i32, scale: f64) -> !:
+                             target_format: gpu.Format?, width: i32, height: i32, cpu_allocator: memory.Allocator? = none) -> !:
     if width <= 0 or height <= 0:
         return
+    this.cpu_allocator = cpu_allocator
+    with memory.heap:
+        try gpu_compositor_draw_frame(this, list, snapshot, target, target_format, width, height)
+
+## gpu_compositor_draw's work, in the process heap.
+func gpu_compositor_draw_frame(this: GpuCompositor*, list: display_list.DisplayList*, snapshot: const display_list.ScrollStateSnapshot*, target: const gpu.RenderTarget*,
+                               target_format: gpu.Format?, width: i32, height: i32) -> !:
+    let extent = try target.size()
+    let scale = extent.pixel_width / extent.width if extent.width > 0.0 else 1.0
     let device = try gpu_compositor_open(this, target)
     var pipelines = this.pipelines else trap("gpu_player: no pipelines")
     let copy = try pipelines.composite_for(device, gpu.Format.rgba8_linear)
@@ -238,9 +247,12 @@ func gpu_compositor_tile(this: GpuCompositor*, device: gpu.Device, list: display
         gpu_player_stats_the.cpu_tiles += 1
         let texture = try gpu_compositor_texture(this, device)
         tile.texture = texture
-        let cpu = this.cpu_player else trap("gpu_player: no CPU player")
-        let scratch = this.scratch else trap("gpu_player: no scratch surface")
-        try gpu_cpu_tile(cpu, list, plane, layer, gfx.IntPoint(m_x = x, m_y = y), scratch, texture, this.pixels)
+        let origin = gfx.IntPoint(m_x = x, m_y = y)
+        if let allocator = this.cpu_allocator:
+            with allocator:
+                try gpu_cpu_tile(list, plane, layer, origin, texture, this.pixels)
+        else:
+            try gpu_cpu_tile(list, plane, layer, origin, texture, this.pixels)
     elif player.is_empty():
         gpu_player_stats_the.empty_tiles += 1
     else:
@@ -253,43 +265,62 @@ func gpu_compositor_tile(this: GpuCompositor*, device: gpu.Device, list: display
     ak.vector_append_t(&this.tiles, tile)
     return tile
 
-## Releases the least recently used tiles (not this frame's) past the budget.
+## Releases the least recently used tiles past the budget (never this frame's: a page whose
+## frame needs more keeps them), and forgets empty tiles not used for a while.
 func gpu_compositor_evict(this: GpuCompositor*):
+    # When the older tiles were last used, newest first.
+    var stamps: ak.Vector[u64]
+    defer ak.vector_clear(&stamps)
     var resident: usize = 0
+    var stale = false
     for tile in ak.vector_span_const(&this.tiles):
         if tile.texture != none:
             resident += 1
-    if resident > gpu_tile_budget or ak.vector_size(&this.tiles) > gpu_tile_budget * 4:
-        # Keep this frame's tiles and the most recent others up to the budget.
-        var kept: ak.Vector[GpuTile]
-        var budget = gpu_tile_budget
-        var age: u64 = 0
-        while age < 64:
-            for tile in ak.vector_span_const(&this.tiles):
-                if this.frame - tile.used == age and (tile.texture == none or budget > 0):
-                    ak.vector_append_t(&kept, tile)
-                    if tile.texture != none:
-                        budget -= 1
-            age += 1
-        for tile in ak.vector_span_const(&this.tiles):
-            if this.frame - tile.used >= 64 or not gpu_tile_kept(&kept, tile.key):
-                if let texture = tile.texture:
-                    gpu_compositor_recycle(this, texture)
-        ak.vector_clear(&this.tiles)
-        this.tiles = kept
-        this.keys.clear()
-        for index in 0..<ak.vector_size(&this.tiles):
-            this.keys.put(ak.vector_at(&this.tiles, index).key, (u32)index)
-        resident = gpu_tile_budget - budget
-    gpu_player_stats_the.resident_tiles = (u64)resident
-    gpu_player_stats_the.resident_bytes = (u64)(resident + ak.vector_size(&this.pool)) * (u64)(gpu_tile_size * gpu_tile_size * 4) + this.images.resident_bytes() + (u64)(gpu_atlas_size * gpu_atlas_size)
+            if tile.used < this.frame:
+                ak.vector_append_t(&stamps, tile.used)
+        elif this.frame - tile.used > 64:
+            stale = true
+    let older = ak.vector_span(&stamps)
+    let current = resident - older.length
+    let allowed = gpu_tile_budget - current if gpu_tile_budget > current else 0
+    if older.length <= allowed and not stale:
+        gpu_compositor_note_memory(this, resident)
+        return
+    for i in 1..<older.length:
+        let value = older[i]
+        var j = i
+        while j > 0 and older[j - 1] < value:
+            older[j] = older[j - 1]
+            j -= 1
+        older[j] = value
+    # Tiles last used at or before `cutoff` go (none when the budget holds them all).
+    let cutoff: u64 = older[allowed] if allowed < older.length else 0
+    let dropping = allowed < older.length
+    var kept: ak.Vector[GpuTile]
+    resident = 0
+    for tile in ak.vector_span_const(&this.tiles):
+        if let texture = tile.texture:
+            if dropping and tile.used <= cutoff:
+                gpu_compositor_recycle(this, texture)
+                continue
+            resident += 1
+        elif this.frame - tile.used > 64:
+            continue
+        ak.vector_append_t(&kept, tile)
+    ak.vector_clear(&this.tiles)
+    this.tiles = kept
+    this.keys.clear()
+    for index in 0..<ak.vector_size(&this.tiles):
+        this.keys.put(ak.vector_at(&this.tiles, index).key, (u32)index)
+    gpu_compositor_note_memory(this, resident)
 
-## Whether `kept` holds a tile of `key`.
-func gpu_tile_kept(kept: const ak.Vector[GpuTile]*, key: u64) -> bool:
-    for tile in ak.vector_span_const(kept):
-        if tile.key == key:
-            return true
-    return false
+## Counts the GPU memory held: resident tiles, pooled textures, images, the atlas and the frame.
+func gpu_compositor_note_memory(this: const GpuCompositor*, resident: usize):
+    let tile_bytes = (u64)(gpu_tile_size * gpu_tile_size * 4)
+    gpu_player_stats_the.resident_tiles = (u64)resident
+    let tiles = (u64)(resident + ak.vector_size(&this.pool)) * tile_bytes
+    let frame = (u64)this.frame_width * (u64)this.frame_height * 4
+    gpu_player_stats_the.resident_bytes = tiles + this.images.resident_bytes() + (u64)(gpu_atlas_size * gpu_atlas_size) + frame
 
 ## `a` divided by `b` (positive), rounded down.
 func gpu_floor_div(a: i32, b: i32) -> i32:

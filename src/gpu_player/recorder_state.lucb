@@ -149,9 +149,6 @@ func gpu_radial_gradient_impl(base: display_list.DisplayListPlayer*, command: di
 func gpu_conic_gradient_impl(base: display_list.DisplayListPlayer*, command: display_list.PaintConicGradient):
     gpu_give_up(gpu_player_of(base), GpuFallback.gradient)
 
-func gpu_outer_box_shadow_impl(base: display_list.DisplayListPlayer*, command: display_list.PaintOuterBoxShadow):
-    gpu_give_up(gpu_player_of(base), GpuFallback.shadow)
-
 func gpu_inner_box_shadow_impl(base: display_list.DisplayListPlayer*, command: display_list.PaintInnerBoxShadow):
     gpu_give_up(gpu_player_of(base), GpuFallback.shadow)
 
@@ -166,9 +163,6 @@ func gpu_draw_ellipse_impl(base: display_list.DisplayListPlayer*, command: displ
 
 func gpu_fill_ellipse_impl(base: display_list.DisplayListPlayer*, command: display_list.FillEllipse):
     gpu_give_up(gpu_player_of(base), GpuFallback.ellipse)
-
-func gpu_draw_line_impl(base: display_list.DisplayListPlayer*, command: display_list.DrawLine):
-    gpu_give_up(gpu_player_of(base), GpuFallback.line)
 
 func gpu_backdrop_filter_impl(base: display_list.DisplayListPlayer*, command: display_list.ApplyBackdropFilter):
     gpu_give_up(gpu_player_of(base), GpuFallback.backdrop_filter)
