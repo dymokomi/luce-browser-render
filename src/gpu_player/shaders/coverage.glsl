@@ -12,11 +12,25 @@
 float rrect_coverage(vec2 p, vec4 rect, vec4 radii0, vec4 radii1) {
     vec2 lo = rect.xy;
     vec2 hi = rect.xy + rect.zw;
-    bvec2 low = lessThan(p, (lo + hi) * 0.5);
-    // The corner the point is nearest to, and its radii.
-    vec2 r = low.x ? (low.y ? radii0.xy : radii1.zw) : (low.y ? radii0.zw : radii1.xy);
-    vec2 q = p - mix(hi - r, lo + r, low);
-    if (r.x > 0.0 && r.y > 0.0 && all(equal(lessThan(q, vec2(0.0)), low)) && all(notEqual(q, vec2(0.0)))) {
+    // The corner whose ellipse's box holds the point (fitted radii never overlap, but one
+    // corner may reach past the middle), and that ellipse's center.
+    vec2 r = vec2(0.0);
+    vec2 center = vec2(0.0);
+    if (p.x < lo.x + radii0.x && p.y < lo.y + radii0.y) {
+        r = radii0.xy;
+        center = lo + r;
+    } else if (p.x > hi.x - radii0.z && p.y < lo.y + radii0.w) {
+        r = radii0.zw;
+        center = vec2(hi.x - r.x, lo.y + r.y);
+    } else if (p.x > hi.x - radii1.x && p.y > hi.y - radii1.y) {
+        r = radii1.xy;
+        center = hi - r;
+    } else if (p.x < lo.x + radii1.z && p.y > hi.y - radii1.w) {
+        r = radii1.zw;
+        center = vec2(lo.x + r.x, hi.y - r.y);
+    }
+    if (r.x > 0.0 && r.y > 0.0) {
+        vec2 q = p - center;
         float f = length(q / r);
         float g = length(q / (r * r));
         float distance = g > 0.0 ? f * (f - 1.0) / g : -min(r.x, r.y);

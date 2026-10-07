@@ -82,7 +82,10 @@ func gpu_apply_transform_impl(base: display_list.DisplayListPlayer*, origin: gfx
     about = gfx.float_matrix4_x4_mul(&about, matrix)
     about = gfx.float_matrix4_x4_mul(&about, gfx.translation_matrix(gfx.FloatVector3([-origin.m_x, -origin.m_y, 0.0])))
     let m = about.m_elements
-    if m[3][0] != 0.0 or m[3][1] != 0.0 or m[3][3] != 1.0:
+    # Only a 2D matrix: a z row or column (perspective, a 3D rotation) changes how later
+    # transforms compose, which the CPU player's 4x4 keeps.
+    let flat = m[0][2] == 0.0 and m[1][2] == 0.0 and m[2][0] == 0.0 and m[2][1] == 0.0 and m[2][2] == 1.0 and m[2][3] == 0.0 and m[3][2] == 0.0
+    if not flat or m[3][0] != 0.0 or m[3][1] != 0.0 or m[3][3] != 1.0:
         gpu_give_up(this, GpuFallback.perspective)
         return
     let local = raster.Transform.from_row(m[0][0], m[1][0], m[0][1], m[1][1], m[0][3], m[1][3])
