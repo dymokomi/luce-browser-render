@@ -5,7 +5,7 @@
 #
 #   DESCRIPTION:
 #       The test fonts live in tests/web_fonts/fonts (see NOTICE there); `luce-base test`
-#       runs from the repository root (test.sh). tests_oracle.lucb holds the expectations,
+#       runs from the repository root (luc test). tests_oracle.lucb holds the expectations,
 #       printed by a local program over the reference build's LibGfx (Skia's FreeType
 #       backend with the FontConfig font manager, as Ladybird's test mode forces, and
 #       HarfBuzz; DESIGN.md §6.7).

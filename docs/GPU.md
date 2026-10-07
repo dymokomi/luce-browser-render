@@ -1,0 +1,196 @@
+# The GPU player
+
+How luce-browser draws pages on the GPU: the design, how it is checked and measured,
+its budgets, and the plan. The owner's goal: the best browser there is, very fast,
+small, with a small memory footprint, on luce-gpu (Metal on macOS, Vulkan on Windows
+and Linux).
+
+## Where it started
+
+Painting records a display list (Ladybird's `DisplayList`: commands, each under a node
+of an `AccumulatedVisualContextTree` of clips, transforms, effects and scroll frames).
+`DisplayListPlayerCpu`, a port of Skia m144's raster pipeline that matches Ladybird's
+Skia output pixel for pixel, replayed the whole list every frame; the view copied the
+frame out (`webview_copy_frame`) and luced-browser uploaded it as a texture. A scroll
+changes only the scroll state, yet every frame re-rastered everything: 128 ms a frame on
+a plain text page, 300 to 500 ms on real ones (tables below). Profiles showed blur masks
+and rounded-clip masks rebuilt every frame (a clip mask is the size of the whole surface),
+image mipmaps rebuilt, glyph masks rastered per draw, and three full-frame copies.
+
+## What others do, and what we take
+
+| | Skia Ganesh (Ladybird) | Skia Graphite | WebRender (Firefox) | Chrome (cc + Skia) | Vello |
+| --- | --- | --- | --- | --- | --- |
+| Frame model | replay the list every frame | replay; recordings, fewer state changes | retained display list, picture caching by tile | layers, 256-512 px tiles, raster on GPU | full scene per frame, compute |
+| Scrolling | re-raster (Ladybird scrolls in the list) | same | tiles cached per spatial node, moved | tiles moved by the compositor | re-render |
+| Text | glyph atlas, instanced quads | atlas | glyph cache atlas, instanced | atlas (Skia) | atlas or paths |
+| Paths | tessellation, MSAA, or CPU mask (software path renderer) | tessellation, atlas of coverage masks | CPU-rastered masks into a mask atlas | Skia | GPU compute coverage |
+| Blurs, shadows | GPU blur; rrect shadows analytic; CPU blur masks cached (SkMaskCache) | GPU | box shadows: cached blur masks, nine-patch | Skia | not yet |
+| Clips | stencil, analytic rrect FP | analytic, depth | clip masks in an atlas, rect clips as scissors | Skia | compute |
+
+Ladybird replays its whole list on the GPU every frame and lets the GPU's speed carry it.
+That is the least code, but it spends GPU time and battery on pixels that did not change,
+and a CPU fallback for anything the GPU path lacks would then cost every frame. Chrome
+and WebRender keep rastered tiles across frames and move them on scroll: the cheapest
+scroll there is, and the only design where a CPU fallback per tile stays affordable.
+Vello's compute coverage is the long-term answer for complex paths but needs compute in
+luce-gpu and is a large body of work; it is a later milestone.
+
+So the player is WebRender-shaped: **retained tiles per scroll plane, rastered once,
+composited each frame**, with Skia-style techniques inside a tile (glyph atlas, cached
+blur masks, CPU-rastered coverage masks for paths, analytic rounded rectangles and
+clips), and the CPU player both as the reference and as the per-tile fallback. No Skia
+GPU code is ported: luce-gpu's fragment shaders and the CPU player's own coverage and
+mask code do it all.
+
+## Architecture
+
+Module `gpu_player` (luce-browser-render, Base), per view one `GpuCompositor`:
+
+1. **Layers** (`layers.lucb`). Each command's visual-context chain says what its pixels
+   depend on: *fixed* (no scroll node), *scrolled* (the chain starts with scroll node S,
+   usually the viewport's; inner scroll nodes, such as sticky boxes and scrollers, are
+   remembered), or *dynamic* (a non-scroll node above S, a scroll bar, or a command sharing
+   an effect group with a dynamic one, since a group cannot be split between planes). A
+   layer is a maximal run of commands with the same kind, S and inner frames; layers are
+   composited in paint order. A layer's plane is S's content with S's offset at zero.
+2. **Tiles** (`compositor.lucb`). 512-pixel tiles of each layer's plane, found by
+   `hash(layer index, offsets of its inner frames, tile position)`, kept in `rgba8_linear`
+   textures while the display list stays the same. A tile where nothing draws keeps no
+   texture. A scroll moves tiles by S's offset (rounded as the CPU player rounds it) and
+   draws only the uncovered ones. Least-recently-used tiles go past a budget (96 tiles;
+   the current frame's are never dropped); textures are pooled.
+3. **Raster** (`recorder*.lucb`, `replay.lucb`). `DisplayListPlayerGpu` (class id 2) is
+   driven by Ladybird's own loop (`display_list_player_execute_tile`: a command range,
+   moved by the tile's origin), so visual contexts, culling and scroll offsets are the
+   CPU player's. It records draws, then replays them as one luce-gpu texture frame. If it
+   meets a command or state it does not support, it gives the tile up and the CPU player
+   draws that tile (with the engine's allocator) and it is uploaded.
+4. **Composite.** Tiles composite into a frame texture of the viewport, then the frame
+   texture is drawn onto the window's target with an sRGB decode.
+
+**Color.** Web content blends in the encoded space (Skia's legacy raster does, and so
+does the reference). luce-gpu's surfaces blend in linear light, so tiles and the frame
+texture are `rgba8_linear` holding encoded premultiplied bytes, and only the last pass
+decodes (`shaders/composite.frag`). An encoded-space surface in luce-gpu would remove the
+frame texture and that pass (request 1).
+
+**Caches.** The coverage atlas (one r8 2048² texture, shelf-packed) holds glyph masks
+keyed by strike and quarter-pixel phase (rastered once per process with the CPU player's
+`sk_strike_glyph_mask`, so text is the reference's coverage), path and line coverage
+(small shapes once per shape, large ones per tile), and blurred shadow masks keyed by size,
+radii and blur (`cpu_blurred_rrect_mask`, Skia's SkMaskCache idea). When it fills it starts
+again (the tile drawing at that moment goes to the CPU). Images are uploaded once per
+bitmap as premultiplied textures (64 MiB budget, LRU).
+
+**Commands.**
+
+| Command | GPU technique |
+| --- | --- |
+| `fill_rect` | one triangle batch per run under one scissor (exact: integer rectangles) |
+| `fill_rect_with_rounded_corners`, `draw_rect`, scroll bars | `fill.frag`: exact box coverage on straight edges, distance to the ellipse at corners; strokes as outer minus inner |
+| `add_clip_rect`, rect clip nodes | scissor (integer, exact) |
+| `add_rounded_rect_clip`, rounded clip nodes | analytic in every shader, one at a time (inside or outside) |
+| `draw_glyph_run` | glyph atlas, one `mask.frag` draw per glyph (instancing: request 2) |
+| `fill_path` (color) | CPU coverage (the reference's own scan converter) in the atlas, `mask.frag` |
+| `draw_line` | the reference's stroke (`cpu_line_of`) rastered to coverage, `mask.frag` |
+| `paint_outer_box_shadow` | the reference's blur mask, cached in the atlas, under the content's outside clip |
+| `draw_scaled_immutable_bitmap` | `image.frag`, nearest or bilinear in the shader on premultiplied texels |
+| whole-pixel `translate`, translation-only transforms, effects that change nothing, `save_layer` | state only |
+| everything else | the tile goes to the CPU player |
+
+What falls back today: non-translation transforms, opacity/blend/filter effects, clip
+paths, a second rounded clip, gradients, inner and text shadows, ellipses, stroked and
+painted paths, repeated or minified (mipmapped) images, color-managed images, nested
+display lists (iframes), external content, vertical text and text over 256 px.
+
+## Correctness
+
+The CPU player is the reference: it matches Ladybird's Skia, and the GPU player must match
+it within a fuzzy bound, as Ladybird's ref tests compare (a channel may be off by a little;
+a few pixels may be off by more).
+
+- `gpu_player/tests_gpu_player.lucb`: scenes drawn both ways and compared (rectangles,
+  clips and translations, at two scroll offsets: off by at most 2 per channel; paths, lines
+  and images: at most 2; rounded rectangles and clips: corner pixels within 40; outer
+  shadows: within 40 on at most 300 pixels; a scroll that must move kept tiles and send
+  only a gradient's tile to the CPU).
+- `webview/tests_webview_gpu.lucb`: a real page through the engine, before and after a
+  wheel scroll, against the CPU player's frame of the same display list.
+- `tools/scroll_bench --player both`: real pages compared every 16th frame.
+- Next: run web_test's Ref and Screenshot corpus with the GPU player (a `--player gpu`
+  mode for web_test drawing into an offscreen texture), with per-test fuzzy metadata.
+
+Where the GPU differs: anti-aliased corners of rounded rectangles (analytic coverage vs
+Skia's scan conversion), large paths rastered per tile (an edge clipped at a tile seam is
+set up differently), and blend rounding (float vs Skia's 8-bit lowp). On the saved Verge
+and the shadows page under 1.2% of pixels differ by more than 2, all on such edges.
+
+## Measuring
+
+Without a window, from the engine's root:
+
+```sh
+luce-base build tools/scroll_bench -o build/scroll_bench --release
+build/scroll_bench tests/scroll_bench/*.html SCRATCH/pages/*/index.html --frames 60 --player cpu|gpu|both [--layers]
+python3 -I tools/scroll_bench/save_page.py https://news.ycombinator.com/ SCRATCH/pages/hn
+python3 ../luced-browser/tools/binary_size.py ../luced-browser/build/luced-browser
+```
+
+A frame is a 40 CSS-pixel wheel scroll at 1280x800 points, device pixel ratio 2, and its
+time is the main thread's work until the frame reaches the GPU (CPU: rastered and copied
+out; GPU: drawn into an offscreen texture and waited for). Real pages are saved to scratch,
+not committed (licenses). Measured on an Apple M-series Mac, release builds, luce-base
+164f3d76.
+
+### Frame time
+
+| Page | CPU avg | CPU p95 | GPU avg | GPU p95 | GPU tiles / CPU tiles over 60 frames |
+| --- | ---: | ---: | ---: | ---: | --- |
+BASELINE_TABLE
+
+### Memory
+
+| | Peak resident |
+| --- | ---: |
+MEMORY_TABLE
+
+### Binary size (luced-browser, release, arm64)
+
+| | Bytes |
+| --- | ---: |
+| main (CPU player only) | 27,083,016 (21,927,336 stripped) |
+| gpu/player | 27,360,840 (22,179,784 stripped): +271 KiB |
+| of which `gpu_player` code | 172,576 |
+
+Largest code by module: `luce_browser_engine_web` 6.8 MB (39%),
+`luce_browser_foundation_ak` 1.8 MB (generic instantiations), `text_codec` 1.3 MB
+(encoding tables in code), `luce_tls_roots` 0.76 MB, `raster` 0.71 MB, brotli 0.49 MB.
+Read-only data (`__const`) is 3.3 MB; the symbol table 5.2 MB (strip it in releases).
+
+## Budgets
+
+- **Scroll**: a frame that only moves tiles under 2 ms on the main thread at 2560x1600;
+  p95 under 8 ms (a frame rastering one new row of GPU tiles); no CPU tile on the pages of
+  `tests/scroll_bench` and on gnu.org, Hacker News, Wikipedia.
+- **GPU memory**: tiles at most twice the viewport per layer, 96 tiles (96 MiB) in all;
+  atlas 4 MiB; images 64 MiB; frame texture 4 bytes a pixel until request 1 removes it.
+- **Process memory**: today 1.35 GiB resident before a page loads. That is not drawing:
+  `PathFontProvider` reads every system font file into memory (and copies it once more),
+  where Ladybird maps them. Mapping them is the largest single memory win available
+  (target: under 150 MiB resident for an empty view). In GPU mode the view still keeps
+  two full-frame back stores it no longer draws into (32 MiB at 2560x1600), and display
+  lists are never freed.
+- **Binary**: the GPU player under 250 KiB of code; the shaders under 40 KiB.
+
+## Plan
+
+| Milestone | What | Measured by |
+| --- | --- | --- |
+| M1 (this branch) | tiles kept across scrolls; rects, rounded rects, borders (paths), lines, text atlas, images, rect and one rounded clip, outer shadows on the GPU; CPU per tile otherwise | GPU avg 1.4-13 ms on the saved pages vs 128-480 ms CPU |
+| M2 | gradients (linear, radial, conic in a shader with the CPU's stop math), opacity groups (an offscreen tile layer), translation+scale transforms, inner and text shadows (cached masks), mipmapped images (request 5) | no CPU tiles on the six saved pages; web_test Ref with `--player gpu` within fuzzy bounds |
+| M3 | raster budget per frame with prefetch ahead of the scroll; spatial binning of a layer's commands per tile (one pass records bounds); instanced glyphs (request 2); encoded surfaces (request 1) | p95 under 8 ms on every saved page |
+| M4 | memory: mapped fonts, no back stores in GPU mode, freed display lists, tile reuse across display-list changes (diff by command ranges) | empty view under 150 MiB; Wikipedia under 400 MiB |
+| M5 | nested clips and clip paths (request 6), filters and backdrop filters, 3D transforms; Vello-style compute coverage for big paths | all of web_test's Ref and Screenshot through the GPU player |
+
+The requests to luce-gpu are in [GPU-LUCE-GPU-REQUESTS.md](GPU-LUCE-GPU-REQUESTS.md).
