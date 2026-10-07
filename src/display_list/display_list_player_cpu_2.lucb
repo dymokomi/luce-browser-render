@@ -527,7 +527,7 @@ func display_list_player_cpu_paint_scrollbar_impl(base: DisplayListPlayer*, comm
 
 ## `Gfx::to_skia_blender`: the raster blend mode of a compositing operator; plus-darker is
 ## composited by hand (CpuLayerEffects.plus_darker), so it answers source-over.
-func cpu_blend_mode(compositing_and_blending_operator: gfx.CompositingAndBlendingOperator) -> raster.BlendMode:
+pub func cpu_blend_mode(compositing_and_blending_operator: gfx.CompositingAndBlendingOperator) -> raster.BlendMode:
     match compositing_and_blending_operator:
         .normal: return raster.BlendMode.source_over
         .multiply: return raster.BlendMode.multiply

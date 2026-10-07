@@ -81,6 +81,8 @@ pub enum GpuDrawKind as u8:
     fill = 1
     mask = 2
     image = 3
+    layer_begin = 4
+    layer_end = 5
 
 ## A solid rectangle of a `rects` draw: whole pixels and a straight color in stored values.
 struct GpuRectRecord:
@@ -94,6 +96,7 @@ let gpu_kind_mask: f32 = 2.0
 let gpu_kind_image: f32 = 3.0
 let gpu_kind_composite: f32 = 4.0
 let gpu_kind_clip: f32 = 5.0
+let gpu_kind_blend: f32 = 6.0
 
 ## Where tile.frag's uniforms keep the clip mode, the clip mask flag, the kind, and the kind's
 ## own values; the analytic clip's rectangle and radii come first.
@@ -134,14 +137,28 @@ struct GpuMaskJob:
     var clips: GpuRoundedClip[8]
     var count: usize
 
-## The drawing state: a translation, a scissor (in tile pixels), a rounded clip and the clip
-## mask around it (1 + the player's mask, 0 for none).
+## The drawing state: a translation, a scissor (in tile pixels), a rounded clip, the clip mask
+## around it (1 + the player's mask, 0 for none), and the layer drawn into (1 + the player's
+## layer, 0 for the tile).
 struct GpuState:
     var dx: i32
     var dy: i32
     var clip: GpuRect
     var rounded: GpuRoundedClip?
     var mask: u32
+    var layer: u32
+
+## The most layers open at once in a tile's recording.
+let gpu_layer_depth: u32 = 8
+
+## A layer (SkCanvas::saveLayer): drawn into its own texture, then composited at `opacity` with
+## `blend` (raster.BlendMode's value; 29 the plus-darker blender) under the clips of `outer`,
+## the state when it was saved; `depth` counts the layers it lies in, itself included.
+struct GpuLayerJob:
+    var opacity: f32
+    var blend: u32
+    var outer: GpuState
+    var depth: u32
 
 # mark: The player ==============================================================================
 
@@ -156,6 +173,7 @@ pub struct DisplayListPlayerGpu: display_list.IsDisplayListPlayer:
     ## Every reason met (a bit per GpuFallback), for reports.
     var reasons: u32
     var masks: ak.Vector[GpuMaskJob]
+    var layers: ak.Vector[GpuLayerJob]
     ## What the recording draws with, and the tile it draws into when it has to before it
     ## ends (`flushed` once it has).
     var device: gpu.Device?
@@ -193,6 +211,7 @@ pub func display_list_player_gpu_destroy(this: DisplayListPlayerGpu*):
     ak.vector_clear(&this.rects)
     ak.vector_clear(&this.saved)
     ak.vector_clear(&this.masks)
+    ak.vector_clear(&this.layers)
     this.replay.release()
     free(this) in memory.heap
 
@@ -202,6 +221,7 @@ pub func display_list_player_gpu_begin(this: DisplayListPlayerGpu*, device: gpu.
     ak.vector_clear(&this.rects)
     ak.vector_clear(&this.saved)
     ak.vector_clear(&this.masks)
+    ak.vector_clear(&this.layers)
     this.state = GpuState(clip = GpuRect(width = size, height = size))
     this.unsupported = none
     this.reasons = 0
@@ -220,6 +240,10 @@ pub func display_list_player_gpu_flushed(this: const DisplayListPlayerGpu*) -> b
 ## and atlas entries stay. A failure gives the tile up.
 func gpu_flush(this: DisplayListPlayerGpu*):
     if ak.vector_is_empty(&this.draws):
+        return
+    # A layer still open cannot be drawn in parts.
+    if this.state.layer != 0:
+        gpu_give_up(this, GpuFallback.atlas_full)
         return
     let pipelines = this.pipelines else return
     let tile = this.tile else return
@@ -271,6 +295,32 @@ func gpu_append(this: DisplayListPlayerGpu*, draw: GpuDraw):
     var masked = draw
     masked.mask = this.state.mask
     ak.vector_append_t(&this.draws, masked)
+
+## Opens a layer composited at `opacity` with `blend` (see GpuLayerJob): what is drawn until the
+## restore that ends it goes into the layer, clipped by the scissor only (Skia clips a layer's
+## contents to its bounds, the prior clip's, and applies the clip when it draws the layer back).
+## `reason` gives the tile up past the depth limit.
+func gpu_begin_layer(this: DisplayListPlayerGpu*, opacity: f32, blend: u32, reason: GpuFallback):
+    if not gpu_recording(this):
+        return
+    var depth: u32 = 1
+    if this.state.layer != 0:
+        depth = ak.vector_at(&this.layers, (usize)this.state.layer - 1).depth + 1
+    if depth > gpu_layer_depth:
+        gpu_give_up(this, reason)
+        return
+    ak.vector_append_t(&this.layers, GpuLayerJob(opacity = opacity, blend = blend, outer = this.state, depth = depth))
+    let index = ak.vector_size(&this.layers)
+    ak.vector_append_t(&this.draws, GpuDraw(kind = GpuDrawKind.layer_begin, scissor = this.state.clip, first = index - 1))
+    this.state.layer = (u32)index
+    this.state.rounded = none
+    this.state.mask = 0
+
+## Ends the open layer: replay composites it into what it was saved over.
+func gpu_end_layer(this: DisplayListPlayerGpu*):
+    let index = (usize)this.state.layer - 1
+    let job = ak.vector_at(&this.layers, index)
+    ak.vector_append_t(&this.draws, GpuDraw(kind = GpuDrawKind.layer_end, scissor = job.outer.clip, first = index))
 
 ## Moves the analytic rounded clip into the clip mask (one more clip multiplied), leaving
 ## no analytic clip; reuses a mask of the same clips. False (the tile is given up) past the

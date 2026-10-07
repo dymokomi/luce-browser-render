@@ -21,14 +21,17 @@
 //                       width, height, filter (0 nearest, 1 bilinear clamped to its edges as
 //                       Skia's kClamp image shader samples, 2 the sampler's trilinear) and
 //                       opacity
-//   kind 4  composite   the texture at binding 1 with its top left at k0.xy, texel for pixel,
-//                       times k0.w; decoded from sRGB first when k0.z is 1 (the frame texture
-//                       onto a linear-light target)
+//   kind 4  composite   a layer: the texture at binding 1 with its top left at k0.xy, texel for
+//                       pixel, times k0.w (its opacity)
 //   kind 5  clip        one clip of a nested clip into an r8 clip mask cleared to 1: an `over`
 //                       draw of color 0 with alpha 1 - coverage leaves mask * coverage
+//   kind 6  blend       a layer (binding 1) at opacity k0.x blended by mode k0.y (blend.glsl)
+//                       with the target's pixels copied to binding 3, lerped by the clips'
+//                       coverage (Plus scales the layer by it instead), drawn without blending
 #version 450
 #extension GL_GOOGLE_include_directive : require
 #include "coverage.glsl"
+#include "blend.glsl"
 layout(location = 0) in vec4 vertex_color;
 layout(location = 1) flat in vec4 a;
 layout(location = 2) flat in vec4 b;
@@ -46,6 +49,7 @@ layout(push_constant) uniform Params {
 } params;
 layout(set = 0, binding = 1) uniform sampler2D source;
 layout(set = 0, binding = 2) uniform sampler2D clip_mask;
+layout(set = 0, binding = 3) uniform sampler2D backdrop;
 
 const int kind_shapes = 0;
 const int kind_rrect = 1;
@@ -53,26 +57,7 @@ const int kind_mask = 2;
 const int kind_image = 3;
 const int kind_composite = 4;
 const int kind_clip = 5;
-
-// The coverage of a rounded rectangle filled, or stroked `stroke` pixels wide around its
-// edge; a pixel is in or out by its center when `aliased`.
-float shape_coverage(vec2 p, vec4 rect, vec4 radii0, vec4 radii1, float stroke, float aliased) {
-    float coverage;
-    if (stroke > 0.0) {
-        float h = stroke * 0.5;
-        vec4 outer = vec4(rect.xy - h, rect.zw + 2.0 * h);
-        vec4 inner = vec4(rect.xy + h, rect.zw - 2.0 * h);
-        // Square corners stay square (a mitered frame); rounded ones grow and shrink by h.
-        vec4 grow0 = radii0 + h * step(vec4(1e-4), radii0);
-        vec4 grow1 = radii1 + h * step(vec4(1e-4), radii1);
-        float outer_coverage = rrect_coverage(p, outer, grow0, grow1);
-        float inner_coverage = inner.z > 0.0 && inner.w > 0.0 ? rrect_coverage(p, inner, max(radii0 - h, 0.0), max(radii1 - h, 0.0)) : 0.0;
-        coverage = clamp(outer_coverage - inner_coverage, 0.0, 1.0);
-    } else {
-        coverage = rrect_coverage(p, rect, radii0, radii1);
-    }
-    return aliased > 0.5 ? step(0.5, coverage) : coverage;
-}
+const int kind_blend = 6;
 
 // The straight 8-bit channels of a pair packed as high * 256 + low.
 vec2 unpacked(float pair) {
@@ -120,27 +105,64 @@ vec4 image_color(vec2 p) {
     return mix(top, bottom, f.y);
 }
 
-vec3 srgb_decode(vec3 v) {
-    return mix(v / 12.92, pow((v + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), v));
-}
-
 void main() {
     vec2 p = gl_FragCoord.xy;
     int kind = int(params.control.z);
-    float clip = clip_coverage(p, params.control.x, params.clip_rect, params.clip_radii0, params.clip_radii1);
+    bool shape = kind == kind_shapes || kind == kind_rrect;
+    // The shape of a shapes or rrect draw: its rectangle, radii, stroke width and aliasing.
+    vec4 radii0 = kind == kind_shapes ? b.xxyy : b;
+    vec4 radii1 = kind == kind_shapes ? b.zzww : c;
+    float stroke = kind == kind_shapes ? c.z : params.k1.x;
+    float aliased = kind == kind_shapes ? c.w : params.k1.y;
+    // The rounded rectangles the pixel's coverage needs, evaluated at one call site (the
+    // program stays small): the clip (0), and a shape's outer (1) and inner (2) edges. A
+    // stroke's edges are the rectangle grown and shrunk by half its width; square corners stay
+    // square (a mitered frame), rounded ones grow and shrink with it.
+    float h = stroke * 0.5;
+    vec4 rects[3] = vec4[3](params.clip_rect, a, vec4(0.0));
+    vec4 corners0[3] = vec4[3](params.clip_radii0, radii0, vec4(0.0));
+    vec4 corners1[3] = vec4[3](params.clip_radii1, radii1, vec4(0.0));
+    if (stroke > 0.0) {
+        rects[1] = vec4(a.xy - h, a.zw + 2.0 * h);
+        corners0[1] = radii0 + h * step(vec4(1e-4), radii0);
+        corners1[1] = radii1 + h * step(vec4(1e-4), radii1);
+        rects[2] = max(vec4(a.xy + h, a.zw - 2.0 * h), vec4(-1e9, -1e9, 0.0, 0.0));
+        corners0[2] = max(radii0 - h, 0.0);
+        corners1[2] = max(radii1 - h, 0.0);
+    }
+    float covered[3] = float[3](1.0, 0.0, 0.0);
+    int last = shape ? (stroke > 0.0 ? 3 : 2) : 1;
+    for (int i = params.control.x > 0.5 ? 0 : 1; i < last; i++) {
+        covered[i] = rrect_coverage(p, rects[i], corners0[i], corners1[i]);
+    }
+    // What the rounded clip lets through: mode 0 no clip, 1 the inside, 2 the outside.
+    float clip = params.control.x < 0.5 ? 1.0 : (params.control.x < 1.5 ? covered[0] : 1.0 - covered[0]);
     if (kind == kind_clip) {
         fragment_color = vec4(0.0, 0.0, 0.0, 1.0 - clip);
         return;
     }
+    if (kind == kind_blend) {
+        ivec2 at = ivec2(floor(p));
+        vec4 layer = texelFetch(source, at, 0) * params.k0.x;
+        vec4 below = texelFetch(backdrop, at, 0);
+        float cover = clip * mask_coverage(clip_mask, p, params.control.y);
+        int mode = int(params.k0.y);
+        fragment_color = mode == 12 ? blend(mode, layer * cover, below) : mix(below, blend(mode, layer, below), cover);
+        return;
+    }
     vec4 color;
     float coverage = 1.0;
-    if (kind == kind_shapes) {
-        coverage = shape_coverage(p, a, b.xxyy, b.zzww, c.z, c.w);
-        vec4 straight = vec4(unpacked(c.x), unpacked(c.y));
-        color = vec4(straight.rgb * straight.a, straight.a);
-    } else if (kind == kind_rrect) {
-        coverage = shape_coverage(p, a, b, c, params.k1.x, params.k1.y);
-        color = params.k0;
+    if (shape) {
+        coverage = clamp(covered[1] - covered[2], 0.0, 1.0);
+        if (aliased > 0.5) {
+            coverage = step(0.5, coverage);
+        }
+        if (kind == kind_shapes) {
+            vec4 straight = vec4(unpacked(c.x), unpacked(c.y));
+            color = vec4(straight.rgb * straight.a, straight.a);
+        } else {
+            color = params.k0;
+        }
     } else if (kind == kind_mask) {
         coverage = mask_texel(ivec2(floor(p - a.xy)));
         color = b;
@@ -149,9 +171,6 @@ void main() {
         coverage = params.k1.w;
     } else {
         color = texelFetch(source, ivec2(floor(p - params.k0.xy)), 0);
-        if (params.k0.z > 0.5) {
-            color = color.a > 0.0 ? vec4(srgb_decode(color.rgb / color.a) * color.a, color.a) : vec4(0.0);
-        }
         coverage = params.k0.w;
     }
     coverage *= clip * mask_coverage(clip_mask, p, params.control.y);

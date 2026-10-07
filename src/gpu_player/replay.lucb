@@ -32,6 +32,7 @@ pub struct GpuPipelines:
     var shader: gpu.Shader
     var composite_shader: gpu.Shader
     var tile: gpu.Pipeline
+    var tile_replace: gpu.Pipeline
     var clip: gpu.Pipeline
     ## The composite pipeline per frame target format (index 8: a presentation surface).
     var composite: (gpu.Pipeline?)[9]
@@ -48,6 +49,7 @@ pub struct GpuPipelines:
     ## Releases every pipeline and the shader.
     pub func release():
         self.tile.destroy()
+        self.tile_replace.destroy()
         self.clip.destroy()
         for index in 0..<(usize)9:
             if let pipeline = self.composite[index]:
@@ -61,6 +63,7 @@ pub func gpu_pipelines_create(device: gpu.Device) -> GpuPipelines!:
     let shader = try gpu.Shader.create(device, tile_frag_words, tile_frag_msl)
     let composite_shader = try gpu.Shader.create(device, composite_frag_words, composite_frag_msl)
     return GpuPipelines(shader = shader, composite_shader = composite_shader, tile = try gpu.Pipeline.create(device, shader, gpu.Blend.over, gpu.Format.rgba8_linear),
+                        tile_replace = try gpu.Pipeline.create(device, shader, gpu.Blend.replace, gpu.Format.rgba8_linear),
                         clip = try gpu.Pipeline.create(device, shader, gpu.Blend.over, gpu.Format.r8))
 
 ## The uniforms of a composite (composite.frag): the texture with its top left at (`x`, `y`) of
@@ -70,10 +73,13 @@ pub func gpu_composite_uniforms(x: f32, y: f32, decode: bool) -> f32[3]:
 
 # mark: Replay state ============================================================================
 
-## What replay keeps between tiles: the clip masks' textures (one per mask of a recording,
-## reused tile after tile), and scratch lists.
+## What replay keeps between tiles: the clip masks' textures (one per mask of a recording),
+## the layers' (one per depth) and the backdrop a blend mode reads, reused tile after tile;
+## and scratch lists.
 pub struct GpuReplay:
     var masks: ak.Vector[gpu.Texture]
+    var layers: ak.Vector[gpu.Texture]
+    var backdrop: gpu.Texture?
     var instances: ak.Vector[gpu.ShadeInstance]
     var vertices: ak.Vector[gpu.Vertex]
 
@@ -83,6 +89,14 @@ pub struct GpuReplay:
             var handle = texture
             handle.destroy()
         ak.vector_clear(&self.masks)
+        for texture in ak.vector_span(&self.layers):
+            var handle = texture
+            handle.destroy()
+        ak.vector_clear(&self.layers)
+        if let texture = self.backdrop:
+            var handle = texture
+            handle.destroy()
+            self.backdrop = none
         ak.vector_clear(&self.instances)
         ak.vector_clear(&self.vertices)
 
@@ -129,35 +143,139 @@ struct GpuTileFrame:
 
 # mark: GPU tiles ===============================================================================
 
+## A texture being drawn into while a tile replays: the tile's, or an open layer's, its frame,
+## the draws in that frame, and whether the frame samples the layer texture one deeper (a
+## frame's draws run when it is presented, so that texture cannot take another layer before).
+struct GpuReplayTarget:
+    var texture: gpu.Texture?
+    var frame: GpuTileFrame
+    var draws: usize
+    var samples_layer: bool
+
+    ## Begins drawing into `texture`, over its contents when `keep`.
+    func open(texture: gpu.Texture, keep: bool) -> !:
+        self.texture = texture
+        self.draws = 0
+        self.samples_layer = false
+        try self.frame.open(texture, keep)
+
+    ## Presents what is drawn and begins again over it.
+    func split() -> !:
+        let texture = self.texture else trap("gpu_player: no replay target")
+        try self.frame.present()
+        try self.frame.open(texture, true)
+        self.draws = 0
+        self.samples_layer = false
+
 ## Draws `player`'s recording into `texture` (`size` pixels square): cleared first, or over
-## what it holds when `keep`.
+## what it holds when `keep`. A layer's draws go into a texture of their own, composited into
+## the target below when the layer ends.
 pub func gpu_replay_tile(player: DisplayListPlayerGpu*, pipelines: const GpuPipelines*, texture: gpu.Texture, size: i32, keep: bool) -> !:
     try player.atlas.submit_uploads()
     try gpu_render_masks(player, pipelines, size)
-    var tile = GpuTileFrame()
-    try tile.open(texture, keep)
-    errdefer tile.release()
+    var targets: GpuReplayTarget[9]
+    var depth: usize = 0
+    try targets[0].open(texture, keep)
+    errdefer:
+        for level in 0..<depth + 1:
+            targets[level].frame.release()
     let bounds = GpuRect(width = size, height = size)
     let draws = ak.vector_span_const(&player.draws)
     var index: usize = 0
-    var in_frame: usize = 0
     while index < draws.length:
-        if in_frame == gpu_frame_draws:
-            try tile.present()
-            try tile.open(texture, true)
-            in_frame = 0
+        let kind = draws[index].kind
+        if kind == GpuDrawKind.layer_begin:
+            if depth + 1 == 9:
+                trap("gpu_player: layers deeper than the recording allows")
+            let layer = try gpu_layer_texture(player, depth, size)
+            if targets[depth].samples_layer:
+                try targets[depth].split()
+            depth += 1
+            try targets[depth].open(layer, false)
+            index += 1
+            continue
+        if kind == GpuDrawKind.layer_end:
+            if depth == 0:
+                trap("gpu_player: a layer ends that did not begin")
+            try targets[depth].frame.present()
+            let layer = targets[depth].texture else trap("gpu_player: no layer texture")
+            depth -= 1
+            try gpu_composite_layer(player, pipelines, &targets[depth], layer, ak.vector_at_const(&player.layers, draws[index].first), size)
+            index += 1
+            continue
+        if targets[depth].draws == gpu_frame_draws:
+            try targets[depth].split()
         let scissor = draws[index].scissor.intersected(bounds)
         if scissor.is_empty():
             index += 1
             continue
-        let view = try tile.target().clipped(gpu.Rect((f64)scissor.x, (f64)scissor.y, (f64)scissor.width, (f64)scissor.height))
+        let view = try targets[depth].frame.target().clipped(gpu.Rect((f64)scissor.x, (f64)scissor.y, (f64)scissor.width, (f64)scissor.height))
         let used = gpu_replay_run(player, pipelines, view.value(), draws, index, size) catch failure:
             view.release()
             error(failure.code, failure.message)
         view.release()
         index += used
-        in_frame += 1
-    try tile.present()
+        targets[depth].draws += 1
+    # A recording given up mid-layer has no ends for its layers: their contents are dropped.
+    while depth > 0:
+        targets[depth].frame.release()
+        depth -= 1
+    try targets[0].frame.present()
+
+## The texture of the layer opened at `depth` (layers at one depth never overlap in time).
+func gpu_layer_texture(player: DisplayListPlayerGpu*, depth: usize, size: i32) -> gpu.Texture!:
+    let device = player.device else trap("gpu_player: no device")
+    while ak.vector_size(&player.replay.layers) <= depth:
+        ak.vector_append_t(&player.replay.layers, try gpu.Texture.create(device, (u32)size, (u32)size, gpu.Format.rgba8_linear))
+    return *ak.vector_at(&player.replay.layers, depth)
+
+## Composites `layer` into `target` as `job` says, under the clips it was saved under: an
+## `over` draw at the layer's opacity, or for another blend mode a draw that reads the target
+## as it is (a copy, the backdrop) and writes the blend of the two, lerped by the clips'
+## coverage as Skia's raster pipeline lerps it.
+func gpu_composite_layer(player: DisplayListPlayerGpu*, pipelines: const GpuPipelines*, target: GpuReplayTarget*, layer: gpu.Texture, job: const GpuLayerJob*, size: i32) -> !:
+    let scissor = job.outer.clip.intersected(GpuRect(width = size, height = size))
+    if scissor.is_empty():
+        return
+    var uniforms: f32[32]
+    if let clip = job.outer.rounded:
+        for i in 0..<(usize)4:
+            uniforms[i] = clip.rect[i]
+        for i in 0..<(usize)8:
+            uniforms[4 + i] = clip.radii[i]
+        uniforms[gpu_uniform_clip_mode] = clip.mode
+    var clip_mask: gpu.Texture? = none
+    if job.outer.mask != 0:
+        uniforms[gpu_uniform_mask] = 1.0
+        clip_mask = *ak.vector_at_const(&player.replay.masks, (usize)job.outer.mask - 1)
+    let instance = gpu.ShadeInstance(rect = [(f32)scissor.x, (f32)scissor.y, (f32)scissor.width, (f32)scissor.height])
+    if target.draws == gpu_frame_draws:
+        try target.split()
+    target.draws += 1
+    target.samples_layer = true
+    if job.blend == (u32)raster.BlendMode.source_over:
+        uniforms[gpu_uniform_kind] = gpu_kind_composite
+        uniforms[gpu_uniform_header + 3] = job.opacity
+        let view = try target.frame.target().clipped(gpu.Rect((f64)scissor.x, (f64)scissor.y, (f64)scissor.width, (f64)scissor.height))
+        defer view.release()
+        try gpu_shade_run(pipelines, view.value(), [instance], &uniforms[0], layer, clip_mask, gpu.Filter.nearest)
+        return
+    # The target's pixels so far, copied where the blend reads them.
+    let device = player.device else trap("gpu_player: no device")
+    let texture = target.texture else trap("gpu_player: no replay target")
+    if player.replay.backdrop == none:
+        player.replay.backdrop = try gpu.Texture.create(device, (u32)size, (u32)size, gpu.Format.rgba8_linear)
+    let backdrop = player.replay.backdrop else trap("gpu_player: no backdrop")
+    try target.split()
+    target.samples_layer = true
+    try gpu.copy_texture(texture, gpu.Region((u32)scissor.x, (u32)scissor.y, (u32)scissor.width, (u32)scissor.height), backdrop, (u32)scissor.x, (u32)scissor.y)
+    uniforms[gpu_uniform_kind] = gpu_kind_blend
+    uniforms[gpu_uniform_header] = job.opacity
+    uniforms[gpu_uniform_header + 1] = (f32)job.blend
+    let view = try target.frame.target().clipped(gpu.Rect((f64)scissor.x, (f64)scissor.y, (f64)scissor.width, (f64)scissor.height))
+    defer view.release()
+    let bytes = u8[]((u8*)&uniforms[0], 128)
+    try gpu.shade_instances(view.value(), pipelines.tile_replace, [instance], bytes, [layer, clip_mask else layer, backdrop], gpu.Filter.nearest)
 
 ## Renders the recording's clip masks, each into its texture (r8, the tile's size): cleared
 ## to 1, then each clip multiplied in.

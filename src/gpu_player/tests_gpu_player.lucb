@@ -295,3 +295,47 @@ test "gpu player: a full atlas grows and draws on, without a CPU tile":
     # The resident count holds the atlas: 4096 squared once it grew.
     if stats.resident_bytes < (u64)(gpu_atlas_largest * gpu_atlas_largest):
         trap("the atlas did not grow")
+
+## Appends an effects node (opacity, blend operator) under node `parent`; answers its index.
+func test_effects(scene: const TestList*, opacity: f32, operator: gfx.CompositingAndBlendingOperator, parent: u64) -> u64:
+    let data = display_list.EffectsData(opacity = opacity, blend_mode = operator, gfx_filter = none)
+    return display_list.accumulated_visual_context_tree_append(scene.tree, display_list.VisualContextData.effects_data(data), parent)
+
+test "gpu player: opacity groups, blend modes and isolated groups are layers on the GPU":
+    let scene = test_list()
+    # The background in the plane the blends are in: a blend reads only what its plane drew.
+    test_add(&scene, .fill_rect(display_list.FillRect(rect = test_box(0, -20, test_width, test_height + 40), color = test_rgba(250, 250, 245, 255))), 1)
+    # Stripes under everything, so the blend modes have a backdrop to blend with.
+    for i in 0..<(i32)14:
+        test_add(&scene, .fill_rect(display_list.FillRect(rect = test_box(i * 50, 0, 25, 300), color = test_rgba((u8)(i * 18), 120, (u8)(255 - i * 18), 255))), 1)
+    # A group at half opacity: its overlapping shapes do not show through each other.
+    let half = test_effects(&scene, 0.5, gfx.CompositingAndBlendingOperator.normal, 1)
+    test_add(&scene, .fill_rect(display_list.FillRect(rect = test_box(20, 20, 120, 80), color = test_rgba(220, 40, 40, 255))), half)
+    test_add(&scene, .fill_rect_with_rounded_corners(display_list.FillRectWithRoundedCorners(rect = test_box(70, 50, 120, 80), color = test_rgba(40, 40, 220, 255), corner_radii = test_radii(20))), half)
+    # Blend modes, separable and not.
+    let operators = [gfx.CompositingAndBlendingOperator.multiply, gfx.CompositingAndBlendingOperator.screen, gfx.CompositingAndBlendingOperator.overlay,
+                     gfx.CompositingAndBlendingOperator.difference, gfx.CompositingAndBlendingOperator.color_burn, gfx.CompositingAndBlendingOperator.soft_light,
+                     gfx.CompositingAndBlendingOperator.hue, gfx.CompositingAndBlendingOperator.luminosity]
+    for i in 0..<(usize)8:
+        let node = test_effects(&scene, 0.8, operators[i], 1)
+        test_add(&scene, .fill_rect(display_list.FillRect(rect = test_box(220 + (i32)i * 55, 30, 45, 120), color = test_rgba(250, (u8)(60 + i * 20), 30, 200))), node)
+    # An isolated group masked by a rounded rectangle composited with destination-in, as CSS
+    # masks are drawn.
+    test_add(&scene, .save_layer(display_list.SaveLayer()), 1)
+    test_add(&scene, .fill_rect(display_list.FillRect(rect = test_box(40, 170, 260, 110), color = test_rgba(20, 160, 90, 255))), 1)
+    let mask = test_effects(&scene, 1.0, gfx.CompositingAndBlendingOperator.destination_in, 1)
+    test_add(&scene, .fill_rect_with_rounded_corners(display_list.FillRectWithRoundedCorners(rect = test_box(60, 180, 200, 90), color = test_rgba(0, 0, 0, 255), corner_radii = test_radii(45))), mask)
+    test_add(&scene, .restore(display_list.Restore()), 1)
+    # A translucent group under a rounded clip: the clip applies when the layer is drawn back.
+    test_add(&scene, .save(display_list.Save()), 1)
+    test_add(&scene, .add_rounded_rect_clip(display_list.AddRoundedRectClip(corner_radii = test_radii(30), border_rect = test_box(360, 170, 300, 110), corner_clip = display_list.CornerClip.outside)), 1)
+    let clipped = test_effects(&scene, 0.6, gfx.CompositingAndBlendingOperator.normal, 1)
+    test_add(&scene, .fill_rect(display_list.FillRect(rect = test_box(340, 160, 340, 130), color = test_rgba(240, 200, 30, 255))), clipped)
+    test_add(&scene, .restore(display_list.Restore()), 1)
+    let snapshots = [test_snapshot(0.0, 0.0), test_snapshot(0.0, 11.0)]
+    # Layers composite in floats where Skia's raster pipeline rounds in 8 bits; the corner
+    # pixels of the rounded clip, the mask and the group's shape differ as analytic coverage
+    # differs from scan conversion (about 420 of them).
+    let stats = test_compare("layers", &scene, snapshots, 3, 500) else return
+    if stats.cpu_tiles > 0:
+        trap("a layer sent a tile to the CPU player")
