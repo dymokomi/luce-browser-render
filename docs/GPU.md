@@ -147,13 +147,45 @@ not committed (licenses). Measured on an Apple M-series Mac, release builds, luc
 
 | Page | CPU avg | CPU p95 | GPU avg | GPU p95 | GPU tiles / CPU tiles over 60 frames |
 | --- | ---: | ---: | ---: | ---: | --- |
-BASELINE_TABLE
+| text.html (local) | 139 | 154 | 3.3 | 8.1 | 120 / 0 |
+| shadows.html (local) | 374 | 473 | 9.4 | 60 | 107 / 39 |
+| boxes.html (local) | over 60,000 | | 15.5 | 95 | 81 / 65 |
+| gnu.org | 926 | 1,030 | 41.7 | 284 | 179 / 91 |
+| Hacker News | 498 | 800 | 4.1 | 16.5 | 220 / 5 |
+| Wikipedia (Web browser) | 148 | 235 | 7.9 | 25.7 | 81 / 65 |
+| The Verge | 1,027 | 1,151 | 13.2 | 73.6 | 234 / 101 |
+
+CPU: 12 frames (40 for text and shadows gave the same), GPU: 60 frames; times in ms.
+boxes.html's CPU frames did not finish 3 frames in 27 minutes: 160 cards each clip with
+a rounded rectangle, and the CPU player builds a clip mask the size of the whole surface
+for each. Before the float intrinsics landed (luce-base 2903eb9), the CPU player measured
+116 / 138 ms on text.html, 310 / 383 on shadows.html and 480 / 507 on Hacker News.
+
+Where the GPU frames still cost: a frame that uncovers a row of tiles the CPU must draw
+(gnu.org's shadows and gradients, the Verge's transforms and inner shadows) takes 50 to
+300 ms; frames that only move tiles take 1 to 3 ms. The CPU tiles column is the whole
+reason for the p95 column. Why tiles fell back, over 60 frames: gnu.org shadow 65
+(inner and text shadows), gradient 20, image 6 (minified); the Verge shadow 52,
+transform 43, effects 2, nested rounded clip 2, atlas full 2; Wikipedia effects 51,
+ellipse 13, nested display list 1; boxes.html nested rounded clip 60, atlas full 5;
+Hacker News gradient 5.
 
 ### Memory
 
 | | Peak resident |
 | --- | ---: |
-MEMORY_TABLE
+| engine initialized, no page | 1,350-1,430 MiB |
+| text.html, CPU / GPU | 1,757 / 1,549 MiB |
+| shadows.html, CPU / GPU | 1,704 / 1,540 MiB |
+| gnu.org, CPU / GPU | 1,802 / 1,726 MiB |
+| Hacker News, CPU / GPU | 1,648 / 1,636 MiB |
+| Wikipedia, CPU / GPU | 1,975 / 1,968 MiB |
+| The Verge, CPU / GPU | 2,681 / 2,630 MiB |
+| GPU player's own textures (tiles, pool, atlas, images, frame) | 118-127 MiB |
+
+Each page in its own process; peak resident set (on Apple silicon the GPU's textures are
+in the same memory, but Metal's private textures are not counted in the process's
+resident set).
 
 ### Binary size (luced-browser, release, arm64)
 
@@ -187,7 +219,7 @@ Read-only data (`__const`) is 3.3 MB; the symbol table 5.2 MB (strip it in relea
 
 | Milestone | What | Measured by |
 | --- | --- | --- |
-| M1 (this branch) | tiles kept across scrolls; rects, rounded rects, borders (paths), lines, text atlas, images, rect and one rounded clip, outer shadows on the GPU; CPU per tile otherwise | GPU avg 1.4-13 ms on the saved pages vs 128-480 ms CPU |
+| M1 (this branch) | tiles kept across scrolls; rects, rounded rects, borders (paths), lines, text atlas, images, rect and one rounded clip, outer shadows on the GPU; CPU per tile otherwise | GPU average 3-42 ms on the seven pages vs 139-1,027 ms CPU (table above) |
 | M2 | gradients (linear, radial, conic in a shader with the CPU's stop math), opacity groups (an offscreen tile layer), translation+scale transforms, inner and text shadows (cached masks), mipmapped images (request 5) | no CPU tiles on the six saved pages; web_test Ref with `--player gpu` within fuzzy bounds |
 | M3 | raster budget per frame with prefetch ahead of the scroll; spatial binning of a layer's commands per tile (one pass records bounds); instanced glyphs (request 2); encoded surfaces (request 1) | p95 under 8 ms on every saved page |
 | M4 | memory: mapped fonts, no back stores in GPU mode, freed display lists, tile reuse across display-list changes (diff by command ranges) | empty view under 150 MiB; Wikipedia under 400 MiB |
