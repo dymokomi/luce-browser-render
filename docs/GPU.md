@@ -64,12 +64,17 @@ Module `gpu_player` (luce-browser-render, Base), per view one `GpuCompositor`:
    driven by Ladybird's own loop (`display_list_player_execute_tile`: a command range,
    moved by the tile's origin), so visual contexts, culling and scroll offsets are the
    CPU player's. It records draws, then replays them as luce-gpu texture frames: runs of
-   glyph and path masks and of rounded rectangles with circular corners become one
-   instanced draw each (`shade_instances`; `glyphs.frag`, `shapes.frag`), and a tile with
-   more than a frame's 4,000 draws goes on in a frame that keeps what the first drew
-   (`Texture.frame(keep)`). If it meets a command or state it does not support, it gives
-   the tile up and the CPU player draws that tile (with the engine's allocator) and it is
-   uploaded.
+   glyph, path and shadow masks and of rounded rectangles with circular corners become one
+   instanced draw each (`shade_instances`), and a tile with more than a frame's 4,000 draws
+   goes on in a frame that keeps what the first drew (`Texture.frame(keep)`). Every draw
+   is one fragment program, `shaders/tile.frag` (a header of the analytic clip, the clip
+   mask flag and the draw's kind, then the kind's values), so the coverage code is
+   embedded once; only the composite, which covers the screen every frame, has its own
+   small program (`composite.frag`). Layers (`save_layer`, opacity, blend modes) are
+   textures of their own, one per depth, composited when their save is restored. If the
+   recording meets a command or state it does not support, it gives the tile up and the
+   CPU player draws that tile (one CPU player and surface per frame, with the engine's
+   allocator) and it is uploaded.
 4. **Composite.** On a target that blends on encoded values (luced-browser's window, an
    encoded luce-gpu surface; or an `rgba8_linear` texture) tiles composite straight onto it.
    On any other they composite into a frame texture of the viewport, which is then drawn
@@ -80,23 +85,32 @@ does the reference). Tiles are `rgba8_linear` holding encoded premultiplied byte
 luced-browser opens its window with `Blending.encoded` (luce-ui's `Application(blending)`),
 so the compositor asks the target (`RenderTarget.blending()`, `pixel_format()`) and draws
 tiles onto it directly: no frame texture (16 MiB at 2560x1600) and no decode pass. A linear
-target still gets both (`shaders/composite.frag`).
+target still gets both (`shaders/composite.frag`). `tools/shaders.sh` embeds the shaders
+(SPIR-V without debug names, its locals made SSA values, nothing inlined, and its Metal
+translation).
 
 **Caches.** The coverage atlas (one r8 2048² texture, shelf-packed) holds glyph masks
 keyed by strike and quarter-pixel phase (rastered once per process with the CPU player's
 `sk_strike_glyph_mask`, so text is the reference's coverage), path and line coverage
-(small shapes once per shape, large ones per tile), and blurred shadow masks keyed by size,
-radii and blur (`cpu_blurred_rrect_mask`, Skia's SkMaskCache idea). When a mask does not
+(small shapes once per shape, large ones per tile, rastered 16 pixels past the tile so the
+scan converter's edge clipping does not change the visible pixels), and blurred shadows as
+the small nine-patch Skia blurs (`cpu_blurred_rrect_nine`, filterRectsToNine and
+filterRRectToNine; the shader stretches it as draw_nine does), keyed by size, radii and
+blur (Skia's SkMaskCache idea). When a mask does not
 fit, the tile being recorded draws what it has into its texture first, then the atlas grows
 once to 4096 texels a side by a GPU copy (`copy_texture`, every entry kept), and after that
 starts again; no tile goes to the CPU for it. Images are uploaded once per bitmap as
 premultiplied textures (64 MiB budget, LRU); an image drawn smaller with mipmapped sampling
-gets a mipmapped texture (`generate_mipmaps`), sampled trilinearly.
+gets Skia's own mip levels (raster's downsampler) packed beside it, and the shader blends
+the two levels SkMipmapAccessor picks (`raster.mipmap_choice`). Gradients' stage programs
+go into a float table per recording (1 MiB), uploaded before the tile's frames.
 
 **Clips.** Rectangle clips are scissors. The innermost rounded clip is analytic in every
 shader; the rounded clips around it go into a clip mask, an r8 texture of the tile rendered
-before the tile's frame (`clip.frag` multiplies each clip in: an `over` draw of color 0 and
-alpha 1 - coverage), which the shaders sample at binding 2. A tile holds up to 32 masks of
+before the tile's frame (tile.frag's clip kind multiplies each clip in: an `over` draw of
+color 0 and alpha 1 - coverage), which the shaders sample at binding 2. A rounded
+rectangle's coverage takes the corner whose ellipse's box holds the pixel (a corner may
+reach past the middle). A tile holds up to 32 masks of
 up to 8 clips each; identical clip stacks share one.
 
 **Commands.**
@@ -104,22 +118,17 @@ up to 8 clips each; identical clip stacks share one.
 | Command | GPU technique |
 | --- | --- |
 | `fill_rect` | one triangle batch per run under one scissor (exact: integer rectangles) |
-| `fill_rect_with_rounded_corners`, `draw_rect`, scroll bars | `fill.frag`: exact box coverage on straight edges, distance to the ellipse at corners; strokes as outer minus inner |
-| `add_clip_rect`, rect clip nodes | scissor (integer, exact) |
-| `add_rounded_rect_clip`, rounded clip nodes | the innermost analytic in every shader (inside or outside), the ones around it in an r8 clip mask |
-| `draw_glyph_run` | glyph atlas, a run's glyphs one instanced `glyphs.frag` draw |
-| `fill_path` (color) | CPU coverage (the reference's own scan converter) in the atlas, `mask.frag` |
-| `draw_line` | the reference's stroke (`cpu_line_of`) rastered to coverage, `mask.frag` |
-| `paint_outer_box_shadow` | the reference's blur mask, cached in the atlas, under the content's outside clip |
-| `draw_scaled_immutable_bitmap` | `image.frag`, nearest or bilinear in the shader on premultiplied texels, trilinear from mipmaps when drawn smaller |
-| whole-pixel `translate`, translation-only transforms, effects that change nothing, `save_layer` | state only |
-| everything else | the tile goes to the CPU player |
-
-What falls back today: non-translation transforms, opacity/blend/filter effects, clip
-paths, gradients, inner and text shadows, ellipses, stroked and painted paths, repeated
-images, color-managed images, nested display lists (iframes), external content, vertical
-text and text over 256 px. Nested rounded clips, minified images, full atlases and tiles of
-more than 4,000 draws no longer fall back.
+| `fill_rect_with_rounded_corners`, `draw_rect`, scroll bars | box coverage on straight edges, distance to the ellipse at corners; strokes as outer minus inner |
+| `add_clip_rect`, `add_rounded_rect_clip`, clip nodes | scissors; the innermost rounded clip analytic, the ones around it in an r8 clip mask |
+| `draw_glyph_run` | glyph atlas (strikes made with the matrix's 2x2), a run's glyphs one instanced draw |
+| `fill_path`, `stroke_path`, `draw_line`, ellipses | the CPU rasterizer's coverage (fill, stroke with caps, joins and dashes) in the atlas, under any matrix |
+| `paint_outer_box_shadow`, `paint_inner_box_shadow` | Skia's blurred nine-patch (or whole mask) from the CPU player's code, cached in the atlas |
+| `paint_*_gradient`, paths painted by gradient paint servers | the raster pipeline's own color stages for the paint (`raster.paint_stage_program`), run per pixel by tile.frag (`stages.glsl`): shapes, tiling, stops, CSS interpolation spaces and hue methods, dither |
+| `draw_scaled_immutable_bitmap`, `draw_repeated_immutable_bitmap` | nearest or bilinear on premultiplied texels, clamped or wrapping; Skia's mip levels when drawn smaller |
+| `save_layer`, opacity, blend modes (`apply_effects`) | a layer texture, composited `over` at its opacity or by the blend mode (`blend.glsl`, reading a copy of the target), under the clips it was saved under |
+| `apply_transform` | 2D matrices: whole-pixel translations as state, anything else drawn under the matrix as above; clips it keeps axis-aligned |
+| `paint_nested_display_list` | played by the same player, translated |
+| text shadows, filters, backdrop filters, luminance masks, clip paths, perspective and 3D matrices, pattern paint servers, color-managed and external images, vertical text, text over 256 px, images and shadows under a rotation | the tile goes to the CPU player |
 
 ## Correctness
 
@@ -127,24 +136,31 @@ The CPU player is the reference: it matches Ladybird's Skia, and the GPU player 
 it within a fuzzy bound, as Ladybird's ref tests compare (a channel may be off by a little;
 a few pixels may be off by more).
 
-- `gpu_player/tests_gpu_player.lucb`: scenes drawn both ways and compared (rectangles,
-  clips and translations, at two scroll offsets: off by at most 2 per channel; paths, lines
-  and images: at most 2; rounded rectangles and clips: corner pixels within 40; outer
-  shadows: within 40 on at most 300 pixels; a scroll that must move kept tiles and send
-  only a gradient's tile to the CPU).
+- `gpu_player/tests_gpu_player*.lucb`: scenes drawn both ways and compared (rectangles,
+  clips and translations at two scroll offsets, paths, lines, images, mipmaps and
+  gradients in every interpolation space: off by at most 2 per channel; rounded rectangles
+  and clips: corner pixels within 40; shadows: within 40 on at most 300 pixels; layers,
+  transforms, strokes, ellipses and patterns: within 3 but for a few hundred corner and
+  edge pixels; a scroll that must move kept tiles and send only a perspective tile to the
+  CPU).
 - `webview/tests_webview_gpu.lucb`: a real page through the engine, before and after a
   wheel scroll, against the CPU player's frame of the same display list.
 - `tools/scroll_bench --player both`: real pages compared every 16th frame.
-- Next: run web_test's Ref and Screenshot corpus with the GPU player (a `--player gpu`
-  mode for web_test drawing into an offscreen texture), with per-test fuzzy metadata.
+- `web_test ref screenshot --player gpu` (engine): Ladybird's Ref and Screenshot tests with
+  the GPU player's screenshots. Ref: 780 of 820 pass, as with the CPU player; Screenshot:
+  44 of 67 (CPU player 65; the GPU player before M2 44). Most Screenshot misses are within
+  a level or a few pixels of Ladybird's tight bounds (analytic corners, float blending,
+  gradients within 1 on 12 pixels where 6 are allowed); clip paths and filters still go to
+  CPU tiles, whose plane is drawn alone (see below).
 
 Where the GPU differs: anti-aliased corners of rounded rectangles (analytic coverage vs
-Skia's scan conversion), large paths rastered per tile (an edge clipped at a tile seam is
-set up differently), blend rounding (float vs Skia's 8-bit lowp), and minified images (the
-GPU's box-filtered mip chain and trilinear sampling vs Skia's mipmaps: gnu.org's large
-illustration, drawn smaller, differs in its fine lines by up to 93 in a channel, so two of
-its checked frames exceed the bench's strict bound). On the saved Verge
-and the shadows page under 1.2% of pixels differ by more than 2, all on such edges.
+Skia's scan conversion), blend rounding (float vs Skia's 8-bit lowp), and shapes rastered
+at another whole-pixel offset than the CPU player's frame (the raster port's anti-aliased
+oval is not quite translation-invariant: its last row differs by up to 30 levels at some
+offsets). Mipmapped images are now Skia's levels: gnu.org's checked frames all match. A
+blend mode reads only what its compositor layer drew: a page background in another plane
+(fixed while the content scrolls) is not under it, for GPU and CPU tiles alike; blends
+across planes need the planes flattened (to do).
 
 Platform coverage: the player and luce-gpu's encoded surfaces are tested on macOS (Metal,
 on screen) and on Linux (Vulkan on RADV with validation, an Xwayland window). On Windows
@@ -220,6 +236,29 @@ tiles (shadows, gradients, effects, transforms). Compositing straight onto an en
 target halves the composite's GPU time (text.html: 0.30 ms through the frame texture,
 0.15 ms direct).
 
+### After M2 (2026-10-07)
+
+Box shadows as nine-patches, inner shadows, layers (opacity, blend modes, isolation),
+2D transforms, gradients, ellipses, repeated images, strokes, painted paths and nested
+display lists on the GPU. Main thread avg / p95 ms, GPU avg / p95 ms (luce-gpu 0d70913,
+before its one command buffer per frame, after which the bench's per-submission GPU time
+counts the whole buffer), tiles over 60 frames; before is main at the start of M2:
+
+| Page | Before avg / p95 | After avg / p95 | GPU after | GPU / CPU tiles, before → after |
+| --- | ---: | ---: | ---: | --- |
+| text.html | 3.78 / 7.60 | 3.81 / 7.34 | 0.16 / 0.27 | 120 / 0 → 120 / 0 |
+| shadows.html | 5.59 / 33.36 | 3.99 / 7.55 | 0.28 / 1.12 | 133 / 13 → 146 / 0 |
+| boxes.html | 4.23 / 14.49 | 4.78 / 15.96 | 0.36 / 1.38 | 146 / 0 → 146 / 0 |
+| gnu.org | 43.50 / 296.26 | 4.00 / 14.30 | 0.73 / 4.67 | 178 / 85 → 263 / 0 |
+| Hacker News | 3.89 / 21.56 | 4.43 / 18.51 | 0.23 / 0.25 | 220 / 5 → 225 / 0 |
+| Wikipedia | 8.17 / 26.17 | 5.47 / 10.45 | 0.16 / 0.18 | 81 / 65 → 146 / 0 |
+| The Verge | 10.81 / 57.62 | 5.02 / 11.00 | 0.59 / 3.03 | 238 / 97 → 290 / 4 |
+
+gnu.org is the saved page with its ten remote images pointed at a local one (gnu.org was
+unreachable and its load event waited for them). The Verge's last four CPU tiles are a
+`drop-shadow` filter with a 70 px blur. Hacker News's p95 has no CPU tile in it: the
+frames that raster a new row of tiles (M3's raster budget and prefetch).
+
 ### Memory
 
 | | Peak resident |
@@ -270,6 +309,14 @@ fresh 1 MiB surface and a CPU player).
 | gpu/player | 27,360,840 (22,179,784 stripped): +271 KiB |
 | of which `gpu_player` code | 172,576 |
 
+After M2 (2026-10-07, against main of the same day's other packages): 27,684,920 bytes
+(22,468,328 stripped), from 27,577,752 (22,380,456) with M1b's player; the `gpu_player`
+module, with its shaders, 287,708 → 321,524 bytes. The embedded SPIR-V is 52.9 KiB (from
+85.2 KiB for seven programs) and its Metal source 45.2 KiB (from 43.3 KiB), with layers,
+every blend mode, the gradient stages and mipmaps added; but Luce Base compiles a `let`
+array of u32 literals to initializer code, about 13.6 bytes a word: the SPIR-V costs
+189 KB of code (200 KB before). Emitting such arrays as data would make it 53 KB.
+
 Largest code by module: `luce_browser_engine_web` 6.8 MB (39%),
 `luce_browser_foundation_ak` 1.8 MB (generic instantiations), `text_codec` 1.3 MB
 (encoding tables in code), `luce_tls_roots` 0.76 MB, `raster` 0.71 MB, brotli 0.49 MB.
@@ -286,7 +333,8 @@ Read-only data (`__const`) is 3.3 MB; the symbol table 5.2 MB (strip it in relea
   under 125 MiB for the local test pages (tests/memory's budgets: 75-150 MiB). Fonts are
   mapped and loaded by family, GPU mode keeps one-pixel back stores, and a replaced display
   list is garbage at once (tests/memory and webview's tests check these).
-- **Binary**: the GPU player under 250 KiB of code; the shaders under 40 KiB.
+- **Binary**: the GPU player under 250 KiB of code; the shaders under 40 KiB (52.9 KiB of
+  SPIR-V now; see Binary size).
 
 ## Plan
 
@@ -294,9 +342,9 @@ Read-only data (`__const`) is 3.3 MB; the symbol table 5.2 MB (strip it in relea
 | --- | --- | --- |
 | M1 (done) | tiles kept across scrolls; rects, rounded rects, borders (paths), lines, text atlas, images, rect and one rounded clip, outer shadows on the GPU; CPU per tile otherwise | GPU average 3-42 ms on the seven pages vs 139-1,027 ms CPU (table above) |
 | M1b (done) | luce-gpu's additions: instanced glyphs and shapes, encoded window, keep frames, atlas growth by GPU copy, mipmapped images, r8 clip masks for nested rounded clips | no CPU tiles for nested clips, minified images, full atlases or draw counts (table above) |
-| M2 | gradients (linear, radial, conic in a shader with the CPU's stop math), opacity groups (an offscreen tile layer), translation+scale transforms, inner and text shadows (cached masks), mipmapped images (request 5) | no CPU tiles on the six saved pages; web_test Ref with `--player gpu` within fuzzy bounds |
+| M2 (done but filters) | gradients (the raster pipeline's stages on the GPU), layers for opacity, blend modes and isolation, 2D transforms, inner shadows and nine-patch shadows, ellipses, strokes, painted paths, repeated images, Skia's mipmaps, nested display lists, one shader | CPU tiles only for The Verge's drop-shadow filter (4); p95 under 16 ms but Hacker News (18.5); web_test Ref with `--player gpu` 780/820, as the CPU player |
 | M3 | raster budget per frame with prefetch ahead of the scroll; spatial binning of a layer's commands per tile (one pass records bounds) | p95 under 8 ms on every saved page |
 | M4 | memory: mapped fonts, no back stores in GPU mode, freed display lists (done 2026-10-07: blank page 58 MiB, Wikipedia 372 MiB peak); still to do: one reused CPU-tile surface and player, tile reuse across display-list changes (diff by command ranges) | empty view under 150 MiB; Wikipedia under 400 MiB |
-| M5 | clip paths (coverage into the r8 clip mask), filters and backdrop filters (luce-gpu compute), 3D transforms; Vello-style compute coverage for big paths | all of web_test's Ref and Screenshot through the GPU player |
+| M5 | filters and backdrop filters (layers larger than a tile by the filter's reach; blur through luce-gpu compute or a separable pass matching SkBlurImageFilter; color matrix, drop shadow), clip paths (coverage into the r8 clip mask), luminance masks, pattern paint servers, color-managed images (the color_xform stage exists in stages.glsl), blends across compositor planes, 3D transforms; Vello-style compute coverage for big paths | all of web_test's Ref and Screenshot through the GPU player |
 
 The requests to luce-gpu are in [GPU-LUCE-GPU-REQUESTS.md](GPU-LUCE-GPU-REQUESTS.md).
