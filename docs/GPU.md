@@ -237,6 +237,31 @@ Each page in its own process; peak resident set (on Apple silicon the GPU's text
 in the same memory, but Metal's private textures are not counted in the process's
 resident set).
 
+After the memory work of 2026-10-07 (mapped fonts loaded by family, no back stores in GPU
+mode, finer blob size classes, one-entry cascaded-property vectors; GPU player on from the
+view's first frame, 60 frames; `scroll_bench --census` prints the breakdown and
+`tests/memory` holds the budgets):
+
+| | Peak resident | Footprint (Activity Monitor) | GPU device allocated |
+| --- | ---: | ---: | ---: |
+| engine initialized, no page | 11 MiB | | |
+| blank page | 58 MiB | 141 MiB | 86 MiB |
+| text.html | 79 MiB | 672 MiB | 147 MiB |
+| shadows.html | 68 MiB | 724 MiB | 164 MiB |
+| boxes.html | 119 MiB | 771 MiB | 177 MiB |
+| Hacker News | 103 MiB | 685 MiB | |
+| Wikipedia | 372 MiB | 858 MiB | |
+| The Verge | 548 MiB | 919 MiB | 192 MiB |
+
+The footprint's excess over the resident set is GPU memory: the device's allocations
+(tiles, frame, atlas, images) and, while frames render, about 400 MiB of Metal driver
+memory in 8 MiB chunks (39-48 of them) that turns reclaimable once rendering stops; it
+is there on a blank page too, idle and reclaimable. The Verge's peak is the live heap
+(about 155 MiB: style 78, parse 26, layout 11, images 12, cells 21), heap blocks' free
+cells (56 MiB), blocks cached for reuse (126 MiB, released to the system as reusable),
+and the CPU tiles' garbage between collections (about 100 MiB: each CPU tile makes a
+fresh 1 MiB surface and a CPU player).
+
 ### Binary size (luced-browser, release, arm64)
 
 | | Bytes |
@@ -257,12 +282,10 @@ Read-only data (`__const`) is 3.3 MB; the symbol table 5.2 MB (strip it in relea
   `tests/scroll_bench` and on gnu.org, Hacker News, Wikipedia.
 - **GPU memory**: tiles at most twice the viewport per layer, 96 tiles (96 MiB) in all;
   atlas 4 MiB; images 64 MiB; frame texture 4 bytes a pixel until request 1 removes it.
-- **Process memory**: today 1.35 GiB resident before a page loads. That is not drawing:
-  `PathFontProvider` reads every system font file into memory (and copies it once more),
-  where Ladybird maps them. Mapping them is the largest single memory win available
-  (target: under 150 MiB resident for an empty view). In GPU mode the view still keeps
-  two full-frame back stores it no longer draws into (32 MiB at 2560x1600), and display
-  lists are never freed.
+- **Process memory**: 11 MiB resident before a page loads, 58 MiB peak for a blank page,
+  under 125 MiB for the local test pages (tests/memory's budgets: 75-150 MiB). Fonts are
+  mapped and loaded by family, GPU mode keeps one-pixel back stores, and a replaced display
+  list is garbage at once (tests/memory and webview's tests check these).
 - **Binary**: the GPU player under 250 KiB of code; the shaders under 40 KiB.
 
 ## Plan
@@ -273,7 +296,7 @@ Read-only data (`__const`) is 3.3 MB; the symbol table 5.2 MB (strip it in relea
 | M1b (done) | luce-gpu's additions: instanced glyphs and shapes, encoded window, keep frames, atlas growth by GPU copy, mipmapped images, r8 clip masks for nested rounded clips | no CPU tiles for nested clips, minified images, full atlases or draw counts (table above) |
 | M2 | gradients (linear, radial, conic in a shader with the CPU's stop math), opacity groups (an offscreen tile layer), translation+scale transforms, inner and text shadows (cached masks), mipmapped images (request 5) | no CPU tiles on the six saved pages; web_test Ref with `--player gpu` within fuzzy bounds |
 | M3 | raster budget per frame with prefetch ahead of the scroll; spatial binning of a layer's commands per tile (one pass records bounds) | p95 under 8 ms on every saved page |
-| M4 | memory: mapped fonts, no back stores in GPU mode, freed display lists, tile reuse across display-list changes (diff by command ranges) | empty view under 150 MiB; Wikipedia under 400 MiB |
+| M4 | memory: mapped fonts, no back stores in GPU mode, freed display lists (done 2026-10-07: blank page 58 MiB, Wikipedia 372 MiB peak); still to do: one reused CPU-tile surface and player, tile reuse across display-list changes (diff by command ranges) | empty view under 150 MiB; Wikipedia under 400 MiB |
 | M5 | clip paths (coverage into the r8 clip mask), filters and backdrop filters (luce-gpu compute), 3D transforms; Vello-style compute coverage for big paths | all of web_test's Ref and Screenshot through the GPU player |
 
 The requests to luce-gpu are in [GPU-LUCE-GPU-REQUESTS.md](GPU-LUCE-GPU-REQUESTS.md).
