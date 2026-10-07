@@ -12,8 +12,8 @@ of an `AccumulatedVisualContextTree` of clips, transforms, effects and scroll fr
 `DisplayListPlayerCpu`, a port of Skia m144's raster pipeline that matches Ladybird's
 Skia output pixel for pixel, replayed the whole list every frame; the view copied the
 frame out (`webview_copy_frame`) and luced-browser uploaded it as a texture. A scroll
-changes only the scroll state, yet every frame re-rastered everything: 128 ms a frame on
-a plain text page, 300 to 500 ms on real ones (tables below). Profiles showed blur masks
+changes only the scroll state, yet every frame re-rastered everything: 139 ms a frame on
+a plain text page, 150 ms to over a second on real ones (tables below). Profiles showed blur masks
 and rounded-clip masks rebuilt every frame (a clip mask is the size of the whole surface),
 image mipmaps rebuilt, glyph masks rastered per draw, and three full-frame copies.
 
