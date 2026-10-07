@@ -22,13 +22,28 @@ pub struct CoreMappedFile:
     pub var m_data: const u8[]
     ## The mapping (luce-std files.map), which owns m_data.
     var m_mapping: interop.Owned[const u8[]]
+    ## Whether m_mapping still maps the file (core_mapped_file_release_all ends it early).
+    var m_mapped: bool
+    ## The live mappings' list (core_mapped_file_release_all).
+    var m_previous: CoreMappedFile*?
+    var m_next: CoreMappedFile*?
+
+## Every live MappedFile, newest first. Ladybird's mappings end with the process (the static
+## FontDatabase's destructor at exit); here the embedder ends them with
+## core_mapped_file_release_all before it exits, since the runtime requires every owned value
+## to be released by then. The list is in the C heap and holds no managed pointers.
+var core_mapped_files: CoreMappedFile*?
 
 ## Ported from Libraries/LibCore/MappedFile.cpp:16 Core::MappedFile::map (Mode::ReadOnly):
 ## open, then map_from_fd_and_close. The MappedFile itself lives in the C heap.
 pub func core_mapped_file_map(path: c.str) -> CoreMappedFile*!:
     let mapping = try files.map(path)
     with memory.heap:
-        return new CoreMappedFile(m_data = mapping.value, m_mapping = mapping) else trap("out of memory")
+        let file = new CoreMappedFile(m_data = mapping.value, m_mapping = mapping, m_mapped = true, m_next = core_mapped_files) else trap("out of memory")
+        if let next = core_mapped_files:
+            next.m_previous = file
+        core_mapped_files = file
+        return file
 
 ## Ported from Libraries/LibCore/MappedFile.h:31 Core::MappedFile::bytes.
 pub func core_mapped_file_bytes(this: const CoreMappedFile*) -> const u8[]:
@@ -37,5 +52,27 @@ pub func core_mapped_file_bytes(this: const CoreMappedFile*) -> const u8[]:
 ## Ported from Libraries/LibCore/MappedFile.cpp:65 Core::MappedFile::~MappedFile: unmaps the
 ## file and frees the MappedFile.
 pub func core_mapped_file_destroy(this: CoreMappedFile*):
-    this.m_mapping.release()
+    core_mapped_file_unmap(this)
+    if let previous = this.m_previous:
+        previous.m_next = this.m_next
+    else:
+        core_mapped_files = this.m_next
+    if let next = this.m_next:
+        next.m_previous = this.m_previous
     free(this) in memory.heap
+
+## Unmaps the file; its bytes are empty from then on.
+func core_mapped_file_unmap(this: CoreMappedFile*):
+    if this.m_mapped:
+        this.m_mapping.release()
+        this.m_mapped = false
+    this.m_data = this.m_data[0..<0]
+
+## Ends every live mapping, as the process's exit ends Ladybird's: the font files' bytes read
+## empty afterwards, so this is the embedder's last step before it exits (webview_api.shutdown).
+## The MappedFiles themselves stay, with empty bytes, for their owners to destroy or not.
+pub func core_mapped_file_release_all():
+    var file = core_mapped_files
+    while let current = file:
+        core_mapped_file_unmap(current)
+        file = current.m_next
