@@ -146,6 +146,11 @@ illustration, drawn smaller, differs in its fine lines by up to 93 in a channel,
 its checked frames exceed the bench's strict bound). On the saved Verge
 and the shadows page under 1.2% of pixels differ by more than 2, all on such edges.
 
+Platform coverage: the player and luce-gpu's encoded surfaces are tested on macOS (Metal,
+on screen) and on Linux (Vulkan on RADV with validation, an Xwayland window). On Windows
+(Vulkan on NVIDIA) the tests run headless only: encoded window presentation has not been seen
+on screen there, because ssh runs in session 0 and has no desktop.
+
 ## Measuring
 
 Without a window, from the engine's root:
