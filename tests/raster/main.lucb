@@ -1,17 +1,17 @@
 #==============================================================================================
 #
-#   run - the runner of the rasterizer's integration tests
+#   tests/raster - the rasterizer's integration tests
 #
 #   DESCRIPTION:
 #       Runs tiny-skia's integration suite (tests/integration of tiny-skia 0.12.0, ported in
 #       the modules of this directory), the pipeline scenes (skia_pipeline) and the
 #       Ladybird-style scenes (ladybird) against reference images rendered by Skia m144
 #       (where tiny-skia's own reference differs from Skia's, Skia's replaces it; gamma.png
-#       is the port's own, as Skia has no such color space mode). `run` runs every
-#       test; `run NAME...` runs the named ones; `run --list` prints the names;
-#       `run --save DIR [NAME...]` also writes every rendered image under DIR. The exit
-#       status is 1 when a test failed. Run it from the repository root (tests/run_raster.py
-#       builds and runs it).
+#       is the port's own, as Skia has no such color space mode). A test program of
+#       `luc test`, built with this directory's package.prisma: with no argument it runs
+#       every test; `NAME...` runs the named ones; `--list` prints the names; `--save DIR
+#       [NAME...]` also writes every rendered image under DIR. The exit status is 1 when a
+#       test failed. It runs from the repository root.
 #
 #==============================================================================================
 

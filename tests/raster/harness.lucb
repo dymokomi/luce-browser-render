@@ -7,7 +7,7 @@
 #       feature: Pixmap::load_png (decode, then premultiply as tiny-skia does), the
 #       `assert_eq!(pixmap, expected)` comparison against a reference image, and a record
 #       of failures. A failed comparison writes the actual image to
-#       build/raster-failures/<test>.png.
+#       build/tests/raster/failures/<test>.png.
 #
 #       Copyright (c) 2020 Yevhenii Reizner (tiny-skia's tests)
 #       Copyright (c) 2026 the luce-browser authors.
@@ -132,10 +132,14 @@ pub func expect_png(t: Test*, pixmap: const raster.Pixmap*, image: str):
     with memory.heap:
         files.create_directory("build") catch:
             recover ()
-        files.create_directory("build/raster-failures") catch:
+        files.create_directory("build/tests") catch:
+            recover ()
+        files.create_directory("build/tests/raster") catch:
+            recover ()
+        files.create_directory("build/tests/raster/failures") catch:
             recover ()
     var buffer: u8[512]
-    save_png(pixmap, path_buffer(buffer, f"build/raster-failures/{file_name(t.name)}.png"))
+    save_png(pixmap, path_buffer(buffer, f"build/tests/raster/failures/{file_name(t.name)}.png"))
 
 ## Rust's `Drop` of a Stroke: frees its dash array.
 pub func release_stroke(stroke: raster.Stroke*):

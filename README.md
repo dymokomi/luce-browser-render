@@ -27,11 +27,12 @@ of this repository.
 
 ## Testing
 
-`./test.sh` checks the formatting, type-checks every module with warnings as errors and runs
-every module's tests (the CPU display-list player is compared with Skia's pixels, the fonts
+`luc test` runs every module's tests and the program `tests/raster`, tiny-skia's integration
+suite and Skia scenes against their reference images (the CPU display-list player is compared with Skia's pixels, the fonts
 and paths with the reference build's LibGfx, the rasterizer with tiny-skia's reference
 images). The font oracle's face, metrics, path and shaping cases test the engine and run in
 luce-fonts; its text-blob bounds and glyph intercepts, which test GlyphRun, run here.
+`tools/check.sh` is the lint: formatting and `-W`.
 
 ## License
 
