@@ -10,6 +10,10 @@
 #       SkMipmapAccessor's choice of levels (src/core/SkMipmapAccessor.cpp) for linear
 #       mipmap sampling. Levels halve each dimension down to 1x1, flooring odd sizes.
 #
+#       The GPU player samples the same levels: mipmap_pack writes them beside the base image
+#       (level 1 to its right, each next level below the one before), mipmap_level_rect says
+#       where, and mipmap_choice picks the levels and their weight as the pattern does.
+#
 #       Copyright 2015 Google Inc.
 #       Copyright (c) 2026 the luce-browser authors.
 #       SPDX-License-Identifier: BSD-3-Clause (see LICENSE-skia)
@@ -134,3 +138,81 @@ func point_length(x: f32, y: f32) -> f32:
     if math32.is_finite(mag2):
         return math32.sqrt(mag2)
     return (f32)math.sqrt((f64)x * (f64)x + (f64)y * (f64)y)
+
+# mark: The choice of levels and their packing ================================================
+
+## SkMipmapAccessor's choice for linear mipmap sampling under `base_inv` (the image's inverse
+## matrix) of an image with `levels` levels below it: the upper level (0 the base), the lower
+## one when two are blended, and the lower one's weight.
+pub struct MipmapChoice:
+    pub var upper: usize
+    pub var lower: usize?
+    pub var weight: f32
+
+## The levels pattern_push_mipmap_stages samples (see MipmapChoice).
+pub func mipmap_choice(base_inv: Transform, levels: usize) -> MipmapChoice:
+    var level: f32 = 0.0
+    var linear = false
+    if let scale = decompose_scale(base_inv):
+        level = mipmap_compute_level(1.0 / scale.0, 1.0 / scale.1)
+        if level <= 0.0:
+            level = 0.0
+        else:
+            linear = true
+    # In linear mode the level is the lower of the two to interpolate between: its floor.
+    let level_num = (usize)math32.floor(level)
+    var choice = MipmapChoice(upper = 0, lower = none, weight = level - (f32)level_num)
+    if level_num > 0:
+        if level_num - 1 < levels:
+            choice.upper = level_num
+        else:
+            linear = false
+    if linear and level_num < levels:
+        choice.lower = level_num + 1
+    return choice
+
+## The levels below an image of `width` by `height` (SkMipmap::ComputeLevelCount).
+pub func mipmap_levels_below(width: u32, height: u32) -> usize:
+    return mipmap_level_count(width, height)
+
+## Where level `level` (0 the base) of an image of `width` by `height` lies in mipmap_pack's
+## packing: x, y, width, height.
+pub func mipmap_level_rect(width: u32, height: u32, level: usize) -> u32[4]:
+    if level == 0:
+        return [0, 0, width, height]
+    var w = width
+    var h = height
+    var y: u32 = 0
+    for i in 0..<level:
+        w = w >> 1 if w >> 1 > 0 else 1
+        h = h >> 1 if h >> 1 > 0 else 1
+        if i + 1 < level:
+            y += h
+    return [width, y, w, h]
+
+## The size of mipmap_pack's packing of an image of `width` by `height`.
+pub func mipmap_packed_size(width: u32, height: u32) -> u32[2]:
+    if mipmap_level_count(width, height) == 0:
+        return [width, height]
+    let first = mipmap_level_rect(width, height, 1)
+    return [width + first[2], height]
+
+## Writes the levels below `src` (SkMipmap::Build's pixels) into `out`, premultiplied RGBA
+## bytes `out_width` pixels a row, at mipmap_level_rect's places; the base is the caller's.
+pub func mipmap_pack(src: PixmapRef, out: u8[], out_width: usize):
+    var levels = mipmap_build(src)
+    defer:
+        for i in 0..<levels.len:
+            levels.data[i].release()
+        levels.release()
+    for i in 0..<levels.len:
+        let rect = mipmap_level_rect(src.width(), src.height(), i + 1)
+        let pixels = levels.data[i].pixels()
+        for y in 0..<(usize)rect[3]:
+            for x in 0..<(usize)rect[2]:
+                let p = pixels[y * (usize)rect[2] + x]
+                let at = (((usize)rect[1] + y) * out_width + (usize)rect[0] + x) * 4
+                out[at] = p.red()
+                out[at + 1] = p.green()
+                out[at + 2] = p.blue()
+                out[at + 3] = p.alpha()

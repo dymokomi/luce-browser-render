@@ -264,9 +264,12 @@ test "gpu player: an image drawn smaller samples its mipmaps":
     gfx.color_space_construct(&color_space)
     let image = gfx.immutable_bitmap_create_color_space(bitmap, color_space)
     test_add(&scene, .draw_scaled_immutable_bitmap(display_list.DrawScaledImmutableBitmap(dst_rect = test_box(40, 40, 64, 64), clip_rect = test_box(0, 0, 700, 300), bitmap = image, scaling_mode = gfx.ScalingMode.bilinear_mipmap)), 1)
+    # Between levels (a weight), and an odd size (the 1-2-1 downsampler).
+    test_add(&scene, .draw_scaled_immutable_bitmap(display_list.DrawScaledImmutableBitmap(dst_rect = test_box(150, 30, 101, 87), clip_rect = test_box(0, 0, 700, 300), bitmap = image, scaling_mode = gfx.ScalingMode.bilinear_mipmap)), 1)
+    test_add(&scene, .draw_scaled_immutable_bitmap(display_list.DrawScaledImmutableBitmap(dst_rect = test_box(300, 30, 37, 200), clip_rect = test_box(0, 0, 700, 300), bitmap = image, scaling_mode = gfx.ScalingMode.bilinear_mipmap)), 1)
     let snapshots = [test_snapshot(0.0, 0.0)]
-    # Mipmap levels and their blending differ from Skia's in the last bits only.
-    let stats = test_compare("mipmaps", &scene, snapshots, 24, 0) else return
+    # Skia's own levels, chosen and blended as its pattern blends them.
+    let stats = test_compare("mipmaps", &scene, snapshots, 2, 0) else return
     if stats.cpu_tiles > 0:
         trap("a downscaled image sent a tile to the CPU player")
 

@@ -258,13 +258,22 @@ func gpu_scaled_bitmap_impl(base: display_list.DisplayListPlayer*, command: disp
     if area.is_empty() or width <= 0 or height <= 0:
         return
     # cpu_image_shader's sampling: mipmaps only matter when the image is made smaller, and
-    # then the texture has them and the shader samples them trilinearly.
+    # then the texture holds Skia's levels and the shader blends the two the pattern picks.
     var filter: f32 = 0.0
     match command.scaling_mode:
         .bilinear: filter = 1.0
         .bilinear_mipmap:
             filter = 2.0 if dst.width < width or dst.height < height else 1.0
         _: filter = 0.0
+    var levels: f32[8] = [0.0, 0.0, (f32)width, (f32)height, 0.0, 0.0, (f32)width, (f32)height]
+    if filter > 1.5:
+        let image_to_device = raster.Transform.from_row((f32)dst.width / (f32)width, 0.0, 0.0, (f32)dst.height / (f32)height, (f32)dst.x, (f32)dst.y)
+        let inverse = image_to_device.invert() else return
+        let choice = raster.mipmap_choice(inverse, raster.mipmap_levels_below((u32)width, (u32)height))
+        let upper = raster.mipmap_level_rect((u32)width, (u32)height, choice.upper)
+        let lower = raster.mipmap_level_rect((u32)width, (u32)height, choice.lower else choice.upper)
+        levels = [(f32)upper[0], (f32)upper[1], (f32)upper[2], (f32)upper[3], (f32)lower[0], (f32)lower[1], (f32)lower[2], (f32)lower[3]]
+        filter = 2.0 + (choice.weight if choice.lower != none else 0.0)
     if gfx.immutable_bitmap_color_xform(command.bitmap) != none:
         gpu_give_up(this, GpuFallback.color_managed_image)
         return
@@ -285,6 +294,9 @@ func gpu_scaled_bitmap_impl(base: display_list.DisplayListPlayer*, command: disp
     draw.uniforms[k + 5] = (f32)height
     draw.uniforms[k + 6] = filter
     draw.uniforms[k + 7] = 1.0
+    if filter > 1.5:
+        for i in 0..<(usize)8:
+            draw.uniforms[k + 8 + i] = levels[i]
     gpu_append(this, draw)
 
 func gpu_repeated_bitmap_impl(base: display_list.DisplayListPlayer*, command: display_list.DrawRepeatedImmutableBitmap):
@@ -343,5 +355,5 @@ func gpu_repeated_bitmap_impl(base: display_list.DisplayListPlayer*, command: di
     draw.uniforms[k + 5] = (f32)height
     draw.uniforms[k + 6] = filter
     draw.uniforms[k + 7] = 1.0
-    draw.uniforms[k + 8] = 1.0
+    draw.uniforms[k + 15] = 1.0
     gpu_append(this, draw)

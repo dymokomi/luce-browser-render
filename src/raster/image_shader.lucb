@@ -133,33 +133,19 @@ func mip_level_contexts(pm: PixmapRef) -> (GatherCtx, TileCtx, TileCtx):
 ## sampler (the fast bilerp_clamp_8888 is not for linear mipmaps), in both levels when there
 ## are two (mipmap_linear_init, update and finish around them).
 func pattern_push_mipmap_stages(patt: const Pattern*, cs: ColorSpace, p: RasterPipelineBuilder*, base_inv: Transform) -> bool:
-    var level: f32 = 0.0
-    var linear = false
-    if let scale = decompose_scale(base_inv):
-        level = mipmap_compute_level(1.0 / scale.0, 1.0 / scale.1)
-        if level <= 0.0:
-            level = 0.0
-        else:
-            linear = true
-    # In linear mode the level is the lower of the two to interpolate between: its floor.
-    let level_num = (usize)math32.floor(level)
-    let lower_weight = level - (f32)level_num
-
     let base = patt.pixmap
+    let choice = mipmap_choice(base_inv, mipmap_level_count(base.width(), base.height()))
     var upper = base
     var ctx = MipmapCtx(levels = Vec[Pixmap](), upper = none, lower = none, lower_weight = 0.0, scale_x = 1.0, scale_y = 1.0)
-    if level_num > 0 or (linear and lower_weight > 0.0):
+    if choice.upper > 0 or choice.lower != none:
         ctx.levels = mipmap_build(base)
-        if level_num > 0:
-            if level_num - 1 < ctx.levels.len:
-                upper = ctx.levels.data[level_num - 1].as_ref()
-                ctx.upper = upper
-            else:
-                linear = false
-        if linear and level_num < ctx.levels.len:
-            let lower = ctx.levels.data[level_num].as_ref()
+        if choice.upper > 0:
+            upper = ctx.levels.data[choice.upper - 1].as_ref()
+            ctx.upper = upper
+        if let lower_index = choice.lower:
+            let lower = ctx.levels.data[lower_index - 1].as_ref()
             ctx.lower = lower
-            ctx.lower_weight = lower_weight
+            ctx.lower_weight = choice.weight
             ctx.scale_x = (f32)lower.width() / (f32)upper.width()
             ctx.scale_y = (f32)lower.height() / (f32)upper.height()
             let contexts = mip_level_contexts(lower)

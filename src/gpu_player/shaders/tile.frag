@@ -19,9 +19,10 @@
 //                       for a plain mask; the last negative when the center stays uncovered)
 //   kind 3  image       the image at binding 1 scaled onto k0 (x, y, width, height): k1 its
 //                       width, height, filter (0 nearest, 1 bilinear clamped to its edges as
-//                       Skia's kClamp image shader samples, 2 the sampler's trilinear) and
-//                       opacity; k2.x 1 when it repeats (Skia's kRepeat on both axes: texel
-//                       coordinates wrap rather than clamp)
+//                       Skia's kClamp image shader samples, 2 + w Skia's linear mipmaps: the
+//                       level packed at k2 and the one at k3 bilinearly, lerped by w) and
+//                       opacity; k3.w 1 when it repeats unmipmapped (Skia's kRepeat on both
+//                       axes: texel coordinates wrap rather than clamp)
 //   kind 4  composite   a layer: the texture at binding 1 with its top left at k0.xy, texel for
 //                       pixel, times k0.w (its opacity)
 //   kind 5  clip        one clip of a nested clip into an r8 clip mask cleared to 1: an `over`
@@ -88,29 +89,38 @@ float mask_texel(ivec2 q) {
 }
 
 // A texel of the image, its coordinates clamped to its edges or wrapped.
-vec4 image_texel(ivec2 at) {
-    ivec2 size = ivec2(params.k1.xy);
-    ivec2 texel = params.k2.x > 0.5 ? (at % size + size) % size : clamp(at, ivec2(0), size - 1);
-    return texelFetch(source, texel, 0);
+vec4 image_texel(ivec4 rect, bool repeat, ivec2 at) {
+    ivec2 texel = repeat ? (at % rect.zw + rect.zw) % rect.zw : clamp(at, ivec2(0), rect.zw - 1);
+    return texelFetch(source, rect.xy + texel, 0);
 }
 
-// The image at pixel center `p`: nearest, bilinear or trilinear.
-vec4 image_color(vec2 p) {
-    vec2 u = (p - params.k0.xy) * (params.k1.xy / params.k0.zw);
-    if (params.k1.z > 1.5) {
-        // Mipmapped: the sampler picks and blends levels by the scale.
-        return texture(source, u / params.k1.xy);
-    }
-    if (params.k1.z < 0.5) {
-        return image_texel(ivec2(floor(u)));
-    }
+// Bilinear sampling at `u` (texel space) of the image in `rect` of the texture.
+vec4 image_bilinear(ivec4 rect, bool repeat, vec2 u) {
     vec2 v = u - 0.5;
     vec2 base = floor(v);
     vec2 f = v - base;
     ivec2 at = ivec2(base);
-    vec4 top = mix(image_texel(at), image_texel(at + ivec2(1, 0)), f.x);
-    vec4 bottom = mix(image_texel(at + ivec2(0, 1)), image_texel(at + ivec2(1, 1)), f.x);
+    vec4 top = mix(image_texel(rect, repeat, at), image_texel(rect, repeat, at + ivec2(1, 0)), f.x);
+    vec4 bottom = mix(image_texel(rect, repeat, at + ivec2(0, 1)), image_texel(rect, repeat, at + ivec2(1, 1)), f.x);
     return mix(top, bottom, f.y);
+}
+
+// The image at pixel center `p`: nearest, bilinear, or Skia's linear mipmaps (the upper
+// level and the lower one sampled bilinearly at the point scaled to each, then lerped).
+vec4 image_color(vec2 p) {
+    vec2 u = (p - params.k0.xy) * (params.k1.xy / params.k0.zw);
+    ivec4 base = ivec4(0, 0, ivec2(params.k1.xy));
+    if (params.k1.z > 1.5) {
+        vec2 upper = u * (params.k2.zw / params.k1.xy);
+        vec4 high = image_bilinear(ivec4(params.k2), false, upper);
+        vec4 low = image_bilinear(ivec4(params.k3), false, upper * (params.k3.zw / params.k2.zw));
+        return fma(low - high, vec4(params.k1.z - 2.0), high);
+    }
+    bool repeat = params.k3.w > 0.5;
+    if (params.k1.z < 0.5) {
+        return image_texel(base, repeat, ivec2(floor(u)));
+    }
+    return image_bilinear(base, repeat, u);
 }
 
 void main() {

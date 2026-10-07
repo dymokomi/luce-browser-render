@@ -363,8 +363,7 @@ func gpu_replay_run(player: DisplayListPlayerGpu*, pipelines: const GpuPipelines
             return try gpu_replay_instances(player, pipelines, target, draws, start, player.replay.table, clip_mask, gpu.Filter.nearest)
         .image:
             let image = draw.image else return 1
-            let filter = gpu.Filter.trilinear if draw.uniforms[gpu_uniform_header + 6] > 1.5 else gpu.Filter.nearest
-            return try gpu_replay_instances(player, pipelines, target, draws, start, image, clip_mask, filter)
+            return try gpu_replay_instances(player, pipelines, target, draws, start, image, clip_mask, gpu.Filter.nearest)
         _: return 1
 
 ## Whether a `fill` draw's corners are circular (each corner's radii equal), which an

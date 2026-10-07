@@ -8,8 +8,9 @@
 #       on premultiplied texels, as Skia's legacy image shader does) and kept while it is used.
 #       Bitmaps are immutable and live as long as the display lists that draw them, so the
 #       bitmap's address and size are its key. An image drawn smaller than it is with
-#       mipmapped sampling gets a texture of its own with mipmaps (made on the GPU after the
-#       upload), sampled trilinearly. Textures over the budget are released least
+#       mipmapped sampling gets a texture of its own holding Skia's mip levels (raster's
+#       mipmap_pack: the CPU player's own downsampler) packed beside the base image, which the
+#       shader samples as the CPU player's pattern does. Textures over the budget are released least
 #       recently used first; a draw recorded with one keeps it alive until its frame finishes.
 #
 #       Copyright (c) 2026 the luce-browser authors.
@@ -37,8 +38,8 @@ pub struct GpuImageCache:
     ## The current frame's number: images used in it are not released.
     pub var frame: u64
 
-    ## The texture of `bitmap` on `device`, uploaded the first time, with mipmaps when
-    ## `mipmapped`; none for an empty bitmap.
+    ## The texture of `bitmap` on `device`, uploaded the first time, with its mip levels packed
+    ## beside it when `mipmapped` (raster.mipmap_level_rect says where); none for an empty bitmap.
     pub func texture_of(device: gpu.Device, bitmap: const gfx.Bitmap*, mipmapped: bool = false) -> gpu.Texture?!:
         let width = gfx.bitmap_width(bitmap)
         let height = gfx.bitmap_height(bitmap)
@@ -50,16 +51,25 @@ pub struct GpuImageCache:
             if image.texture != none:
                 image.used = self.frame
                 return image.texture
-        let level_bytes = (u64)width * (u64)height * 4
-        # A mip chain adds a third.
-        let bytes = level_bytes + (level_bytes // 3 if mipmapped else 0)
+        var packed: u32[2] = [(u32)width, (u32)height]
+        if mipmapped:
+            packed = raster.mipmap_packed_size((u32)width, (u32)height)
+        let bytes = (u64)packed[0] * (u64)packed[1] * 4
         self.make_room(bytes)
-        let texture = try gpu.Texture.create(device, (u32)width, (u32)height, gpu.Format.rgba8_linear, mipmaps = mipmapped)
-        let pixels = try new u8[(usize)level_bytes] --- in memory.heap
+        let texture = try gpu.Texture.create(device, packed[0], packed[1], gpu.Format.rgba8_linear)
+        let pixels = try new u8[(usize)bytes] in memory.heap
         defer free(pixels) in memory.heap
-        gpu_premultiplied_rgba(bitmap, pixels)
+        gpu_premultiplied_rgba(bitmap, pixels, (usize)packed[0])
+        if mipmapped:
+            var base = raster.Pixmap.new_((u32)width, (u32)height) else trap("gpu_player: out of memory")
+            defer base.release()
+            let texels = base.pixels_mut()
+            for y in 0..<(usize)height:
+                for x in 0..<(usize)width:
+                    let at = (y * (usize)packed[0] + x) * 4
+                    texels[y * (usize)width + x] = raster.PremultipliedColorU8.from_rgba(pixels[at], pixels[at + 1], pixels[at + 2], pixels[at + 3]) else raster.PremultipliedColorU8.transparent()
+            raster.mipmap_pack(base.as_ref(), pixels, (usize)packed[0])
         try texture.upload(pixels)
-        try texture.generate_mipmaps()
         self.bytes += bytes
         let image = GpuImage(key = key, texture = texture, width = width, height = height, bytes = bytes, used = self.frame)
         if let index = self.keys.get(key):
@@ -102,9 +112,9 @@ pub struct GpuImageCache:
     pub func resident_bytes() -> u64:
         return self.bytes
 
-## `bitmap`'s pixels as premultiplied R, G, B, A bytes into `out` (width x height x 4): the x
+## `bitmap`'s pixels as premultiplied R, G, B, A bytes into `out` (`stride` pixels a row): the x
 ## formats taken as opaque, unpremultiplied ones premultiplied as the CPU player does.
-func gpu_premultiplied_rgba(bitmap: const gfx.Bitmap*, out: u8[]):
+func gpu_premultiplied_rgba(bitmap: const gfx.Bitmap*, out: u8[], stride: usize):
     let width = gfx.bitmap_width(bitmap)
     let height = gfx.bitmap_height(bitmap)
     let format_ = gfx.bitmap_format(bitmap)
@@ -113,7 +123,7 @@ func gpu_premultiplied_rgba(bitmap: const gfx.Bitmap*, out: u8[]):
     let premultiplied = gfx.bitmap_alpha_type(bitmap) == gfx.AlphaType.premultiplied and not opaque
     for y in 0..<height:
         let row = gfx.bitmap_scanline_const(bitmap, y) else continue
-        let base = (usize)y * (usize)width * 4
+        let base = (usize)y * stride * 4
         for x in 0..<width:
             let value = row[(usize)x]
             let c0 = (u8)(value & 0xff)
