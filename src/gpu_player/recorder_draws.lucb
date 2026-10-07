@@ -19,10 +19,12 @@
 
 # mark: Masks ===================================================================================
 
-## A `mask` draw of the atlas texels of `entry` at `dst` (whole pixels) in `color`.
-func gpu_mask_draw(this: DisplayListPlayerGpu*, texture: gpu.Texture, entry: GpuAtlasEntry, dst: GpuRect, color: f32[4]):
+## A `mask` draw of the atlas texels of `entry` at `dst` (whole pixels) in `color`. The
+## atlas's texture now: making room may have replaced it.
+func gpu_mask_draw(this: DisplayListPlayerGpu*, entry: GpuAtlasEntry, dst: GpuRect, color: f32[4]):
     if not dst.intersects(this.state.clip):
         return
+    let texture = this.atlas.texture else return
     var draw = GpuDraw(kind = GpuDrawKind.mask, scissor = this.state.clip, area = dst, image = texture)
     draw.uniforms[0] = (f32)dst.x
     draw.uniforms[1] = (f32)dst.y
@@ -32,7 +34,7 @@ func gpu_mask_draw(this: DisplayListPlayerGpu*, texture: gpu.Texture, entry: Gpu
     draw.uniforms[5] = (f32)entry.y
     for i in 0..<(usize)4:
         draw.uniforms[8 + i] = color[i]
-    gpu_clip_uniforms(this, &draw.uniforms[0], 12, 24)
+    gpu_clip_uniforms(this, &draw.uniforms[0], 12, 24, 25)
     gpu_append(this, draw)
 
 # mark: Glyph runs ==============================================================================
@@ -61,9 +63,6 @@ func gpu_draw_glyph_run_impl(base: display_list.DisplayListPlayer*, command: dis
     let strike = web_fonts.sk_strike_make(&blob.font, identity, r, g, b) else return
     let spec = display_list.cpu_rounding_spec(&strike)
     let device = this.device else return
-    let texture = this.atlas.texture_on(device) catch failure:
-        gpu_give_up(this, GpuFallback.atlas_full)
-        return
     # What makes the strike: the typeface, the size, subpixel positioning and the color's
     # gamma (the identity matrix is implied).
     var strike_key = gpu_hash(gpu_hash_start, (u64)(void*)(blob.font.typeface else return))
@@ -86,7 +85,7 @@ func gpu_draw_glyph_run_impl(base: display_list.DisplayListPlayer*, command: dis
         if not gpu_recording(this):
             return
         let dst = GpuRect(x = display_list.cpu_floor_to_int(mapped_x) + entry.left, y = display_list.cpu_floor_to_int(mapped_y) + entry.top, width = entry.width, height = entry.height)
-        gpu_mask_draw(this, texture, entry, dst, color)
+        gpu_mask_draw(this, entry, dst, color)
 
 ## The atlas entry of a glyph, rastered and placed the first time; none for an empty glyph.
 func gpu_glyph_entry(this: DisplayListPlayerGpu*, device: gpu.Device, strike: const web_fonts.SkStrike*, key: u64, glyph: u32, sub_x: u32, sub_y: u32) -> GpuAtlasEntry?:
@@ -97,10 +96,7 @@ func gpu_glyph_entry(this: DisplayListPlayerGpu*, device: gpu.Device, strike: co
     if mask.is_empty():
         this.atlas.remember_empty(key)
         return none
-    let placed = this.atlas.place(device, key, mask.image, mask.width, mask.height, mask.left, mask.top) catch failure:
-        gpu_give_up(this, GpuFallback.atlas_full)
-        return none
-    return placed
+    return gpu_place(this, device, key, mask.image, mask.width, mask.height, mask.left, mask.top)
 
 # mark: Paths ===================================================================================
 
@@ -122,9 +118,6 @@ func gpu_fill_path_impl(base: display_list.DisplayListPlayer*, command: display_
     if not bounds.translated(this.state.dx, this.state.dy).intersects(this.state.clip):
         return
     let device = this.device else return
-    let texture = this.atlas.texture_on(device) catch failure:
-        gpu_give_up(this, GpuFallback.atlas_full)
-        return
     let anti_alias = command.should_anti_alias == display_list.ShouldAntiAlias.yes
     # A small path is rastered whole, once: its coverage is the same wherever a whole-pixel
     # translation puts it, so every tile it crosses shares it. A larger one (a box's border)
@@ -145,16 +138,14 @@ func gpu_fill_path_impl(base: display_list.DisplayListPlayer*, command: display_
     if entry.width == 0:
         let coverage = gpu_path_coverage(&command, area, anti_alias) else return
         defer free(coverage) in memory.heap
-        let placed = this.atlas.place(device, key, coverage, area.width, area.height, 0, 0) catch failure:
-            gpu_give_up(this, GpuFallback.atlas_full)
-            return
+        let placed = gpu_place(this, device, key, coverage, area.width, area.height, 0, 0)
         if placed == none:
             gpu_give_up(this, GpuFallback.path)
             return
         entry = placed else return
     if not gpu_recording(this):
         return
-    gpu_mask_draw(this, texture, entry, area.translated(this.state.dx, this.state.dy), gpu_premultiplied(color))
+    gpu_mask_draw(this, entry, area.translated(this.state.dx, this.state.dy), gpu_premultiplied(color))
 
 ## The coverage of `command`'s path over `area` (its own coordinates), one byte a pixel: the
 ## alpha of a white fill on a transparent pixmap, which is the CPU player's draw coverage
@@ -203,9 +194,6 @@ func gpu_draw_line_impl(base: display_list.DisplayListPlayer*, command: display_
     if not bounds.translated(this.state.dx, this.state.dy).intersects(this.state.clip):
         return
     let device = this.device else return
-    let texture = this.atlas.texture_on(device) catch failure:
-        gpu_give_up(this, GpuFallback.atlas_full)
-        return
     var area = bounds
     var key: u64? = none
     if bounds.width * bounds.height <= 512 * 512 and bounds.width <= 2048 and bounds.height <= 2048:
@@ -228,13 +216,10 @@ func gpu_draw_line_impl(base: display_list.DisplayListPlayer*, command: display_
         pixmap.stroke_path(&line.path, &paint, &line.stroke, raster.Transform.from_translate((f32)-area.x, (f32)-area.y), none)
         let coverage = gpu_alpha_of(&pixmap)
         defer free(coverage) in memory.heap
-        let placed = this.atlas.place(device, key, coverage, area.width, area.height, 0, 0) catch failure:
-            gpu_give_up(this, GpuFallback.atlas_full)
-            return
-        entry = placed else return
+        entry = gpu_place(this, device, key, coverage, area.width, area.height, 0, 0) else return
     if not gpu_recording(this):
         return
-    gpu_mask_draw(this, texture, entry, area.translated(this.state.dx, this.state.dy), gpu_premultiplied(command.color))
+    gpu_mask_draw(this, entry, area.translated(this.state.dx, this.state.dy), gpu_premultiplied(command.color))
 
 # mark: Shadows =================================================================================
 
@@ -248,15 +233,15 @@ func gpu_outer_box_shadow_impl(base: display_list.DisplayListPlayer*, command: d
         return
     if (command.color.m_value >> 24) == 0:
         return
-    if this.state.rounded != none:
-        gpu_give_up(this, GpuFallback.nested_rounded_clip)
-        return
     let shadow = gpu_rect_of(command.shadow_rect)
     if shadow.width < 0 or shadow.height < 0:
         return
     let content = gpu_rect_of(command.device_content_rect).translated(this.state.dx, this.state.dy)
     let saved = this.state
     defer this.state = saved
+    # A clip around the shadow joins the clip mask; the content's outside is the analytic one.
+    if not gpu_push_mask(this):
+        return
     this.state.rounded = GpuRoundedClip(rect = [(f32)content.x, (f32)content.y, (f32)content.width, (f32)content.height],
                                         radii = gpu_normalized_radii(content, &command.content_corner_radii), mode = 2.0)
     let placed = shadow.translated(this.state.dx, this.state.dy)
@@ -265,9 +250,6 @@ func gpu_outer_box_shadow_impl(base: display_list.DisplayListPlayer*, command: d
         gpu_fill_shape(this, placed, gpu_normalized_radii(placed, &command.shadow_corner_radii), command.color, 0.0, false)
         return
     let device = this.device else return
-    let texture = this.atlas.texture_on(device) catch failure:
-        gpu_give_up(this, GpuFallback.atlas_full)
-        return
     let radii = display_list.cpu_radii(&command.shadow_corner_radii)
     var key = gpu_hash(gpu_hash_start, ((u64)(u32)shadow.width << 32) | (u64)(u32)shadow.height)
     for i in 0..<(usize)4:
@@ -287,14 +269,11 @@ func gpu_outer_box_shadow_impl(base: display_list.DisplayListPlayer*, command: d
         if mask.width > 2048 or mask.height > 2048:
             gpu_give_up(this, GpuFallback.shadow)
             return
-        let stored = this.atlas.place(device, key, mask.image, mask.width, mask.height, mask.left, mask.top) catch failure:
-            gpu_give_up(this, GpuFallback.atlas_full)
-            return
-        entry = stored else return
+        entry = gpu_place(this, device, key, mask.image, mask.width, mask.height, mask.left, mask.top) else return
     if not gpu_recording(this):
         return
     let dst = GpuRect(x = placed.x + entry.left, y = placed.y + entry.top, width = entry.width, height = entry.height)
-    gpu_mask_draw(this, texture, entry, dst, gpu_premultiplied(command.color))
+    gpu_mask_draw(this, entry, dst, gpu_premultiplied(command.color))
 
 # mark: Images ==================================================================================
 
@@ -310,21 +289,19 @@ func gpu_scaled_bitmap_impl(base: display_list.DisplayListPlayer*, command: disp
     let area = dst.intersected(clip)
     if area.is_empty() or width <= 0 or height <= 0:
         return
-    # cpu_image_shader's sampling: mipmaps only matter when the image is made smaller.
+    # cpu_image_shader's sampling: mipmaps only matter when the image is made smaller, and
+    # then the texture has them and the shader samples them trilinearly.
     var filter: f32 = 0.0
     match command.scaling_mode:
         .bilinear: filter = 1.0
         .bilinear_mipmap:
-            if dst.width < width or dst.height < height:
-                gpu_give_up(this, GpuFallback.image)
-                return
-            filter = 1.0
+            filter = 2.0 if dst.width < width or dst.height < height else 1.0
         _: filter = 0.0
     if gfx.immutable_bitmap_color_xform(command.bitmap) != none:
         gpu_give_up(this, GpuFallback.image)
         return
     let device = this.device else return
-    let found = this.images.texture_of(device, bitmap) catch failure:
+    let found = this.images.texture_of(device, bitmap, filter > 1.5) catch failure:
         gpu_give_up(this, GpuFallback.image)
         return
     let texture = found else return
@@ -337,5 +314,5 @@ func gpu_scaled_bitmap_impl(base: display_list.DisplayListPlayer*, command: disp
     draw.uniforms[5] = (f32)height
     draw.uniforms[6] = filter
     draw.uniforms[7] = 1.0
-    gpu_clip_uniforms(this, &draw.uniforms[0], 8, 20)
+    gpu_clip_uniforms(this, &draw.uniforms[0], 8, 20, 21)
     gpu_append(this, draw)

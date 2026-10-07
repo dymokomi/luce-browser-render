@@ -3,24 +3,27 @@
 #   atlas - one coverage texture for glyph masks and path coverage
 #
 #   DESCRIPTION:
-#       An r8 texture of 2048 by 2048 texels packed in shelves (rows of the height of their
+#       An r8 texture of 2048 by 2048 texels (4096 by 4096 once it has filled) packed in shelves (rows of the height of their
 #       tallest mask, filled left to right), as Skia's text atlas and WebRender's glyph cache
 #       pack. Glyph masks are kept by key (the strike, the glyph and its quarter-pixel phase:
 #       the same key always has the same pixels, see display_list's cpu_glyph_run), so a glyph
 #       is rastered once per process, not once per draw. Path coverage is placed without a key:
 #       it lives until the atlas starts again.
 #
-#       When a mask does not fit, the atlas starts again empty and its generation changes:
-#       draws recorded before refer to texels that are gone, so the player gives up the tile
-#       it is drawing (the CPU draws it) and the next tile starts with an empty atlas.
+#       When a mask does not fit (`fits`), the player first draws what it has recorded into its
+#       tile (texture frames that keep their contents let it add the rest later), then makes
+#       room: the first time the atlas grows to 4096 texels a side, copying its texels into
+#       the larger texture on the GPU (copy_texture), so every entry stays; after that it starts
+#       again empty and its generation changes.
 #
 #       Copyright (c) 2026 the luce-browser authors.
 #       SPDX-License-Identifier: BSD-2-Clause
 #
 #==============================================================================================
 
-## The side of the atlas in texels.
+## The side of the atlas in texels when it starts, and the most it grows to.
 pub let gpu_atlas_size: i32 = 2048
+pub let gpu_atlas_largest: i32 = 4096
 
 ## A mask in the atlas: where its texels are, and where it sits relative to the point it is
 ## drawn at (a glyph mask's left and top).
@@ -35,6 +38,8 @@ pub struct GpuAtlasEntry:
 ## The coverage atlas (see the header).
 pub struct GpuAtlas:
     var texture: gpu.Texture?
+    ## The side of the texture now (0 before it is made).
+    pub var size: i32
     ## The uploads not yet sent: one submission per tile, not one per mask.
     var batch: gpu.UploadBatch?
     var keys: GpuIndexMap
@@ -53,7 +58,34 @@ pub struct GpuAtlas:
             return texture
         let texture = try gpu.Texture.create(device, (u32)gpu_atlas_size, (u32)gpu_atlas_size, gpu.Format.r8)
         self.texture = texture
+        self.size = gpu_atlas_size
         return texture
+
+    ## Whether a `width` by `height` mask fits without growing or starting again.
+    pub func fits(width: i32, height: i32) -> bool:
+        let side = self.size if self.size > 0 else gpu_atlas_size
+        if self.shelf_x + width > side:
+            return self.shelf_y + self.shelf_height + height <= side
+        return self.shelf_y + height <= side
+
+    ## Room for more masks: the atlas grows to its largest side the first time, keeping
+    ## every entry (its texels are copied on the GPU), and starts again empty after that.
+    ## Draws recorded against the old texels must have been submitted first.
+    pub func make_room(device: gpu.Device) -> !:
+        let old = try self.texture_on(device)
+        if self.size >= gpu_atlas_largest:
+            self.reset()
+            return
+        try self.submit_uploads()
+        let grown = try gpu.Texture.create(device, (u32)gpu_atlas_largest, (u32)gpu_atlas_largest, gpu.Format.r8)
+        gpu.copy_texture(old, gpu.Region(0, 0, (u32)self.size, (u32)self.size), grown, 0, 0) catch failure:
+            var handle = grown
+            handle.destroy()
+            error(failure.code, failure.message)
+        var handle = old
+        handle.destroy()
+        self.texture = grown
+        self.size = gpu_atlas_largest
 
     ## The mask kept for `key`, if any.
     pub func find(key: u64) -> GpuAtlasEntry?:
@@ -69,18 +101,18 @@ pub struct GpuAtlas:
     ## unless `key` is none. None when it is larger than the atlas; a full atlas starts again
     ## first (see the header).
     pub func place(device: gpu.Device, key: u64?, coverage: const u8[], width: i32, height: i32, left: i32, top: i32) -> GpuAtlasEntry?!:
-        if width <= 0 or height <= 0 or width > gpu_atlas_size or height > gpu_atlas_size:
+        let texture = try self.texture_on(device)
+        if width <= 0 or height <= 0 or width > self.size or height > self.size:
             return none
-        if self.shelf_x + width > gpu_atlas_size:
+        if self.shelf_x + width > self.size:
             self.shelf_y += self.shelf_height
             self.shelf_x = 0
             self.shelf_height = 0
-        if self.shelf_y + height > gpu_atlas_size:
+        if self.shelf_y + height > self.size:
             self.reset()
         let entry = GpuAtlasEntry(x = self.shelf_x, y = self.shelf_y, width = width, height = height, left = left, top = top)
         self.shelf_x += width + 1
         self.shelf_height = gpu_max(self.shelf_height, height + 1)
-        let texture = try self.texture_on(device)
         if self.batch == none:
             self.batch = try gpu.UploadBatch.begin(device)
         var batch = self.batch else trap("gpu_player: no upload batch")
@@ -118,5 +150,6 @@ pub struct GpuAtlas:
             var handle = texture
             handle.destroy()
             self.texture = none
+        self.size = 0
         self.keys.release()
         ak.vector_clear(&self.entries)

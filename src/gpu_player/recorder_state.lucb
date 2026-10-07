@@ -51,8 +51,8 @@ func gpu_add_rounded_rect_clip_impl(base: display_list.DisplayListPlayer*, comma
     # A clip that no longer reaches the scissor changes nothing drawn there.
     if this.state.clip.is_empty():
         return
-    if this.state.rounded != none:
-        gpu_give_up(this, GpuFallback.nested_rounded_clip)
+    # A clip inside another: the outer one joins the clip mask.
+    if not gpu_push_mask(this):
         return
     let radii = gpu_normalized_radii(rect, &command.corner_radii)
     this.state.rounded = GpuRoundedClip(rect = [(f32)rect.x, (f32)rect.y, (f32)rect.width, (f32)rect.height], radii = radii, mode = 2.0 if keep_outside else 1.0)

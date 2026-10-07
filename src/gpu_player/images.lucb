@@ -7,7 +7,9 @@
 #       premultiplied bytes (sampled as stored, so filtering happens in the encoded space and
 #       on premultiplied texels, as Skia's legacy image shader does) and kept while it is used.
 #       Bitmaps are immutable and live as long as the display lists that draw them, so the
-#       bitmap's address and size are its key. Textures over the budget are released least
+#       bitmap's address and size are its key. An image drawn smaller than it is with
+#       mipmapped sampling gets a texture of its own with mipmaps (made on the GPU after the
+#       upload), sampled trilinearly. Textures over the budget are released least
 #       recently used first; a draw recorded with one keeps it alive until its frame finishes.
 #
 #       Copyright (c) 2026 the luce-browser authors.
@@ -24,6 +26,7 @@ struct GpuImage:
     var texture: gpu.Texture?
     var width: i32
     var height: i32
+    var bytes: u64
     var used: u64
 
 ## The image textures (see the header).
@@ -34,27 +37,31 @@ pub struct GpuImageCache:
     ## The current frame's number: images used in it are not released.
     pub var frame: u64
 
-    ## The texture of `bitmap` on `device`, uploaded the first time; none for an empty bitmap.
-    pub func texture_of(device: gpu.Device, bitmap: const gfx.Bitmap*) -> gpu.Texture?!:
+    ## The texture of `bitmap` on `device`, uploaded the first time, with mipmaps when
+    ## `mipmapped`; none for an empty bitmap.
+    pub func texture_of(device: gpu.Device, bitmap: const gfx.Bitmap*, mipmapped: bool = false) -> gpu.Texture?!:
         let width = gfx.bitmap_width(bitmap)
         let height = gfx.bitmap_height(bitmap)
         if width <= 0 or height <= 0 or width > 16384 or height > 16384:
             return none
-        let key = gpu_hash(gpu_hash(gpu_hash_start, (u64)(void*)bitmap), ((u64)(u32)width << 32) | (u64)(u32)height)
+        let key = gpu_hash(gpu_hash(gpu_hash(gpu_hash_start, (u64)(void*)bitmap), ((u64)(u32)width << 32) | (u64)(u32)height), 1 if mipmapped else 0)
         if let index = self.keys.get(key):
             let image = ak.vector_at(&self.images, (usize)index)
             if image.texture != none:
                 image.used = self.frame
                 return image.texture
-        let bytes = (u64)width * (u64)height * 4
+        let level_bytes = (u64)width * (u64)height * 4
+        # A mip chain adds a third.
+        let bytes = level_bytes + (level_bytes // 3 if mipmapped else 0)
         self.make_room(bytes)
-        let texture = try gpu.Texture.create(device, (u32)width, (u32)height, gpu.Format.rgba8_linear)
-        let pixels = try new u8[(usize)bytes] --- in memory.heap
+        let texture = try gpu.Texture.create(device, (u32)width, (u32)height, gpu.Format.rgba8_linear, mipmaps = mipmapped)
+        let pixels = try new u8[(usize)level_bytes] --- in memory.heap
         defer free(pixels) in memory.heap
         gpu_premultiplied_rgba(bitmap, pixels)
         try texture.upload(pixels)
+        try texture.generate_mipmaps()
         self.bytes += bytes
-        let image = GpuImage(key = key, texture = texture, width = width, height = height, used = self.frame)
+        let image = GpuImage(key = key, texture = texture, width = width, height = height, bytes = bytes, used = self.frame)
         if let index = self.keys.get(key):
             *ak.vector_at(&self.images, (usize)index) = image
         else:
@@ -81,7 +88,7 @@ pub struct GpuImageCache:
         if let texture = image.texture:
             var handle = texture
             handle.destroy()
-            self.bytes -= (u64)image.width * (u64)image.height * 4
+            self.bytes -= image.bytes
         image.texture = none
 
     ## Releases every texture.

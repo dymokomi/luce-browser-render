@@ -1,12 +1,17 @@
 #==============================================================================================
 #
-#   replay - a tile's recorded draws submitted as one frame, and the CPU player's tiles
+#   replay - a tile's recorded draws submitted as texture frames, and the CPU player's tiles
 #
 #   DESCRIPTION:
 #       gpu_replay_tile records the GPU player's draws into the tile texture's frame and
-#       presents it (cleared to transparent first): each draw under its scissor, the `rects`
-#       batches as one triangle list each, the shader draws with their uniforms. The atlas's
-#       pending uploads are sent first, so the frame samples them.
+#       presents it (cleared to transparent first, or over what the tile holds when the
+#       recording drew part of it already): each draw under its scissor, the `rects` batches as
+#       one triangle list each, runs of glyph masks and of rounded rectangles with circular
+#       corners that share a scissor and clips as one instanced draw each (glyphs.frag,
+#       shapes.frag), the other shader draws with their uniforms. A tile that needs more than
+#       a frame's draws goes on in another frame that keeps what the first drew. The atlas's
+#       pending uploads are sent first, so the frame samples them, and the clip masks its
+#       draws use are rendered first, one r8 texture each (clip.frag).
 #
 #       gpu_cpu_tile draws a tile the GPU player gave up on with the CPU player
 #       (DisplayListPlayerCpu through the same tile seam) into a scratch surface and uploads
@@ -19,12 +24,16 @@
 
 # mark: Pipelines ===============================================================================
 
-## The shaders and pipelines tiles are drawn with (all into rgba8_linear tiles).
+## The shaders and pipelines tiles are drawn with: into rgba8_linear tiles, and clip.frag into
+## r8 clip masks.
 pub struct GpuPipelines:
-    var shaders: gpu.Shader[4]
+    var shaders: gpu.Shader[7]
     var fill: gpu.Pipeline
     var mask: gpu.Pipeline
     var image: gpu.Pipeline
+    var glyphs: gpu.Pipeline
+    var shapes: gpu.Pipeline
+    var clip: gpu.Pipeline
     ## The composite pipeline per frame target format (index 4: a presentation surface).
     var composite: (gpu.Pipeline?)[5]
 
@@ -42,11 +51,14 @@ pub struct GpuPipelines:
         self.fill.destroy()
         self.mask.destroy()
         self.image.destroy()
+        self.glyphs.destroy()
+        self.shapes.destroy()
+        self.clip.destroy()
         for index in 0..<(usize)5:
             if let pipeline = self.composite[index]:
                 var handle = pipeline
                 handle.destroy()
-        for index in 0..<(usize)4:
+        for index in 0..<(usize)7:
             self.shaders[index].destroy()
 
 ## The pipelines on `device`.
@@ -55,54 +67,268 @@ pub func gpu_pipelines_create(device: gpu.Device) -> GpuPipelines!:
     let mask_shader = try gpu.Shader.create(device, mask_frag_words, mask_frag_msl)
     let image_shader = try gpu.Shader.create(device, image_frag_words, image_frag_msl)
     let composite_shader = try gpu.Shader.create(device, composite_frag_words, composite_frag_msl)
+    let glyphs_shader = try gpu.Shader.create(device, glyphs_frag_words, glyphs_frag_msl)
+    let shapes_shader = try gpu.Shader.create(device, shapes_frag_words, shapes_frag_msl)
+    let clip_shader = try gpu.Shader.create(device, clip_frag_words, clip_frag_msl)
     let tile = gpu.Format.rgba8_linear
-    return GpuPipelines(shaders = [fill_shader, mask_shader, image_shader, composite_shader],
+    return GpuPipelines(shaders = [fill_shader, mask_shader, image_shader, composite_shader, glyphs_shader, shapes_shader, clip_shader],
                         fill = try gpu.Pipeline.create(device, fill_shader, gpu.Blend.over, tile),
                         mask = try gpu.Pipeline.create(device, mask_shader, gpu.Blend.over, tile),
-                        image = try gpu.Pipeline.create(device, image_shader, gpu.Blend.over, tile))
+                        image = try gpu.Pipeline.create(device, image_shader, gpu.Blend.over, tile),
+                        glyphs = try gpu.Pipeline.create(device, glyphs_shader, gpu.Blend.over, tile),
+                        shapes = try gpu.Pipeline.create(device, shapes_shader, gpu.Blend.over, tile),
+                        clip = try gpu.Pipeline.create(device, clip_shader, gpu.Blend.over, gpu.Format.r8))
+
+# mark: Replay state ============================================================================
+
+## What replay keeps between tiles: the clip masks' textures (one per mask of a recording,
+## reused tile after tile), and scratch lists.
+pub struct GpuReplay:
+    var masks: ak.Vector[gpu.Texture]
+    var instances: ak.Vector[gpu.ShadeInstance]
+    var vertices: ak.Vector[gpu.Vertex]
+
+    ## Releases the textures and lists.
+    pub func release():
+        for texture in ak.vector_span(&self.masks):
+            var handle = texture
+            handle.destroy()
+        ak.vector_clear(&self.masks)
+        ak.vector_clear(&self.instances)
+        ak.vector_clear(&self.vertices)
+
+## The luce-gpu draws one tile frame takes before the tile goes on in another (luce-gpu's
+## default limit is 4096).
+let gpu_frame_draws: usize = 4000
+
+## One texture frame of a tile and its root target.
+struct GpuTileFrame:
+    var frame: interop.Reference[gpu.Frame]?
+    var root: interop.View[gpu.RenderTarget]?
+
+    ## Begins a frame of `texture`, over its contents when `keep`.
+    func open(texture: gpu.Texture, keep: bool) -> !:
+        let frame = try texture.frame(keep)
+        let root = frame.value().target() catch failure:
+            frame.release()
+            error(failure.code, failure.message)
+        self.frame = frame
+        self.root = root
+
+    ## The frame's root target.
+    func target() -> const gpu.RenderTarget*:
+        return (self.root else trap("gpu_player: no tile frame")).value()
+
+    ## Presents the frame (cleared to transparent unless it keeps) and lets it go.
+    func present() -> !:
+        let frame = self.frame else return
+        if let root = self.root:
+            root.release()
+        self.root = none
+        self.frame = none
+        defer frame.release()
+        _ = try frame.value().present(gpu.Color(0.0, 0.0, 0.0, 0.0))
+
+    ## Lets the frame go without presenting it.
+    func release():
+        if let root = self.root:
+            root.release()
+        if let frame = self.frame:
+            frame.release()
+        self.root = none
+        self.frame = none
 
 # mark: GPU tiles ===============================================================================
 
-## Draws `player`'s recording into `texture` (`size` pixels square), cleared first.
-pub func gpu_replay_tile(player: DisplayListPlayerGpu*, pipelines: const GpuPipelines*, texture: gpu.Texture, size: i32, vertices: ak.Vector[gpu.Vertex]*) -> !:
+## Draws `player`'s recording into `texture` (`size` pixels square): cleared first, or over
+## what it holds when `keep`.
+pub func gpu_replay_tile(player: DisplayListPlayerGpu*, pipelines: const GpuPipelines*, texture: gpu.Texture, size: i32, keep: bool) -> !:
     try player.atlas.submit_uploads()
-    let frame = try texture.frame()
-    defer frame.release()
-    let root = try frame.value().target()
-    defer root.release()
+    try gpu_render_masks(player, pipelines, size)
+    var tile = GpuTileFrame()
+    try tile.open(texture, keep)
+    errdefer tile.release()
     let bounds = GpuRect(width = size, height = size)
-    for draw in ak.vector_span_const(&player.draws):
-        let scissor = draw.scissor.intersected(bounds)
+    let draws = ak.vector_span_const(&player.draws)
+    var index: usize = 0
+    var in_frame: usize = 0
+    while index < draws.length:
+        if in_frame == gpu_frame_draws:
+            try tile.present()
+            try tile.open(texture, true)
+            in_frame = 0
+        let scissor = draws[index].scissor.intersected(bounds)
         if scissor.is_empty():
+            index += 1
             continue
-        let view = try root.value().clipped(gpu.Rect((f64)scissor.x, (f64)scissor.y, (f64)scissor.width, (f64)scissor.height))
-        gpu_replay_draw(player, pipelines, view.value(), &draw, size, vertices) catch failure:
+        let view = try tile.target().clipped(gpu.Rect((f64)scissor.x, (f64)scissor.y, (f64)scissor.width, (f64)scissor.height))
+        let used = gpu_replay_run(player, pipelines, view.value(), draws, index, size) catch failure:
             view.release()
             error(failure.code, failure.message)
         view.release()
-    _ = try frame.value().present(gpu.Color(0.0, 0.0, 0.0, 0.0))
+        index += used
+        in_frame += 1
+    try tile.present()
 
-## One recorded draw into `target` (the tile under the draw's scissor).
-func gpu_replay_draw(player: const DisplayListPlayerGpu*, pipelines: const GpuPipelines*, target: const gpu.RenderTarget*, draw: const GpuDraw*, size: i32, vertices: ak.Vector[gpu.Vertex]*) -> !:
+## Renders the recording's clip masks, each into its texture (r8, the tile's size): cleared
+## to 1, then each clip multiplied in.
+func gpu_render_masks(player: DisplayListPlayerGpu*, pipelines: const GpuPipelines*, size: i32) -> !:
+    let jobs = ak.vector_span_const(&player.masks)
+    let device = player.device else return
+    while ak.vector_size(&player.replay.masks) < jobs.length:
+        let texture = try gpu.Texture.create(device, (u32)size, (u32)size, gpu.Format.r8)
+        ak.vector_append_t(&player.replay.masks, texture)
+    let whole = gpu.Rect(0.0, 0.0, (f64)size, (f64)size)
+    for index in 0..<jobs.length:
+        let job = jobs[index]
+        var tile = GpuTileFrame()
+        try tile.open(*ak.vector_at(&player.replay.masks, index), false)
+        errdefer tile.release()
+        for which in 0..<job.count:
+            let clip = job.clips[which]
+            var uniforms: f32[13]
+            for i in 0..<(usize)4:
+                uniforms[i] = clip.rect[i]
+            for i in 0..<(usize)8:
+                uniforms[4 + i] = clip.radii[i]
+            uniforms[12] = clip.mode
+            try gpu.shade(tile.target(), pipelines.clip, whole, u8[]((u8*)&uniforms[0], 52), none, gpu.Filter.nearest)
+        # r8 keeps the red of the clear: 1 everywhere before the clips.
+        let frame = tile.frame else trap("gpu_player: no mask frame")
+        if let root = tile.root:
+            root.release()
+        tile.root = none
+        tile.frame = none
+        defer frame.release()
+        _ = try frame.value().present(gpu.Color(1.0, 0.0, 0.0, 1.0))
+
+## The clip mask texture of `draw` (none without one).
+func gpu_mask_texture(player: const DisplayListPlayerGpu*, draw: const GpuDraw*) -> gpu.Texture?:
+    if draw.mask == 0:
+        return none
+    return *ak.vector_at_const(&player.replay.masks, (usize)draw.mask - 1)
+
+## The images of a draw sampling `first` at binding 1, with the clip mask at binding 2.
+func gpu_images(first: gpu.Texture?, mask: gpu.Texture?) -> gpu.Texture[2]?:
+    let clip = mask else return none
+    return [first else clip, clip]
+
+## Draws `draws[start]` into `target`, with the draws after it that join it in one instanced
+## draw; how many it drew.
+func gpu_replay_run(player: DisplayListPlayerGpu*, pipelines: const GpuPipelines*, target: const gpu.RenderTarget*, draws: const GpuDraw[], start: usize, size: i32) -> usize!:
+    let draw = draws[start]
     let area = gpu.Rect((f64)draw.area.x, (f64)draw.area.y, (f64)draw.area.width, (f64)draw.area.height)
     let uniforms = u8[]((u8*)&draw.uniforms[0], 128)
+    let clip_mask = gpu_mask_texture(player, &draw)
     match draw.kind:
         .rects:
+            let vertices = &player.replay.vertices
             ak.vector_clear(vertices)
             let scale = 2.0 / (f32)size
             for index in draw.first..<draw.first + draw.count:
                 let record = ak.vector_at_const(&player.rects, index)
                 gpu_append_quad(vertices, record, scale)
             try target.triangles(ak.vector_span_const(vertices))
+            return 1
         .fill:
-            try gpu.shade(target, pipelines.fill, area, uniforms, none, gpu.Filter.nearest)
+            if gpu_circular(&draw):
+                return try gpu_replay_shapes(player, pipelines, target, draws, start, clip_mask)
+            if let images = gpu_images(none, clip_mask):
+                try gpu.shade(target, pipelines.fill, area, uniforms, images, gpu.Filter.nearest)
+            else:
+                try gpu.shade(target, pipelines.fill, area, uniforms, none, gpu.Filter.nearest)
+            return 1
         .mask:
-            let image = draw.image else return
-            try gpu.shade(target, pipelines.mask, area, uniforms, [image], gpu.Filter.nearest)
+            return try gpu_replay_glyphs(player, pipelines, target, draws, start, clip_mask)
         .image:
-            let image = draw.image else return
-            try gpu.shade(target, pipelines.image, area, uniforms, [image], gpu.Filter.nearest)
-        _: return
+            let image = draw.image else return 1
+            let filter = gpu.Filter.trilinear if draw.uniforms[6] > 1.5 else gpu.Filter.nearest
+            if let images = gpu_images(image, clip_mask):
+                try gpu.shade(target, pipelines.image, area, uniforms, images, filter)
+            else:
+                try gpu.shade(target, pipelines.image, area, uniforms, [image], filter)
+            return 1
+        _: return 1
+
+## Whether a `fill` draw's corners are circular (each corner's radii equal), which an
+## instanced shape carries.
+func gpu_circular(draw: const GpuDraw*) -> bool:
+    for corner in 0..<(usize)4:
+        if draw.uniforms[4 + corner * 2] != draw.uniforms[5 + corner * 2]:
+            return false
+    return true
+
+## Whether two draws share a scissor, a clip mask and the rounded clip's uniforms from `at`
+## through its mode at `mode_at`.
+func gpu_same_clips(a: const GpuDraw*, b: const GpuDraw*, at: usize, mode_at: usize) -> bool:
+    if a.scissor != b.scissor or a.mask != b.mask:
+        return false
+    for index in at..<mode_at + 1:
+        if a.uniforms[index] != b.uniforms[index]:
+            return false
+    return true
+
+## The uniforms of an instanced draw: the rounded clip (13 floats from `at`) and the mask flag.
+func gpu_shared_uniforms(draw: const GpuDraw*, at: usize) -> f32[14]:
+    var shared: f32[14]
+    for index in 0..<(usize)13:
+        shared[index] = draw.uniforms[at + index]
+    shared[13] = 1.0 if draw.mask != 0 else 0.0
+    return shared
+
+## A run of `fill` draws with circular corners and the same clips as one instanced draw of
+## shapes.frag; how many it drew.
+func gpu_replay_shapes(player: DisplayListPlayerGpu*, pipelines: const GpuPipelines*, target: const gpu.RenderTarget*, draws: const GpuDraw[], start: usize, clip_mask: gpu.Texture?) -> usize!:
+    let instances = &player.replay.instances
+    ak.vector_clear(instances)
+    var end = start
+    while end < draws.length and draws[end].kind == GpuDrawKind.fill and gpu_circular(&draws[end]) and gpu_same_clips(&draws[start], &draws[end], 16, 28):
+        let draw = draws[end]
+        let v = draw.straight
+        var instance = gpu.ShadeInstance(rect = [(f32)draw.area.x, (f32)draw.area.y, (f32)draw.area.width, (f32)draw.area.height])
+        for i in 0..<(usize)4:
+            instance.data[i] = draw.uniforms[i]
+            instance.data[4 + i] = draw.uniforms[4 + i * 2]
+        instance.data[8] = (f32)(((v >> 16) & 0xff) * 256 + ((v >> 8) & 0xff))
+        instance.data[9] = (f32)((v & 0xff) * 256 + (v >> 24))
+        instance.data[10] = draw.uniforms[29]
+        instance.data[11] = draw.uniforms[30]
+        ak.vector_append_t(instances, instance)
+        end += 1
+    var shared = gpu_shared_uniforms(&draws[start], 16)
+    let bytes = u8[]((u8*)&shared[0], 56)
+    if let images = gpu_images(none, clip_mask):
+        try gpu.shade_instances(target, pipelines.shapes, ak.vector_span_const(instances), bytes, images, gpu.Filter.nearest)
+    else:
+        try gpu.shade_instances(target, pipelines.shapes, ak.vector_span_const(instances), bytes, none, gpu.Filter.nearest)
+    return end - start
+
+## A run of atlas `mask` draws with the same clips as one instanced draw of glyphs.frag (every
+## mask draw of a recording samples the atlas's one texture: making room draws what came
+## before); how many it drew.
+func gpu_replay_glyphs(player: DisplayListPlayerGpu*, pipelines: const GpuPipelines*, target: const gpu.RenderTarget*, draws: const GpuDraw[], start: usize, clip_mask: gpu.Texture?) -> usize!:
+    let atlas = draws[start].image else return 1
+    let instances = &player.replay.instances
+    ak.vector_clear(instances)
+    var end = start
+    while end < draws.length and draws[end].kind == GpuDrawKind.mask and gpu_same_clips(&draws[start], &draws[end], 12, 24):
+        let draw = draws[end]
+        var instance = gpu.ShadeInstance(rect = [(f32)draw.area.x, (f32)draw.area.y, (f32)draw.area.width, (f32)draw.area.height])
+        instance.data[0] = draw.uniforms[0]
+        instance.data[1] = draw.uniforms[1]
+        instance.data[2] = draw.uniforms[4]
+        instance.data[3] = draw.uniforms[5]
+        for i in 0..<(usize)4:
+            instance.data[4 + i] = draw.uniforms[8 + i]
+        ak.vector_append_t(instances, instance)
+        end += 1
+    var shared = gpu_shared_uniforms(&draws[start], 12)
+    let bytes = u8[]((u8*)&shared[0], 56)
+    if let images = gpu_images(atlas, clip_mask):
+        try gpu.shade_instances(target, pipelines.glyphs, ak.vector_span_const(instances), bytes, images, gpu.Filter.nearest)
+    else:
+        try gpu.shade_instances(target, pipelines.glyphs, ak.vector_span_const(instances), bytes, [atlas], gpu.Filter.nearest)
+    return end - start
 
 ## The two triangles of a solid rectangle in clip coordinates of a tile (`scale` is 2 / side).
 func gpu_append_quad(vertices: ak.Vector[gpu.Vertex]*, record: const GpuRectRecord*, scale: f32):

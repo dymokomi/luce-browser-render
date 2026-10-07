@@ -77,19 +77,22 @@ func test_gpu_frame(compositor: GpuCompositor*, texture: gpu.Texture, scene: con
     defer frame.release()
     let target = try frame.value().target()
     defer target.release()
-    try gpu_compositor_draw(compositor, scene.list, snapshot, target.value(), gpu.Format.rgba8, test_width, test_height)
+    try gpu_compositor_draw(compositor, scene.list, snapshot, target.value(), test_width, test_height)
     _ = try frame.value().present(gpu.Color(0.0, 0.0, 0.0, 0.0))
     try texture.read(out)
 
 ## Draws `scene` both ways at the scroll offsets of `snapshots` and traps when more than
 ## `max_pixels` pixels differ by more than `max_difference` in a channel; answers the
-## compositor's statistics after the last frame.
-func test_compare(name: str, scene: const TestList*, snapshots: const display_list.ScrollStateSnapshot[], max_difference: i32, max_pixels: usize) -> GpuPlayerStats?:
+## compositor's statistics after the last frame. The GPU draws into a texture of
+## `target_format`: rgba8 composites through the frame texture and its decode, rgba8_linear
+## (which blends on stored values, as an encoded surface does) takes the tiles directly.
+func test_compare(name: str, scene: const TestList*, snapshots: const display_list.ScrollStateSnapshot[], max_difference: i32, max_pixels: usize,
+                  target_format: gpu.Format = gpu.Format.rgba8) -> GpuPlayerStats?:
     # Frames this large need the process heap, not a test's bounded one.
     with memory.heap:
         var device = gpu.Device.open() catch failure: return none
         defer device.destroy()
-        var texture = gpu.Texture.create(device, (u32)test_width, (u32)test_height, gpu.Format.rgba8) catch failure: trap(f"{name}: {failure.message}")
+        var texture = gpu.Texture.create(device, (u32)test_width, (u32)test_height, target_format) catch failure: trap(f"{name}: {failure.message}")
         defer texture.destroy()
         let compositor = gpu_compositor_create()
         defer gpu_compositor_destroy(compositor)
@@ -142,6 +145,8 @@ test "gpu player: rectangles, clips and translations match the CPU player":
     test_add(&scene, .draw_rect(display_list.DrawRect(rect = test_box(20, 200, 300, 60), color = test_rgba(0, 0, 0, 255), rough = false)), 1)
     let snapshots = [test_snapshot(0.0, 0.0), test_snapshot(0.0, 37.0)]
     _ = test_compare("rectangles", &scene, snapshots, 2, 0)
+    # The same straight onto a target that blends on stored values, with no frame texture.
+    _ = test_compare("rectangles, direct", &scene, snapshots, 2, 0, gpu.Format.rgba8_linear)
 
 test "gpu player: rounded rectangles and rounded clips match the CPU player within a fuzzy bound":
     let scene = test_list()
@@ -229,3 +234,64 @@ test "gpu player: a scroll moves kept tiles; unsupported commands fall back per 
         trap("a scroll drew kept tiles again")
     if stats.cpu_tiles == 0 or stats.fallbacks[(usize)GpuFallback.gradient] == 0:
         trap("the gradient's tile did not fall back to the CPU player")
+
+test "gpu player: nested rounded clips go through a clip mask, not to the CPU":
+    let scene = test_list()
+    test_background(&scene)
+    for i in 0..<(i32)3:
+        let x = 30 + i * 220
+        test_add(&scene, .save(display_list.Save()), 1)
+        test_add(&scene, .add_rounded_rect_clip(display_list.AddRoundedRectClip(corner_radii = test_radii(30), border_rect = test_box(x, 20, 180, 240), corner_clip = display_list.CornerClip.outside)), 1)
+        test_add(&scene, .add_rounded_rect_clip(display_list.AddRoundedRectClip(corner_radii = test_radii(20 + i * 10), border_rect = test_box(x + 20, 60, 180, 220), corner_clip = display_list.CornerClip.outside)), 1)
+        test_add(&scene, .fill_rect(display_list.FillRect(rect = test_box(x - 10, 0, 220, 300), color = test_rgba(30, 90 + (u8)(i * 50), 200, 255))), 1)
+        test_add(&scene, .fill_rect_with_rounded_corners(display_list.FillRectWithRoundedCorners(rect = test_box(x + 40, 120, 100, 60), color = test_rgba(250, 200, 40, 255), corner_radii = test_radii(12))), 1)
+        test_add(&scene, .restore(display_list.Restore()), 1)
+    let snapshots = [test_snapshot(0.0, 0.0), test_snapshot(0.0, 9.0)]
+    let stats = test_compare("nested clips", &scene, snapshots, 40, 900) else return
+    if stats.cpu_tiles > 0:
+        trap("nested rounded clips sent a tile to the CPU player")
+
+test "gpu player: an image drawn smaller samples its mipmaps":
+    let scene = test_list()
+    test_background(&scene)
+    let bitmap = gfx.bitmap_create_alpha_type(gfx.BitmapFormat.bgra8888, gfx.AlphaType.premultiplied, gfx.IntSize(m_width = 256, m_height = 256)) else trap("bitmap")
+    for j in 0..<(i32)256:
+        let row = gfx.bitmap_scanline(bitmap, j) else trap("scanline")
+        for i in 0..<(i32)256:
+            # Stripes four texels wide: drawn at a quarter, they average to grey.
+            let on = (i // 4 + j // 4) % 2 == 0
+            row[(usize)i] = 0xff000000 | (0x00e0e0e0 if on else 0x00202020)
+    var color_space: gfx.ColorSpace = ---
+    gfx.color_space_construct(&color_space)
+    let image = gfx.immutable_bitmap_create_color_space(bitmap, color_space)
+    test_add(&scene, .draw_scaled_immutable_bitmap(display_list.DrawScaledImmutableBitmap(dst_rect = test_box(40, 40, 64, 64), clip_rect = test_box(0, 0, 700, 300), bitmap = image, scaling_mode = gfx.ScalingMode.bilinear_mipmap)), 1)
+    let snapshots = [test_snapshot(0.0, 0.0)]
+    # Mipmap levels and their blending differ from Skia's in the last bits only.
+    let stats = test_compare("mipmaps", &scene, snapshots, 24, 0) else return
+    if stats.cpu_tiles > 0:
+        trap("a downscaled image sent a tile to the CPU player")
+
+test "gpu player: a full atlas grows and draws on, without a CPU tile":
+    let scene = test_list()
+    test_background(&scene)
+    # Sixty distinct paths of up to 300 pixels a side: more coverage than 2048 squared holds.
+    for i in 0..<(i32)60:
+        var path: gfx.Path
+        let x = (f32)(10 + (i * 37) % 380)
+        let y = (f32)(5 + (i * 23) % 20)
+        let size = (f32)(200 + (i * 13) % 100)
+        gfx.path_move_to(&path, gfx.FloatPoint(m_x = x, m_y = y))
+        gfx.path_line_to(&path, gfx.FloatPoint(m_x = x + size, m_y = y + 3.5))
+        gfx.path_line_to(&path, gfx.FloatPoint(m_x = x + size * 0.5, m_y = y + size * 0.9))
+        gfx.path_close(&path)
+        let bounds = test_box((i32)x, (i32)y, (i32)size + 1, (i32)(size * 0.9) + 1)
+        test_add(&scene, .fill_path(display_list.FillPath(path_bounding_rect = bounds, path = path, opacity = 1.0, paint_style_or_color = .color(test_rgba((u8)(i * 4), 40, 160, 60)),
+                                                          winding_rule = gfx.WindingRule.even_odd, should_anti_alias = display_list.ShouldAntiAlias.yes)), 1)
+    let snapshots = [test_snapshot(0.0, 0.0)]
+    # Sixty translucent layers: blending in floats drifts from Skia's 8-bit lowp by a few.
+    let stats = test_compare("atlas", &scene, snapshots, 6, 0) else return
+    if stats.cpu_tiles > 0:
+        trap("a full atlas sent a tile to the CPU player")
+    # The resident count holds the atlas: 4096 squared once it grew.
+    if stats.resident_bytes < (u64)(gpu_atlas_largest * gpu_atlas_largest):
+        trap("the atlas did not grow")

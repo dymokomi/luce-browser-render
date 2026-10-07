@@ -8,18 +8,24 @@
 #       scroll offsets are Ladybird's. Each virtual records draws into CPU-side lists that
 #       replay.lucb submits as one tile frame:
 #
-#         - the state is a stack of whole-pixel translations, a scissor rectangle and at most
-#           one rounded clip (applied analytically by every shader);
-#         - solid rectangles without a rounded clip append to a batch, one triangle draw for
-#           every run of them under one scissor;
+#         - the state is a stack of whole-pixel translations, a scissor rectangle, at most one
+#           rounded clip applied analytically by every shader, and the clips around it as a
+#           clip mask: a second rounded clip moves the first into a mask (the clips it
+#           multiplies, rendered into an r8 texture of the tile at replay) and takes its place;
+#         - solid rectangles without a rounded clip or mask append to a batch, one triangle
+#           draw for every run of them under one scissor;
 #         - rounded rectangles, rectangle strokes and the scroll bar are `fill` draws, glyphs
-#           and path coverage `mask` draws, images `image` draws (recorder_draws.lucb).
+#           and path coverage `mask` draws, images `image` draws (recorder_draws.lucb); replay
+#           draws runs of them as one instanced draw where it can.
+#
+#       The recording draws into the tile's texture as it goes when the atlas has to make
+#       room (gpu_flush), so a full atlas costs a texture frame, not the tile.
 #
 #       What it cannot draw like the CPU player (a transform that is not a whole-pixel
-#       translation, an effect, a clip path, a second rounded clip, gradients, shadows, lines,
-#       ellipses, strokes, painted paths, repeated or downscaled mipmapped images, nested
-#       display lists, external content) makes the recording unsupported: the tile goes to the
-#       CPU player, and the reason is counted (GpuPlayerStats.fallbacks).
+#       translation, an effect, a clip path, gradients, inner and text shadows, ellipses,
+#       strokes, painted paths, repeated images, nested display lists, external content)
+#       makes the recording unsupported: the tile goes to the CPU player, and the reason is
+#       counted (GpuPlayerStats.fallbacks).
 #
 #       Copyright (c) 2026 the luce-browser authors.
 #       SPDX-License-Identifier: BSD-2-Clause
@@ -45,13 +51,12 @@ pub enum GpuFallback as u8:
     nested_display_list = 12
     external_content = 13
     atlas_full = 14
-    draw_limit = 15
 
 ## A fallback's name, for reports.
 pub func gpu_fallback_name(kind: usize) -> str:
-    let names: str[16] = ["transform", "effects", "clip path", "nested rounded clip", "text as paths", "image", "path", "gradient",
-                          "shadow", "line", "ellipse", "backdrop filter", "nested display list", "external content", "atlas full", "draw limit"]
-    return names[kind] if kind < 16 else "?"
+    let names: str[15] = ["transform", "effects", "clip path", "nested rounded clip", "text as paths", "image", "path", "gradient",
+                          "shadow", "line", "ellipse", "backdrop filter", "nested display list", "external content", "atlas full"]
+    return names[kind] if kind < 15 else "?"
 
 # mark: Draws ===================================================================================
 
@@ -68,8 +73,9 @@ struct GpuRectRecord:
     var color: f32[4]
 
 ## One recorded draw: its kind, its scissor, its rectangles (`rects`: `first..<first + count` of
-## the player's records) or its shader's area and uniforms (the others), and the image it
-## samples (`image`).
+## the player's records) or its shader's area and uniforms (the others), the image it
+## samples (`image`), its clip mask (`mask`: 1 + the player's mask, 0 for none), and for a
+## `fill` its straight color (ARGB), which instanced shapes carry packed.
 struct GpuDraw:
     var kind: GpuDrawKind
     var scissor: GpuRect
@@ -78,6 +84,8 @@ struct GpuDraw:
     var area: GpuRect
     var uniforms: f32[32]
     var image: gpu.Texture?
+    var mask: u32
+    var straight: u32
 
 ## A rounded clip as the shaders take it: rectangle, radii (top-left x/y, top-right x/y,
 ## bottom-right x/y, bottom-left x/y) and mode (1 keeps the inside, 2 the outside).
@@ -86,12 +94,23 @@ struct GpuRoundedClip:
     var radii: f32[8]
     var mode: f32
 
-## The drawing state: a translation, a scissor (in tile pixels) and a rounded clip.
+## The most clips one clip mask multiplies, and the most masks a tile's recording holds.
+let gpu_mask_clips: usize = 8
+let gpu_mask_limit: usize = 32
+
+## The clips around the analytic one, multiplied into an r8 mask of the tile at replay.
+struct GpuMaskJob:
+    var clips: GpuRoundedClip[8]
+    var count: usize
+
+## The drawing state: a translation, a scissor (in tile pixels), a rounded clip and the clip
+## mask around it (1 + the player's mask, 0 for none).
 struct GpuState:
     var dx: i32
     var dy: i32
     var clip: GpuRect
     var rounded: GpuRoundedClip?
+    var mask: u32
 
 # mark: The player ==============================================================================
 
@@ -103,11 +122,18 @@ pub struct DisplayListPlayerGpu: display_list.IsDisplayListPlayer:
     var draws: ak.Vector[GpuDraw]
     var rects: ak.Vector[GpuRectRecord]
     var unsupported: GpuFallback?
-    ## What the recording draws with.
+    var masks: ak.Vector[GpuMaskJob]
+    ## What the recording draws with, and the tile it draws into when it has to before it
+    ## ends (`flushed` once it has).
     var device: gpu.Device?
     var atlas: GpuAtlas*
     var images: GpuImageCache*
     var atlas_generation: u64
+    var pipelines: GpuPipelines*?
+    var tile: gpu.Texture?
+    var tile_size: i32
+    var flushed: bool
+    var replay: GpuReplay
 
     func display_list_player() -> display_list.DisplayListPlayer*: return (display_list.DisplayListPlayer*)&self
 
@@ -119,10 +145,6 @@ pub struct DisplayListPlayerGpu: display_list.IsDisplayListPlayer:
     pub func fallback() -> GpuFallback?:
         return self.unsupported
 
-## The most draws a tile records before it goes to the CPU player (luce-gpu's canvas takes
-## 4096).
-let gpu_draw_limit: usize = 4000
-
 ## A GPU player drawing with `atlas` and `images`.
 pub func display_list_player_gpu_create(atlas: GpuAtlas*, images: GpuImageCache*) -> DisplayListPlayerGpu*:
     let base = display_list.DisplayListPlayer(vtable = &display_list_player_gpu_vtable, class_id = display_list_player_gpu_class.first_id)
@@ -133,17 +155,61 @@ pub func display_list_player_gpu_destroy(this: DisplayListPlayerGpu*):
     ak.vector_clear(&this.draws)
     ak.vector_clear(&this.rects)
     ak.vector_clear(&this.saved)
+    ak.vector_clear(&this.masks)
+    this.replay.release()
     free(this) in memory.heap
 
-## Starts a recording for a tile of `width` by `height` pixels on `device`.
-pub func display_list_player_gpu_begin(this: DisplayListPlayerGpu*, device: gpu.Device, width: i32, height: i32):
+## Starts a recording for `tile`, `size` pixels square, on `device`, drawn with `pipelines`.
+pub func display_list_player_gpu_begin(this: DisplayListPlayerGpu*, device: gpu.Device, pipelines: GpuPipelines*, tile: gpu.Texture, size: i32):
     ak.vector_clear(&this.draws)
     ak.vector_clear(&this.rects)
     ak.vector_clear(&this.saved)
-    this.state = GpuState(clip = GpuRect(width = width, height = height))
+    ak.vector_clear(&this.masks)
+    this.state = GpuState(clip = GpuRect(width = size, height = size))
     this.unsupported = none
     this.device = device
+    this.pipelines = pipelines
+    this.tile = tile
+    this.tile_size = size
+    this.flushed = false
     this.atlas_generation = this.atlas.generation
+
+## Whether the recording has drawn into its tile already (the rest then draws over it).
+pub func display_list_player_gpu_flushed(this: const DisplayListPlayerGpu*) -> bool:
+    return this.flushed
+
+## Draws what is recorded into the tile now and starts the list again; the state, masks
+## and atlas entries stay. A failure gives the tile up.
+func gpu_flush(this: DisplayListPlayerGpu*):
+    if ak.vector_is_empty(&this.draws):
+        return
+    let pipelines = this.pipelines else return
+    let tile = this.tile else return
+    gpu_replay_tile(this, pipelines, tile, this.tile_size, this.flushed) catch failure:
+        gpu_give_up(this, GpuFallback.atlas_full)
+        return
+    this.flushed = true
+    ak.vector_clear(&this.draws)
+    ak.vector_clear(&this.rects)
+
+## Places `coverage` in the atlas, first drawing what is recorded and making room when it
+## does not fit (see atlas.lucb). None when it cannot be placed (the tile is given up).
+func gpu_place(this: DisplayListPlayerGpu*, device: gpu.Device, key: u64?, coverage: const u8[], width: i32, height: i32, left: i32, top: i32) -> GpuAtlasEntry?:
+    _ = this.atlas.texture_on(device) catch failure:
+        gpu_give_up(this, GpuFallback.atlas_full)
+        return none
+    if not this.atlas.fits(width, height):
+        gpu_flush(this)
+        if this.unsupported != none:
+            return none
+        this.atlas.make_room(device) catch failure:
+            gpu_give_up(this, GpuFallback.atlas_full)
+            return none
+        this.atlas_generation = this.atlas.generation
+    let placed = this.atlas.place(device, key, coverage, width, height, left, top) catch failure:
+        gpu_give_up(this, GpuFallback.atlas_full)
+        return none
+    return placed
 
 ## Gives the tile up to the CPU player for `reason` (the first reason counts).
 func gpu_give_up(this: DisplayListPlayerGpu*, reason: GpuFallback):
@@ -157,12 +223,54 @@ func gpu_recording(this: DisplayListPlayerGpu*) -> bool:
         this.unsupported = GpuFallback.atlas_full
     return this.unsupported == none
 
-## Appends `draw`, giving up past the draw limit.
+## Appends `draw` under the state's clip mask.
 func gpu_append(this: DisplayListPlayerGpu*, draw: GpuDraw):
-    if ak.vector_size(&this.draws) >= gpu_draw_limit:
-        gpu_give_up(this, GpuFallback.draw_limit)
-        return
-    ak.vector_append_t(&this.draws, draw)
+    var masked = draw
+    masked.mask = this.state.mask
+    ak.vector_append_t(&this.draws, masked)
+
+## Moves the analytic rounded clip into the clip mask (one more clip multiplied), leaving
+## no analytic clip; reuses a mask of the same clips. False (the tile is given up) past the
+## limits.
+func gpu_push_mask(this: DisplayListPlayerGpu*) -> bool:
+    let rounded = this.state.rounded else return true
+    var job = GpuMaskJob()
+    if this.state.mask != 0:
+        job = *ak.vector_at(&this.masks, (usize)this.state.mask - 1)
+    if job.count == gpu_mask_clips:
+        gpu_give_up(this, GpuFallback.nested_rounded_clip)
+        return false
+    job.clips[job.count] = rounded
+    job.count += 1
+    this.state.rounded = none
+    for index in 0..<ak.vector_size(&this.masks):
+        let known = ak.vector_at(&this.masks, index)
+        if gpu_same_mask(known, &job):
+            this.state.mask = (u32)index + 1
+            return true
+    if ak.vector_size(&this.masks) == gpu_mask_limit:
+        gpu_give_up(this, GpuFallback.nested_rounded_clip)
+        return false
+    ak.vector_append_t(&this.masks, job)
+    this.state.mask = (u32)ak.vector_size(&this.masks)
+    return true
+
+## Whether two masks multiply the same clips.
+func gpu_same_mask(a: const GpuMaskJob*, b: const GpuMaskJob*) -> bool:
+    if a.count != b.count:
+        return false
+    for i in 0..<a.count:
+        let x = a.clips[i]
+        let y = b.clips[i]
+        if x.mode != y.mode:
+            return false
+        for j in 0..<(usize)4:
+            if x.rect[j] != y.rect[j]:
+                return false
+        for j in 0..<(usize)8:
+            if x.radii[j] != y.radii[j]:
+                return false
+    return true
 
 ## The player behind the DisplayListPlayer the loop hands a virtual.
 func gpu_player_of(base: display_list.DisplayListPlayer*) -> DisplayListPlayerGpu*:
@@ -184,6 +292,9 @@ func gpu_premultiplied(color: gfx.Color) -> f32[4]:
 func gpu_solid_rect(this: DisplayListPlayerGpu*, rect: GpuRect, color: gfx.Color):
     if (color.m_value >> 24) == 0:
         return
+    if this.state.mask != 0:
+        gpu_fill_shape(this, rect, gpu_no_radii(), color, 0.0, false)
+        return
     ak.vector_append_t(&this.rects, GpuRectRecord(rect = rect, color = gpu_straight(color)))
     let count = ak.vector_size(&this.draws)
     if count > 0:
@@ -193,8 +304,10 @@ func gpu_solid_rect(this: DisplayListPlayerGpu*, rect: GpuRect, color: gfx.Color
             return
     gpu_append(this, GpuDraw(kind = GpuDrawKind.rects, scissor = this.state.clip, first = ak.vector_size(&this.rects) - 1, count = 1))
 
-## Writes the rounded clip's uniforms at `at` (rectangle, radii, then the mode at `mode_at`).
-func gpu_clip_uniforms(this: const DisplayListPlayerGpu*, uniforms: f32*, at: usize, mode_at: usize):
+## Writes the rounded clip's uniforms at `at` (rectangle, radii, then the mode at `mode_at`)
+## and whether the clip mask applies at `mask_at`.
+func gpu_clip_uniforms(this: const DisplayListPlayerGpu*, uniforms: f32*, at: usize, mode_at: usize, mask_at: usize):
+    uniforms[mask_at] = 1.0 if this.state.mask != 0 else 0.0
     let clip = this.state.rounded else return
     for i in 0..<(usize)4:
         uniforms[at + i] = clip.rect[i]
@@ -211,7 +324,7 @@ func gpu_fill_shape(this: DisplayListPlayerGpu*, rect: GpuRect, radii: f32[8], c
     let area = GpuRect(x = rect.x - reach, y = rect.y - reach, width = rect.width + 2 * reach, height = rect.height + 2 * reach)
     if not area.intersects(this.state.clip):
         return
-    var draw = GpuDraw(kind = GpuDrawKind.fill, scissor = this.state.clip, area = area)
+    var draw = GpuDraw(kind = GpuDrawKind.fill, scissor = this.state.clip, area = area, straight = color.m_value)
     draw.uniforms[0] = (f32)rect.x
     draw.uniforms[1] = (f32)rect.y
     draw.uniforms[2] = (f32)rect.width
@@ -221,7 +334,7 @@ func gpu_fill_shape(this: DisplayListPlayerGpu*, rect: GpuRect, radii: f32[8], c
     let rgba = gpu_premultiplied(color)
     for i in 0..<(usize)4:
         draw.uniforms[12 + i] = rgba[i]
-    gpu_clip_uniforms(this, &draw.uniforms[0], 16, 28)
+    gpu_clip_uniforms(this, &draw.uniforms[0], 16, 28, 31)
     draw.uniforms[29] = stroke
     draw.uniforms[30] = 1.0 if aliased else 0.0
     gpu_append(this, draw)

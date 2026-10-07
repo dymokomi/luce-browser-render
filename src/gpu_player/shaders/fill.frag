@@ -1,5 +1,5 @@
 // A solid rectangle or rounded rectangle (filled, or stroked `stroke` pixels wide around
-// its edge), under at most one rounded clip, with or without anti-aliasing. Colors are stored values premultiplied: the
+// its edge), under at most one rounded clip and the clip mask, with or without anti-aliasing. Colors are stored values premultiplied: the
 // player blends in the encoded space, as Skia's legacy raster does.
 #version 450
 #extension GL_GOOGLE_include_directive : require
@@ -17,7 +17,9 @@ layout(push_constant) uniform Params {
     float clip_mode;
     float stroke;
     float aliased;   // 1: no anti-aliasing (a pixel is in when its center is)
+    float mask;      // 1: multiply by the clip mask at binding 2
 } params;
+layout(set = 0, binding = 2) uniform sampler2D clip_mask;
 
 void main() {
     vec2 p = gl_FragCoord.xy;
@@ -39,5 +41,6 @@ void main() {
         coverage = coverage >= 0.5 ? 1.0 : 0.0;
     }
     coverage *= clip_coverage(p, params.clip_mode, params.clip_rect, params.clip_radii0, params.clip_radii1);
+    coverage *= mask_coverage(clip_mask, p, params.mask);
     fragment_color = params.color * coverage;
 }

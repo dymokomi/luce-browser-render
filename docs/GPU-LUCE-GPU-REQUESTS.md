@@ -1,5 +1,13 @@
 # luce-gpu: what the browser's GPU player asks for
 
+**Status (2026-10-07):** items 1-7 landed on luce-gpu's main as LUCE_LANG shaped them, and the
+player uses them: encoded surfaces (`e1cce0d`), `shade_instances` (`5dbd4d4`),
+`Texture.frame(keep)` (`6de7e9a`), `copy_texture` (`4f68dae`), mipmaps and `Filter.trilinear`
+(`f32aab1`), r8 render targets as clip masks instead of a stencil (`5158af5`), and
+`pixel_format()`/`allow_draws` (`270925f`). Completion tokens and GPU timestamps came from
+LUCE_LANG's compute work (`Frame.submission()`, `Device.gpu_time`; scroll_bench reports GPU
+time with them). The proposal as written follows.
+
 A proposal to LUCE_LANG, who owns luce-gpu. The GPU player (`gpu_player` in
 luce-browser-render; design in [GPU.md](GPU.md)) runs today on luce-gpu 0.5.1 as it
 is. Nothing below has a local stand-in yet: each item names what the player does
