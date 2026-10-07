@@ -8,6 +8,7 @@ recorder_state.lucb
 recorder_draws.lucb
 recorder_shadows.lucb
 recorder_matrix.lucb
+recorder_gradients.lucb
 replay.lucb
 compositor.lucb
 generated_shaders.lucb

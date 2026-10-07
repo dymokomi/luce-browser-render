@@ -362,8 +362,29 @@ func cpu_gradient_stops(color_stop_list: const ak.Vector[gfx.ColorStop]*, first_
         ak.vector_append_t(&stops, CpuGradientStop(position = (stop.position - first_position) / scale, color = cpu_color4(stop.color)))
     return stops
 
+## The paint a gradient command fills its rectangle with (SkPaint with the gradient shader,
+## anti-aliased or not, dithered), and that rectangle: what the paint_*_gradient virtuals draw,
+## shared with the GPU player. The caller releases the paint.
+pub struct CpuGradientFill:
+    pub var paint: raster.Paint
+    pub var rect: raster.Rect
+
+## Fills `fill`'s rectangle with its paint, and releases the paint.
+func cpu_canvas_fill_gradient(canvas: CpuCanvas*, fill: CpuGradientFill*):
+    defer fill.paint.release()
+    if cpu_canvas_is_clip_empty(canvas):
+        return
+    var path = cpu_rect_path(fill.rect)
+    defer path.release()
+    cpu_canvas_fill_path(canvas, &path, &fill.paint, raster.FillRule.winding)
+
 ## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:35 Web::Painting::DisplayListPlayerSkia::paint_linear_gradient (override).
 func display_list_player_cpu_paint_linear_gradient_impl(base: DisplayListPlayer*, command: PaintLinearGradient):
+    var fill = cpu_linear_gradient_fill(&command) else return
+    cpu_canvas_fill_gradient(display_list_player_cpu_canvas((DisplayListPlayerCpu*)base), &fill)
+
+## paint_linear_gradient's paint and rectangle.
+pub func cpu_linear_gradient_fill(command: const PaintLinearGradient*) -> CpuGradientFill?:
     let linear_gradient_data = command.linear_gradient_data
     let color_stop_list = &linear_gradient_data.color_stops.list
     let repeat_length = linear_gradient_data.color_stops.repeat_length
@@ -387,15 +408,17 @@ func display_list_player_cpu_paint_linear_gradient_impl(base: DisplayListPlayer*
                                tile_mode = CpuTileMode.repeat, interpolation = cpu_interpolation(linear_gradient_data.interpolation_method),
                                local_matrix = matrix, linear_to_srgb = false)
 
-    let draw_rect = cpu_float_rect(rect) else return
-    var path = cpu_rect_path(draw_rect)
-    defer path.release()
-    let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
+    let draw_rect = cpu_float_rect(rect) else return none
     # paint.setDither(true)
-    cpu_canvas_fill_path_with_gradient(canvas, &path, raster.FillRule.winding, false, &gradient, 1.0, true)
+    return CpuGradientFill(paint = cpu_gradient_paint(&gradient, false, 1.0, true), rect = draw_rect)
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:47 Web::Painting::DisplayListPlayerSkia::paint_radial_gradient (override).
 func display_list_player_cpu_paint_radial_gradient_impl(base: DisplayListPlayer*, command: PaintRadialGradient):
+    var fill = cpu_radial_gradient_fill(&command) else return
+    cpu_canvas_fill_gradient(display_list_player_cpu_canvas((DisplayListPlayerCpu*)base), &fill)
+
+## paint_radial_gradient's paint and rectangle.
+pub func cpu_radial_gradient_fill(command: const PaintRadialGradient*) -> CpuGradientFill?:
     let radial_gradient_data = command.radial_gradient_data
     let color_stop_list = &radial_gradient_data.color_stops.list
     assert(not ak.vector_is_empty(color_stop_list))
@@ -419,14 +442,16 @@ func display_list_player_cpu_paint_radial_gradient_impl(base: DisplayListPlayer*
                                tile_mode = tile_mode, interpolation = cpu_interpolation(radial_gradient_data.interpolation_method),
                                local_matrix = matrix, linear_to_srgb = false)
 
-    let draw_rect = cpu_rect(rect) else return
-    var path = cpu_rect_path(draw_rect)
-    defer path.release()
-    let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
-    cpu_canvas_fill_path_with_gradient(canvas, &path, raster.FillRule.winding, true, &gradient, 1.0, true)
+    let draw_rect = cpu_rect(rect) else return none
+    return CpuGradientFill(paint = cpu_gradient_paint(&gradient, true, 1.0, true), rect = draw_rect)
 
 ## Ported from Libraries/LibWeb/Painting/DisplayListPlayerSkia.h:48 Web::Painting::DisplayListPlayerSkia::paint_conic_gradient (override).
 func display_list_player_cpu_paint_conic_gradient_impl(base: DisplayListPlayer*, command: PaintConicGradient):
+    var fill = cpu_conic_gradient_fill(&command) else return
+    cpu_canvas_fill_gradient(display_list_player_cpu_canvas((DisplayListPlayerCpu*)base), &fill)
+
+## paint_conic_gradient's paint and rectangle.
+pub func cpu_conic_gradient_fill(command: const PaintConicGradient*) -> CpuGradientFill?:
     let conic_gradient_data = command.conic_gradient_data
     let color_stop_list = &conic_gradient_data.color_stops.list
     assert(not ak.vector_is_empty(color_stop_list))
@@ -442,8 +467,5 @@ func display_list_player_cpu_paint_conic_gradient_impl(base: DisplayListPlayer*,
                                tile_mode = CpuTileMode.repeat, interpolation = cpu_interpolation(conic_gradient_data.interpolation_method),
                                local_matrix = matrix, linear_to_srgb = false)
 
-    let draw_rect = cpu_rect(rect) else return
-    var path = cpu_rect_path(draw_rect)
-    defer path.release()
-    let canvas = display_list_player_cpu_canvas((DisplayListPlayerCpu*)base)
-    cpu_canvas_fill_path_with_gradient(canvas, &path, raster.FillRule.winding, true, &gradient, 1.0, true)
+    let draw_rect = cpu_rect(rect) else return none
+    return CpuGradientFill(paint = cpu_gradient_paint(&gradient, true, 1.0, true), rect = draw_rect)

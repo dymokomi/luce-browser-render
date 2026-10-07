@@ -95,15 +95,6 @@ func cpu_gradient_shader(gradient: const CpuGradient*) -> raster.Shader?:
 
 # mark: Filling ================================================================================
 
-## Fills `path` (in the current transform) with `gradient` at `opacity` (SkPaint::setAlphaf),
-## dithered when `dither` (SkPaint::setDither); in black when Skia makes no shader of it.
-func cpu_canvas_fill_path_with_gradient(canvas: CpuCanvas*, path: const raster.Path*, fill_rule: raster.FillRule, anti_alias: bool, gradient: const CpuGradient*, opacity: f32, dither: bool = false):
-    if cpu_canvas_is_clip_empty(canvas):
-        return
-    var paint = cpu_gradient_paint(gradient, anti_alias, opacity, dither)
-    cpu_canvas_fill_path(canvas, path, &paint, fill_rule)
-    paint.release()
-
 ## The paint of a gradient at `opacity` (the caller releases it).
 func cpu_gradient_paint(gradient: const CpuGradient*, anti_alias: bool, opacity: f32, dither: bool) -> raster.Paint:
     var paint = raster.Paint()

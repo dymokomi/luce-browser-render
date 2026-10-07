@@ -179,15 +179,6 @@ func gpu_draw_rect_impl(base: display_list.DisplayListPlayer*, command: display_
 
 # mark: Commands for the CPU player ==============================================================
 
-func gpu_linear_gradient_impl(base: display_list.DisplayListPlayer*, command: display_list.PaintLinearGradient):
-    gpu_give_up(gpu_player_of(base), GpuFallback.gradient)
-
-func gpu_radial_gradient_impl(base: display_list.DisplayListPlayer*, command: display_list.PaintRadialGradient):
-    gpu_give_up(gpu_player_of(base), GpuFallback.gradient)
-
-func gpu_conic_gradient_impl(base: display_list.DisplayListPlayer*, command: display_list.PaintConicGradient):
-    gpu_give_up(gpu_player_of(base), GpuFallback.gradient)
-
 func gpu_text_shadow_impl(base: display_list.DisplayListPlayer*, command: display_list.PaintTextShadow):
     gpu_give_up(gpu_player_of(base), GpuFallback.text_shadow)
 

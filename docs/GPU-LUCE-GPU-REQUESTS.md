@@ -133,3 +133,19 @@ pipeline's dynamic state.
 - Compute (luce-gpu's GPU.md lists it as a later increment): Gaussian blurs for
   `filter: blur()` and backdrop filters, and a Vello-style coverage pass for large
   paths, once the player moves those off the CPU.
+
+## 8. Fragment programs without fast math (requested 2026-10-07, M2)
+
+```luce
+pub static func Shader.create(device: Device, spirv: const u32[], msl: c.str, fast_math: bool = true) -> Shader!
+```
+
+**Why.** The player's tile shader runs the raster pipeline's stages (gradients: Skia's polynomial
+atan, approximate powers on float bits, fused multiply-adds where Skia's NEON code fuses) to
+match the CPU player within a level. Metal compiles a fragment library with fast math unless told
+otherwise (`metal_compile` passes no `MTLCompileOptions`), which reassociates arithmetic and may
+assume no NaN: a conic gradient's seam on an exact pixel diagonal lands on the other side for a
+line of pixels (the GPU player's gradient test avoids 45 degrees for now), and the stages' NaN
+checks may fold away. `Kernel.create` already takes `fast_math`. **Metal.** `MTLCompileOptions`
+with `setFastMathEnabled:` (or `mathMode = .safe` on macOS 15) for `newLibraryWithSource:`.
+**Vulkan.** Nothing: SPIR-V float math is IEEE unless decorated otherwise.

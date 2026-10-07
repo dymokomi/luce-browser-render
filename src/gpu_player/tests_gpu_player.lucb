@@ -220,20 +220,19 @@ test "gpu player: a scroll moves kept tiles; unsupported commands fall back per 
     test_background(&scene)
     for i in 0..<(i32)30:
         test_add(&scene, .fill_rect(display_list.FillRect(rect = test_box(20 + i * 7, i * 40, 200, 30), color = test_rgba((u8)(i * 8), 100, 200, 255))), 1)
-    # A gradient far down the page: its tile is the CPU player's.
-    var stops: ak.Vector[gfx.ColorStop]
-    ak.vector_append_t(&stops, gfx.ColorStop(color = test_rgba(255, 0, 0, 255), position = 0.0))
-    ak.vector_append_t(&stops, gfx.ColorStop(color = test_rgba(0, 0, 255, 255), position = 1.0))
-    let data = display_list.LinearGradientData(gradient_angle = 90.0, color_stops = display_list.ColorStopData(list = stops), interpolation_method = .rectangular_color_space(value = css_data.RectangularColorSpace.srgb))
-    test_add(&scene, .paint_linear_gradient(display_list.PaintLinearGradient(gradient_rect = test_box(100, 1100, 300, 50), linear_gradient_data = data)), 1)
+    # A shape under perspective far down the page: its tile is the CPU player's.
+    var matrix = gfx.scale_matrix(gfx.FloatVector3([1.0, 1.0, 1.0]))
+    matrix.m_elements[3][0] = 0.0005
+    let tilted = display_list.accumulated_visual_context_tree_append(scene.tree, display_list.VisualContextData.transform_data(display_list.TransformData(matrix = matrix, origin = gfx.FloatPoint(m_x = 100.0, m_y = 1100.0))), 1)
+    test_add(&scene, .fill_rect(display_list.FillRect(rect = test_box(100, 1100, 300, 50), color = test_rgba(255, 0, 0, 255))), tilted)
     let snapshots = [test_snapshot(0.0, 0.0), test_snapshot(0.0, 100.0), test_snapshot(0.0, 400.0), test_snapshot(0.0, 900.0)]
     let stats = test_compare("scroll", &scene, snapshots, 2, 0) else return
     # Without tiles kept, four frames of two layers would draw 4 x (2 + 2) tiles or more.
     if stats.gpu_tiles + stats.cpu_tiles + stats.empty_tiles > 12:
         print(f"scroll: {stats.gpu_tiles} GPU, {stats.cpu_tiles} CPU and {stats.empty_tiles} empty tiles drawn")
         trap("a scroll drew kept tiles again")
-    if stats.cpu_tiles == 0 or stats.fallbacks[(usize)GpuFallback.gradient] == 0:
-        trap("the gradient's tile did not fall back to the CPU player")
+    if stats.cpu_tiles == 0 or stats.fallbacks[(usize)GpuFallback.perspective] == 0:
+        trap("the tile under perspective did not fall back to the CPU player")
 
 test "gpu player: nested rounded clips go through a clip mask, not to the CPU":
     let scene = test_list()
@@ -383,3 +382,52 @@ test "gpu player: rotated, flipped and scaled content is drawn on the GPU":
     let stats = test_compare("transforms", &scene, snapshots, 3, 40) else return
     if stats.cpu_tiles > 0:
         trap("a transform sent a tile to the CPU player")
+
+## Color stops at evenly spread positions, or at `positions` when they are as many.
+func test_stops(colors: const gfx.Color[], positions: const f32[]) -> display_list.ColorStopData:
+    var stops: ak.Vector[gfx.ColorStop]
+    for i in 0..<colors.length:
+        let position = positions[i] if positions.length == colors.length else (f32)i / (f32)(colors.length - 1)
+        ak.vector_append_t(&stops, gfx.ColorStop(color = colors[i], position = position))
+    return display_list.ColorStopData(list = stops)
+
+test "gpu player: gradients run the raster pipeline's stages on the GPU":
+    let scene = test_list()
+    test_background(&scene)
+    let warm = [test_rgba(255, 40, 0, 255), test_rgba(250, 220, 30, 255), test_rgba(20, 90, 230, 255)]
+    let none_: f32[1] = [0.0]
+    let srgb = display_list.ColorInterpolationMethod.rectangular_color_space(value = css_data.RectangularColorSpace.srgb)
+    # Linear: an angle, a hard stop, a repeating one, translucent colors.
+    test_add(&scene, .paint_linear_gradient(display_list.PaintLinearGradient(gradient_rect = test_box(10, 10, 160, 120),
+                                                                             linear_gradient_data = display_list.LinearGradientData(gradient_angle = 30.0, color_stops = test_stops(warm, none_), interpolation_method = srgb))), 1)
+    let hard: f32[4] = [0.0, 0.5, 0.5, 1.0]
+    test_add(&scene, .paint_linear_gradient(display_list.PaintLinearGradient(gradient_rect = test_box(180, 10, 160, 120),
+                                                                             linear_gradient_data = display_list.LinearGradientData(gradient_angle = 90.0, color_stops = test_stops([test_rgba(0, 120, 0, 255), test_rgba(0, 200, 90, 255), test_rgba(40, 0, 160, 128), test_rgba(220, 0, 160, 40)], hard), interpolation_method = srgb))), 1)
+    var repeating = test_stops([test_rgba(30, 30, 30, 255), test_rgba(230, 230, 230, 255)], [0.0, 0.1])
+    repeating.repeat_length = 0.1
+    test_add(&scene, .paint_linear_gradient(display_list.PaintLinearGradient(gradient_rect = test_box(350, 10, 160, 120),
+                                                                             linear_gradient_data = display_list.LinearGradientData(gradient_angle = 135.0, color_stops = repeating, interpolation_method = srgb))), 1)
+    # Radial and conic. (A conic seam on an exact pixel diagonal, a start angle of 45 degrees,
+    # can land on the other side: Metal compiles fragment programs with fast math, which
+    # reassociates the matrix stage; see docs/GPU-LUCE-GPU-REQUESTS.md, item 8.)
+    test_add(&scene, .paint_radial_gradient(display_list.PaintRadialGradient(rect = test_box(520, 10, 170, 120), center = gfx.IntPoint(m_x = 70, m_y = 50), size = gfx.IntSize(m_width = 90, m_height = 60),
+                                                                             radial_gradient_data = display_list.RadialGradientData(color_stops = test_stops(warm, none_), interpolation_method = srgb))), 1)
+    test_add(&scene, .paint_conic_gradient(display_list.PaintConicGradient(rect = test_box(10, 150, 140, 140), position = gfx.IntPoint(m_x = 70, m_y = 70),
+                                                                           conic_gradient_data = display_list.ConicGradientData(start_angle = 40.0, color_stops = test_stops(warm, none_), interpolation_method = srgb))), 1)
+    # Interpolation spaces and hue methods: each through its own stages.
+    let spaces = [display_list.ColorInterpolationMethod.rectangular_color_space(value = css_data.RectangularColorSpace.srgb_linear),
+                  display_list.ColorInterpolationMethod.rectangular_color_space(value = css_data.RectangularColorSpace.oklab),
+                  display_list.ColorInterpolationMethod.rectangular_color_space(value = css_data.RectangularColorSpace.lab),
+                  display_list.ColorInterpolationMethod.rectangular_color_space(value = css_data.RectangularColorSpace.display_p3),
+                  display_list.ColorInterpolationMethod.polar_color_interpolation_method(value = display_list.PolarColorInterpolationMethod(color_space = css_data.PolarColorSpace.oklch, hue_interpolation_method = css_data.HueInterpolationMethod.longer)),
+                  display_list.ColorInterpolationMethod.polar_color_interpolation_method(value = display_list.PolarColorInterpolationMethod(color_space = css_data.PolarColorSpace.hsl, hue_interpolation_method = css_data.HueInterpolationMethod.shorter)),
+                  display_list.ColorInterpolationMethod.polar_color_interpolation_method(value = display_list.PolarColorInterpolationMethod(color_space = css_data.PolarColorSpace.hwb, hue_interpolation_method = css_data.HueInterpolationMethod.increasing)),
+                  display_list.ColorInterpolationMethod.polar_color_interpolation_method(value = display_list.PolarColorInterpolationMethod(color_space = css_data.PolarColorSpace.lch, hue_interpolation_method = css_data.HueInterpolationMethod.decreasing))]
+    for i in 0..<(usize)8:
+        test_add(&scene, .paint_linear_gradient(display_list.PaintLinearGradient(gradient_rect = test_box(160 + (i32)i * 66, 150, 60, 140),
+                                                                                 linear_gradient_data = display_list.LinearGradientData(gradient_angle = 180.0, color_stops = test_stops([test_rgba(255, 0, 80, 255), test_rgba(30, 200, 255, 160)], none_), interpolation_method = spaces[i]))), 1)
+    let snapshots = [test_snapshot(0.0, 0.0), test_snapshot(0.0, 5.0)]
+    # The same stages in floats: off by a level where a value lands on a rounding boundary.
+    let stats = test_compare("gradients", &scene, snapshots, 2, 0) else return
+    if stats.cpu_tiles > 0:
+        trap("a gradient sent a tile to the CPU player")

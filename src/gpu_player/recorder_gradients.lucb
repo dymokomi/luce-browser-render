@@ -1,0 +1,68 @@
+#==============================================================================================
+#
+#   recorder_gradients - DisplayListPlayerGpu's gradients: the raster pipeline's stages
+#
+#   DESCRIPTION:
+#       A gradient command fills a rectangle with a gradient paint; the CPU player makes the
+#       paint and the rectangle with display_list's cpu_*_gradient_fill, and so does this
+#       player. raster's paint_stage_program then writes the color stages the raster pipeline
+#       would run for that paint (the shape's t, tiling, the stops' factors and biases, the
+#       interpolation space's conversions back to sRGB, dither) into the recording's program
+#       table, and tile.frag's stages kind runs them for each pixel of the rectangle
+#       (shaders/stages.glsl): the CSS interpolation spaces and hue methods are the CPU
+#       player's own, since they decide the program. The table is uploaded before the tile's
+#       frames (replay.lucb). Under a matrix, or with a stage the GPU has no form for, the tile
+#       is given up.
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+## The most floats one program may take (a gradient of about 330 stops).
+let gpu_program_floats: usize = 4096
+
+## Draws `fill` (its rectangle with its paint) and releases its paint.
+func gpu_gradient_draw(this: DisplayListPlayerGpu*, fill: display_list.CpuGradientFill*):
+    defer fill.paint.release()
+    if not gpu_recording(this):
+        return
+    if gpu_under_matrix(this):
+        gpu_give_up(this, GpuFallback.transform)
+        return
+    let r = fill.rect
+    if math32.floor(r.left()) != r.left() or math32.floor(r.top()) != r.top() or math32.floor(r.right()) != r.right() or math32.floor(r.bottom()) != r.bottom():
+        gpu_give_up(this, GpuFallback.gradient)
+        return
+    let rect = GpuRect(x = (i32)r.left(), y = (i32)r.top(), width = (i32)r.width(), height = (i32)r.height()).translated(this.state.dx, this.state.dy)
+    let area = rect.intersected(this.state.clip)
+    if area.is_empty():
+        return
+    if this.program.length == 0:
+        this.program = (new f32[gpu_program_floats] --- in memory.heap) else trap("gpu_player: out of memory")
+    let made = raster.paint_stage_program(&fill.paint, gpu_ctm(this), this.program)
+    if made == none:
+        gpu_give_up(this, GpuFallback.gradient)
+        return
+    let written = made else return
+    let start = ak.vector_size(&this.table) // 4
+    if start + written // 4 > gpu_table_width * gpu_table_height:
+        gpu_give_up(this, GpuFallback.gradient)
+        return
+    for i in 0..<written:
+        ak.vector_append_t(&this.table, this.program[i])
+    var draw = gpu_shader_draw(this, GpuDrawKind.stages, gpu_kind_stages, area)
+    draw.uniforms[gpu_uniform_header] = (f32)start
+    gpu_append(this, draw)
+
+func gpu_linear_gradient_impl(base: display_list.DisplayListPlayer*, command: display_list.PaintLinearGradient):
+    var fill = display_list.cpu_linear_gradient_fill(&command) else return
+    gpu_gradient_draw(gpu_player_of(base), &fill)
+
+func gpu_radial_gradient_impl(base: display_list.DisplayListPlayer*, command: display_list.PaintRadialGradient):
+    var fill = display_list.cpu_radial_gradient_fill(&command) else return
+    gpu_gradient_draw(gpu_player_of(base), &fill)
+
+func gpu_conic_gradient_impl(base: display_list.DisplayListPlayer*, command: display_list.PaintConicGradient):
+    var fill = display_list.cpu_conic_gradient_fill(&command) else return
+    gpu_gradient_draw(gpu_player_of(base), &fill)

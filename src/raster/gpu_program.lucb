@@ -1,0 +1,162 @@
+#==============================================================================================
+#
+#   gpu_program - a paint's color stages as a program the GPU player's shader runs
+#
+#   DESCRIPTION:
+#       New code for luce-browser's GPU player (gpu_player, docs/GPU.md). It draws a shaded
+#       paint (a gradient) by running the stages the raster pipeline runs for the same paint
+#       and matrix: what RasterPipelineBlitter decides about the paint (pipeline_source_of)
+#       and the color stages it pushes (PipelineSource.push_color_stages), written with their
+#       contexts as a program of vec4 texels that gpu_player's shaders/stages.glsl interprets.
+#       Which stages run, with which stops and color steps, stays this module's; the shader
+#       only computes them.
+#
+#       Texel 0 holds the stage count; texel 1 + i stage i's opcode (its Stage value), the
+#       texel its parameters start at and two inline values; the parameters follow:
+#
+#         transform                  (sx, kx, tx, -) (ky, sy, ty, -)
+#         gradient, evenly_spaced    (entries, -, -, -), then per entry its factor, its bias
+#                                    and (t, -, -, -)
+#         evenly_spaced_2_stop       factor, bias
+#         uniform_color              the premultiplied color
+#         color_xform,               (unpremul, linearize, gamut, encode) (premul, the
+#         color_filter_xform         source curve, the destination curve, -), the source
+#                                    curve (g, a, b, c) (d, e, f, -), the destination's
+#                                    likewise, the gamut matrix's columns (three texels)
+#         scale_paint_alpha          inline: the alpha
+#         dither                     inline: the rate
+#
+#       A curve is 1 for gamma_ and 2 for parametric. Stages without a GPU form here (image
+#       sampling, two-point conical gradients, HDR curves and OOTFs) make no program, and nor
+#       does a blend mode other than source-over (the GPU draws over).
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+## A program's floats as they are written: four per texel.
+struct ProgramWriter:
+    var out: f32[]
+    var length: usize
+    var full: bool
+
+    ## Appends one texel.
+    func texel(a: f32, b: f32, c: f32, d: f32):
+        if self.length + 4 > self.out.length:
+            self.full = true
+            return
+        self.out[self.length] = a
+        self.out[self.length + 1] = b
+        self.out[self.length + 2] = c
+        self.out[self.length + 3] = d
+        self.length += 4
+
+    ## Writes texel `index` (already appended) again.
+    func set(index: usize, a: f32, b: f32, c: f32, d: f32):
+        let at = index * 4
+        if at + 4 > self.length:
+            return
+        self.out[at] = a
+        self.out[at + 1] = b
+        self.out[at + 2] = c
+        self.out[at + 3] = d
+
+    ## The index of the next texel.
+    func next() -> usize:
+        return self.length // 4
+
+    ## A gradient color as one texel.
+    func color(c: GradientColor):
+        self.texel(c.r, c.g, c.b, c.a)
+
+## The program of the stages `paint` runs when it fills under `transform` (the matrix a draw
+## gives Draw::drawRect or drawPath), written into `out`; how many floats it took, or none
+## when a stage has no GPU form or `out` is too small.
+pub func paint_stage_program(paint: const Paint*, transform: Transform, out: f32[]) -> usize?:
+    var shaded = *paint
+    shaded.shader.transform(transform)
+    let chosen = pipeline_source_of(&shaded) else return none
+    let src = chosen.0
+    if src.blend_mode != .source_over and src.blend_mode != .source:
+        return none
+    var b = RasterPipelineBuilder.new_()
+    defer b.release()
+    if not src.push_color_stages(&b):
+        return none
+    var w = ProgramWriter(out = out)
+    let count = b.stages_len
+    w.texel((f32)count, 0.0, 0.0, 0.0)
+    for _ in 0..<count:
+        w.texel(0.0, 0.0, 0.0, 0.0)
+    for i in 0..<count:
+        let stage = b.stages[i]
+        let at = w.next()
+        var inline: f32 = 0.0
+        match stage:
+            .seed_shader, .clamp_x_1, .mirror_x_1, .repeat_x_1, .xy_to_unit_angle, .xy_to_radius, .premultiply, .clamp_01:
+                _ = 0
+            .unpremul, .unpremul_polar, .css_lab_to_xyz, .css_oklab_to_linear_srgb, .css_hcl_to_lab, .css_hsl_to_srgb, .css_hwb_to_srgb:
+                _ = 0
+            .transform:
+                let ts = b.ctx.transform
+                w.texel(ts.sx, ts.kx, ts.tx, 0.0)
+                w.texel(ts.ky, ts.sy, ts.ty, 0.0)
+            .gradient, .evenly_spaced_gradient:
+                let ctx = &b.ctx.gradient
+                w.texel((f32)ctx.len, 0.0, 0.0, 0.0)
+                for entry in 0..<ctx.factors.len:
+                    w.color(ctx.factors.data[entry])
+                    w.color(ctx.biases.data[entry])
+                    w.texel(ctx.t_values.data[entry] if entry < ctx.t_values.len else 0.0, 0.0, 0.0, 0.0)
+            .evenly_spaced_2_stop_gradient:
+                w.color(b.ctx.evenly_spaced_2_stop_gradient.factor)
+                w.color(b.ctx.evenly_spaced_2_stop_gradient.bias)
+            .uniform_color:
+                let c = b.ctx.uniform_color
+                w.texel(c.r, c.g, c.b, c.a)
+            .color_xform:
+                if not program_xform(&w, &b.ctx.color_xform):
+                    return none
+            .color_filter_xform:
+                if not program_xform(&w, &b.ctx.color_filter_xform):
+                    return none
+            .scale_paint_alpha:
+                inline = b.ctx.paint_alpha
+            .dither:
+                inline = b.ctx.dither_rate
+            _:
+                return none
+        w.set(1 + i, (f32)((u8)stage), (f32)at, inline, 0.0)
+    if w.full:
+        return none
+    return w.length
+
+## A color_xform's parameters; false when a step has no GPU form (HDR curves, OOTFs).
+func program_xform(w: ProgramWriter*, x: const ColorXform*) -> bool:
+    let flags = x.steps.flags
+    if flags.src_ootf or flags.dst_ootf:
+        return false
+    let src_curve = program_curve(x.src_curve) else return false
+    let dst_curve = program_curve(x.dst_curve) else return false
+    w.texel(1.0 if flags.unpremul else 0.0, 1.0 if flags.linearize else 0.0, 1.0 if flags.gamut_transform else 0.0, 1.0 if flags.encode else 0.0)
+    w.texel(1.0 if flags.premul else 0.0, src_curve, dst_curve, 0.0)
+    let s = x.steps.src_tf
+    w.texel(s.g, s.a, s.b, s.c)
+    w.texel(s.d, s.e, s.f, 0.0)
+    let d = x.steps.dst_tf_inv
+    w.texel(d.g, d.a, d.b, d.c)
+    w.texel(d.d, d.e, d.f, 0.0)
+    let m = x.steps.src_to_dst_matrix
+    w.texel(m[0], m[1], m[2], 0.0)
+    w.texel(m[3], m[4], m[5], 0.0)
+    w.texel(m[6], m[7], m[8], 0.0)
+    return true
+
+## A curve's number in a program: 1 gamma_, 2 parametric, 0 none; none for the HDR curves.
+func program_curve(curve: XformCurve) -> f32?:
+    match curve:
+        .none_: return 0.0
+        .gamma: return 1.0
+        .parametric: return 2.0
+        _: return none

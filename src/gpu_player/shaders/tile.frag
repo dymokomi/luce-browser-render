@@ -28,10 +28,14 @@
 //   kind 6  blend       a layer (binding 1) at opacity k0.x blended by mode k0.y (blend.glsl)
 //                       with the target's pixels copied to binding 3, lerped by the clips'
 //                       coverage (Plus scales the layer by it instead), drawn without blending
+//   kind 7  stages      a shaded paint (a gradient): the raster pipeline's color stages from
+//                       the program at texel k0.x of the float table at binding 1
+//                       (stages.glsl), over the draw's rectangle
 #version 450
 #extension GL_GOOGLE_include_directive : require
 #include "coverage.glsl"
 #include "blend.glsl"
+#include "stages.glsl"
 layout(location = 0) in vec4 vertex_color;
 layout(location = 1) flat in vec4 a;
 layout(location = 2) flat in vec4 b;
@@ -58,6 +62,7 @@ const int kind_image = 3;
 const int kind_composite = 4;
 const int kind_clip = 5;
 const int kind_blend = 6;
+const int kind_stages = 7;
 
 // The straight 8-bit channels of a pair packed as high * 256 + low.
 vec2 unpacked(float pair) {
@@ -169,6 +174,8 @@ void main() {
     } else if (kind == kind_image) {
         color = image_color(p);
         coverage = params.k1.w;
+    } else if (kind == kind_stages) {
+        color = run_program(source, int(params.k0.x), p);
     } else {
         color = texelFetch(source, ivec2(floor(p - params.k0.xy)), 0);
         coverage = params.k0.w;

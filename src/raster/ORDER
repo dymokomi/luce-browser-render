@@ -45,6 +45,7 @@ scan_antihair.lucb
 wide.lucb
 pipeline.lucb
 pipeline_blitter.lucb
+gpu_program.lucb
 legacy_blitter.lucb
 highp.lucb
 highp_image.lucb

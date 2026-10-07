@@ -80,6 +80,7 @@ pub struct GpuReplay:
     var masks: ak.Vector[gpu.Texture]
     var layers: ak.Vector[gpu.Texture]
     var backdrop: gpu.Texture?
+    var table: gpu.Texture?
     var instances: ak.Vector[gpu.ShadeInstance]
     var vertices: ak.Vector[gpu.Vertex]
 
@@ -97,6 +98,10 @@ pub struct GpuReplay:
             var handle = texture
             handle.destroy()
             self.backdrop = none
+        if let texture = self.table:
+            var handle = texture
+            handle.destroy()
+            self.table = none
         ak.vector_clear(&self.instances)
         ak.vector_clear(&self.vertices)
 
@@ -172,6 +177,7 @@ struct GpuReplayTarget:
 ## the target below when the layer ends.
 pub func gpu_replay_tile(player: DisplayListPlayerGpu*, pipelines: const GpuPipelines*, texture: gpu.Texture, size: i32, keep: bool) -> !:
     try player.atlas.submit_uploads()
+    try gpu_upload_table(player)
     try gpu_render_masks(player, pipelines, size)
     var targets: GpuReplayTarget[9]
     var depth: usize = 0
@@ -221,6 +227,22 @@ pub func gpu_replay_tile(player: DisplayListPlayerGpu*, pipelines: const GpuPipe
         targets[depth].frame.release()
         depth -= 1
     try targets[0].frame.present()
+
+## Uploads the recording's program table, whole rows of it, before the frames that read it.
+func gpu_upload_table(player: DisplayListPlayerGpu*) -> !:
+    let floats = ak.vector_size(&player.table)
+    if floats == 0:
+        return
+    let device = player.device else trap("gpu_player: no device")
+    if player.replay.table == none:
+        player.replay.table = try gpu.Texture.create(device, (u32)gpu_table_width, (u32)gpu_table_height, gpu.Format.rgba32_float)
+    let table = player.replay.table else trap("gpu_player: no table")
+    let row = gpu_table_width * 4
+    let rows = (floats + row - 1) // row
+    while ak.vector_size(&player.table) < rows * row:
+        ak.vector_append_t(&player.table, 0.0)
+    let values = ak.vector_span_const(&player.table)
+    try table.upload(u8[]((u8*)&values[0], rows * row * 4), gpu.Region(0, 0, (u32)gpu_table_width, (u32)rows))
 
 ## The texture of the layer opened at `depth` (layers at one depth never overlap in time).
 func gpu_layer_texture(player: DisplayListPlayerGpu*, depth: usize, size: i32) -> gpu.Texture!:
@@ -337,6 +359,8 @@ func gpu_replay_run(player: DisplayListPlayerGpu*, pipelines: const GpuPipelines
             return try gpu_replay_instances(player, pipelines, target, draws, start, none, clip_mask, gpu.Filter.nearest)
         .mask:
             return try gpu_replay_instances(player, pipelines, target, draws, start, draw.image, clip_mask, gpu.Filter.nearest)
+        .stages:
+            return try gpu_replay_instances(player, pipelines, target, draws, start, player.replay.table, clip_mask, gpu.Filter.nearest)
         .image:
             let image = draw.image else return 1
             let filter = gpu.Filter.trilinear if draw.uniforms[gpu_uniform_header + 6] > 1.5 else gpu.Filter.nearest
@@ -450,16 +474,30 @@ func gpu_append_quad(vertices: ak.Vector[gpu.Vertex]*, record: const GpuRectReco
 
 # mark: CPU tiles ===============================================================================
 
-## Draws commands `layer.first..<layer.end` with the CPU player into a new surface of a tile
-## from `origin` of the layer's plane, then uploads it into `texture` through `pixels` (a
-## tile's bytes). The player and the surface are made here, with the caller's allocator: the
-## CPU player keeps its pixels where an engine's collector expects them, and nothing the
-## compositor keeps points there.
-pub func gpu_cpu_tile(list: display_list.DisplayList*, snapshot: const display_list.ScrollStateSnapshot*, layer: const GpuLayer*,
+## The CPU player and the tile surface it draws into, made by the first CPU tile of a frame
+## and reused by the frame's other ones. It lives on the stack of gpu_compositor_draw, where
+## an engine's collector sees it: the player and the surface are made with the caller's
+## allocator, and nothing the compositor keeps across frames points there.
+pub struct GpuCpuScratch:
+    var player: display_list.DisplayListPlayerCpu*?
+    var surface: gfx.PaintingSurface*?
+
+## Draws commands `layer.first..<layer.end` with the CPU player into the scratch tile surface
+## (cleared first) from `origin` of the layer's plane, then uploads it into `texture` through
+## `pixels` (a tile's bytes).
+pub func gpu_cpu_tile(scratch: GpuCpuScratch*, list: display_list.DisplayList*, snapshot: const display_list.ScrollStateSnapshot*, layer: const GpuLayer*,
                       origin: gfx.IntPoint, texture: gpu.Texture, pixels: u8[]) -> !:
-    let player = display_list.display_list_player_cpu_create()
-    let surface = gfx.painting_surface_create_with_size(gfx.IntSize(m_width = gpu_tile_size, m_height = gpu_tile_size), gfx.BitmapFormat.bgra8888, gfx.AlphaType.premultiplied)
+    if scratch.player == none:
+        scratch.player = display_list.display_list_player_cpu_create()
+    let player = scratch.player else trap("gpu_player: no CPU player")
+    var surface = scratch.surface else gfx.painting_surface_create_with_size(gfx.IntSize(m_width = gpu_tile_size, m_height = gpu_tile_size), gfx.BitmapFormat.bgra8888, gfx.AlphaType.premultiplied)
     let bitmap = gfx.painting_surface_bitmap(surface)
+    if scratch.surface != none:
+        for y in 0..<gfx.bitmap_height(bitmap):
+            let row = gfx.bitmap_scanline(bitmap, y) else continue
+            for x in 0..<gfx.bitmap_width(bitmap):
+                row[(usize)x] = 0
+    scratch.surface = surface
     display_list.display_list_player_execute_tile((display_list.DisplayListPlayer*)player, list, snapshot, surface, layer.first, layer.end, origin)
     let width = gfx.bitmap_width(bitmap)
     let height = gfx.bitmap_height(bitmap)
