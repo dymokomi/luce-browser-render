@@ -1,0 +1,127 @@
+#==============================================================================================
+#
+#   images - decoded images kept as textures
+#
+#   DESCRIPTION:
+#       Each Gfx::Bitmap an image command draws is uploaded once as an rgba8_linear texture of
+#       premultiplied bytes (sampled as stored, so filtering happens in the encoded space and
+#       on premultiplied texels, as Skia's legacy image shader does) and kept while it is used.
+#       Bitmaps are immutable and live as long as the display lists that draw them, so the
+#       bitmap's address and size are its key. Textures over the budget are released least
+#       recently used first; a draw recorded with one keeps it alive until its frame finishes.
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+## Bytes of image textures kept before the least recently used are released.
+pub let gpu_image_budget: u64 = 64 * 1024 * 1024
+
+## One kept image.
+struct GpuImage:
+    var key: u64
+    var texture: gpu.Texture?
+    var width: i32
+    var height: i32
+    var used: u64
+
+## The image textures (see the header).
+pub struct GpuImageCache:
+    var keys: GpuIndexMap
+    var images: ak.Vector[GpuImage]
+    var bytes: u64
+    ## The current frame's number: images used in it are not released.
+    pub var frame: u64
+
+    ## The texture of `bitmap` on `device`, uploaded the first time; none for an empty bitmap.
+    pub func texture_of(device: gpu.Device, bitmap: const gfx.Bitmap*) -> gpu.Texture?!:
+        let width = gfx.bitmap_width(bitmap)
+        let height = gfx.bitmap_height(bitmap)
+        if width <= 0 or height <= 0 or width > 16384 or height > 16384:
+            return none
+        let key = gpu_hash(gpu_hash(gpu_hash_start, (u64)(void*)bitmap), ((u64)(u32)width << 32) | (u64)(u32)height)
+        if let index = self.keys.get(key):
+            let image = ak.vector_at(&self.images, (usize)index)
+            if image.texture != none:
+                image.used = self.frame
+                return image.texture
+        let bytes = (u64)width * (u64)height * 4
+        self.make_room(bytes)
+        let texture = try gpu.Texture.create(device, (u32)width, (u32)height, gpu.Format.rgba8_linear)
+        let pixels = try new u8[(usize)bytes] --- in memory.heap
+        defer free(pixels) in memory.heap
+        gpu_premultiplied_rgba(bitmap, pixels)
+        try texture.upload(pixels)
+        self.bytes += bytes
+        let image = GpuImage(key = key, texture = texture, width = width, height = height, used = self.frame)
+        if let index = self.keys.get(key):
+            *ak.vector_at(&self.images, (usize)index) = image
+        else:
+            self.keys.put(key, (u32)ak.vector_size(&self.images))
+            ak.vector_append_t(&self.images, image)
+        return texture
+
+    ## Releases least recently used textures (not this frame's) until `incoming` more bytes fit.
+    func make_room(incoming: u64):
+        while self.bytes + incoming > gpu_image_budget:
+            var oldest: usize? = none
+            var oldest_used = self.frame
+            let images = ak.vector_span(&self.images)
+            for index in 0..<images.length:
+                if images[index].texture != none and images[index].used < oldest_used:
+                    oldest = index
+                    oldest_used = images[index].used
+            let victim = oldest else return
+            self.drop(victim)
+
+    ## Releases the texture of image `index` (its slot stays, empty).
+    func drop(index: usize):
+        let image = ak.vector_at(&self.images, index)
+        if let texture = image.texture:
+            var handle = texture
+            handle.destroy()
+            self.bytes -= (u64)image.width * (u64)image.height * 4
+        image.texture = none
+
+    ## Releases every texture.
+    pub func release():
+        for index in 0..<ak.vector_size(&self.images):
+            self.drop(index)
+        ak.vector_clear(&self.images)
+        self.keys.release()
+
+    ## The bytes of textures kept.
+    pub func resident_bytes() -> u64:
+        return self.bytes
+
+## `bitmap`'s pixels as premultiplied R, G, B, A bytes into `out` (width x height x 4): the x
+## formats taken as opaque, unpremultiplied ones premultiplied as the CPU player does.
+func gpu_premultiplied_rgba(bitmap: const gfx.Bitmap*, out: u8[]):
+    let width = gfx.bitmap_width(bitmap)
+    let height = gfx.bitmap_height(bitmap)
+    let format_ = gfx.bitmap_format(bitmap)
+    let opaque = format_ == gfx.BitmapFormat.bg_rx8888 or format_ == gfx.BitmapFormat.rg_bx8888
+    let bgr = format_ == gfx.BitmapFormat.bgra8888 or format_ == gfx.BitmapFormat.bg_rx8888
+    let premultiplied = gfx.bitmap_alpha_type(bitmap) == gfx.AlphaType.premultiplied and not opaque
+    for y in 0..<height:
+        let row = gfx.bitmap_scanline_const(bitmap, y) else continue
+        let base = (usize)y * (usize)width * 4
+        for x in 0..<width:
+            let value = row[(usize)x]
+            let c0 = (u8)(value & 0xff)
+            let c1 = (u8)((value >> 8) & 0xff)
+            let c2 = (u8)((value >> 16) & 0xff)
+            let a: u8 = 255 if opaque else (u8)((value >> 24) & 0xff)
+            var r = c2 if bgr else c0
+            var g = c1
+            var b = c0 if bgr else c2
+            if not premultiplied:
+                r = raster.premultiply_u8(r, a)
+                g = raster.premultiply_u8(g, a)
+                b = raster.premultiply_u8(b, a)
+            let at = base + (usize)x * 4
+            out[at] = r
+            out[at + 1] = g
+            out[at + 2] = b
+            out[at + 3] = a

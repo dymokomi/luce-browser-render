@@ -49,7 +49,7 @@ func cpu_map_point(m: raster.Transform, x: f32, y: f32) -> (f32, f32):
 ## SkStrikeSpec::ShouldDrawAsPath for a fill paint: whether `position` has perspective or a
 ## side of the text matrix (the font's size, then `position`) is longer than 256, Skia's
 ## limit for cached glyphs.
-func cpu_should_draw_as_path(font: const web_fonts.SkFont*, position: raster.Transform) -> bool:
+pub func cpu_should_draw_as_path(font: const web_fonts.SkFont*, position: raster.Transform) -> bool:
     # we don't cache perspective
     if position.has_perspective():
         return true
@@ -66,15 +66,15 @@ func cpu_should_draw_as_path(font: const web_fonts.SkFont*, position: raster.Tra
 
 ## SkGlyphPositionRoundingSpec for a strike: what is added to a device position before it
 ## is floored, and which quarter-pixel fields are kept.
-struct CpuRoundingSpec:
-    var half_x: f32
-    var half_y: f32
-    var keep_x: bool
-    var keep_y: bool
+pub struct CpuRoundingSpec:
+    pub var half_x: f32
+    pub var half_y: f32
+    pub var keep_x: bool
+    pub var keep_y: bool
 
 ## SkGlyphPositionRoundingSpec(isSubpixel, axisAlignment): HalfAxisSampleFreq and
 ## IgnorePositionFieldMask.
-func cpu_rounding_spec(strike: const web_fonts.SkStrike*) -> CpuRoundingSpec:
+pub func cpu_rounding_spec(strike: const web_fonts.SkStrike*) -> CpuRoundingSpec:
     # SkPackedGlyphID::kSubpixelRound: 1 / (1 << (kSubPixelPosLen + 1)).
     let subpixel_round: f32 = 0.125
     if not strike.subpixel:
@@ -86,7 +86,7 @@ func cpu_rounding_spec(strike: const web_fonts.SkStrike*) -> CpuRoundingSpec:
 
 ## SkPackedGlyphID::PackIDSkPoint's field for one axis: the quarter-pixel phase of a
 ## position that already has the rounding constant added (0 when the axis keeps none).
-func cpu_subpixel_field(value: f32, keep: bool) -> u32:
+pub func cpu_subpixel_field(value: f32, keep: bool) -> u32:
     if not keep:
         return 0
     let shifted = (value - math32.floor(value)) + 1.0
@@ -158,7 +158,7 @@ func cpu_canvas_draw_glyph_masks(canvas: CpuCanvas*, blob: const web_fonts.SkTex
         cpu_canvas_target(canvas).fill_masks(placed[..<placed_count], paint, cpu_canvas_draw_mask(canvas))
 
 ## sk_float_floor2int: floor, saturated to the int range.
-func cpu_floor_to_int(x: f32) -> i32:
+pub func cpu_floor_to_int(x: f32) -> i32:
     let f = math32.floor(x)
     if not (f < 2147483520.0):
         return i32_max_value

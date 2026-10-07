@@ -1,0 +1,122 @@
+#==============================================================================================
+#
+#   atlas - one coverage texture for glyph masks and path coverage
+#
+#   DESCRIPTION:
+#       An r8 texture of 2048 by 2048 texels packed in shelves (rows of the height of their
+#       tallest mask, filled left to right), as Skia's text atlas and WebRender's glyph cache
+#       pack. Glyph masks are kept by key (the strike, the glyph and its quarter-pixel phase:
+#       the same key always has the same pixels, see display_list's cpu_glyph_run), so a glyph
+#       is rastered once per process, not once per draw. Path coverage is placed without a key:
+#       it lives until the atlas starts again.
+#
+#       When a mask does not fit, the atlas starts again empty and its generation changes:
+#       draws recorded before refer to texels that are gone, so the player gives up the tile
+#       it is drawing (the CPU draws it) and the next tile starts with an empty atlas.
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+## The side of the atlas in texels.
+pub let gpu_atlas_size: i32 = 2048
+
+## A mask in the atlas: where its texels are, and where it sits relative to the point it is
+## drawn at (a glyph mask's left and top).
+pub struct GpuAtlasEntry:
+    pub var x: i32
+    pub var y: i32
+    pub var width: i32
+    pub var height: i32
+    pub var left: i32
+    pub var top: i32
+
+## The coverage atlas (see the header).
+pub struct GpuAtlas:
+    var texture: gpu.Texture?
+    ## The uploads not yet sent: one submission per tile, not one per mask.
+    var batch: gpu.UploadBatch?
+    var keys: GpuIndexMap
+    var entries: ak.Vector[GpuAtlasEntry]
+    var shelf_x: i32
+    var shelf_y: i32
+    var shelf_height: i32
+    ## Counts the atlas's fresh starts.
+    pub var generation: u64
+    ## Masks rastered and uploaded, for the statistics.
+    pub var uploads: u64
+
+    ## The atlas texture on `device`, made the first time.
+    pub func texture_on(device: gpu.Device) -> gpu.Texture!:
+        if let texture = self.texture:
+            return texture
+        let texture = try gpu.Texture.create(device, (u32)gpu_atlas_size, (u32)gpu_atlas_size, gpu.Format.r8)
+        self.texture = texture
+        return texture
+
+    ## The mask kept for `key`, if any.
+    pub func find(key: u64) -> GpuAtlasEntry?:
+        let index = self.keys.get(key) else return none
+        return *ak.vector_at(&self.entries, (usize)index)
+
+    ## Remembers that `key` draws nothing (an empty glyph), so it is not rastered again.
+    pub func remember_empty(key: u64):
+        self.keys.put(key, (u32)ak.vector_size(&self.entries))
+        ak.vector_append_t(&self.entries, GpuAtlasEntry())
+
+    ## Places `coverage` (`width` by `height` bytes, top-down) and uploads it; keeps it for `key`
+    ## unless `key` is none. None when it is larger than the atlas; a full atlas starts again
+    ## first (see the header).
+    pub func place(device: gpu.Device, key: u64?, coverage: const u8[], width: i32, height: i32, left: i32, top: i32) -> GpuAtlasEntry?!:
+        if width <= 0 or height <= 0 or width > gpu_atlas_size or height > gpu_atlas_size:
+            return none
+        if self.shelf_x + width > gpu_atlas_size:
+            self.shelf_y += self.shelf_height
+            self.shelf_x = 0
+            self.shelf_height = 0
+        if self.shelf_y + height > gpu_atlas_size:
+            self.reset()
+        let entry = GpuAtlasEntry(x = self.shelf_x, y = self.shelf_y, width = width, height = height, left = left, top = top)
+        self.shelf_x += width + 1
+        self.shelf_height = gpu_max(self.shelf_height, height + 1)
+        let texture = try self.texture_on(device)
+        if self.batch == none:
+            self.batch = try gpu.UploadBatch.begin(device)
+        var batch = self.batch else trap("gpu_player: no upload batch")
+        try batch.add(texture, coverage[..<(usize)width * (usize)height], gpu.Region((u32)entry.x, (u32)entry.y, (u32)width, (u32)height))
+        self.batch = batch
+        self.uploads += 1
+        if let k = key:
+            self.keys.put(k, (u32)ak.vector_size(&self.entries))
+            ak.vector_append_t(&self.entries, entry)
+        return entry
+
+    ## Sends the uploads placed so far, before a frame that samples them is submitted.
+    pub func submit_uploads() -> !:
+        if let batch = self.batch:
+            var sending = batch
+            try sending.submit()
+            self.batch = sending
+
+    ## Starts again empty (the texels stay until overwritten).
+    pub func reset():
+        self.keys.clear()
+        ak.vector_clear(&self.entries)
+        self.shelf_x = 0
+        self.shelf_y = 0
+        self.shelf_height = 0
+        self.generation += 1
+
+    ## Releases the texture and the tables.
+    pub func release():
+        if let batch = self.batch:
+            var finishing = batch
+            finishing.finish()
+            self.batch = none
+        if let texture = self.texture:
+            var handle = texture
+            handle.destroy()
+            self.texture = none
+        self.keys.release()
+        ak.vector_clear(&self.entries)

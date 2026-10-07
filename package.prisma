@@ -6,7 +6,7 @@ def package "luce-browser-render" {
     str language = "luce-base"
     str description = "Geometry, color, fonts, the CPU rasterizer and the display list of the luce-browser port of Ladybird, in luce-base."
     str readme = "README.md"
-    str[] public = ["display_list", "gfx", "raster", "web_fonts"]
+    str[] public = ["display_list", "gfx", "gpu_player", "raster", "web_fonts"]
 
     def dependency "luce-std" {
         str owner = "dymokomi"
@@ -31,5 +31,10 @@ def package "luce-browser-render" {
     def dependency "luce-browser-css" {
         str owner = "dymokomi"
         str path = "../luce-browser-css"
+    }
+
+    def dependency "luce-gpu" {
+        str owner = "dymokomi"
+        str path = "../luce-gpu"
     }
 }

@@ -1,0 +1,208 @@
+#==============================================================================================
+#
+#   tests_gpu_player - the GPU player against the CPU player
+#
+#   DESCRIPTION:
+#       Each scene is a display list drawn by the CPU player into a surface and by the GPU
+#       compositor into an offscreen texture of the same size (crossing tile edges), then
+#       compared pixel by pixel within a fuzzy bound (how far a channel may be off, and how
+#       many pixels may be off by more), as Ladybird's ref tests compare. A machine without a
+#       GPU device skips them. Scrolling scenes draw again at another offset and check that
+#       the kept tiles were moved, not drawn again.
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+# mark: Support =================================================================================
+
+let test_width: i32 = 700
+let test_height: i32 = 300
+
+## A color from its channels.
+func test_rgba(r: u8, g: u8, b: u8, a: u8) -> gfx.Color:
+    return gfx.Color(m_value = ((u32)a << 24) | ((u32)r << 16) | ((u32)g << 8) | (u32)b)
+
+## A device rectangle.
+func test_box(x: i32, y: i32, width: i32, height: i32) -> gfx.DevicePixelRect:
+    return gfx.DevicePixelRect(m_location = gfx.IntPoint(m_x = x, m_y = y), m_size = gfx.IntSize(m_width = width, m_height = height))
+
+## The same radius at every corner.
+func test_radii(radius: i32) -> display_list.CornerRadii:
+    let r = display_list.CornerRadius(horizontal_radius = radius, vertical_radius = radius)
+    return display_list.CornerRadii(top_left = r, top_right = r, bottom_right = r, bottom_left = r)
+
+## A scene's list: commands appended under `context`.
+struct TestList:
+    var tree: display_list.AccumulatedVisualContextTree*
+    var list: display_list.DisplayList*
+
+## An empty list whose tree has the viewport's scroll node (frame 1) as node 1.
+func test_list() -> TestList:
+    let tree = display_list.accumulated_visual_context_tree_create()
+    _ = display_list.accumulated_visual_context_tree_append(tree, display_list.VisualContextData.scroll_data(display_list.ScrollData(scroll_frame_index = 1, is_sticky = false)), 0)
+    return TestList(tree = tree, list = display_list.display_list_create(tree))
+
+## Appends `command` under node `context` (0: none, 1: the scroll node).
+func test_add(scene: const TestList*, command: display_list.DisplayListCommand, context: u64):
+    _ = display_list.display_list_append(scene.list, command, context)
+
+## A snapshot with frame 1 scrolled by (`x`, `y`) device pixels.
+func test_snapshot(x: f32, y: f32) -> display_list.ScrollStateSnapshot:
+    var snapshot: display_list.ScrollStateSnapshot
+    ak.vector_append_t(&snapshot.m_device_offsets, gfx.FloatPoint(m_x = 0.0, m_y = 0.0))
+    ak.vector_append_t(&snapshot.m_device_offsets, gfx.FloatPoint(m_x = -x, m_y = -y))
+    return snapshot
+
+## The CPU player's frame of `scene` as premultiplied RGBA bytes.
+func test_cpu_frame(scene: const TestList*, snapshot: const display_list.ScrollStateSnapshot*, out: u8[]):
+    let player = display_list.display_list_player_cpu_create()
+    let surface = gfx.painting_surface_create_with_size(gfx.IntSize(m_width = test_width, m_height = test_height), gfx.BitmapFormat.bgra8888, gfx.AlphaType.premultiplied)
+    display_list.display_list_player_execute((display_list.DisplayListPlayer*)player, scene.list, snapshot, surface)
+    let bitmap = gfx.painting_surface_bitmap(surface)
+    for y in 0..<test_height:
+        let row = gfx.bitmap_scanline_const(bitmap, y) else trap("scanline")
+        for x in 0..<test_width:
+            let value = row[(usize)x]
+            let at = ((usize)y * (usize)test_width + (usize)x) * 4
+            out[at] = (u8)((value >> 16) & 0xff)
+            out[at + 1] = (u8)((value >> 8) & 0xff)
+            out[at + 2] = (u8)(value & 0xff)
+            out[at + 3] = (u8)(value >> 24)
+
+## The GPU compositor's frame of `scene` into `texture`, read back into `out`.
+func test_gpu_frame(compositor: GpuCompositor*, texture: gpu.Texture, scene: const TestList*, snapshot: const display_list.ScrollStateSnapshot*, out: u8[]) -> !:
+    let frame = try texture.frame()
+    defer frame.release()
+    let target = try frame.value().target()
+    defer target.release()
+    try gpu_compositor_draw(compositor, scene.list, snapshot, target.value(), gpu.Format.rgba8, test_width, test_height, 1.0)
+    _ = try frame.value().present(gpu.Color(0.0, 0.0, 0.0, 0.0))
+    try texture.read(out)
+
+## Draws `scene` both ways at the scroll offsets of `snapshots` and traps when more than
+## `max_pixels` pixels differ by more than `max_difference` in a channel; answers the
+## compositor's statistics after the last frame.
+func test_compare(name: str, scene: const TestList*, snapshots: const display_list.ScrollStateSnapshot[], max_difference: i32, max_pixels: usize) -> GpuPlayerStats?:
+    # Frames this large need the process heap, not a test's bounded one.
+    with memory.heap:
+        var device = gpu.Device.open() catch failure: return none
+        defer device.destroy()
+        var texture = gpu.Texture.create(device, (u32)test_width, (u32)test_height, gpu.Format.rgba8) catch failure: trap(f"{name}: {failure.message}")
+        defer texture.destroy()
+        let compositor = gpu_compositor_create()
+        defer gpu_compositor_destroy(compositor)
+        let bytes = (usize)test_width * (usize)test_height * 4
+        let expected = (new u8[bytes] --- in memory.heap) else trap("out of memory")
+        let actual = (new u8[bytes] --- in memory.heap) else trap("out of memory")
+        defer free(expected) in memory.heap
+        defer free(actual) in memory.heap
+        gpu_player_reset_stats()
+        for snapshot in snapshots:
+            test_cpu_frame(scene, &snapshot, expected)
+            test_gpu_frame(compositor, texture, scene, &snapshot, actual) catch failure: trap(f"{name}: {failure.message}")
+            var worst: i32 = 0
+            var differing: usize = 0
+            var at: usize = 0
+            while at < bytes:
+                var pixel_worst: i32 = 0
+                for channel in 0..<(usize)4:
+                    let d = (i32)expected[at + channel] - (i32)actual[at + channel]
+                    let magnitude = d if d >= 0 else -d
+                    pixel_worst = gpu_max(pixel_worst, magnitude)
+                worst = gpu_max(worst, pixel_worst)
+                if pixel_worst > max_difference:
+                    if pixel_worst > 20:
+                        let p = at // 4
+                        print(f"{name}: pixel ({p % (usize)test_width}, {p // (usize)test_width}) cpu {expected[at]} {expected[at + 1]} {expected[at + 2]} {expected[at + 3]} gpu {actual[at]} {actual[at + 1]} {actual[at + 2]} {actual[at + 3]}")
+                    differing += 1
+                at += 4
+            if differing > max_pixels:
+                print(f"{name}: {differing} pixels differ by more than {max_difference} (worst {worst})")
+                trap("the GPU player's pixels are not close enough to the CPU player's")
+        return gpu_player_stats()
+
+## An opaque page background over the whole frame, outside any scroll node.
+func test_background(scene: const TestList*):
+    test_add(scene, display_list.DisplayListCommand.fill_rect(display_list.FillRect(rect = test_box(0, 0, test_width, test_height), color = test_rgba(250, 250, 245, 255))), 0)
+
+# mark: Scenes ==================================================================================
+
+test "gpu player: rectangles, clips and translations match the CPU player":
+    let scene = test_list()
+    test_background(&scene)
+    test_add(&scene, .fill_rect(display_list.FillRect(rect = test_box(10, 10, 600, 40), color = test_rgba(200, 30, 30, 255))), 1)
+    test_add(&scene, .fill_rect(display_list.FillRect(rect = test_box(500, 30, 60, 200), color = test_rgba(20, 90, 200, 128))), 1)
+    test_add(&scene, .save(display_list.Save()), 1)
+    test_add(&scene, .add_clip_rect(display_list.AddClipRect(rect = test_box(100, 100, 450, 80))), 1)
+    test_add(&scene, .translate(display_list.Translate(delta = gfx.IntPoint(m_x = 7, m_y = 3))), 1)
+    test_add(&scene, .fill_rect(display_list.FillRect(rect = test_box(80, 90, 600, 200), color = test_rgba(30, 160, 60, 255))), 1)
+    test_add(&scene, .restore(display_list.Restore()), 1)
+    test_add(&scene, .draw_rect(display_list.DrawRect(rect = test_box(20, 200, 300, 60), color = test_rgba(0, 0, 0, 255), rough = false)), 1)
+    let snapshots = [test_snapshot(0.0, 0.0), test_snapshot(0.0, 37.0)]
+    _ = test_compare("rectangles", &scene, snapshots, 2, 0)
+
+test "gpu player: rounded rectangles and rounded clips match the CPU player within a fuzzy bound":
+    let scene = test_list()
+    test_background(&scene)
+    test_add(&scene, .fill_rect_with_rounded_corners(display_list.FillRectWithRoundedCorners(rect = test_box(20, 20, 300, 120), color = test_rgba(40, 120, 220, 255), corner_radii = test_radii(18))), 1)
+    test_add(&scene, .fill_rect_with_rounded_corners(display_list.FillRectWithRoundedCorners(rect = test_box(480, 60, 120, 200), color = test_rgba(240, 160, 60, 200), corner_radii = test_radii(40))), 1)
+    test_add(&scene, .save(display_list.Save()), 1)
+    test_add(&scene, .add_rounded_rect_clip(display_list.AddRoundedRectClip(corner_radii = test_radii(24), border_rect = test_box(60, 160, 380, 120), corner_clip = display_list.CornerClip.outside)), 1)
+    test_add(&scene, .fill_rect(display_list.FillRect(rect = test_box(0, 150, 700, 150), color = test_rgba(20, 140, 70, 255))), 1)
+    test_add(&scene, .restore(display_list.Restore()), 1)
+    let snapshots = [test_snapshot(0.0, 0.0)]
+    # Analytic coverage differs from Skia's scan conversion on corner pixels only.
+    _ = test_compare("rounded", &scene, snapshots, 40, 400)
+
+test "gpu player: a path filled with a color is the CPU player's coverage":
+    let scene = test_list()
+    test_background(&scene)
+    var path: gfx.Path
+    gfx.path_move_to(&path, gfx.FloatPoint(m_x = 30.0, m_y = 30.0))
+    gfx.path_line_to(&path, gfx.FloatPoint(m_x = 640.5, m_y = 40.0))
+    gfx.path_line_to(&path, gfx.FloatPoint(m_x = 420.0, m_y = 260.25))
+    gfx.path_close(&path)
+    let bounds = test_box(30, 30, 611, 231)
+    test_add(&scene, .fill_path(display_list.FillPath(path_bounding_rect = bounds, path = path, opacity = 1.0, paint_style_or_color = .color(test_rgba(90, 20, 160, 255)),
+                                                      winding_rule = gfx.WindingRule.even_odd, should_anti_alias = display_list.ShouldAntiAlias.yes)), 1)
+    let snapshots = [test_snapshot(0.0, 0.0)]
+    _ = test_compare("path", &scene, snapshots, 2, 0)
+
+test "gpu player: images are sampled as the CPU player samples them":
+    let scene = test_list()
+    test_background(&scene)
+    let bitmap = gfx.bitmap_create_alpha_type(gfx.BitmapFormat.bgra8888, gfx.AlphaType.premultiplied, gfx.IntSize(m_width = 8, m_height = 6)) else trap("bitmap")
+    for j in 0..<(i32)6:
+        let row = gfx.bitmap_scanline(bitmap, j) else trap("scanline")
+        for i in 0..<(i32)8:
+            row[(usize)i] = 0xff000000 | ((u32)(i * 32) << 16) | ((u32)(j * 40) << 8) | (u32)((i + j) % 2 * 255)
+    var color_space: gfx.ColorSpace = ---
+    gfx.color_space_construct(&color_space)
+    let image = gfx.immutable_bitmap_create_color_space(bitmap, color_space)
+    test_add(&scene, .draw_scaled_immutable_bitmap(display_list.DrawScaledImmutableBitmap(dst_rect = test_box(10, 10, 8, 6), clip_rect = test_box(0, 0, 700, 300), bitmap = image, scaling_mode = gfx.ScalingMode.nearest_neighbor)), 1)
+    test_add(&scene, .draw_scaled_immutable_bitmap(display_list.DrawScaledImmutableBitmap(dst_rect = test_box(40, 20, 160, 120), clip_rect = test_box(0, 0, 700, 300), bitmap = image, scaling_mode = gfx.ScalingMode.nearest_neighbor)), 1)
+    test_add(&scene, .draw_scaled_immutable_bitmap(display_list.DrawScaledImmutableBitmap(dst_rect = test_box(420, 20, 240, 180), clip_rect = test_box(430, 30, 700, 300), bitmap = image, scaling_mode = gfx.ScalingMode.bilinear)), 1)
+    let snapshots = [test_snapshot(0.0, 0.0)]
+    _ = test_compare("image", &scene, snapshots, 3, 0)
+
+test "gpu player: a scroll moves kept tiles; unsupported commands fall back per tile":
+    let scene = test_list()
+    test_background(&scene)
+    for i in 0..<(i32)30:
+        test_add(&scene, .fill_rect(display_list.FillRect(rect = test_box(20 + i * 7, i * 40, 200, 30), color = test_rgba((u8)(i * 8), 100, 200, 255))), 1)
+    # A gradient far down the page: its tile is the CPU player's.
+    var stops: ak.Vector[gfx.ColorStop]
+    ak.vector_append_t(&stops, gfx.ColorStop(color = test_rgba(255, 0, 0, 255), position = 0.0))
+    ak.vector_append_t(&stops, gfx.ColorStop(color = test_rgba(0, 0, 255, 255), position = 1.0))
+    let data = display_list.LinearGradientData(gradient_angle = 90.0, color_stops = display_list.ColorStopData(list = stops), interpolation_method = .rectangular_color_space(value = css_data.RectangularColorSpace.srgb))
+    test_add(&scene, .paint_linear_gradient(display_list.PaintLinearGradient(gradient_rect = test_box(100, 1100, 300, 50), linear_gradient_data = data)), 1)
+    let snapshots = [test_snapshot(0.0, 0.0), test_snapshot(0.0, 100.0), test_snapshot(0.0, 400.0), test_snapshot(0.0, 900.0)]
+    let stats = test_compare("scroll", &scene, snapshots, 2, 0) else return
+    # Without tiles kept, four frames of two layers would draw 4 x (2 + 2) tiles or more.
+    if stats.gpu_tiles + stats.cpu_tiles + stats.empty_tiles > 12:
+        print(f"scroll: {stats.gpu_tiles} GPU, {stats.cpu_tiles} CPU and {stats.empty_tiles} empty tiles drawn")
+        trap("a scroll drew kept tiles again")
+    if stats.cpu_tiles == 0 or stats.fallbacks[(usize)GpuFallback.gradient] == 0:
+        trap("the gradient's tile did not fall back to the CPU player")

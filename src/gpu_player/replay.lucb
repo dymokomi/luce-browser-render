@@ -1,0 +1,155 @@
+#==============================================================================================
+#
+#   replay - a tile's recorded draws submitted as one frame, and the CPU player's tiles
+#
+#   DESCRIPTION:
+#       gpu_replay_tile records the GPU player's draws into the tile texture's frame and
+#       presents it (cleared to transparent first): each draw under its scissor, the `rects`
+#       batches as one triangle list each, the shader draws with their uniforms. The atlas's
+#       pending uploads are sent first, so the frame samples them.
+#
+#       gpu_cpu_tile draws a tile the GPU player gave up on with the CPU player
+#       (DisplayListPlayerCpu through the same tile seam) into a scratch surface and uploads
+#       it: BGRA premultiplied bytes swizzled to the tile's RGBA.
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+# mark: Pipelines ===============================================================================
+
+## The shaders and pipelines tiles are drawn with (all into rgba8_linear tiles).
+pub struct GpuPipelines:
+    var shaders: gpu.Shader[4]
+    var fill: gpu.Pipeline
+    var mask: gpu.Pipeline
+    var image: gpu.Pipeline
+    ## The composite pipeline per frame target format (index 4: a presentation surface).
+    var composite: (gpu.Pipeline?)[5]
+
+    ## The composite pipeline for targets of `target_format` (none: a surface).
+    pub func composite_for(device: gpu.Device, target_format: gpu.Format?) -> gpu.Pipeline!:
+        let index: usize = (usize)(target_format else gpu.Format.rgba8) if target_format != none else 4
+        if let pipeline = self.composite[index]:
+            return pipeline
+        let pipeline = try gpu.Pipeline.create(device, self.shaders[3], gpu.Blend.over, target_format)
+        self.composite[index] = pipeline
+        return pipeline
+
+    ## Releases every pipeline and shader.
+    pub func release():
+        self.fill.destroy()
+        self.mask.destroy()
+        self.image.destroy()
+        for index in 0..<(usize)5:
+            if let pipeline = self.composite[index]:
+                var handle = pipeline
+                handle.destroy()
+        for index in 0..<(usize)4:
+            self.shaders[index].destroy()
+
+## The pipelines on `device`.
+pub func gpu_pipelines_create(device: gpu.Device) -> GpuPipelines!:
+    let fill_shader = try gpu.Shader.create(device, fill_frag_words, fill_frag_msl)
+    let mask_shader = try gpu.Shader.create(device, mask_frag_words, mask_frag_msl)
+    let image_shader = try gpu.Shader.create(device, image_frag_words, image_frag_msl)
+    let composite_shader = try gpu.Shader.create(device, composite_frag_words, composite_frag_msl)
+    let tile = gpu.Format.rgba8_linear
+    return GpuPipelines(shaders = [fill_shader, mask_shader, image_shader, composite_shader],
+                        fill = try gpu.Pipeline.create(device, fill_shader, gpu.Blend.over, tile),
+                        mask = try gpu.Pipeline.create(device, mask_shader, gpu.Blend.over, tile),
+                        image = try gpu.Pipeline.create(device, image_shader, gpu.Blend.over, tile))
+
+# mark: GPU tiles ===============================================================================
+
+## Draws `player`'s recording into `texture` (`size` pixels square), cleared first.
+pub func gpu_replay_tile(player: DisplayListPlayerGpu*, pipelines: const GpuPipelines*, texture: gpu.Texture, size: i32, vertices: ak.Vector[gpu.Vertex]*) -> !:
+    try player.atlas.submit_uploads()
+    let frame = try texture.frame()
+    defer frame.release()
+    let root = try frame.value().target()
+    defer root.release()
+    let bounds = GpuRect(width = size, height = size)
+    for draw in ak.vector_span_const(&player.draws):
+        let scissor = draw.scissor.intersected(bounds)
+        if scissor.is_empty():
+            continue
+        let view = try root.value().clipped(gpu.Rect((f64)scissor.x, (f64)scissor.y, (f64)scissor.width, (f64)scissor.height))
+        gpu_replay_draw(player, pipelines, view.value(), &draw, size, vertices) catch failure:
+            view.release()
+            error(failure.code, failure.message)
+        view.release()
+    _ = try frame.value().present(gpu.Color(0.0, 0.0, 0.0, 0.0))
+
+## One recorded draw into `target` (the tile under the draw's scissor).
+func gpu_replay_draw(player: const DisplayListPlayerGpu*, pipelines: const GpuPipelines*, target: const gpu.RenderTarget*, draw: const GpuDraw*, size: i32, vertices: ak.Vector[gpu.Vertex]*) -> !:
+    let area = gpu.Rect((f64)draw.area.x, (f64)draw.area.y, (f64)draw.area.width, (f64)draw.area.height)
+    let uniforms = u8[]((u8*)&draw.uniforms[0], 128)
+    match draw.kind:
+        .rects:
+            ak.vector_clear(vertices)
+            let scale = 2.0 / (f32)size
+            for index in draw.first..<draw.first + draw.count:
+                let record = ak.vector_at_const(&player.rects, index)
+                gpu_append_quad(vertices, record, scale)
+            try target.triangles(ak.vector_span_const(vertices))
+        .fill:
+            try gpu.shade(target, pipelines.fill, area, uniforms, none, gpu.Filter.nearest)
+        .mask:
+            let image = draw.image else return
+            try gpu.shade(target, pipelines.mask, area, uniforms, [image], gpu.Filter.nearest)
+        .image:
+            let image = draw.image else return
+            try gpu.shade(target, pipelines.image, area, uniforms, [image], gpu.Filter.nearest)
+        _: return
+
+## The two triangles of a solid rectangle in clip coordinates of a tile (`scale` is 2 / side).
+func gpu_append_quad(vertices: ak.Vector[gpu.Vertex]*, record: const GpuRectRecord*, scale: f32):
+    let left = (f32)record.rect.x * scale - 1.0
+    let right = (f32)(record.rect.x + record.rect.width) * scale - 1.0
+    let top = 1.0 - (f32)record.rect.y * scale
+    let bottom = 1.0 - (f32)(record.rect.y + record.rect.height) * scale
+    let rgba = record.color
+    let a = gpu.Vertex(x = left, y = top, z = 0.0, red = rgba[0], green = rgba[1], blue = rgba[2], alpha = rgba[3])
+    var b = a
+    b.x = right
+    var d = a
+    d.x = right
+    d.y = bottom
+    var e = a
+    e.y = bottom
+    ak.vector_append_t(vertices, a)
+    ak.vector_append_t(vertices, b)
+    ak.vector_append_t(vertices, d)
+    ak.vector_append_t(vertices, a)
+    ak.vector_append_t(vertices, d)
+    ak.vector_append_t(vertices, e)
+
+# mark: CPU tiles ===============================================================================
+
+## Draws commands `layer.first..<layer.end` with the CPU player into `surface` (a square of
+## `size` pixels) from `origin` of the layer's plane, then uploads it into `texture` through
+## `pixels` (size * size * 4 bytes).
+pub func gpu_cpu_tile(player: display_list.DisplayListPlayerCpu*, list: display_list.DisplayList*, snapshot: const display_list.ScrollStateSnapshot*, layer: const GpuLayer*,
+                      origin: gfx.IntPoint, surface: gfx.PaintingSurface*, texture: gpu.Texture, pixels: u8[]) -> !:
+    gfx.painting_surface_lock_context(surface)
+    var pixmap = gfx.painting_surface_begin_raster(surface)
+    memory.set(pixmap.data_mut(), 0)
+    gfx.painting_surface_end_raster(surface)
+    gfx.painting_surface_unlock_context(surface)
+    display_list.display_list_player_execute_tile((display_list.DisplayListPlayer*)player, list, snapshot, surface, layer.first, layer.end, origin)
+    let bitmap = gfx.painting_surface_bitmap(surface)
+    let width = gfx.bitmap_width(bitmap)
+    let height = gfx.bitmap_height(bitmap)
+    for y in 0..<height:
+        let row = gfx.bitmap_scanline_const(bitmap, y) else continue
+        let base = (usize)y * (usize)width * 4
+        for x in 0..<width:
+            let value = row[(usize)x]
+            let at = base + (usize)x * 4
+            pixels[at] = (u8)((value >> 16) & 0xff)
+            pixels[at + 1] = (u8)((value >> 8) & 0xff)
+            pixels[at + 2] = (u8)(value & 0xff)
+            pixels[at + 3] = (u8)(value >> 24)
+    try texture.upload(pixels)

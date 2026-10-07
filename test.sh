@@ -14,17 +14,27 @@ for file in $(git ls-files '*.lucb' | grep -v -e '/generated_' -e '_tables\.lucb
 done
 
 # check MODULE: `luce-base check -W`, which reports warnings without failing, so any output at
-# all fails the run.
+# all fails the run, except warnings in another package's code (gpu_player reaches luce-gpu and
+# luce-window, whose unused platform helpers warn on other hosts): those are theirs to fix.
 check() {
     echo "== luce-base check src/$1 -W"
-    output=$(luce-base check "src/$1" -W 2>&1) || { echo "$output"; exit 1; }
+    status=0
+    output=$(luce-base check "src/$1" -W 2>&1) || status=$?
+    pattern='^luce-base: luce_[a-z_]+/src/[^ ]*: warning: '
+    dependency_warnings=$(printf '%s\n' "$output" | grep -E "$pattern" || true)
+    output=$(printf '%s\n' "$output" | grep -v -E "$pattern" || true)
     if [ -n "$output" ]; then
         echo "$output"
         exit 1
     fi
+    # Only another package's warnings: the module must check cleanly without -W.
+    if [ "$status" -ne 0 ]; then
+        [ -n "$dependency_warnings" ] || exit 1
+        luce-base check "src/$1"
+    fi
 }
 
-for module in raster gfx web_fonts display_list; do
+for module in raster gfx web_fonts display_list gpu_player; do
     check "$module"
 done
 
@@ -38,10 +48,11 @@ luce-base test src/gfx
 echo "== luce-base test src/web_fonts"
 luce-base test src/web_fonts
 
-# display_list: the module's tests (the CPU player against Skia's pixels, the ported LibWeb
-# logic).
-echo "== luce-base test src/display_list"
-luce-base test src/display_list --native
+# display_list and gpu_player: the modules' tests (the CPU player against Skia's pixels, the
+# ported LibWeb logic, the GPU player against the CPU player; testing gpu_player runs the tests
+# of display_list, which it imports, too). The GPU scenes skip on a machine without a GPU.
+echo "== luce-base test src/gpu_player"
+luce-base test src/gpu_player --native
 
 # raster: its unit tests.
 echo "== luce-base test src/raster"

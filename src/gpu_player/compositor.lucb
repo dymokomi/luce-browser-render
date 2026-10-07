@@ -1,0 +1,296 @@
+#==============================================================================================
+#
+#   compositor - tiles kept across frames, drawn when missing, composited every frame
+#
+#   DESCRIPTION:
+#       A GpuCompositor belongs to one view. Each frame it takes the display list and scroll
+#       state the page presented and draws them onto a luce-gpu target:
+#
+#         1. a new display list is cut into layers (layers.lucb) and every tile is dropped
+#            (their textures go back to a pool);
+#         2. for each layer, the tiles of its plane that the viewport shows are found by key:
+#            the layer's number, what its pixels depend on (gpu_layer_key) and the tile's place.
+#            A tile not kept yet is drawn: recorded by the GPU player and replayed, or, when
+#            the recording gives up, drawn by the CPU player and uploaded. A tile on which
+#            nothing draws keeps no texture;
+#         3. every visible tile is composited, layer by layer in paint order, moved by its
+#            layer's scroll offset, into a frame texture of the viewport's size: layers
+#            blend in the encoded space there, as the CPU player blends them into one
+#            surface; the frame texture is then drawn onto the target, decoded for its
+#            linear-light pixels (shaders/composite.frag).
+#
+#       A scroll therefore moves tiles and draws only those it uncovers. Tiles not used for a
+#       while are released past a budget; textures are reused through a small pool.
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+## Tiles kept (with textures) before the least recently used are released: 96 tiles of 1 MiB.
+pub let gpu_tile_budget: usize = 96
+
+## Textures kept for reuse when tiles are dropped.
+let gpu_pool_limit: usize = 16
+
+## One kept tile: its key, its place in its layer's plane, its texture (none when empty), and
+## the frame it was last used in.
+struct GpuTile:
+    var key: u64
+    var x: i32
+    var y: i32
+    var texture: gpu.Texture?
+    var used: u64
+
+## The GPU compositor of one view (see the header).
+pub struct GpuCompositor:
+    var device: gpu.Device?
+    var pipelines: GpuPipelines?
+    var atlas: GpuAtlas
+    var images: GpuImageCache
+    var player: DisplayListPlayerGpu*?
+    var cpu_player: display_list.DisplayListPlayerCpu*?
+    var scratch: gfx.PaintingSurface*?
+    var pixels: u8[]
+    var vertices: ak.Vector[gpu.Vertex]
+    var list: const display_list.DisplayList*?
+    var layers: ak.Vector[GpuLayer]
+    var tiles: ak.Vector[GpuTile]
+    var keys: GpuIndexMap
+    var pool: ak.Vector[gpu.Texture]
+    var frame: u64
+    ## The viewport's frame texture (see step 3), and its size.
+    var frame_texture: gpu.Texture?
+    var frame_width: i32
+    var frame_height: i32
+
+## A compositor with nothing drawn yet.
+pub func gpu_compositor_create() -> GpuCompositor*:
+    return (new GpuCompositor() in memory.heap) else trap("gpu_player: out of memory")
+
+## Releases everything the compositor holds (main thread, as every GPU call).
+pub func gpu_compositor_destroy(this: GpuCompositor*):
+    gpu_compositor_drop_device(this)
+    if this.pixels.length > 0:
+        free(this.pixels) in memory.heap
+    free(this) in memory.heap
+
+## Releases the tiles, caches and pipelines (and the device they were on).
+func gpu_compositor_drop_device(this: GpuCompositor*):
+    gpu_compositor_drop_tiles(this)
+    if let texture = this.frame_texture:
+        var handle = texture
+        handle.destroy()
+        this.frame_texture = none
+    for texture in ak.vector_span(&this.pool):
+        var handle = texture
+        handle.destroy()
+    ak.vector_clear(&this.pool)
+    this.atlas.release()
+    this.images.release()
+    if let pipelines = this.pipelines:
+        var handle = pipelines
+        handle.release()
+        this.pipelines = none
+    if let player = this.player:
+        display_list_player_gpu_destroy(player)
+        this.player = none
+    if let device = this.device:
+        var handle = device
+        handle.destroy()
+        this.device = none
+    gpu_player_stats_the.resident_tiles = 0
+    gpu_player_stats_the.resident_bytes = 0
+
+## Drops every tile, keeping up to the pool's limit of their textures.
+func gpu_compositor_drop_tiles(this: GpuCompositor*):
+    for tile in ak.vector_span(&this.tiles):
+        if let texture = tile.texture:
+            gpu_compositor_recycle(this, texture)
+    ak.vector_clear(&this.tiles)
+    this.keys.clear()
+    gpu_player_stats_the.resident_tiles = 0
+
+## Gives a tile's texture back: to the pool, or released when the pool is full.
+func gpu_compositor_recycle(this: GpuCompositor*, texture: gpu.Texture):
+    if ak.vector_size(&this.pool) < gpu_pool_limit:
+        ak.vector_append_t(&this.pool, texture)
+        return
+    var handle = texture
+    handle.destroy()
+
+## A tile texture: from the pool, or new.
+func gpu_compositor_texture(this: GpuCompositor*, device: gpu.Device) -> gpu.Texture!:
+    if not ak.vector_is_empty(&this.pool):
+        return ak.vector_take_last(&this.pool)
+    return try gpu.Texture.create(device, (u32)gpu_tile_size, (u32)gpu_tile_size, gpu.Format.rgba8_linear)
+
+## Opens what drawing needs on `target`'s device the first time (or after a device change).
+func gpu_compositor_open(this: GpuCompositor*, target: const gpu.RenderTarget*) -> gpu.Device!:
+    var device = try gpu.device_of(target)
+    if let current = this.device:
+        if current.same(&device):
+            device.destroy()
+            return current
+        gpu_compositor_drop_device(this)
+        this.list = none
+    this.device = device
+    this.pipelines = try gpu_pipelines_create(device)
+    this.player = display_list_player_gpu_create(&this.atlas, &this.images)
+    if this.cpu_player == none:
+        this.cpu_player = display_list.display_list_player_cpu_create()
+    if this.scratch == none:
+        this.scratch = gfx.painting_surface_create_with_size(gfx.IntSize(m_width = gpu_tile_size, m_height = gpu_tile_size), gfx.BitmapFormat.bgra8888, gfx.AlphaType.premultiplied)
+    if this.pixels.length == 0:
+        this.pixels = try new u8[(usize)(gpu_tile_size * gpu_tile_size * 4)] --- in memory.heap
+    return device
+
+# mark: Drawing a frame ==========================================================================
+
+## Draws `list` at `snapshot`'s scroll offsets onto `target` (a frame target of `target_format`,
+## none for a presentation surface), the page's device pixel (0, 0) at the target's top left,
+## `scale` device pixels a point, covering `width` by `height` device pixels.
+pub func gpu_compositor_draw(this: GpuCompositor*, list: display_list.DisplayList*, snapshot: const display_list.ScrollStateSnapshot*, target: const gpu.RenderTarget*,
+                             target_format: gpu.Format?, width: i32, height: i32, scale: f64) -> !:
+    if width <= 0 or height <= 0:
+        return
+    let device = try gpu_compositor_open(this, target)
+    var pipelines = this.pipelines else trap("gpu_player: no pipelines")
+    let copy = try pipelines.composite_for(device, gpu.Format.rgba8_linear)
+    let present = try pipelines.composite_for(device, target_format)
+    this.pipelines = pipelines
+    if this.list != list:
+        gpu_compositor_drop_tiles(this)
+        ak.vector_clear(&this.layers)
+        this.layers = gpu_layers_of(list)
+        this.list = list
+    this.frame += 1
+    this.images.frame = this.frame
+    let frame_texture = try gpu_compositor_frame_texture(this, device, width, height)
+    let frame = try frame_texture.frame()
+    defer frame.release()
+    let canvas = try frame.value().target()
+    defer canvas.release()
+    let viewport = GpuRect(width = width, height = height)
+    for layer_index in 0..<ak.vector_size(&this.layers):
+        let layer = *ak.vector_at(&this.layers, layer_index)
+        try gpu_compositor_layer(this, device, list, snapshot, &layer, layer_index, viewport, canvas.value(), copy)
+    _ = try frame.value().present(gpu.Color(0.0, 0.0, 0.0, 0.0))
+    # The frame onto the target, decoded.
+    let placement = try target.placement()
+    var params: f32[3] = [(f32)(placement.x * scale), (f32)(placement.y * scale), 1.0]
+    try gpu.shade(target, present, gpu.Rect(0.0, 0.0, (f64)width / scale, (f64)height / scale), u8[]((u8*)&params[0], 12), [frame_texture], gpu.Filter.nearest)
+    gpu_compositor_evict(this)
+
+## The frame texture for a viewport of `width` by `height` pixels, made again when it changes.
+func gpu_compositor_frame_texture(this: GpuCompositor*, device: gpu.Device, width: i32, height: i32) -> gpu.Texture!:
+    if let texture = this.frame_texture:
+        if this.frame_width == width and this.frame_height == height:
+            return texture
+        var handle = texture
+        handle.destroy()
+        this.frame_texture = none
+    let texture = try gpu.Texture.create(device, (u32)width, (u32)height, gpu.Format.rgba8_linear)
+    this.frame_texture = texture
+    this.frame_width = width
+    this.frame_height = height
+    return texture
+
+## Draws the tiles `layer` shows in `viewport` (drawing those not kept) into `canvas`, the
+## frame texture's target, with the `copy` pipeline.
+func gpu_compositor_layer(this: GpuCompositor*, device: gpu.Device, list: display_list.DisplayList*, snapshot: const display_list.ScrollStateSnapshot*, layer: const GpuLayer*,
+                          layer_index: usize, viewport: GpuRect, canvas: const gpu.RenderTarget*, copy: gpu.Pipeline) -> !:
+    let offset = gpu_layer_offset(layer, snapshot)
+    let key = gpu_hash(gpu_layer_key(layer, snapshot), (u64)layer_index)
+    var plane = gpu_layer_snapshot(layer, snapshot)
+    defer ak.vector_clear(&plane.m_device_offsets)
+    # The part of the layer's plane the viewport shows.
+    let visible = viewport.translated(-offset.m_x, -offset.m_y)
+    let first_column = gpu_floor_div(visible.x, gpu_tile_size)
+    let first_row = gpu_floor_div(visible.y, gpu_tile_size)
+    let last_column = gpu_floor_div(visible.x + visible.width - 1, gpu_tile_size)
+    let last_row = gpu_floor_div(visible.y + visible.height - 1, gpu_tile_size)
+    let side = (f64)gpu_tile_size
+    for row in first_row..<last_row + 1:
+        for column in first_column..<last_column + 1:
+            let tile = try gpu_compositor_tile(this, device, list, &plane, layer, key, column * gpu_tile_size, row * gpu_tile_size)
+            let texture = tile.texture else continue
+            let x = (f64)(tile.x + offset.m_x)
+            let y = (f64)(tile.y + offset.m_y)
+            var params: f32[3] = [(f32)x, (f32)y, 0.0]
+            try gpu.shade(canvas, copy, gpu.Rect(x, y, side, side), u8[]((u8*)&params[0], 12), [texture], gpu.Filter.nearest)
+            gpu_player_stats_the.composited_tiles += 1
+
+## The tile of `layer` at (`x`, `y`) in its plane for `key`: kept, or drawn now.
+func gpu_compositor_tile(this: GpuCompositor*, device: gpu.Device, list: display_list.DisplayList*, plane: const display_list.ScrollStateSnapshot*, layer: const GpuLayer*,
+                         key: u64, x: i32, y: i32) -> GpuTile!:
+    let tile_key = gpu_hash(gpu_hash(key, (u64)(u32)x), (u64)(u32)y)
+    if let index = this.keys.get(tile_key):
+        let kept = ak.vector_at(&this.tiles, (usize)index)
+        kept.used = this.frame
+        return *kept
+    var tile = GpuTile(key = tile_key, x = x, y = y, used = this.frame)
+    let player = this.player else trap("gpu_player: no player")
+    display_list_player_gpu_begin(player, device, gpu_tile_size, gpu_tile_size)
+    display_list.display_list_player_execute_tile((display_list.DisplayListPlayer*)player, list, plane, none, layer.first, layer.end, gfx.IntPoint(m_x = x, m_y = y))
+    if let reason = player.fallback():
+        gpu_player_stats_the.fallbacks[(usize)reason] += 1
+        gpu_player_stats_the.cpu_tiles += 1
+        let texture = try gpu_compositor_texture(this, device)
+        tile.texture = texture
+        let cpu = this.cpu_player else trap("gpu_player: no CPU player")
+        let scratch = this.scratch else trap("gpu_player: no scratch surface")
+        try gpu_cpu_tile(cpu, list, plane, layer, gfx.IntPoint(m_x = x, m_y = y), scratch, texture, this.pixels)
+    elif player.is_empty():
+        gpu_player_stats_the.empty_tiles += 1
+    else:
+        gpu_player_stats_the.gpu_tiles += 1
+        let texture = try gpu_compositor_texture(this, device)
+        tile.texture = texture
+        let pipelines = this.pipelines else trap("gpu_player: no pipelines")
+        try gpu_replay_tile(player, &pipelines, texture, gpu_tile_size, &this.vertices)
+    this.keys.put(tile_key, (u32)ak.vector_size(&this.tiles))
+    ak.vector_append_t(&this.tiles, tile)
+    return tile
+
+## Releases the least recently used tiles (not this frame's) past the budget.
+func gpu_compositor_evict(this: GpuCompositor*):
+    var resident: usize = 0
+    for tile in ak.vector_span_const(&this.tiles):
+        if tile.texture != none:
+            resident += 1
+    if resident > gpu_tile_budget or ak.vector_size(&this.tiles) > gpu_tile_budget * 4:
+        # Keep this frame's tiles and the most recent others up to the budget.
+        var kept: ak.Vector[GpuTile]
+        var budget = gpu_tile_budget
+        var age: u64 = 0
+        while age < 64:
+            for tile in ak.vector_span_const(&this.tiles):
+                if this.frame - tile.used == age and (tile.texture == none or budget > 0):
+                    ak.vector_append_t(&kept, tile)
+                    if tile.texture != none:
+                        budget -= 1
+            age += 1
+        for tile in ak.vector_span_const(&this.tiles):
+            if this.frame - tile.used >= 64 or not gpu_tile_kept(&kept, tile.key):
+                if let texture = tile.texture:
+                    gpu_compositor_recycle(this, texture)
+        ak.vector_clear(&this.tiles)
+        this.tiles = kept
+        this.keys.clear()
+        for index in 0..<ak.vector_size(&this.tiles):
+            this.keys.put(ak.vector_at(&this.tiles, index).key, (u32)index)
+        resident = gpu_tile_budget - budget
+    gpu_player_stats_the.resident_tiles = (u64)resident
+    gpu_player_stats_the.resident_bytes = (u64)(resident + ak.vector_size(&this.pool)) * (u64)(gpu_tile_size * gpu_tile_size * 4) + this.images.resident_bytes() + (u64)(gpu_atlas_size * gpu_atlas_size)
+
+## Whether `kept` holds a tile of `key`.
+func gpu_tile_kept(kept: const ak.Vector[GpuTile]*, key: u64) -> bool:
+    for tile in ak.vector_span_const(kept):
+        if tile.key == key:
+            return true
+    return false
+
+## `a` divided by `b` (positive), rounded down.
+func gpu_floor_div(a: i32, b: i32) -> i32:
+    return a // b if a >= 0 else -((-a + b - 1) // b)

@@ -1,0 +1,186 @@
+#==============================================================================================
+#
+#   layers - the display list cut into runs of commands that scroll together
+#
+#   DESCRIPTION:
+#       Scrolling is a visual context node (AccumulatedVisualContextTree's scroll data) whose
+#       translation is the scroll frame's offset. A command's chain of nodes says what its
+#       pixels depend on:
+#
+#         fixed     no scroll node in the chain: the pixels never move with a scroll;
+#         scrolled  the chain starts with a scroll node S (the viewport's, usually): in S's
+#                   plane (S's offset taken as zero) the pixels stay put while S scrolls, and
+#                   the compositor moves them by S's offset;
+#         dynamic   anything else that depends on an offset: a node above the outermost scroll
+#                   node (a fixed box with a scroller in it), a scroll bar (its thumb reads an
+#                   offset), or a command sharing an effect (opacity, a filter, a blend) with
+#                   such a command, since an effect's group cannot be split between planes.
+#                   They are drawn again whenever an offset changes.
+#
+#       A layer is a maximal run of consecutive commands of one kind (and one S): paint order
+#       is kept by compositing layers in order. A layer's tiles also depend on the offsets of
+#       scroll frames other than S (a scroller inside the page): `gpu_layer_key` hashes them.
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+## What a layer's pixels depend on (see the header).
+pub enum GpuLayerKind as u8:
+    fixed = 0
+    scrolled = 1
+    dynamic = 2
+
+## A run of commands `first..<end` of one kind; `frame` is S for a scrolled layer.
+pub struct GpuLayer:
+    pub var first: usize
+    pub var end: usize
+    pub var kind: GpuLayerKind
+    pub var frame: u64
+
+## What the chain of a visual context node holds, for classifying commands.
+struct GpuNodeClass:
+    ## The scroll frame of the outermost scroll node in the chain, 0 for none.
+    var frame: u64
+    ## Whether a node other than a scroll node lies above that outermost scroll node.
+    var above: bool
+    ## Whether the chain holds an effects node a dynamic command shares.
+    var tainted: bool
+    ## Whether this node is an effects node a dynamic command lies under.
+    var marked: bool
+
+## The layers of `list`.
+pub func gpu_layers_of(list: const display_list.DisplayList*) -> ak.Vector[GpuLayer]:
+    let tree = display_list.display_list_visual_context_tree(list)
+    let node_count = ak.vector_size(&tree.m_nodes)
+    let classes = (new GpuNodeClass[node_count + 1] in memory.heap) else trap("gpu_player: out of memory")
+    defer free(classes) in memory.heap
+    gpu_classify_nodes(tree, classes)
+
+    let commands = display_list.display_list_commands(list)
+    let count = ak.vector_size(commands)
+    let kinds = (new GpuLayerKind[count + 1] in memory.heap) else trap("gpu_player: out of memory")
+    defer free(kinds) in memory.heap
+
+    # Pass 1: each command's own kind; the effects nodes above a dynamic command are marked.
+    for index in 0..<count:
+        let item = ak.vector_at_const(commands, index)
+        kinds[index] = gpu_command_kind(item, classes)
+        if kinds[index] == GpuLayerKind.dynamic:
+            gpu_mark_effects(tree, classes, item.context_index)
+    # Pass 2: a command under a marked effects node is dynamic too.
+    gpu_taint_nodes(tree, classes)
+    for index in 0..<count:
+        let context = ak.vector_at_const(commands, index).context_index
+        if context != 0 and classes[context].tainted:
+            kinds[index] = GpuLayerKind.dynamic
+
+    var layers: ak.Vector[GpuLayer]
+    var index: usize = 0
+    while index < count:
+        let kind = kinds[index]
+        let frame = gpu_command_frame(ak.vector_at_const(commands, index), classes, kind)
+        var end = index + 1
+        while end < count and kinds[end] == kind and gpu_command_frame(ak.vector_at_const(commands, end), classes, kinds[end]) == frame:
+            end += 1
+        ak.vector_append_t(&layers, GpuLayer(first = index, end = end, kind = kind, frame = frame))
+        index = end
+    return layers
+
+## Fills `classes` (indexed by node index, 0 the root) in one pass: a node's parent comes
+## before it in the tree.
+func gpu_classify_nodes(tree: const display_list.AccumulatedVisualContextTree*, classes: GpuNodeClass[]):
+    classes[0] = GpuNodeClass()
+    let node_count = ak.vector_size(&tree.m_nodes)
+    for index in 1..<node_count:
+        let node = display_list.accumulated_visual_context_tree_node_at(tree, (u64)index)
+        let parent = classes[(usize)node.parent_index]
+        var own = GpuNodeClass()
+        if parent.frame != 0:
+            own.frame = parent.frame
+            own.above = parent.above
+        else:
+            match node.data:
+                .scroll_data(scroll):
+                    own.frame = scroll.scroll_frame_index
+                    # The chain above holds only nodes that are not scroll nodes, if any.
+                    own.above = node.parent_index != 0
+                _:
+                    own.frame = 0
+        classes[index] = own
+
+## The kind of one command by its context's class.
+func gpu_command_kind(item: const display_list.DisplayListCommandListItem*, classes: GpuNodeClass[]) -> GpuLayerKind:
+    match item.command:
+        .paint_scroll_bar(_): return GpuLayerKind.dynamic
+        _: _ = 0
+    if item.context_index == 0:
+        return GpuLayerKind.fixed
+    let class = classes[(usize)item.context_index]
+    if class.frame == 0:
+        return GpuLayerKind.fixed
+    return GpuLayerKind.dynamic if class.above else GpuLayerKind.scrolled
+
+## The scroll frame a command of `kind` moves with (0 unless scrolled).
+func gpu_command_frame(item: const display_list.DisplayListCommandListItem*, classes: GpuNodeClass[], kind: GpuLayerKind) -> u64:
+    if kind != GpuLayerKind.scrolled:
+        return 0
+    return classes[(usize)item.context_index].frame
+
+## Marks the effects nodes of `context`'s chain (stopping at one already marked).
+func gpu_mark_effects(tree: const display_list.AccumulatedVisualContextTree*, classes: GpuNodeClass[], context: u64):
+    var index = context
+    while index != 0:
+        let node = display_list.accumulated_visual_context_tree_node_at(tree, index)
+        match node.data:
+            .effects_data(_):
+                if classes[(usize)index].marked:
+                    return
+                classes[(usize)index].marked = true
+            _: _ = 0
+        index = node.parent_index
+
+## Sets `tainted` on every node at or below a marked effects node (parents come first).
+func gpu_taint_nodes(tree: const display_list.AccumulatedVisualContextTree*, classes: GpuNodeClass[]):
+    let node_count = ak.vector_size(&tree.m_nodes)
+    for index in 1..<node_count:
+        let node = display_list.accumulated_visual_context_tree_node_at(tree, (u64)index)
+        classes[index].tainted = classes[index].marked or classes[(usize)node.parent_index].tainted
+
+# mark: Keys and offsets ========================================================================
+
+## The hash of what `layer`'s tiles depend on besides their plane: the offsets of every scroll
+## frame but the layer's own (all of them for a dynamic layer, none for a fixed one).
+pub func gpu_layer_key(layer: const GpuLayer*, snapshot: const display_list.ScrollStateSnapshot*) -> u64:
+    if layer.kind == GpuLayerKind.fixed:
+        return 0
+    var hash: u64 = 14695981039346656037
+    let offsets = ak.vector_span_const(&snapshot.m_device_offsets)
+    for index in 0..<offsets.length:
+        if layer.kind == GpuLayerKind.scrolled and (u64)index == layer.frame:
+            continue
+        let point = display_list.float_point_to_int_point(offsets[index])
+        hash = (hash ^ (u64)(u32)point.m_x) *% 1099511628211
+        hash = (hash ^ (u64)(u32)point.m_y) *% 1099511628211
+    return hash
+
+## Where `layer`'s plane lies on the viewport: its scroll frame's offset as the player applies
+## it (rounded toward zero), nothing for the other kinds.
+pub func gpu_layer_offset(layer: const GpuLayer*, snapshot: const display_list.ScrollStateSnapshot*) -> gfx.IntPoint:
+    if layer.kind != GpuLayerKind.scrolled:
+        return gfx.IntPoint()
+    return display_list.float_point_to_int_point(display_list.scroll_state_snapshot_device_offset_for_index(snapshot, layer.frame))
+
+## `snapshot` with `layer`'s own frame at offset zero: the scroll state its plane is drawn
+## with. The caller owns the copy.
+pub func gpu_layer_snapshot(layer: const GpuLayer*, snapshot: const display_list.ScrollStateSnapshot*) -> display_list.ScrollStateSnapshot:
+    var copy: display_list.ScrollStateSnapshot
+    let offsets = ak.vector_span_const(&snapshot.m_device_offsets)
+    ak.vector_ensure_capacity(&copy.m_device_offsets, offsets.length)
+    for index in 0..<offsets.length:
+        var offset = offsets[index]
+        if layer.kind == GpuLayerKind.scrolled and (u64)index == layer.frame:
+            offset = gfx.FloatPoint(m_x = 0.0, m_y = 0.0)
+        ak.vector_append_t(&copy.m_device_offsets, offset)
+    return copy

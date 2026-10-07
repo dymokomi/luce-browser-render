@@ -1,0 +1,201 @@
+#==============================================================================================
+#
+#   recorder_state - DisplayListPlayerGpu's virtuals: state, clips, rectangles, the vtable
+#
+#   DESCRIPTION:
+#       The virtuals that change the drawing state (save, restore, translations, clips,
+#       effects and transforms that change nothing), the rectangle commands, the commands the
+#       GPU player gives to the CPU player, and the player's vtable and class. Glyph runs,
+#       paths and images are in recorder_draws.lucb.
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+# mark: State ===================================================================================
+
+func gpu_save_impl(base: display_list.DisplayListPlayer*, arg0: display_list.Save):
+    let this = gpu_player_of(base)
+    ak.vector_append_t(&this.saved, this.state)
+
+func gpu_save_layer_impl(base: display_list.DisplayListPlayer*, arg0: display_list.SaveLayer):
+    # A layer without an effect composites as its contents would have drawn.
+    gpu_save_impl(base, display_list.Save())
+
+func gpu_restore_impl(base: display_list.DisplayListPlayer*, arg0: display_list.Restore):
+    let this = gpu_player_of(base)
+    if ak.vector_is_empty(&this.saved):
+        return
+    this.state = ak.vector_take_last(&this.saved)
+
+func gpu_translate_impl(base: display_list.DisplayListPlayer*, command: display_list.Translate):
+    let this = gpu_player_of(base)
+    this.state.dx += command.delta.m_x
+    this.state.dy += command.delta.m_y
+
+func gpu_add_clip_rect_impl(base: display_list.DisplayListPlayer*, command: display_list.AddClipRect):
+    let this = gpu_player_of(base)
+    if command.rect.m_size.m_width < 0 or command.rect.m_size.m_height < 0:
+        return
+    this.state.clip = this.state.clip.intersected(gpu_rect_of(command.rect).translated(this.state.dx, this.state.dy))
+
+func gpu_add_rounded_rect_clip_impl(base: display_list.DisplayListPlayer*, command: display_list.AddRoundedRectClip):
+    let this = gpu_player_of(base)
+    let rect = gpu_rect_of(command.border_rect).translated(this.state.dx, this.state.dy)
+    if rect.width < 0 or rect.height < 0:
+        return
+    let keep_outside = command.corner_clip == display_list.CornerClip.inside
+    if not keep_outside:
+        this.state.clip = this.state.clip.intersected(rect)
+    # A clip that no longer reaches the scissor changes nothing drawn there.
+    if this.state.clip.is_empty():
+        return
+    if this.state.rounded != none:
+        gpu_give_up(this, GpuFallback.nested_rounded_clip)
+        return
+    let radii = gpu_normalized_radii(rect, &command.corner_radii)
+    this.state.rounded = GpuRoundedClip(rect = [(f32)rect.x, (f32)rect.y, (f32)rect.width, (f32)rect.height], radii = radii, mode = 2.0 if keep_outside else 1.0)
+
+func gpu_add_clip_path_impl(base: display_list.DisplayListPlayer*, path: gfx.Path):
+    gpu_give_up(gpu_player_of(base), GpuFallback.clip_path)
+
+func gpu_apply_transform_impl(base: display_list.DisplayListPlayer*, origin: gfx.FloatPoint, matrix: gfx.FloatMatrix4X4):
+    let this = gpu_player_of(base)
+    # Only a whole-pixel translation keeps the GPU's pixels the CPU's. (The loop saved.)
+    let m = matrix.m_elements
+    let linear = m[0][0] == 1.0 and m[0][1] == 0.0 and m[0][2] == 0.0 and m[1][0] == 0.0 and m[1][1] == 1.0 and m[1][2] == 0.0
+    let flat = m[2][0] == 0.0 and m[2][1] == 0.0 and m[2][2] == 1.0 and m[2][3] == 0.0 and m[3][0] == 0.0 and m[3][1] == 0.0 and m[3][2] == 0.0 and m[3][3] == 1.0
+    if not linear or not flat or math32.floor(m[0][3]) != m[0][3] or math32.floor(m[1][3]) != m[1][3]:
+        gpu_give_up(this, GpuFallback.transform)
+        return
+    this.state.dx += (i32)m[0][3]
+    this.state.dy += (i32)m[1][3]
+
+func gpu_apply_effects_impl(base: display_list.DisplayListPlayer*, command: display_list.ApplyEffects):
+    let this = gpu_player_of(base)
+    # The loop restores what an effect saved; an effect that changes nothing is a save.
+    gpu_save_impl(base, display_list.Save())
+    if command.opacity < 1.0 or command.compositing_and_blending_operator != gfx.CompositingAndBlendingOperator.normal or command.filter != none or command.mask_kind != none:
+        gpu_give_up(this, GpuFallback.effects)
+
+func gpu_would_be_fully_clipped_impl(base: display_list.DisplayListPlayer*, rect: gfx.DevicePixelRect) -> bool:
+    let this = gpu_player_of(base)
+    return not gpu_rect_of(rect).translated(this.state.dx, this.state.dy).intersects(this.state.clip)
+
+func gpu_flush_impl(base: display_list.DisplayListPlayer*):
+    _ = base
+
+# mark: Rectangles ==============================================================================
+
+func gpu_fill_rect_impl(base: display_list.DisplayListPlayer*, command: display_list.FillRect):
+    let this = gpu_player_of(base)
+    if not gpu_recording(this):
+        return
+    let rect = gpu_rect_of(command.rect).translated(this.state.dx, this.state.dy)
+    if rect.is_empty() or not rect.intersects(this.state.clip):
+        return
+    if this.state.rounded != none:
+        gpu_fill_shape(this, rect, gpu_no_radii(), command.color, 0.0, false)
+        return
+    gpu_solid_rect(this, rect, command.color)
+
+func gpu_fill_rect_with_rounded_corners_impl(base: display_list.DisplayListPlayer*, command: display_list.FillRectWithRoundedCorners):
+    let this = gpu_player_of(base)
+    if not gpu_recording(this):
+        return
+    let rect = gpu_rect_of(command.rect).translated(this.state.dx, this.state.dy)
+    if rect.is_empty():
+        return
+    gpu_fill_shape(this, rect, gpu_normalized_radii(rect, &command.corner_radii), command.color, 0.0, false)
+
+func gpu_paint_scrollbar_impl(base: display_list.DisplayListPlayer*, command: display_list.PaintScrollBar):
+    # DisplayListPlayerCpu::paint_scrollbar: the gutter, then the thumb (a pill), both filled
+    # without anti-aliasing, then the thumb's edge stroked one pixel wide in a lighter color.
+    let this = gpu_player_of(base)
+    if not gpu_recording(this):
+        return
+    let gutter = gpu_rect_of(command.gutter_rect).translated(this.state.dx, this.state.dy)
+    if not gutter.is_empty():
+        gpu_fill_shape(this, gutter, gpu_no_radii(), command.track_color, 0.0, true)
+    let thumb = gpu_rect_of(command.thumb_rect).translated(this.state.dx, this.state.dy)
+    if thumb.width < 0 or thumb.height < 0:
+        return
+    var color = command.thumb_color
+    if gfx.device_pixel_rect_is_empty(&command.gutter_rect) and color == display_list.initial_values_scrollbar_color().thumb_color:
+        color = gfx.color_with_alpha(&color, 128)
+    let radii = gpu_normalized_uniform_radii(thumb, (f32)thumb.width / 2.0)
+    gpu_fill_shape(this, thumb, radii, color, 0.0, true)
+    gpu_fill_shape(this, thumb, radii, gfx.color_lightened(&color), 1.0, false)
+
+func gpu_draw_rect_impl(base: display_list.DisplayListPlayer*, command: display_list.DrawRect):
+    # SkCanvas::drawRect with a one-pixel stroke: a frame half a pixel each side of the edge.
+    let this = gpu_player_of(base)
+    if not gpu_recording(this):
+        return
+    let rect = gpu_rect_of(command.rect).translated(this.state.dx, this.state.dy)
+    if rect.width < 0 or rect.height < 0:
+        return
+    gpu_fill_shape(this, rect, gpu_no_radii(), command.color, 1.0, false)
+
+# mark: Commands for the CPU player ==============================================================
+
+func gpu_linear_gradient_impl(base: display_list.DisplayListPlayer*, command: display_list.PaintLinearGradient):
+    gpu_give_up(gpu_player_of(base), GpuFallback.gradient)
+
+func gpu_radial_gradient_impl(base: display_list.DisplayListPlayer*, command: display_list.PaintRadialGradient):
+    gpu_give_up(gpu_player_of(base), GpuFallback.gradient)
+
+func gpu_conic_gradient_impl(base: display_list.DisplayListPlayer*, command: display_list.PaintConicGradient):
+    gpu_give_up(gpu_player_of(base), GpuFallback.gradient)
+
+func gpu_outer_box_shadow_impl(base: display_list.DisplayListPlayer*, command: display_list.PaintOuterBoxShadow):
+    gpu_give_up(gpu_player_of(base), GpuFallback.shadow)
+
+func gpu_inner_box_shadow_impl(base: display_list.DisplayListPlayer*, command: display_list.PaintInnerBoxShadow):
+    gpu_give_up(gpu_player_of(base), GpuFallback.shadow)
+
+func gpu_text_shadow_impl(base: display_list.DisplayListPlayer*, command: display_list.PaintTextShadow):
+    gpu_give_up(gpu_player_of(base), GpuFallback.shadow)
+
+func gpu_stroke_path_impl(base: display_list.DisplayListPlayer*, command: display_list.StrokePath):
+    gpu_give_up(gpu_player_of(base), GpuFallback.path)
+
+func gpu_draw_ellipse_impl(base: display_list.DisplayListPlayer*, command: display_list.DrawEllipse):
+    gpu_give_up(gpu_player_of(base), GpuFallback.ellipse)
+
+func gpu_fill_ellipse_impl(base: display_list.DisplayListPlayer*, command: display_list.FillEllipse):
+    gpu_give_up(gpu_player_of(base), GpuFallback.ellipse)
+
+func gpu_draw_line_impl(base: display_list.DisplayListPlayer*, command: display_list.DrawLine):
+    gpu_give_up(gpu_player_of(base), GpuFallback.line)
+
+func gpu_backdrop_filter_impl(base: display_list.DisplayListPlayer*, command: display_list.ApplyBackdropFilter):
+    gpu_give_up(gpu_player_of(base), GpuFallback.backdrop_filter)
+
+func gpu_nested_display_list_impl(base: display_list.DisplayListPlayer*, command: display_list.PaintNestedDisplayList):
+    gpu_give_up(gpu_player_of(base), GpuFallback.nested_display_list)
+
+func gpu_external_content_impl(base: display_list.DisplayListPlayer*, command: display_list.DrawExternalContent):
+    gpu_give_up(gpu_player_of(base), GpuFallback.external_content)
+
+func gpu_repeated_bitmap_impl(base: display_list.DisplayListPlayer*, command: display_list.DrawRepeatedImmutableBitmap):
+    gpu_give_up(gpu_player_of(base), GpuFallback.image)
+
+# mark: Class ===================================================================================
+
+## The vtable of Web::Painting::DisplayListPlayerGpu.
+pub let display_list_player_gpu_vtable: display_list.DisplayListPlayerVTable = display_list.DisplayListPlayerVTable(
+    class_info = &display_list_player_gpu_class, flush = gpu_flush_impl, draw_glyph_run = gpu_draw_glyph_run_impl, fill_rect = gpu_fill_rect_impl,
+    draw_scaled_immutable_bitmap = gpu_scaled_bitmap_impl, draw_repeated_immutable_bitmap = gpu_repeated_bitmap_impl, draw_external_content = gpu_external_content_impl,
+    save = gpu_save_impl, save_layer = gpu_save_layer_impl, restore = gpu_restore_impl, translate = gpu_translate_impl, add_clip_rect = gpu_add_clip_rect_impl,
+    paint_linear_gradient = gpu_linear_gradient_impl, paint_radial_gradient = gpu_radial_gradient_impl, paint_conic_gradient = gpu_conic_gradient_impl,
+    paint_outer_box_shadow = gpu_outer_box_shadow_impl, paint_inner_box_shadow = gpu_inner_box_shadow_impl, paint_text_shadow = gpu_text_shadow_impl,
+    fill_rect_with_rounded_corners = gpu_fill_rect_with_rounded_corners_impl, fill_path = gpu_fill_path_impl, stroke_path = gpu_stroke_path_impl,
+    draw_ellipse = gpu_draw_ellipse_impl, fill_ellipse = gpu_fill_ellipse_impl, draw_line = gpu_draw_line_impl, apply_backdrop_filter = gpu_backdrop_filter_impl,
+    draw_rect = gpu_draw_rect_impl, add_rounded_rect_clip = gpu_add_rounded_rect_clip_impl, paint_nested_display_list = gpu_nested_display_list_impl,
+    paint_scrollbar = gpu_paint_scrollbar_impl, apply_effects = gpu_apply_effects_impl, apply_transform = gpu_apply_transform_impl,
+    would_be_fully_clipped_by_painter = gpu_would_be_fully_clipped_impl, add_clip_path = gpu_add_clip_path_impl)
+
+## Class information of Web::Painting::DisplayListPlayerGpu (class id 2).
+pub let display_list_player_gpu_class: ak.ClassInfo = ak.ClassInfo(name = "DisplayListPlayerGpu", first_id = 2, last_id = 2, size = memory.size_of(DisplayListPlayerGpu), vtable = (const void*)&display_list_player_gpu_vtable)

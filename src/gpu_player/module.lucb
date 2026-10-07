@@ -1,0 +1,109 @@
+#==============================================================================================
+#
+#   gpu_player - the display list on the GPU: tiles kept across frames, rastered on luce-gpu
+#
+#   DESCRIPTION:
+#       The GPU display-list player of luce-browser (docs/GPU.md). It draws what the CPU
+#       player draws (display_list's DisplayListPlayerCpu stays the reference), with luce-gpu
+#       as the only GPU layer, in three parts:
+#
+#         layers      the commands split into runs that scroll together: what the viewport's
+#                     scroll frame moves, what stays fixed, and what must be drawn again
+#                     whenever anything scrolls (layers.lucb);
+#         tiles       each layer's plane cut into 512-pixel tiles, kept in textures while
+#                     they stay the same, so a scroll moves tiles and rasters only the ones it
+#                     uncovers (compositor.lucb);
+#         raster      a tile is drawn by DisplayListPlayerGpu (recorder*.lucb): the commands
+#                     it supports become GPU draws (rectangles batched into one triangle draw,
+#                     rounded rectangles and clips as analytic coverage, glyphs and path
+#                     coverage from one coverage atlas, images from textures kept per bitmap).
+#                     A tile that meets a command it does not support is drawn by the CPU
+#                     player instead and uploaded (per tile, so the page stays correct).
+#
+#       Drawing is in the encoded (sRGB byte) space with premultiplied colors, as Skia's
+#       legacy raster blends: tiles are rgba8_linear textures, and compositing decodes them
+#       for the frame's linear-light target (shaders/composite.frag).
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+from luce_browser_foundation import ak
+from luce_browser_css import css_data
+from luce_gpu import gpu
+import display_list
+import gfx
+import web_fonts
+import raster
+import c
+import memory
+from luce_std import math32
+
+## The side of a tile in device pixels.
+pub let gpu_tile_size: i32 = 512
+
+## The smaller of two integers.
+pub func gpu_min(a: i32, b: i32) -> i32:
+    return a if a < b else b
+
+## The larger of two integers.
+pub func gpu_max(a: i32, b: i32) -> i32:
+    return a if a > b else b
+
+## A rectangle of whole pixels: x, y, width, height.
+pub struct GpuRect:
+    pub var x: i32
+    pub var y: i32
+    pub var width: i32
+    pub var height: i32
+
+    ## Whether it covers no pixel.
+    pub func is_empty() -> bool:
+        return self.width <= 0 or self.height <= 0
+
+    ## The part it shares with `other` (empty when none).
+    pub func intersected(other: GpuRect) -> GpuRect:
+        let left = gpu_max(self.x, other.x)
+        let top = gpu_max(self.y, other.y)
+        let right = gpu_min(self.x + self.width, other.x + other.width)
+        let bottom = gpu_min(self.y + self.height, other.y + other.height)
+        if right <= left or bottom <= top:
+            return GpuRect()
+        return GpuRect(x = left, y = top, width = right - left, height = bottom - top)
+
+    ## Whether it shares a pixel with `other`.
+    pub func intersects(other: GpuRect) -> bool:
+        return not self.intersected(other).is_empty()
+
+    ## The rectangle moved by (`dx`, `dy`).
+    pub func translated(dx: i32, dy: i32) -> GpuRect:
+        return GpuRect(x = self.x + dx, y = self.y + dy, width = self.width, height = self.height)
+
+## A device pixel rectangle as a GpuRect.
+pub func gpu_rect_of(rect: gfx.DevicePixelRect) -> GpuRect:
+    return GpuRect(x = rect.m_location.m_x, y = rect.m_location.m_y, width = rect.m_size.m_width, height = rect.m_size.m_height)
+
+## Counts of what the players did since the last reset: tiles drawn on the GPU and on the CPU,
+## tiles composited, and the commands that sent tiles to the CPU, by GpuFallback.
+pub struct GpuPlayerStats:
+    pub var gpu_tiles: u64
+    pub var cpu_tiles: u64
+    pub var empty_tiles: u64
+    pub var composited_tiles: u64
+    pub var resident_tiles: u64
+    pub var resident_bytes: u64
+    pub var fallbacks: u64[16]
+
+## The process's counts (main thread only, as every GPU call is).
+var gpu_player_stats_the: GpuPlayerStats = GpuPlayerStats()
+
+## The counts since the last reset.
+pub func gpu_player_stats() -> GpuPlayerStats:
+    return gpu_player_stats_the
+
+## Starts the counts again (resident counts are the compositor's and stay).
+pub func gpu_player_reset_stats():
+    let resident_tiles = gpu_player_stats_the.resident_tiles
+    let resident_bytes = gpu_player_stats_the.resident_bytes
+    gpu_player_stats_the = GpuPlayerStats(resident_tiles = resident_tiles, resident_bytes = resident_bytes)

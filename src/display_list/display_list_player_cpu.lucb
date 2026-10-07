@@ -30,14 +30,14 @@
 # mark: Seams ==================================================================================
 
 ## A path as the rasterizer takes it: its contours and its fill rule (an SkPath carries both).
-struct CpuPath:
-    var path: raster.Path
-    var fill_rule: raster.FillRule
+pub struct CpuPath:
+    pub var path: raster.Path
+    pub var fill_rule: raster.FillRule
 
 ## `to_skia_path` (SkiaUtils.cpp; region r10's PathImplRaster): `path`'s contours as a raster
 ## path with the path's fill type (Path::set_fill_type), or none when it has no contour. The
 ## caller releases the path.
-func to_raster_path(path: const gfx.Path*) -> CpuPath?:
+pub func to_raster_path(path: const gfx.Path*) -> CpuPath?:
     let outline = gfx.path_to_raster_path(path) else return none
     var fill_rule = raster.FillRule.winding
     match gfx.sk_path_get_fill_type(gfx.path_sk_path_const(path)):

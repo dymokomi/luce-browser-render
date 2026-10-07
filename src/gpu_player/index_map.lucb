@@ -1,0 +1,100 @@
+#==============================================================================================
+#
+#   index_map - a hash table from 64-bit keys to entry numbers
+#
+#   DESCRIPTION:
+#       The caches' lookup (glyphs in the atlas, images, tiles): open addressing with linear
+#       probing over a power-of-two table, keys hashed already (a zero key is mapped to one, so
+#       zero can mark an empty slot). Entries live in the caller's own vector; the map holds
+#       their numbers. Removal is a clear of the whole map, which every cache here does when it
+#       starts again.
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+## One slot: a key (0 when empty) and its entry's number.
+struct GpuIndexSlot:
+    var key: u64
+    var value: u32
+
+## Keys to entry numbers (see the header). The zero value is empty.
+pub struct GpuIndexMap:
+    var slots: GpuIndexSlot[]
+    var count: usize
+
+    ## The number stored for `key`, if any.
+    pub func get(key: u64) -> u32?:
+        if self.slots.length == 0:
+            return none
+        let wanted = gpu_index_key(key)
+        let mask = self.slots.length - 1
+        var at = (usize)(gpu_index_mix(wanted)) & mask
+        while true:
+            let slot = self.slots[at]
+            if slot.key == 0:
+                return none
+            if slot.key == wanted:
+                return slot.value
+            at = (at + 1) & mask
+
+    ## Stores `value` for `key`, replacing what was there.
+    pub func put(key: u64, value: u32):
+        if (self.count + 1) * 4 > self.slots.length * 3:
+            self.grow()
+        let wanted = gpu_index_key(key)
+        let mask = self.slots.length - 1
+        var at = (usize)(gpu_index_mix(wanted)) & mask
+        while self.slots[at].key != 0 and self.slots[at].key != wanted:
+            at = (at + 1) & mask
+        if self.slots[at].key == 0:
+            self.count += 1
+        self.slots[at] = GpuIndexSlot(key = wanted, value = value)
+
+    ## Forgets every key, keeping the table.
+    pub func clear():
+        for index in 0..<self.slots.length:
+            self.slots[index] = GpuIndexSlot()
+        self.count = 0
+
+    ## Releases the table.
+    pub func release():
+        if self.slots.length > 0:
+            free(self.slots) in memory.heap
+        self = GpuIndexMap()
+
+    ## Doubles the table (64 slots at first) and puts every key back.
+    func grow():
+        let old = self.slots
+        let capacity = old.length * 2 if old.length > 0 else 64
+        self.slots = (new GpuIndexSlot[capacity] in memory.heap) else trap("gpu_player: out of memory")
+        self.count = 0
+        for slot in old:
+            if slot.key != 0:
+                self.put(slot.key, slot.value)
+        if old.length > 0:
+            free(old) in memory.heap
+
+## `key` with zero, the empty mark, moved to one.
+func gpu_index_key(key: u64) -> u64:
+    return key if key != 0 else 1
+
+## A key's bits mixed for the slot index (splitmix64's finalizer).
+func gpu_index_mix(key: u64) -> u64:
+    var x = key
+    x = (x ^ (x >> 30)) *% 0xbf58476d1ce4e5b9
+    x = (x ^ (x >> 27)) *% 0x94d049bb133111eb
+    return x ^ (x >> 31)
+
+## FNV-1a of `value` into `hash`: how the caches build their keys.
+pub func gpu_hash(hash: u64, value: u64) -> u64:
+    var h = hash
+    var v = value
+    for _ in 0..<(usize)8:
+        h = (h ^ (v & 0xff)) *% 1099511628211
+        v = v >> 8
+    return h
+
+## The starting value of gpu_hash.
+pub let gpu_hash_start: u64 = 14695981039346656037

@@ -223,14 +223,36 @@ func display_list_player_switch_to_context(state: DisplayListPlayerExecuteState*
 
 ## Ported from Libraries/LibWeb/Painting/DisplayList.cpp:65 Web::Painting::DisplayListPlayer::execute_impl.
 func display_list_player_execute_impl(this: DisplayListPlayer*, display_list_: DisplayList*, scroll_state: const ScrollStateSnapshot*):
+    assert(this.m_surface != none)
+    display_list_player_execute_range(this, display_list_, scroll_state, 0, ak.vector_size(display_list_commands(display_list_)))
+
+## A tile of the display list (the GPU player's seam, luce-browser-render docs/GPU.md): the
+## commands `first..<end` played as `execute` plays them, onto `surface` (none for a player
+## that draws elsewhere, as the GPU player does), with everything moved by `-origin` first, so
+## the surface shows the part of the list's plane that starts at `origin`.
+pub func display_list_player_execute_tile(this: DisplayListPlayer*, display_list_: DisplayList*, scroll_state: const ScrollStateSnapshot*, surface: gfx.PaintingSurface*?, first: usize, end: usize, origin: gfx.IntPoint):
+    if let s = surface:
+        gfx.painting_surface_lock_context(s)
+    this.m_surface = surface
+    display_list_player_save(this, Save())
+    if origin.m_x != 0 or origin.m_y != 0:
+        display_list_player_translate(this, Translate(delta = gfx.IntPoint(m_x = -origin.m_x, m_y = -origin.m_y)))
+    display_list_player_execute_range(this, display_list_, scroll_state, first, end)
+    display_list_player_restore(this, Restore())
+    if surface != none:
+        display_list_player_flush(this)
+    this.m_surface = none
+    if let s = surface:
+        gfx.painting_surface_unlock_context(s)
+
+## `execute_impl`'s loop over the commands `first..<end` (all of them for `execute_impl`).
+func display_list_player_execute_range(this: DisplayListPlayer*, display_list_: DisplayList*, scroll_state: const ScrollStateSnapshot*, first: usize, end: usize):
     let commands = display_list_commands(display_list_)
     let visual_context_tree = display_list_visual_context_tree(display_list_)
 
-    assert(this.m_surface != none)
-
     var state = DisplayListPlayerExecuteState(player = this, visual_context_tree = visual_context_tree, scroll_state = scroll_state, applied_context_index = 0, applied_depth = 0)
 
-    for command_index in 0..<ak.vector_size(commands):
+    for command_index in first..<end:
         let item = ak.vector_at_const(commands, command_index)
         let context_index = item.context_index
         let command = &item.command

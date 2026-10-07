@@ -292,7 +292,7 @@ func cpu_canvas_fill_path_with_shader(canvas: CpuCanvas*, path: const raster.Pat
 # mark: Paths ==================================================================================
 
 ## `to_skia_path_fill_type`.
-func cpu_fill_rule(winding_rule: gfx.WindingRule) -> raster.FillRule:
+pub func cpu_fill_rule(winding_rule: gfx.WindingRule) -> raster.FillRule:
     match winding_rule:
         .nonzero: return raster.FillRule.winding
         .even_odd: return raster.FillRule.even_odd

@@ -54,12 +54,12 @@ func cpu_rect_path(rect: raster.Rect) -> raster.Path:
 
 ## The four corner radii of a rounded rectangle, SkVector radii[4]: top-left, top-right,
 ## bottom-right, bottom-left, each (x, y).
-struct CpuRadii:
-    var x: f32[4]
-    var y: f32[4]
+pub struct CpuRadii:
+    pub var x: f32[4]
+    pub var y: f32[4]
 
 ## `to_skia_rrect`'s radii: CornerRadii's horizontal and vertical radii per corner.
-func cpu_radii(corner_radii: const CornerRadii*) -> CpuRadii:
+pub func cpu_radii(corner_radii: const CornerRadii*) -> CpuRadii:
     return CpuRadii(
         x = [(f32)corner_radii.top_left.horizontal_radius, (f32)corner_radii.top_right.horizontal_radius, (f32)corner_radii.bottom_right.horizontal_radius, (f32)corner_radii.bottom_left.horizontal_radius],
         y = [(f32)corner_radii.top_left.vertical_radius, (f32)corner_radii.top_right.vertical_radius, (f32)corner_radii.bottom_right.vertical_radius, (f32)corner_radii.bottom_left.vertical_radius])
@@ -87,7 +87,7 @@ func cpu_rrect_adjust_radii(limit: f64, scale: f64, a: f32*, b: f32*):
             *b = (f32)(limit - (f64)*a)
 
 ## SkRRect::setRectRadii's normalization of `radii` for `rect`.
-func cpu_normalize_radii(rect: raster.Rect, radii0: CpuRadii) -> CpuRadii:
+pub func cpu_normalize_radii(rect: raster.Rect, radii0: CpuRadii) -> CpuRadii:
     var radii = radii0
     for i in 0..<4usize:
         if not (radii.x[i] > 0.0) or not (radii.y[i] > 0.0) or not math32.is_finite(radii.x[i]) or not math32.is_finite(radii.y[i]):
