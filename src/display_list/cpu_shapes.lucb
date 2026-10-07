@@ -114,7 +114,7 @@ let cpu_quarter_conic_weight: f32 = 0.707106781
 ## addRRect with the default clockwise direction and start index 6: from the bottom of the
 ## lower-left corner, a line and a quarter conic per side); a plain rectangle when no corner is
 ## rounded (SkPathPriv::SimplifyRRect).
-func cpu_rrect_path(rect: raster.Rect, radii0: CpuRadii) -> raster.Path:
+pub func cpu_rrect_path(rect: raster.Rect, radii0: CpuRadii) -> raster.Path:
     let radii = cpu_normalize_radii(rect, radii0)
     var any_radius = false
     for i in 0..<4usize:
@@ -143,7 +143,7 @@ func cpu_rrect_path(rect: raster.Rect, radii0: CpuRadii) -> raster.Path:
     return builder.finish() else raster.PathBuilder.from_rect(rect)
 
 ## `to_skia_rrect(rect, corner_radii)` as a path.
-func cpu_rrect_path_for(rect: gfx.DevicePixelRect, corner_radii: const CornerRadii*) -> raster.Path?:
+pub func cpu_rrect_path_for(rect: gfx.DevicePixelRect, corner_radii: const CornerRadii*) -> raster.Path?:
     let r = cpu_rect(rect) else return none
     return cpu_rrect_path(r, cpu_radii(corner_radii))
 

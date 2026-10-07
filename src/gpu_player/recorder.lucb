@@ -137,12 +137,14 @@ struct GpuMaskJob:
     var clips: GpuRoundedClip[8]
     var count: usize
 
-## The drawing state: a translation, a scissor (in tile pixels), a rounded clip, the clip mask
-## around it (1 + the player's mask, 0 for none), and the layer drawn into (1 + the player's
-## layer, 0 for the tile).
+## The drawing state: a whole-pixel translation, or the whole matrix when the transform is
+## anything else (recorder_matrix.lucb), a scissor (in tile pixels), a rounded clip, the clip
+## mask around it (1 + the player's mask, 0 for none), and the layer drawn into (1 + the
+## player's layer, 0 for the tile).
 struct GpuState:
     var dx: i32
     var dy: i32
+    var matrix: raster.Transform?
     var clip: GpuRect
     var rounded: GpuRoundedClip?
     var mask: u32

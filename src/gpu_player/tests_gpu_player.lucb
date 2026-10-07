@@ -339,3 +339,47 @@ test "gpu player: opacity groups, blend modes and isolated groups are layers on 
     let stats = test_compare("layers", &scene, snapshots, 3, 500) else return
     if stats.cpu_tiles > 0:
         trap("a layer sent a tile to the CPU player")
+
+## Appends a transform node (rotation by `degrees` about the z axis, then scale `scale`) about
+## `origin` under node `parent`; answers its index.
+func test_transform(scene: const TestList*, degrees: f32, scale: f32, origin_x: f32, origin_y: f32, parent: u64) -> u64:
+    var matrix = gfx.rotation_matrix(gfx.FloatVector3([0.0, 0.0, 1.0]), degrees * 3.14159265 / 180.0)
+    matrix = gfx.float_matrix4_x4_mul(&matrix, gfx.scale_matrix(gfx.FloatVector3([scale, scale, 1.0])))
+    let data = display_list.TransformData(matrix = matrix, origin = gfx.FloatPoint(m_x = origin_x, m_y = origin_y))
+    return display_list.accumulated_visual_context_tree_append(scene.tree, display_list.VisualContextData.transform_data(data), parent)
+
+## Shapes under `node`: a rectangle, a rounded rectangle, a frame and a path, around (x, y).
+func test_shapes(scene: const TestList*, x: i32, y: i32, node: u64):
+    test_add(scene, .fill_rect(display_list.FillRect(rect = test_box(x, y, 90, 50), color = test_rgba(200, 40, 40, 255))), node)
+    test_add(scene, .fill_rect_with_rounded_corners(display_list.FillRectWithRoundedCorners(rect = test_box(x + 20, y + 30, 80, 60), color = test_rgba(30, 90, 210, 220), corner_radii = test_radii(14))), node)
+    test_add(scene, .draw_rect(display_list.DrawRect(rect = test_box(x - 10, y - 10, 120, 110), color = test_rgba(0, 0, 0, 255), rough = false)), node)
+    var path: gfx.Path
+    gfx.path_move_to(&path, gfx.FloatPoint(m_x = (f32)x + 5.0, m_y = (f32)y + 95.0))
+    gfx.path_line_to(&path, gfx.FloatPoint(m_x = (f32)x + 60.5, m_y = (f32)y + 70.0))
+    gfx.path_line_to(&path, gfx.FloatPoint(m_x = (f32)x + 100.0, m_y = (f32)y + 99.25))
+    gfx.path_close(&path)
+    test_add(scene, .fill_path(display_list.FillPath(path_bounding_rect = test_box(x + 5, y + 70, 96, 30), path = path, opacity = 1.0, paint_style_or_color = .color(test_rgba(20, 150, 60, 255)),
+                                                     winding_rule = gfx.WindingRule.nonzero, should_anti_alias = display_list.ShouldAntiAlias.yes)), node)
+
+test "gpu player: rotated, flipped and scaled content is drawn on the GPU":
+    let scene = test_list()
+    test_background(&scene)
+    # Half turns and quarter turns about fractional origins (an icon flipped by CSS), with a
+    # clip that lands between pixels; a turn by 30 degrees; a scale.
+    let flipped = test_transform(&scene, 180.0, 1.0, 90.5, 80.25, 1)
+    test_add(&scene, .save(display_list.Save()), flipped)
+    test_add(&scene, .add_clip_rect(display_list.AddClipRect(rect = test_box(25, 25, 100, 70))), flipped)
+    test_shapes(&scene, 30, 30, flipped)
+    test_add(&scene, .restore(display_list.Restore()), flipped)
+    let quarter = test_transform(&scene, 90.0, 1.0, 260.0, 150.5, 1)
+    test_shapes(&scene, 210, 100, quarter)
+    let tilted = test_transform(&scene, 30.0, 1.0, 430.0, 150.0, 1)
+    test_shapes(&scene, 380, 100, tilted)
+    let scaled = test_transform(&scene, 0.0, 1.5, 520.0, 60.0, 1)
+    test_shapes(&scene, 520, 60, scaled)
+    let snapshots = [test_snapshot(0.0, 0.0), test_snapshot(0.0, 7.0)]
+    # The shapes are the CPU rasterizer's coverage; the fractional clip is analytic, as is a
+    # rectangle's anti-aliased clip, within a level or two.
+    let stats = test_compare("transforms", &scene, snapshots, 3, 40) else return
+    if stats.cpu_tiles > 0:
+        trap("a transform sent a tile to the CPU player")

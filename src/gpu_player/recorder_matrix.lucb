@@ -1,0 +1,215 @@
+#==============================================================================================
+#
+#   recorder_matrix - DisplayListPlayerGpu under a transform other than a whole-pixel translation
+#
+#   DESCRIPTION:
+#       Skia draws under the canvas's whole matrix, and so does the GPU player, in the ways that
+#       keep the CPU player's pixels:
+#
+#         - shapes (rectangles, rounded rectangles, rectangle frames, paths, lines) are the CPU
+#           rasterizer's coverage under the matrix, made for the part of the tile they cover
+#           and drawn as masks, as the software path renderer of Ganesh draws what it has no
+#           GPU method for;
+#         - text is drawn from glyph masks of a strike made with the matrix's 2x2 part, placed
+#           as the CPU player places them (recorder_draws.lucb);
+#         - a clip the matrix keeps axis-aligned is a scissor when its edges land on whole
+#           pixels and the analytic clip otherwise (Skia's anti-aliased clip of a rectangle
+#           with fractional edges); a rounded clip is mapped as SkRRect::transform maps it.
+#
+#       Anything else under such a matrix (images, shadows, gradients, a clip it rotates)
+#       gives the tile up. The state keeps the matrix (GpuState.matrix) only while the
+#       transform is not a whole-pixel translation; otherwise the translation is dx, dy.
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+# mark: The matrix ==============================================================================
+
+## The current local-to-tile matrix.
+func gpu_ctm(this: const DisplayListPlayerGpu*) -> raster.Transform:
+    if let matrix = this.state.matrix:
+        return matrix
+    return raster.Transform.from_translate((f32)this.state.dx, (f32)this.state.dy)
+
+## Whether the transform is more than a whole-pixel translation.
+func gpu_under_matrix(this: const DisplayListPlayerGpu*) -> bool:
+    return this.state.matrix != none
+
+## Makes `matrix` the transform: a whole-pixel translation goes back to dx, dy.
+func gpu_set_matrix(this: DisplayListPlayerGpu*, matrix: raster.Transform):
+    let translation = matrix.sx == 1.0 and matrix.sy == 1.0 and matrix.kx == 0.0 and matrix.ky == 0.0
+    if translation and math32.floor(matrix.tx) == matrix.tx and math32.floor(matrix.ty) == matrix.ty and math32.abs(matrix.tx) < 1.0e9 and math32.abs(matrix.ty) < 1.0e9:
+        this.state.dx = (i32)matrix.tx
+        this.state.dy = (i32)matrix.ty
+        this.state.matrix = none
+        return
+    this.state.matrix = matrix
+
+## Whether `ts` keeps rectangles axis-aligned (SkMatrix::rectStaysRect, without perspective).
+func gpu_axis_aligned(ts: raster.Transform) -> bool:
+    if ts.kx == 0.0 and ts.ky == 0.0:
+        return ts.sx != 0.0 and ts.sy != 0.0
+    return ts.sx == 0.0 and ts.sy == 0.0 and ts.kx != 0.0 and ts.ky != 0.0
+
+## How far past the scissor coverage is rastered: the scan converter clips a shape at its
+## pixmap's edge, which changes the coverage of the pixels next to that edge.
+let gpu_coverage_margin: i32 = 16
+
+## The whole pixels that `bounds` (tile coordinates) touches, one more around for
+## anti-aliasing, within the scissor grown by gpu_coverage_margin; none when it misses the
+## scissor.
+func gpu_device_area(this: const DisplayListPlayerGpu*, bounds: raster.Rect) -> GpuRect?:
+    let left = math32.floor(bounds.left()) - 1.0
+    let top = math32.floor(bounds.top()) - 1.0
+    let right = math32.ceil(bounds.right()) + 1.0
+    let bottom = math32.ceil(bounds.bottom()) + 1.0
+    if not (left > -1.0e7 and top > -1.0e7 and right < 1.0e7 and bottom < 1.0e7):
+        return none
+    let near = GpuRect(x = (i32)left, y = (i32)top, width = (i32)(right - left), height = (i32)(bottom - top))
+    if not near.intersects(this.state.clip):
+        return none
+    let area = near.intersected(gpu_grown_clip(this))
+    return none if area.is_empty() else area
+
+## The scissor grown by gpu_coverage_margin on every side.
+func gpu_grown_clip(this: const DisplayListPlayerGpu*) -> GpuRect:
+    let m = gpu_coverage_margin
+    let clip = this.state.clip
+    return GpuRect(x = clip.x - m, y = clip.y - m, width = clip.width + 2 * m, height = clip.height + 2 * m)
+
+# mark: Coverage ================================================================================
+
+## The kinds of shape a coverage draw rasters.
+enum GpuCoverageShape:
+    fill(path: const raster.Path*, fill_rule: raster.FillRule, anti_alias: bool)
+    rect(rect: raster.Rect)
+    stroke(path: const raster.Path*, stroke: const raster.Stroke*)
+
+## Draws `shape` under the matrix in `color`: its coverage (the CPU rasterizer's, an opaque
+## white fill's alpha) over the part of the tile it touches, placed in the atlas for this tile.
+func gpu_coverage_draw(this: DisplayListPlayerGpu*, shape: GpuCoverageShape, bounds: raster.Rect?, color: gfx.Color):
+    if (color.m_value >> 24) == 0:
+        return
+    let device_bounds = bounds else return
+    let area = gpu_device_area(this, device_bounds) else return
+    let device = this.device else return
+    var pixmap = gpu_coverage_pixmap(area) else return
+    defer pixmap.release()
+    let ts = gpu_ctm(this).post_translate((f32)-area.x, (f32)-area.y)
+    match shape:
+        .fill(path, fill_rule, anti_alias):
+            var paint = gpu_white_paint(anti_alias)
+            pixmap.fill_path(path, &paint, fill_rule, ts, none)
+        .rect(rect):
+            var paint = gpu_white_paint(true)
+            pixmap.fill_rect(rect, &paint, ts, none)
+        .stroke(path, stroke):
+            var paint = gpu_white_paint(true)
+            pixmap.stroke_path(path, &paint, stroke, ts, none)
+    let coverage = gpu_alpha_of(&pixmap)
+    defer free(coverage) in memory.heap
+    let entry = gpu_place(this, device, none, coverage, area.width, area.height, 0, 0) else return
+    if not gpu_recording(this):
+        return
+    gpu_mask_draw(this, entry, area, gpu_premultiplied(color))
+
+## A path's bounds under the matrix, widened by `outset` on every side first (a stroke's reach).
+func gpu_mapped_bounds(this: const DisplayListPlayerGpu*, bounds: raster.Rect, outset: f32) -> raster.Rect?:
+    let grown = raster.Rect.from_ltrb(bounds.left() - outset, bounds.top() - outset, bounds.right() + outset, bounds.bottom() + outset) else return none
+    return grown.transform(gpu_ctm(this))
+
+## A device pixel rectangle as a raster rectangle (none when it is empty or inverted).
+func gpu_raster_rect(rect: gfx.DevicePixelRect) -> raster.Rect?:
+    return raster.Rect.from_xywh((f32)rect.m_location.m_x, (f32)rect.m_location.m_y, (f32)rect.m_size.m_width, (f32)rect.m_size.m_height)
+
+# mark: Shapes ==================================================================================
+
+## fill_rect under the matrix: Draw::drawRect of the anti-aliased rectangle.
+func gpu_matrix_fill_rect(this: DisplayListPlayerGpu*, rect: gfx.DevicePixelRect, color: gfx.Color):
+    let r = gpu_raster_rect(rect) else return
+    gpu_coverage_draw(this, .rect(rect = r), r.transform(gpu_ctm(this)), color)
+
+## fill_rect_with_rounded_corners under the matrix: the rounded rectangle's path, filled.
+func gpu_matrix_fill_rrect(this: DisplayListPlayerGpu*, rect: gfx.DevicePixelRect, corner_radii: const display_list.CornerRadii*, color: gfx.Color):
+    var path = display_list.cpu_rrect_path_for(rect, corner_radii) else return
+    defer path.release()
+    gpu_coverage_draw(this, .fill(path = &path, fill_rule = raster.FillRule.winding, anti_alias = true), path.bounds().transform(gpu_ctm(this)), color)
+
+## draw_rect under the matrix: cpu_canvas_stroke_rect's one-pixel frame (an even-odd frame
+## while the matrix has no skew, the rectangle's stroked path otherwise).
+func gpu_matrix_draw_rect(this: DisplayListPlayerGpu*, rect: gfx.DevicePixelRect, color: gfx.Color):
+    let r = gpu_raster_rect(rect) else return
+    let ts = gpu_ctm(this)
+    if not ts.has_skew():
+        let outer = r.outset(0.5, 0.5) else return
+        var builder = raster.PathBuilder.new_()
+        builder.push_rect(outer)
+        if let inner = r.inset(0.5, 0.5):
+            builder.push_rect(inner)
+        var frame = builder.finish() else return
+        defer frame.release()
+        gpu_coverage_draw(this, .fill(path = &frame, fill_rule = raster.FillRule.even_odd, anti_alias = true), outer.transform(ts), color)
+        return
+    var path = raster.PathBuilder.from_rect(r)
+    defer path.release()
+    let stroke = raster.Stroke(width = 1.0)
+    gpu_coverage_draw(this, .stroke(path = &path, stroke = &stroke), gpu_mapped_bounds(this, r, 1.0), color)
+
+# mark: Clips ===================================================================================
+
+## add_clip_rect under the matrix: a scissor for whole-pixel edges, the analytic clip for
+## fractional ones; false (the tile given up) when the matrix rotates the rectangle.
+func gpu_matrix_clip_rect(this: DisplayListPlayerGpu*, rect: gfx.DevicePixelRect) -> bool:
+    let ts = gpu_ctm(this)
+    if not gpu_axis_aligned(ts):
+        gpu_give_up(this, GpuFallback.clip_path)
+        return false
+    let r = gpu_raster_rect(rect) else return true
+    let mapped = r.transform(ts) else return true
+    let outer = GpuRect(x = (i32)math32.floor(mapped.left()), y = (i32)math32.floor(mapped.top()), width = (i32)(math32.ceil(mapped.right()) - math32.floor(mapped.left())),
+                        height = (i32)(math32.ceil(mapped.bottom()) - math32.floor(mapped.top())))
+    this.state.clip = this.state.clip.intersected(outer)
+    let whole = mapped.left() == math32.floor(mapped.left()) and mapped.top() == math32.floor(mapped.top()) and mapped.right() == math32.floor(mapped.right()) and mapped.bottom() == math32.floor(mapped.bottom())
+    if whole or this.state.clip.is_empty():
+        return true
+    if not gpu_push_mask(this):
+        return false
+    this.state.rounded = GpuRoundedClip(rect = [mapped.left(), mapped.top(), mapped.width(), mapped.height()], radii = gpu_no_radii(), mode = 1.0)
+    return true
+
+## add_rounded_rect_clip under the matrix: the rounded rectangle mapped (SkRRect::transform),
+## inside or outside; false (the tile given up) when the matrix rotates it.
+func gpu_matrix_rounded_clip(this: DisplayListPlayerGpu*, rect: gfx.DevicePixelRect, corner_radii: const display_list.CornerRadii*, keep_outside: bool):
+    let ts = gpu_ctm(this)
+    if not gpu_axis_aligned(ts):
+        gpu_give_up(this, GpuFallback.clip_path)
+        return
+    let r = gpu_raster_rect(rect) else return
+    let radii = display_list.cpu_normalize_radii(r, display_list.cpu_radii(corner_radii))
+    let mapped = display_list.cpu_rrect_transform(r, &radii, ts)
+    let m = mapped.0
+    if not keep_outside:
+        let outer = GpuRect(x = (i32)math32.floor(m.left()), y = (i32)math32.floor(m.top()), width = (i32)(math32.ceil(m.right()) - math32.floor(m.left())),
+                            height = (i32)(math32.ceil(m.bottom()) - math32.floor(m.top())))
+        this.state.clip = this.state.clip.intersected(outer)
+    if this.state.clip.is_empty() or not gpu_push_mask(this):
+        return
+    let n = mapped.1
+    this.state.rounded = GpuRoundedClip(rect = [m.left(), m.top(), m.width(), m.height()], radii = [n.x[0], n.y[0], n.x[1], n.y[1], n.x[2], n.y[2], n.x[3], n.y[3]],
+                                        mode = 2.0 if keep_outside else 1.0)
+
+## would_be_fully_clipped under the matrix: cpu_canvas_quick_reject, whether the rectangle's
+## mapped bounds miss the scissor grown by a pixel (anti-aliasing reaches that far).
+func gpu_matrix_fully_clipped(this: const DisplayListPlayerGpu*, rect: gfx.DevicePixelRect) -> bool:
+    let r = gpu_raster_rect(rect) else return true
+    let mapped = r.transform(gpu_ctm(this)) else return true
+    let clip = this.state.clip
+    if clip.is_empty():
+        return true
+    let left = math32.max((f32)clip.x - 1.0, mapped.left())
+    let top = math32.max((f32)clip.y - 1.0, mapped.top())
+    let right = math32.min((f32)(clip.x + clip.width) + 1.0, mapped.right())
+    let bottom = math32.min((f32)(clip.y + clip.height) + 1.0, mapped.bottom())
+    return not (left < right and top < bottom)

@@ -51,10 +51,9 @@ func gpu_draw_glyph_run_impl(base: display_list.DisplayListPlayer*, command: dis
     if command.orientation != gfx.Orientation.horizontal:
         gpu_give_up(this, GpuFallback.text)
         return
-    # cpu_canvas_draw_text_blob: the canvas's translation pre-translated by the run's origin.
-    let tx = (f32)this.state.dx + command.translation.m_x
-    let ty = (f32)this.state.dy + command.translation.m_y
-    let position = raster.Transform.from_translate(tx, ty)
+    # cpu_canvas_draw_text_blob: the canvas's matrix pre-translated by the run's origin; the
+    # strike is made with its 2x2 part (glyphs rotated or scaled by it).
+    let position = display_list.cpu_pre_translate(gpu_ctm(this), command.translation.m_x, command.translation.m_y)
     if display_list.cpu_should_draw_as_path(&blob.font, position):
         gpu_give_up(this, GpuFallback.text)
         return
@@ -63,25 +62,28 @@ func gpu_draw_glyph_run_impl(base: display_list.DisplayListPlayer*, command: dis
     let r = gfx.color_red(&command.color)
     let g = gfx.color_green(&command.color)
     let b = gfx.color_blue(&command.color)
-    let identity = web_fonts.SkMatrix22(scale_x = 1.0, skew_x = 0.0, skew_y = 0.0, scale_y = 1.0)
-    let strike = web_fonts.sk_strike_make(&blob.font, identity, r, g, b) else return
+    let m22 = web_fonts.SkMatrix22(scale_x = position.sx, skew_x = position.kx, skew_y = position.ky, scale_y = position.sy)
+    let strike = web_fonts.sk_strike_make(&blob.font, m22, r, g, b) else return
     let spec = display_list.cpu_rounding_spec(&strike)
     let device = this.device else return
-    # What makes the strike: the typeface, the size, subpixel positioning and the color's
-    # gamma (the identity matrix is implied).
+    # What makes the strike: the typeface, the size, subpixel positioning, the color's gamma
+    # and the matrix's 2x2 part.
     var strike_key = gpu_hash(gpu_hash_start, (u64)(void*)(blob.font.typeface else return))
     strike_key = gpu_hash(strike_key, ((u64)(i64)(blob.font.size * 65536.0) << 1) | (1 if blob.font.subpixel else 0))
     strike_key = gpu_hash(strike_key, ((u64)r << 16) | ((u64)g << 8) | (u64)b)
+    if not (position.sx == 1.0 and position.sy == 1.0 and position.kx == 0.0 and position.ky == 0.0):
+        strike_key = gpu_hash(gpu_hash(strike_key, ((u64)position.sx.bits() << 32) | (u64)position.kx.bits()), ((u64)position.ky.bits() << 32) | (u64)position.sy.bits())
     let color = gpu_premultiplied(command.color)
-    let rounded_x = tx + spec.half_x
-    let rounded_y = ty + spec.half_y
+    # The mapping to the device with the rounding constant added, so flooring places a glyph.
+    var rounding = position
+    rounding.tx = position.tx + spec.half_x
+    rounding.ty = position.ty + spec.half_y
     for i in 0..<ak.vector_size(&blob.glyphs):
         let glyph = *ak.vector_at_const(&blob.glyphs, i)
         let origin = *ak.vector_at_const(&blob.positions, i)
         if not (math32.is_finite(origin.m_x) and math32.is_finite(origin.m_y)):
             continue
-        let mapped_x = origin.m_x + rounded_x
-        let mapped_y = origin.m_y + rounded_y
+        let (mapped_x, mapped_y) = display_list.cpu_map_point(rounding, origin.m_x, origin.m_y)
         let sub_x = display_list.cpu_subpixel_field(mapped_x, spec.keep_x)
         let sub_y = display_list.cpu_subpixel_field(mapped_y, spec.keep_y)
         let key = gpu_hash(gpu_hash(strike_key, (u64)glyph), ((u64)sub_x << 2) | (u64)sub_y)
@@ -116,6 +118,12 @@ func gpu_fill_path_impl(base: display_list.DisplayListPlayer*, command: display_
             return
     if (color.m_value >> 24) == 0:
         return
+    if gpu_under_matrix(this):
+        var under = display_list.to_raster_path(&command.path) else return
+        defer under.path.release()
+        let fill = GpuCoverageShape.fill(path = &under.path, fill_rule = display_list.cpu_fill_rule(command.winding_rule), anti_alias = command.should_anti_alias == display_list.ShouldAntiAlias.yes)
+        gpu_coverage_draw(this, fill, under.path.bounds().transform(gpu_ctm(this)), color)
+        return
     # The path's bounds, one pixel wider for anti-aliasing, in its own coordinates.
     let local = gpu_rect_of(command.path_bounding_rect)
     let bounds = GpuRect(x = local.x - 1, y = local.y - 1, width = local.width + 2, height = local.height + 2)
@@ -134,7 +142,7 @@ func gpu_fill_path_impl(base: display_list.DisplayListPlayer*, command: display_
         hash = gpu_hash(hash, ((u64)(u32)bounds.width << 32) | (u64)(u32)bounds.height)
         key = gpu_hash(hash, ((u64)command.winding_rule << 1) | (1 if anti_alias else 0))
     else:
-        area = bounds.translated(this.state.dx, this.state.dy).intersected(this.state.clip).translated(-this.state.dx, -this.state.dy)
+        area = bounds.translated(this.state.dx, this.state.dy).intersected(gpu_grown_clip(this)).translated(-this.state.dx, -this.state.dy)
     var entry = GpuAtlasEntry()
     if let k = key:
         if let found = this.atlas.find(k):
@@ -193,6 +201,13 @@ func gpu_draw_line_impl(base: display_list.DisplayListPlayer*, command: display_
         return
     if (command.color.m_value >> 24) == 0:
         return
+    if gpu_under_matrix(this):
+        var under = display_list.cpu_line_of(&command) else return
+        defer under.path.release()
+        defer display_list.cpu_stroke_release(&under.stroke)
+        let bounds = under.path.bounds()
+        gpu_coverage_draw(this, .stroke(path = &under.path, stroke = &under.stroke), gpu_mapped_bounds(this, bounds, (f32)command.thickness + 1.0), command.color)
+        return
     let local = gpu_rect_of(display_list.draw_line_bounding_rect(&command))
     let bounds = GpuRect(x = local.x - 1, y = local.y - 1, width = local.width + 2, height = local.height + 2)
     if not bounds.translated(this.state.dx, this.state.dy).intersects(this.state.clip):
@@ -205,7 +220,7 @@ func gpu_draw_line_impl(base: display_list.DisplayListPlayer*, command: display_
         hash = gpu_hash(hash, ((u64)(u32)(command.from_.m_x - bounds.x) << 32) | (u64)(u32)(command.from_.m_y - bounds.y))
         key = gpu_hash(hash, ((u64)(u32)command.thickness << 8) | (u64)command.style | 0x10000000000)
     else:
-        area = bounds.translated(this.state.dx, this.state.dy).intersected(this.state.clip).translated(-this.state.dx, -this.state.dy)
+        area = bounds.translated(this.state.dx, this.state.dy).intersected(gpu_grown_clip(this)).translated(-this.state.dx, -this.state.dy)
     var entry = GpuAtlasEntry()
     if let k = key:
         if let found = this.atlas.find(k):
@@ -230,6 +245,9 @@ func gpu_draw_line_impl(base: display_list.DisplayListPlayer*, command: display_
 func gpu_scaled_bitmap_impl(base: display_list.DisplayListPlayer*, command: display_list.DrawScaledImmutableBitmap):
     let this = gpu_player_of(base)
     if not gpu_recording(this):
+        return
+    if gpu_under_matrix(this):
+        gpu_give_up(this, GpuFallback.transform)
         return
     let bitmap = gfx.immutable_bitmap_bitmap(command.bitmap) else return
     let width = gfx.bitmap_width(bitmap)

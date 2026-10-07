@@ -30,7 +30,7 @@
 # mark: Matrices ===============================================================================
 
 ## SkMatrix::preTranslate (a concatenation under perspective).
-func cpu_pre_translate(m: raster.Transform, dx: f32, dy: f32) -> raster.Transform:
+pub func cpu_pre_translate(m: raster.Transform, dx: f32, dy: f32) -> raster.Transform:
     if m.has_perspective():
         return m.pre_concat(raster.Transform.from_translate(dx, dy))
     var result = m
@@ -43,7 +43,7 @@ func cpu_pre_translate(m: raster.Transform, dx: f32, dy: f32) -> raster.Transfor
     return result
 
 ## SkMatrix::mapPoint (affine matrices: Affine_vpts, which the simpler kinds agree with).
-func cpu_map_point(m: raster.Transform, x: f32, y: f32) -> (f32, f32):
+pub func cpu_map_point(m: raster.Transform, x: f32, y: f32) -> (f32, f32):
     return (x * m.sx + y * m.kx + m.tx, y * m.sy + x * m.ky + m.ty)
 
 ## SkStrikeSpec::ShouldDrawAsPath for a fill paint: whether `position` has perspective or a

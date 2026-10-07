@@ -66,6 +66,9 @@ func gpu_outer_box_shadow_impl(base: display_list.DisplayListPlayer*, command: d
         return
     if (command.color.m_value >> 24) == 0:
         return
+    if gpu_under_matrix(this):
+        gpu_give_up(this, GpuFallback.transform)
+        return
     let shadow = gpu_rect_of(command.shadow_rect)
     if shadow.width < 0 or shadow.height < 0:
         return
@@ -117,6 +120,9 @@ func gpu_inner_box_shadow_impl(base: display_list.DisplayListPlayer*, command: d
     if not gpu_recording(this):
         return
     if (command.color.m_value >> 24) == 0:
+        return
+    if gpu_under_matrix(this):
+        gpu_give_up(this, GpuFallback.transform)
         return
     let outer = gpu_rect_of(command.outer_shadow_rect)
     let inner = gpu_rect_of(command.inner_shadow_rect)

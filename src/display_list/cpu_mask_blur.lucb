@@ -545,7 +545,7 @@ func cpu_rect_stays_rect(ts: raster.Transform) -> bool:
 ## (SkPathRawShapes::RRect, clockwise from start index 6) mapped point by point: each conic's
 ## corner point names the corner it is at in the mapped rectangle, the two legs its radii;
 ## setRectRadii normalizes them again.
-func cpu_rrect_transform(rect: raster.Rect, radii: const CpuRadii*, ts: raster.Transform) -> (raster.Rect, CpuRadii):
+pub func cpu_rrect_transform(rect: raster.Rect, radii: const CpuRadii*, ts: raster.Transform) -> (raster.Rect, CpuRadii):
     let mapped = rect.transform(ts) else return (rect, *radii)
     let l = rect.left()
     let t = rect.top()

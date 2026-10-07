@@ -36,6 +36,9 @@ func gpu_restore_impl(base: display_list.DisplayListPlayer*, arg0: display_list.
 
 func gpu_translate_impl(base: display_list.DisplayListPlayer*, command: display_list.Translate):
     let this = gpu_player_of(base)
+    if let matrix = this.state.matrix:
+        gpu_set_matrix(this, display_list.cpu_pre_translate(matrix, (f32)command.delta.m_x, (f32)command.delta.m_y))
+        return
     this.state.dx += command.delta.m_x
     this.state.dy += command.delta.m_y
 
@@ -43,14 +46,20 @@ func gpu_add_clip_rect_impl(base: display_list.DisplayListPlayer*, command: disp
     let this = gpu_player_of(base)
     if command.rect.m_size.m_width < 0 or command.rect.m_size.m_height < 0:
         return
+    if gpu_under_matrix(this):
+        _ = gpu_matrix_clip_rect(this, command.rect)
+        return
     this.state.clip = this.state.clip.intersected(gpu_rect_of(command.rect).translated(this.state.dx, this.state.dy))
 
 func gpu_add_rounded_rect_clip_impl(base: display_list.DisplayListPlayer*, command: display_list.AddRoundedRectClip):
     let this = gpu_player_of(base)
+    let keep_outside = command.corner_clip == display_list.CornerClip.inside
+    if gpu_under_matrix(this):
+        gpu_matrix_rounded_clip(this, command.border_rect, &command.corner_radii, keep_outside)
+        return
     let rect = gpu_rect_of(command.border_rect).translated(this.state.dx, this.state.dy)
     if rect.width < 0 or rect.height < 0:
         return
-    let keep_outside = command.corner_clip == display_list.CornerClip.inside
     if not keep_outside:
         this.state.clip = this.state.clip.intersected(rect)
     # A clip that no longer reaches the scissor changes nothing drawn there.
@@ -66,22 +75,18 @@ func gpu_add_clip_path_impl(base: display_list.DisplayListPlayer*, path: gfx.Pat
     gpu_give_up(gpu_player_of(base), GpuFallback.clip_path)
 
 func gpu_apply_transform_impl(base: display_list.DisplayListPlayer*, origin: gfx.FloatPoint, matrix: gfx.FloatMatrix4X4):
+    # DisplayListPlayerCpu::apply_transform: the matrix about `origin`, concatenated (the loop
+    # saved). The 2D part draws; perspective gives the tile up.
     let this = gpu_player_of(base)
-    # Only a whole-pixel translation keeps the GPU's pixels the CPU's. (The loop saved.)
-    let m = matrix.m_elements
-    let linear = m[0][0] == 1.0 and m[0][1] == 0.0 and m[0][2] == 0.0 and m[1][0] == 0.0 and m[1][1] == 1.0 and m[1][2] == 0.0
-    let flat = m[2][0] == 0.0 and m[2][1] == 0.0 and m[2][2] == 1.0 and m[2][3] == 0.0 and m[3][0] == 0.0 and m[3][1] == 0.0 and m[3][2] == 0.0 and m[3][3] == 1.0
-    if not flat:
+    var about = gfx.translation_matrix(gfx.FloatVector3([origin.m_x, origin.m_y, 0.0]))
+    about = gfx.float_matrix4_x4_mul(&about, matrix)
+    about = gfx.float_matrix4_x4_mul(&about, gfx.translation_matrix(gfx.FloatVector3([-origin.m_x, -origin.m_y, 0.0])))
+    let m = about.m_elements
+    if m[3][0] != 0.0 or m[3][1] != 0.0 or m[3][3] != 1.0:
         gpu_give_up(this, GpuFallback.perspective)
         return
-    if not linear:
-        gpu_give_up(this, GpuFallback.transform)
-        return
-    if math32.floor(m[0][3]) != m[0][3] or math32.floor(m[1][3]) != m[1][3]:
-        gpu_give_up(this, GpuFallback.fractional_translation)
-        return
-    this.state.dx += (i32)m[0][3]
-    this.state.dy += (i32)m[1][3]
+    let local = raster.Transform.from_row(m[0][0], m[1][0], m[0][1], m[1][1], m[0][3], m[1][3])
+    gpu_set_matrix(this, gpu_ctm(this).pre_concat(local))
 
 func gpu_apply_effects_impl(base: display_list.DisplayListPlayer*, command: display_list.ApplyEffects):
     # DisplayListPlayerCpu::apply_effects: a layer with the effects (the loop restores it); an
@@ -101,6 +106,8 @@ func gpu_apply_effects_impl(base: display_list.DisplayListPlayer*, command: disp
 
 func gpu_would_be_fully_clipped_impl(base: display_list.DisplayListPlayer*, rect: gfx.DevicePixelRect) -> bool:
     let this = gpu_player_of(base)
+    if gpu_under_matrix(this):
+        return gpu_matrix_fully_clipped(this, rect)
     return not gpu_rect_of(rect).translated(this.state.dx, this.state.dy).intersects(this.state.clip)
 
 func gpu_flush_impl(base: display_list.DisplayListPlayer*):
@@ -111,6 +118,9 @@ func gpu_flush_impl(base: display_list.DisplayListPlayer*):
 func gpu_fill_rect_impl(base: display_list.DisplayListPlayer*, command: display_list.FillRect):
     let this = gpu_player_of(base)
     if not gpu_recording(this):
+        return
+    if gpu_under_matrix(this):
+        gpu_matrix_fill_rect(this, command.rect, command.color)
         return
     let rect = gpu_rect_of(command.rect).translated(this.state.dx, this.state.dy)
     if rect.is_empty() or not rect.intersects(this.state.clip):
@@ -124,6 +134,9 @@ func gpu_fill_rect_with_rounded_corners_impl(base: display_list.DisplayListPlaye
     let this = gpu_player_of(base)
     if not gpu_recording(this):
         return
+    if gpu_under_matrix(this):
+        gpu_matrix_fill_rrect(this, command.rect, &command.corner_radii, command.color)
+        return
     let rect = gpu_rect_of(command.rect).translated(this.state.dx, this.state.dy)
     if rect.is_empty():
         return
@@ -134,6 +147,9 @@ func gpu_paint_scrollbar_impl(base: display_list.DisplayListPlayer*, command: di
     # without anti-aliasing, then the thumb's edge stroked one pixel wide in a lighter color.
     let this = gpu_player_of(base)
     if not gpu_recording(this):
+        return
+    if gpu_under_matrix(this):
+        gpu_give_up(this, GpuFallback.transform)
         return
     let gutter = gpu_rect_of(command.gutter_rect).translated(this.state.dx, this.state.dy)
     if not gutter.is_empty():
@@ -152,6 +168,9 @@ func gpu_draw_rect_impl(base: display_list.DisplayListPlayer*, command: display_
     # SkCanvas::drawRect with a one-pixel stroke: a frame half a pixel each side of the edge.
     let this = gpu_player_of(base)
     if not gpu_recording(this):
+        return
+    if gpu_under_matrix(this):
+        gpu_matrix_draw_rect(this, command.rect, command.color)
         return
     let rect = gpu_rect_of(command.rect).translated(this.state.dx, this.state.dy)
     if rect.width < 0 or rect.height < 0:
