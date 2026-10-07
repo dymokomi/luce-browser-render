@@ -25,10 +25,12 @@
 
 # mark: Pipelines ===============================================================================
 
-## The shader tiles are drawn with (shaders/tile.frag: every kind of draw) and its pipelines:
-## into rgba8_linear tiles, into r8 clip masks, and composites per target format.
+## The shaders tiles are drawn with (shaders/tile.frag: every kind of draw) and composited with
+## (shaders/composite.frag), and their pipelines: into rgba8_linear tiles, into r8 clip masks,
+## and composites per target format.
 pub struct GpuPipelines:
     var shader: gpu.Shader
+    var composite_shader: gpu.Shader
     var tile: gpu.Pipeline
     var clip: gpu.Pipeline
     ## The composite pipeline per frame target format (index 8: a presentation surface).
@@ -39,7 +41,7 @@ pub struct GpuPipelines:
         let index: usize = (usize)(target_format else gpu.Format.rgba8) if target_format != none else 8
         if let pipeline = self.composite[index]:
             return pipeline
-        let pipeline = try gpu.Pipeline.create(device, self.shader, gpu.Blend.over, target_format)
+        let pipeline = try gpu.Pipeline.create(device, self.composite_shader, gpu.Blend.over, target_format)
         self.composite[index] = pipeline
         return pipeline
 
@@ -52,23 +54,19 @@ pub struct GpuPipelines:
                 var handle = pipeline
                 handle.destroy()
         self.shader.destroy()
+        self.composite_shader.destroy()
 
 ## The pipelines on `device`.
 pub func gpu_pipelines_create(device: gpu.Device) -> GpuPipelines!:
     let shader = try gpu.Shader.create(device, tile_frag_words, tile_frag_msl)
-    return GpuPipelines(shader = shader, tile = try gpu.Pipeline.create(device, shader, gpu.Blend.over, gpu.Format.rgba8_linear),
+    let composite_shader = try gpu.Shader.create(device, composite_frag_words, composite_frag_msl)
+    return GpuPipelines(shader = shader, composite_shader = composite_shader, tile = try gpu.Pipeline.create(device, shader, gpu.Blend.over, gpu.Format.rgba8_linear),
                         clip = try gpu.Pipeline.create(device, shader, gpu.Blend.over, gpu.Format.r8))
 
-## The uniforms of a composite: the texture at binding 1 with its top left at (`x`, `y`) of the
-## target, decoded from sRGB when `decode` (tile.frag's kind 4).
-pub func gpu_composite_uniforms(x: f32, y: f32, decode: bool) -> f32[20]:
-    var uniforms: f32[20]
-    uniforms[gpu_uniform_kind] = gpu_kind_composite
-    uniforms[gpu_uniform_header] = x
-    uniforms[gpu_uniform_header + 1] = y
-    uniforms[gpu_uniform_header + 2] = 1.0 if decode else 0.0
-    uniforms[gpu_uniform_header + 3] = 1.0
-    return uniforms
+## The uniforms of a composite (composite.frag): the texture with its top left at (`x`, `y`) of
+## the target, decoded from sRGB when `decode`.
+pub func gpu_composite_uniforms(x: f32, y: f32, decode: bool) -> f32[3]:
+    return [x, y, 1.0 if decode else 0.0]
 
 # mark: Replay state ============================================================================
 

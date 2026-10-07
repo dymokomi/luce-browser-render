@@ -7,4 +7,4 @@ cd "$(dirname "$0")/.."
 shaders=src/gpu_player/shaders
 python3 ../luce-gpu/tools/embed_shaders.py src/gpu_player/generated_shaders.lucb --shared \
     --glslang "$PWD/tools/glslang_small.sh" \
-    $shaders/tile.frag
+    $shaders/tile.frag $shaders/composite.frag

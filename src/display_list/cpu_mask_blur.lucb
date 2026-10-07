@@ -440,8 +440,8 @@ pub enum CpuInnerShadow:
 ## `blur_radius` / 2 under the identity transform, before its clip to the content: the
 ## frame's nine-patch for two nested rectangles, the blurred even-odd difference of the
 ## rounded rectangles (limited to `clip` plus the blur's margin), or the difference's plain
-## coverage without a blur (limited to `clip`). Unsupported for shapes that touch or cross,
-## which the CPU player composes from two coverages. The caller releases the patch.
+## coverage without a blur (limited to `clip`); for shapes that touch or cross, the outer
+## coverage less the inner one, blurred. The caller releases the patch.
 pub func cpu_inner_shadow_patch(outer: raster.Rect, outer_radii0: CpuRadii, inner: raster.Rect, inner_radii0: CpuRadii, blur_radius: i32, clip: raster.Rect) -> CpuInnerShadow:
     let outer_radii = cpu_normalize_radii(outer, outer_radii0)
     let inner_radii = cpu_normalize_radii(inner, inner_radii0)
@@ -452,9 +452,9 @@ pub func cpu_inner_shadow_patch(outer: raster.Rect, outer_radii0: CpuRadii, inne
         match cpu_filter_nested_rects_to_nine([outer.left(), outer.top(), outer.right(), outer.bottom()], [inner.left(), inner.top(), inner.right(), inner.bottom()], sigma):
             .mask(value): return .patch(value = value)
             _: _ = 0
-    var difference = cpu_inner_shadow_difference(outer, outer_radii, inner, inner_radii) else return .unsupported
-    defer difference.release()
     let limit = cpu_round_out([clip.left(), clip.top(), clip.right(), clip.bottom()])
+    var difference = cpu_inner_shadow_difference(outer, outer_radii, inner, inner_radii) else return cpu_crossing_shadow_patch(outer, outer_radii, inner, inner_radii, sigma, blur_radius // 2 > 0, limit)
+    defer difference.release()
     if blur_radius // 2 > 0:
         if let blurred = cpu_blurred_path_mask(&difference, raster.FillRule.even_odd, limit, sigma):
             return .patch(value = cpu_whole_patch(blurred))
@@ -467,6 +467,47 @@ pub func cpu_inner_shadow_patch(outer: raster.Rect, outer_radii0: CpuRadii, inne
     if bounds.left >= bounds.right or bounds.top >= bounds.bottom:
         return .nothing
     return .patch(value = cpu_whole_patch(cpu_path_mask(&difference, raster.FillRule.even_odd, bounds)))
+
+## paint_inner_box_shadow's shapes that touch or cross (SkPathOps' merge is not ported): the
+## outer rounded rectangle's coverage less the inner's (as clip masks scan-convert them) over
+## the outer one's bounds, blurred when `blur` (cpu_canvas_fill_coverage_blurred), within
+## `limit` plus the blur's margin.
+func cpu_crossing_shadow_patch(outer: raster.Rect, outer_radii: CpuRadii, inner: raster.Rect, inner_radii: CpuRadii, sigma: f32, blur: bool, limit: CpuIRect) -> CpuInnerShadow:
+    var outer_path = cpu_rrect_path(outer, outer_radii)
+    defer outer_path.release()
+    var inner_path = cpu_rrect_path(inner, inner_radii)
+    defer inner_path.release()
+    let blur_sigma = cpu_mask_blur_sigma(sigma)
+    let blurred = blur and not cpu_mask_blur_has_no_blur(blur_sigma)
+    let m = (i32)math32.min((f32)cpu_mask_blur_border(blur_sigma), (f32)cpu_mask_max_margin) if blurred else 0
+    let ob = outer_path.bounds()
+    let grow: f32 = 0.5 if blurred else 0.0
+    var b = cpu_round_out([ob.left() - grow, ob.top() - grow, ob.right() + grow, ob.bottom() + grow])
+    b.left = cpu_max_i32(b.left, limit.left - m)
+    b.top = cpu_max_i32(b.top, limit.top - m)
+    b.right = cpu_min_i32(b.right, limit.right + m)
+    b.bottom = cpu_min_i32(b.bottom, limit.bottom + m)
+    if b.left >= b.right or b.top >= b.bottom:
+        return .nothing
+    let width = b.right - b.left
+    let height = b.bottom - b.top
+    let shift = raster.Transform.from_translate(-(f32)b.left, -(f32)b.top)
+    var outer_mask = raster.Mask.new_((u32)width, (u32)height) else return .nothing
+    defer outer_mask.release()
+    outer_mask.fill_path(&outer_path, raster.FillRule.winding, true, shift)
+    var inner_mask = raster.Mask.new_((u32)width, (u32)height) else return .nothing
+    defer inner_mask.release()
+    inner_mask.fill_path(&inner_path, raster.FillRule.winding, true, shift)
+    var src = cpu_a8_mask_new(b.left, b.top, width, height)
+    let outer_data = outer_mask.data()
+    let inner_data = inner_mask.data()
+    for i in 0..<src.image.length:
+        src.image[i] = raster.premultiply_u8(outer_data[i], 255 - inner_data[i])
+    if not blurred:
+        return .patch(value = cpu_whole_patch(src))
+    defer cpu_a8_mask_release(&src)
+    let result = cpu_box_blur(&src, sigma) else return .nothing
+    return .patch(value = cpu_whole_patch(result.0))
 
 ## SkRRect's type, as far as the blurred draw cares.
 enum CpuRRectKind:

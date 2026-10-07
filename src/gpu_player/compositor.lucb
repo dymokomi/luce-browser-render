@@ -19,7 +19,7 @@
 #            encoded surface, or an rgba8_linear texture) tiles go straight onto it; on
 #            any other they go into a frame texture of the viewport's size, which is then
 #            drawn onto the target decoded for its linear-light pixels
-#            (shaders/tile.frag's composite kind).
+#            (shaders/composite.frag).
 #
 #       A scroll therefore moves tiles and draws only those it uncovers. Tiles not used for a
 #       while are released past a budget; textures are reused through a small pool.
@@ -211,7 +211,7 @@ func gpu_compositor_draw_frame(this: GpuCompositor*, list: display_list.DisplayL
     # The frame onto the target, decoded.
     let placement = try target.placement()
     var params = gpu_composite_uniforms((f32)(placement.x * scale), (f32)(placement.y * scale), true)
-    try gpu.shade(target, present, gpu.Rect(0.0, 0.0, (f64)width / scale, (f64)height / scale), u8[]((u8*)&params[0], 80), [frame_texture], gpu.Filter.nearest)
+    try gpu.shade(target, present, gpu.Rect(0.0, 0.0, (f64)width / scale, (f64)height / scale), u8[]((u8*)&params[0], 12), [frame_texture], gpu.Filter.nearest)
     gpu_compositor_evict(this)
 
 ## The frame texture for a viewport of `width` by `height` pixels, made again when it changes.
@@ -251,7 +251,7 @@ func gpu_compositor_layer(this: GpuCompositor*, device: gpu.Device, list: displa
             let x = tile.x + offset.m_x
             let y = tile.y + offset.m_y
             var params = gpu_composite_uniforms((f32)(x + origin.m_x), (f32)(y + origin.m_y), false)
-            try gpu.shade(canvas, copy, gpu.Rect((f64)x / scale, (f64)y / scale, side, side), u8[]((u8*)&params[0], 80), [texture], gpu.Filter.nearest)
+            try gpu.shade(canvas, copy, gpu.Rect((f64)x / scale, (f64)y / scale, side, side), u8[]((u8*)&params[0], 12), [texture], gpu.Filter.nearest)
             gpu_player_stats_the.composited_tiles += 1
 
 ## The tile of `layer` at (`x`, `y`) in its plane for `key`: kept, or drawn now.
