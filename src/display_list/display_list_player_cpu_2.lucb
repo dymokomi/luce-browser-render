@@ -280,6 +280,15 @@ func cpu_shader_paint(shader: const CpuShader*, anti_alias: bool, opacity: f32) 
             paint.shader = raster.Pattern.new_(pixmap.as_ref(), raster.SpreadMode.repeat, raster.FilterQuality.bilinear, opacity, transform)
             return paint
 
+## The paint a gradient paint server paints with (the CPU player's shader for it, at
+## `opacity`), shared with the GPU player; none for a pattern or no paint server. The caller
+## releases the paint.
+pub func cpu_gradient_style_paint(paint_style: SvgPaintServerPaintStyle*, bounding_rect: gfx.FloatRect, anti_alias: bool, opacity: f32) -> raster.Paint?:
+    let gradient = as_if_svg_gradient_paint_style(paint_style) else return none
+    var shader = cpu_gradient_paint_style_shader(gradient, bounding_rect)
+    defer cpu_shader_release(&shader)
+    return cpu_shader_paint(&shader, anti_alias, opacity)
+
 ## Fills `path` with `shader` at `opacity`.
 func cpu_canvas_fill_path_with_shader(canvas: CpuCanvas*, path: const raster.Path*, fill_rule: raster.FillRule, anti_alias: bool, shader: const CpuShader*, opacity: f32):
     if cpu_canvas_is_clip_empty(canvas):
@@ -334,7 +343,7 @@ func display_list_player_cpu_fill_path_impl(base: DisplayListPlayer*, command: F
 ## The raster stroke of a StrokePath command (setStrokeWidth, setStrokeCap, setStrokeJoin,
 ## setStrokeMiter, and SkDashPathEffect::Make, which makes no effect from an invalid dash
 ## array); the caller releases its dash.
-func cpu_stroke_of(command: const StrokePath*) -> raster.Stroke:
+pub func cpu_stroke_of(command: const StrokePath*) -> raster.Stroke:
     let dash = raster.StrokeDash.new_(ak.vector_span_const(&command.dash_array), command.dash_offset)
     return raster.Stroke(width = command.thickness, miter_limit = command.miter_limit, line_cap = cpu_line_cap(command.cap_style),
                          line_join = cpu_line_join(command.join_style), dash = dash)

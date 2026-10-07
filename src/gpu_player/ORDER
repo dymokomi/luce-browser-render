@@ -13,3 +13,4 @@ replay.lucb
 compositor.lucb
 generated_shaders.lucb
 tests_gpu_player.lucb
+tests_gpu_player_2.lucb

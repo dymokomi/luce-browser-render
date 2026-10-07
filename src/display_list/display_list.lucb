@@ -226,6 +226,11 @@ func display_list_player_execute_impl(this: DisplayListPlayer*, display_list_: D
     assert(this.m_surface != none)
     display_list_player_execute_range(this, display_list_, scroll_state, 0, ak.vector_size(display_list_commands(display_list_)))
 
+## execute_impl for a player that draws elsewhere than a surface (the GPU player): every
+## command of a nested display list, played as execute_impl plays them.
+pub func display_list_player_execute_nested(this: DisplayListPlayer*, display_list_: DisplayList*, scroll_state: const ScrollStateSnapshot*):
+    display_list_player_execute_range(this, display_list_, scroll_state, 0, ak.vector_size(display_list_commands(display_list_)))
+
 ## A tile of the display list (the GPU player's seam, luce-browser-render docs/GPU.md): the
 ## commands `first..<end` played as `execute` plays them, onto `surface` (none for a player
 ## that draws elsewhere, as the GPU player does), with everything moved by `-origin` first, so

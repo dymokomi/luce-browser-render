@@ -113,8 +113,8 @@ func gpu_fill_path_impl(base: display_list.DisplayListPlayer*, command: display_
     var color = gfx.Color()
     match command.paint_style_or_color:
         .color(value): color = value
-        _:
-            gpu_give_up(this, GpuFallback.path)
+        .svg_paint_server_paint_style(paint_style):
+            gpu_painted_path(this, &command, paint_style)
             return
     if (color.m_value >> 24) == 0:
         return
@@ -190,6 +190,53 @@ func gpu_alpha_of(pixmap: const raster.Pixmap*) -> u8[]:
         coverage[index] = pixels[index].alpha()
     return coverage
 
+## fill_path with a paint server: its coverage under the matrix, painted with the gradient's
+## stages (a pattern paint server gives the tile up).
+func gpu_painted_path(this: DisplayListPlayerGpu*, command: const display_list.FillPath*, paint_style: display_list.SvgPaintServerPaintStyle*?):
+    let style = paint_style else trap("VERIFY: a null paint style")
+    let anti_alias = command.should_anti_alias == display_list.ShouldAntiAlias.yes
+    let bounding = display_list.int_rect_to_float_rect(display_list.fill_path_bounding_rect(command))
+    let made = display_list.cpu_gradient_style_paint(style, bounding, anti_alias, command.opacity)
+    if made == none:
+        gpu_give_up(this, GpuFallback.path)
+        return
+    var paint = made else return
+    defer paint.release()
+    var under = display_list.to_raster_path(&command.path) else return
+    defer under.path.release()
+    let fill = GpuCoverageShape.fill(path = &under.path, fill_rule = display_list.cpu_fill_rule(command.winding_rule), anti_alias = anti_alias)
+    gpu_coverage_draw(this, fill, under.path.bounds().transform(gpu_ctm(this)), gfx.Color(), &paint)
+
+func gpu_stroke_path_impl(base: display_list.DisplayListPlayer*, command: display_list.StrokePath):
+    # DisplayListPlayerCpu::stroke_path: the path stroked (width, caps, joins, miter, dashes)
+    # under the matrix, as the CPU rasterizer's coverage, in a color or a gradient paint
+    # server's stages.
+    let this = gpu_player_of(base)
+    if not gpu_recording(this):
+        return
+    var under = display_list.to_raster_path(&command.path) else return
+    defer under.path.release()
+    var stroke = display_list.cpu_stroke_of(&command)
+    defer display_list.cpu_stroke_release(&stroke)
+    let anti_alias = command.should_anti_alias == display_list.ShouldAntiAlias.yes
+    # How far a stroke reaches past the path: half its width, times the miter limit at joins.
+    let reach = command.thickness * math32.max(command.miter_limit, 2.0) * 0.5 + 1.0
+    let bounds = gpu_mapped_bounds(this, under.path.bounds(), reach)
+    let shape = GpuCoverageShape.stroke(path = &under.path, stroke = &stroke, anti_alias = anti_alias)
+    match command.paint_style_or_color:
+        .color(color):
+            gpu_coverage_draw(this, shape, bounds, color)
+        .svg_paint_server_paint_style(paint_style):
+            let style = paint_style else trap("VERIFY: a null paint style")
+            let bounding = display_list.int_rect_to_float_rect(display_list.stroke_path_bounding_rect(&command))
+            let made = display_list.cpu_gradient_style_paint(style, bounding, anti_alias, command.opacity)
+            if made == none:
+                gpu_give_up(this, GpuFallback.stroke)
+                return
+            var paint = made else return
+            defer paint.release()
+            gpu_coverage_draw(this, shape, bounds, gfx.Color(), &paint)
+
 # mark: Lines ===================================================================================
 
 func gpu_draw_line_impl(base: display_list.DisplayListPlayer*, command: display_list.DrawLine):
@@ -206,7 +253,7 @@ func gpu_draw_line_impl(base: display_list.DisplayListPlayer*, command: display_
         defer under.path.release()
         defer display_list.cpu_stroke_release(&under.stroke)
         let bounds = under.path.bounds()
-        gpu_coverage_draw(this, .stroke(path = &under.path, stroke = &under.stroke), gpu_mapped_bounds(this, bounds, (f32)command.thickness + 1.0), command.color)
+        gpu_coverage_draw(this, .stroke(path = &under.path, stroke = &under.stroke, anti_alias = true), gpu_mapped_bounds(this, bounds, (f32)command.thickness + 1.0), command.color)
         return
     let local = gpu_rect_of(display_list.draw_line_bounding_rect(&command))
     let bounds = GpuRect(x = local.x - 1, y = local.y - 1, width = local.width + 2, height = local.height + 2)

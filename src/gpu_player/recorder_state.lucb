@@ -185,9 +185,6 @@ func gpu_draw_rect_impl(base: display_list.DisplayListPlayer*, command: display_
 func gpu_text_shadow_impl(base: display_list.DisplayListPlayer*, command: display_list.PaintTextShadow):
     gpu_give_up(gpu_player_of(base), GpuFallback.text_shadow)
 
-func gpu_stroke_path_impl(base: display_list.DisplayListPlayer*, command: display_list.StrokePath):
-    gpu_give_up(gpu_player_of(base), GpuFallback.stroke)
-
 func gpu_draw_ellipse_impl(base: display_list.DisplayListPlayer*, command: display_list.DrawEllipse):
     gpu_ellipse(gpu_player_of(base), command.rect, command.color, command.thickness)
 
@@ -198,7 +195,15 @@ func gpu_backdrop_filter_impl(base: display_list.DisplayListPlayer*, command: di
     gpu_give_up(gpu_player_of(base), GpuFallback.backdrop_filter)
 
 func gpu_nested_display_list_impl(base: display_list.DisplayListPlayer*, command: display_list.PaintNestedDisplayList):
-    gpu_give_up(gpu_player_of(base), GpuFallback.nested_display_list)
+    # DisplayListPlayerCpu::paint_nested_display_list: translated to the rectangle, the nested
+    # list (an iframe's) played by this player with no scroll offsets.
+    let this = gpu_player_of(base)
+    if not gpu_recording(this):
+        return
+    gpu_translate_impl(base, display_list.Translate(delta = command.rect.m_location))
+    var empty_scroll_state: display_list.ScrollStateSnapshot
+    let nested = command.display_list else trap("VERIFY: a null nested display list")
+    display_list.display_list_player_execute_nested(base, nested, &empty_scroll_state)
 
 func gpu_external_content_impl(base: display_list.DisplayListPlayer*, command: display_list.DrawExternalContent):
     gpu_give_up(gpu_player_of(base), GpuFallback.external_content)

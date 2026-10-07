@@ -360,7 +360,7 @@ func gpu_replay_run(player: DisplayListPlayerGpu*, pipelines: const GpuPipelines
         .mask:
             return try gpu_replay_instances(player, pipelines, target, draws, start, draw.image, clip_mask, gpu.Filter.nearest)
         .stages:
-            return try gpu_replay_instances(player, pipelines, target, draws, start, player.replay.table, clip_mask, gpu.Filter.nearest)
+            return try gpu_replay_instances(player, pipelines, target, draws, start, player.replay.table, clip_mask, gpu.Filter.nearest, draw.image)
         .image:
             let image = draw.image else return 1
             return try gpu_replay_instances(player, pipelines, target, draws, start, image, clip_mask, gpu.Filter.nearest)
@@ -389,7 +389,7 @@ func gpu_joins(a: const GpuDraw*, b: const GpuDraw*) -> bool:
 ## Draws an instanced run: `draws[start]` and the draws after it that join it, each its
 ## rectangle and instance values, with `image` at binding 1; how many it drew.
 func gpu_replay_instances(player: DisplayListPlayerGpu*, pipelines: const GpuPipelines*, target: const gpu.RenderTarget*, draws: const GpuDraw[], start: usize,
-                          image: gpu.Texture?, clip_mask: gpu.Texture?, filter: gpu.Filter) -> usize!:
+                          image: gpu.Texture?, clip_mask: gpu.Texture?, filter: gpu.Filter, extra: gpu.Texture? = none) -> usize!:
     let instances = &player.replay.instances
     ak.vector_clear(instances)
     var end = start
@@ -399,15 +399,18 @@ func gpu_replay_instances(player: DisplayListPlayerGpu*, pipelines: const GpuPip
         let draw = draws[end]
         ak.vector_append_t(instances, gpu.ShadeInstance(rect = [(f32)draw.area.x, (f32)draw.area.y, (f32)draw.area.width, (f32)draw.area.height], data = draw.data))
         end += 1
-    try gpu_shade_run(pipelines, target, ak.vector_span_const(instances), &draws[start].uniforms[0], image, clip_mask, filter)
+    try gpu_shade_run(pipelines, target, ak.vector_span_const(instances), &draws[start].uniforms[0], image, clip_mask, filter, extra)
     return end - start
 
-## One instanced draw of tile.frag with `uniforms` (32 floats), `image` at binding 1 and the clip
-## mask at binding 2.
+## One instanced draw of tile.frag with `uniforms` (32 floats), `image` at binding 1, the clip
+## mask at binding 2 and `extra` at binding 3.
 func gpu_shade_run(pipelines: const GpuPipelines*, target: const gpu.RenderTarget*, instances: const gpu.ShadeInstance[], uniforms: const f32*, image: gpu.Texture?,
-                   clip_mask: gpu.Texture?, filter: gpu.Filter) -> !:
+                   clip_mask: gpu.Texture?, filter: gpu.Filter, extra: gpu.Texture? = none) -> !:
     let bytes = u8[]((u8*)uniforms, 128)
-    if let mask = clip_mask:
+    if let third = extra:
+        let first = image else third
+        try gpu.shade_instances(target, pipelines.tile, instances, bytes, [first, clip_mask else first, third], filter)
+    elif let mask = clip_mask:
         try gpu.shade_instances(target, pipelines.tile, instances, bytes, [image else mask, mask], filter)
     elif let first = image:
         try gpu.shade_instances(target, pipelines.tile, instances, bytes, [first], filter)

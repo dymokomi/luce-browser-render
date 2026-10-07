@@ -86,12 +86,14 @@ func gpu_grown_clip(this: const DisplayListPlayerGpu*) -> GpuRect:
 enum GpuCoverageShape:
     fill(path: const raster.Path*, fill_rule: raster.FillRule, anti_alias: bool)
     rect(rect: raster.Rect)
-    stroke(path: const raster.Path*, stroke: const raster.Stroke*)
+    stroke(path: const raster.Path*, stroke: const raster.Stroke*, anti_alias: bool)
 
 ## Draws `shape` under the matrix in `color`: its coverage (the CPU rasterizer's, an opaque
 ## white fill's alpha) over the part of the tile it touches, placed in the atlas for this tile.
-func gpu_coverage_draw(this: DisplayListPlayerGpu*, shape: GpuCoverageShape, bounds: raster.Rect?, color: gfx.Color):
-    if (color.m_value >> 24) == 0:
+## With `paint`, the shape is painted with that paint's color stages instead (a gradient paint
+## server, recorder_gradients.lucb).
+func gpu_coverage_draw(this: DisplayListPlayerGpu*, shape: GpuCoverageShape, bounds: raster.Rect?, color: gfx.Color, paint: const raster.Paint*? = none):
+    if paint == none and (color.m_value >> 24) == 0:
         return
     let device_bounds = bounds else return
     let area = gpu_device_area(this, device_bounds) else return
@@ -101,18 +103,21 @@ func gpu_coverage_draw(this: DisplayListPlayerGpu*, shape: GpuCoverageShape, bou
     let ts = gpu_ctm(this).post_translate((f32)-area.x, (f32)-area.y)
     match shape:
         .fill(path, fill_rule, anti_alias):
-            var paint = gpu_white_paint(anti_alias)
-            pixmap.fill_path(path, &paint, fill_rule, ts, none)
+            var white = gpu_white_paint(anti_alias)
+            pixmap.fill_path(path, &white, fill_rule, ts, none)
         .rect(rect):
-            var paint = gpu_white_paint(true)
-            pixmap.fill_rect(rect, &paint, ts, none)
-        .stroke(path, stroke):
-            var paint = gpu_white_paint(true)
-            pixmap.stroke_path(path, &paint, stroke, ts, none)
+            var white = gpu_white_paint(true)
+            pixmap.fill_rect(rect, &white, ts, none)
+        .stroke(path, stroke, anti_alias):
+            var white = gpu_white_paint(anti_alias)
+            pixmap.stroke_path(path, &white, stroke, ts, none)
     let coverage = gpu_alpha_of(&pixmap)
     defer free(coverage) in memory.heap
     let entry = gpu_place(this, device, none, coverage, area.width, area.height, 0, 0) else return
     if not gpu_recording(this):
+        return
+    if let shaded = paint:
+        gpu_painted_mask_draw(this, shaded, entry, area)
         return
     gpu_mask_draw(this, entry, area, gpu_premultiplied(color))
 
@@ -156,7 +161,7 @@ func gpu_matrix_draw_rect(this: DisplayListPlayerGpu*, rect: gfx.DevicePixelRect
     var path = raster.PathBuilder.from_rect(r)
     defer path.release()
     let stroke = raster.Stroke(width = 1.0)
-    gpu_coverage_draw(this, .stroke(path = &path, stroke = &stroke), gpu_mapped_bounds(this, r, 1.0), color)
+    gpu_coverage_draw(this, .stroke(path = &path, stroke = &stroke, anti_alias = true), gpu_mapped_bounds(this, r, 1.0), color)
 
 ## fill_ellipse and draw_ellipse (`thickness` wide), under any transform: the oval's path filled
 ## or stroked, anti-aliased, as DisplayListPlayerCpu draws them.
@@ -168,7 +173,7 @@ func gpu_ellipse(this: DisplayListPlayerGpu*, rect: gfx.DevicePixelRect, color: 
     defer oval.release()
     if let width = thickness:
         let stroke = raster.Stroke(width = (f32)width)
-        gpu_coverage_draw(this, .stroke(path = &oval, stroke = &stroke), gpu_mapped_bounds(this, r, (f32)width), color)
+        gpu_coverage_draw(this, .stroke(path = &oval, stroke = &stroke, anti_alias = true), gpu_mapped_bounds(this, r, (f32)width), color)
         return
     gpu_coverage_draw(this, .fill(path = &oval, fill_rule = raster.FillRule.winding, anti_alias = true), r.transform(gpu_ctm(this)), color)
 

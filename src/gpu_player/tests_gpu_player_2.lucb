@@ -1,0 +1,45 @@
+#==============================================================================================
+#
+#   tests_gpu_player_2 - the GPU player against the CPU player: stroked paths
+#
+#   DESCRIPTION:
+#       More scenes of tests_gpu_player.lucb (its support functions draw and compare them):
+#       stroked paths with caps, joins, miters and dashes, also under a turn and a scale.
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+## A stroked zigzag of `width` from (x, y), with `cap`, `join` and `dashes` (none when empty).
+func test_stroke(scene: const TestList*, x: f32, y: f32, width: f32, cap: gfx.PathCapStyle, join: gfx.PathJoinStyle, dashes: const f32[], node: u64):
+    var path: gfx.Path
+    gfx.path_move_to(&path, gfx.FloatPoint(m_x = x, m_y = y))
+    gfx.path_line_to(&path, gfx.FloatPoint(m_x = x + 40.5, m_y = y + 60.0))
+    gfx.path_line_to(&path, gfx.FloatPoint(m_x = x + 80.0, m_y = y + 5.25))
+    gfx.path_quadratic_bezier_curve_to(&path, gfx.FloatPoint(m_x = x + 120.0, m_y = y + 90.0), gfx.FloatPoint(m_x = x + 150.0, m_y = y + 20.0))
+    var dash_array: ak.Vector[f32]
+    for d in dashes:
+        ak.vector_append_t(&dash_array, d)
+    test_add(scene, .stroke_path(display_list.StrokePath(cap_style = cap, join_style = join, miter_limit = 4.0, dash_array = dash_array, dash_offset = 3.0,
+                                                         path_bounding_rect = test_box((i32)x, (i32)y, 151, 91), path = path, opacity = 1.0,
+                                                         paint_style_or_color = .color(test_rgba(30, 60, 200, 230)), thickness = width,
+                                                         should_anti_alias = display_list.ShouldAntiAlias.yes)), node)
+
+test "gpu player: stroked paths are the CPU rasterizer's strokes":
+    let scene = test_list()
+    test_background(&scene)
+    let none_: f32[1] = [0.0]
+    let dashes: f32[2] = [12.0, 5.0]
+    test_stroke(&scene, 20.0, 20.0, 1.0, gfx.PathCapStyle.butt, gfx.PathJoinStyle.miter, none_[..<0], 1)
+    test_stroke(&scene, 200.0, 20.0, 7.0, gfx.PathCapStyle.round, gfx.PathJoinStyle.round, none_[..<0], 1)
+    test_stroke(&scene, 380.0, 20.0, 9.0, gfx.PathCapStyle.square, gfx.PathJoinStyle.miter, dashes, 1)
+    test_stroke(&scene, 20.0, 160.0, 4.0, gfx.PathCapStyle.butt, gfx.PathJoinStyle.bevel, dashes, 1)
+    let tilted = test_transform(&scene, 20.0, 1.0, 290.0, 200.0, 1)
+    test_stroke(&scene, 210.0, 150.0, 5.0, gfx.PathCapStyle.round, gfx.PathJoinStyle.miter, none_[..<0], tilted)
+    let scaled = test_transform(&scene, 0.0, 1.25, 470.0, 160.0, 1)
+    test_stroke(&scene, 470.0, 160.0, 3.0, gfx.PathCapStyle.butt, gfx.PathJoinStyle.round, dashes, scaled)
+    let snapshots = [test_snapshot(0.0, 0.0), test_snapshot(0.0, 4.0)]
+    let stats = test_compare("strokes", &scene, snapshots, 3, 40) else return
+    if stats.cpu_tiles > 0:
+        trap("a stroked path sent a tile to the CPU player")

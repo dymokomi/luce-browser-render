@@ -32,7 +32,9 @@
 //                       coverage (Plus scales the layer by it instead), drawn without blending
 //   kind 7  stages      a shaded paint (a gradient): the raster pipeline's color stages from
 //                       the program at texel k0.x of the float table at binding 1
-//                       (stages.glsl), over the draw's rectangle
+//                       (stages.glsl), over the draw's rectangle; when k0.y is 1, times the
+//                       coverage atlas's texels (binding 3) of a mask whose top left is k1.xy
+//                       in the tile and k1.zw in the atlas
 #version 450
 #extension GL_GOOGLE_include_directive : require
 #include "coverage.glsl"
@@ -189,6 +191,9 @@ void main() {
         coverage = params.k1.w;
     } else if (kind == kind_stages) {
         color = run_program(source, int(params.k0.x), p);
+        if (params.k0.y > 0.5) {
+            coverage = texelFetch(backdrop, ivec2(floor(p - params.k1.xy)) + ivec2(params.k1.zw), 0).r;
+        }
     } else {
         color = texelFetch(source, ivec2(floor(p - params.k0.xy)), 0);
         coverage = params.k0.w;

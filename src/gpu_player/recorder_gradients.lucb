@@ -22,6 +22,41 @@
 ## The most floats one program may take (a gradient of about 330 stops).
 let gpu_program_floats: usize = 4096
 
+## Writes `paint`'s stage program under the current matrix into the recording's table; its first
+## texel, or none (the tile given up) when it has no GPU form or the table is full.
+func gpu_paint_program(this: DisplayListPlayerGpu*, paint: const raster.Paint*) -> f32?:
+    if this.program.length == 0:
+        this.program = (new f32[gpu_program_floats] --- in memory.heap) else trap("gpu_player: out of memory")
+    let made = raster.paint_stage_program(paint, gpu_ctm(this), this.program)
+    if made == none:
+        gpu_give_up(this, GpuFallback.gradient)
+        return none
+    let written = made else return none
+    let start = ak.vector_size(&this.table) // 4
+    if start + written // 4 > gpu_table_width * gpu_table_height:
+        gpu_give_up(this, GpuFallback.gradient)
+        return none
+    for i in 0..<written:
+        ak.vector_append_t(&this.table, this.program[i])
+    return (f32)start
+
+## A coverage mask from the atlas (`entry`, drawn at `dst`) painted with `paint`'s stages.
+func gpu_painted_mask_draw(this: DisplayListPlayerGpu*, paint: const raster.Paint*, entry: GpuAtlasEntry, dst: GpuRect):
+    if not dst.intersects(this.state.clip):
+        return
+    let start = gpu_paint_program(this, paint) else return
+    let atlas = this.atlas.texture else return
+    var draw = gpu_shader_draw(this, GpuDrawKind.stages, gpu_kind_stages, dst)
+    draw.image = atlas
+    let k = gpu_uniform_header
+    draw.uniforms[k] = start
+    draw.uniforms[k + 1] = 1.0
+    draw.uniforms[k + 4] = (f32)dst.x
+    draw.uniforms[k + 5] = (f32)dst.y
+    draw.uniforms[k + 6] = (f32)entry.x
+    draw.uniforms[k + 7] = (f32)entry.y
+    gpu_append(this, draw)
+
 ## Draws `fill` (its rectangle with its paint) and releases its paint.
 func gpu_gradient_draw(this: DisplayListPlayerGpu*, fill: display_list.CpuGradientFill*):
     defer fill.paint.release()
@@ -38,21 +73,9 @@ func gpu_gradient_draw(this: DisplayListPlayerGpu*, fill: display_list.CpuGradie
     let area = rect.intersected(this.state.clip)
     if area.is_empty():
         return
-    if this.program.length == 0:
-        this.program = (new f32[gpu_program_floats] --- in memory.heap) else trap("gpu_player: out of memory")
-    let made = raster.paint_stage_program(&fill.paint, gpu_ctm(this), this.program)
-    if made == none:
-        gpu_give_up(this, GpuFallback.gradient)
-        return
-    let written = made else return
-    let start = ak.vector_size(&this.table) // 4
-    if start + written // 4 > gpu_table_width * gpu_table_height:
-        gpu_give_up(this, GpuFallback.gradient)
-        return
-    for i in 0..<written:
-        ak.vector_append_t(&this.table, this.program[i])
+    let start = gpu_paint_program(this, &fill.paint) else return
     var draw = gpu_shader_draw(this, GpuDrawKind.stages, gpu_kind_stages, area)
-    draw.uniforms[gpu_uniform_header] = (f32)start
+    draw.uniforms[gpu_uniform_header] = start
     gpu_append(this, draw)
 
 func gpu_linear_gradient_impl(base: display_list.DisplayListPlayer*, command: display_list.PaintLinearGradient):
