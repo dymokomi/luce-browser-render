@@ -407,6 +407,30 @@ test "path_font_provider":
         path_font_provider_load_all_fonts_from_uri(named, ak.sv("resource://fonts"))
         assert(ak.hash_map_is_empty(&named.m_typeface_by_family))
 
+test "path_font_provider maps fonts and loads a family when it is asked for":
+    with memory.heap:
+        let provider = path_font_provider_create()
+        path_font_provider_load_all_fonts_from_uri(provider, ak.sv("file://tests/web_fonts/fonts"))
+        # The walk records the OpenType faces by family and keeps no file mapped; only the
+        # WOFF file (decompressed into memory) loads at once.
+        assert(ak.hash_map_size(&provider.m_typeface_by_family) == 1)
+        assert(ak.hash_map_contains_k(&provider.m_unloaded_by_family, ak.fly_string_from_str("lato")))
+        for file in ak.vector_span_const(&provider.m_font_files):
+            assert(file.font_data == none)
+        var count: u32 = 0
+        let callback = ak.Function1[Typeface*, unit](call = test_count_typefaces, context = &count)
+        path_font_provider_for_each_typeface_with_family_name_impl(provider.system_font_provider(), ak.fly_string_from_str("Lato"), callback)
+        assert(count == 1)
+        assert(not ak.hash_map_contains_k(&provider.m_unloaded_by_family, ak.fly_string_from_str("Lato")))
+        assert(ak.hash_map_size(&provider.m_typeface_by_family) == 2)
+        # Its file is mapped now, and stays mapped for the typeface.
+        var mapped = 0
+        for file in ak.vector_span_const(&provider.m_font_files):
+            if let font_data = file.font_data:
+                assert(font_data.m_mapped_file != none and font_data_bytes(font_data).length > 0)
+                mapped += 1
+        assert(mapped == 1)
+
 test "font_database_defaults":
     if not tests_r10_four_cc_is_ported:
         return

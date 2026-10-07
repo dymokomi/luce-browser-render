@@ -16,6 +16,7 @@ types_typeface_skia.lucb
 types_unicode_range.lucb
 types_traits.lucb
 font_allocators.lucb
+mapped_file.lucb
 font.lucb
 font_data.lucb
 font_database.lucb

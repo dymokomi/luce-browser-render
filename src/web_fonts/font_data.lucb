@@ -6,7 +6,8 @@
 #       Port of Libraries/LibGfx/Font/FontData.cpp (lines 1-40). The C++ Variant is two fields
 #       (types_font_data.lucb). LibCore is not ported (DESIGN.md §1.1): a Core::Resource is
 #       opaque in ak, so a FontData made from one cannot answer its bytes; the port's
-#       PathFontProvider reads font files into ByteBuffers instead (path_font_provider.lucb).
+#       PathFontProvider holds the Core::MappedFile of a file resource instead
+#       (font_data_create_from_mapped_file, mapped_file.lucb).
 #
 #==============================================================================================
 
@@ -22,8 +23,17 @@ pub func font_data_create_from_resource(resource: const ak.CoreResource*) -> Fon
     font_data_construct_core_resource(font_data, resource)
     return font_data
 
+## FontData::create_from_resource of a file resource, whose data() is its MappedFile's bytes:
+## the FontData keeps `mapped_file`. (Port addition, see the header.)
+pub func font_data_create_from_mapped_file(mapped_file: CoreMappedFile*) -> FontData*:
+    let font_data = new FontData else trap("out of memory")
+    font_data.m_mapped_file = mapped_file
+    return font_data
+
 ## Ported from Libraries/LibGfx/Font/FontData.cpp:21 Gfx::FontData::bytes.
 pub func font_data_bytes(this: const FontData*) -> const u8[]:
+    if let mapped_file = this.m_mapped_file:
+        return core_mapped_file_bytes(mapped_file)
     if this.m_resource != none:
         trap("unported: Core::Resource::data (LibCore is not ported)")
     return ak.byte_buffer_bytes_const(&this.m_byte_buffer)

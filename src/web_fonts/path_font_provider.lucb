@@ -8,8 +8,9 @@
 #       functions of Libraries/LibGfx/Font/PathFontProvider.h (lines 1-38).
 #       Core::Resource::load_from_uri and for_each_descendant_file (LibCore, not ported) are
 #       luce-std's walk of the directory a `file://` URI names (files.walk_with, symbolic
-#       links below the root not followed), and each font file is read with files.read into
-#       a ByteBuffer that the typefaces made from it share. `resource://` URIs (Ladybird's
+#       links below the root not followed). Font files are mapped (Core::MappedFile,
+#       mapped_file.lucb), and a family's faces load when it is first asked for ("Loading
+#       fonts" below). `resource://` URIs (Ladybird's
 #       resource root) are not supported: the embedder passes file URIs. The provider and
 #       everything it loads live in the C heap (font_allocators.lucb).
 #
@@ -62,6 +63,14 @@ func number_of_fonts_in_ttc(bytes: const u8[]) -> u32:
     return num_fonts
 
 # mark: Loading fonts ============================================================================
+#
+# The donor maps every font file (Core::Resource holds a Core::MappedFile) and parses each face
+# when it walks the directory. The port maps a file only to read its faces' family names, then
+# unmaps it; a family's faces are mapped and parsed when the family is first asked for
+# (path_font_provider_family). A system has hundreds of font files (545 MB on macOS) and a
+# page uses a handful of families, so only those are ever in memory, and only the pages of
+# them that text reads. Lookups (get_font, for_each_typeface_with_family_name) answer what
+# the donor's would, in its order: the faces of a family in the order of the walk.
 
 ## Reads the whole file at `path` (Core::Resource::data of a file resource), or none.
 func path_font_provider_read_file(path: c.str) -> ak.ByteBuffer?:
@@ -71,13 +80,14 @@ func path_font_provider_read_file(path: c.str) -> ak.ByteBuffer?:
     ak.byte_buffer_try_append_span_u8(&buffer, data.value) else return none
     return buffer
 
-## The FontData of the file at `path` (a file system path), or none when it cannot be read:
+## The FontData of the file at `path` (a file system path), or none when it cannot be mapped:
 ## `FontData::create_from_resource(Core::Resource::load_from_filesystem(path))`, the resource
-## read as load_all_fonts_from_uri reads it. (Integration addition: the display list's tests
+## mapped as load_all_fonts_from_uri maps it. (Integration addition: the display list's tests
 ## load their fonts with it.)
 pub func font_data_create_from_file(path: str) -> FontData*?:
-    let bytes = path_font_provider_read_file(path_font_provider_c_string(path)) else return none
-    return font_data_create_from_byte_buffer(bytes)
+    let mapped_file: CoreMappedFile*? = core_mapped_file_map(path_font_provider_c_string(path)) catch:
+        recover none
+    return font_data_create_from_mapped_file(mapped_file else return none)
 
 ## for_each_descendant_file's walk: loads every regular file of the tree into `provider`.
 struct PathFontProviderWalk: files.WalkVisitor:
@@ -96,6 +106,15 @@ func path_font_provider_add_typeface(this: PathFontProvider*, font: Typeface*):
     let family = ak.hash_map_get_k(&this.m_typeface_by_family, family_name) else trap("VERIFY_NOT_REACHED")
     ak.vector_append_t(family, font)
 
+## Records the face `ttc_index` of the file m_font_files[file] under `family_name`, to load when
+## the family is first asked for.
+func path_font_provider_add_unloaded(this: PathFontProvider*, family_name: str, file: usize, ttc_index: u32):
+    let family = ak.fly_string_from_str(family_name)
+    if ak.hash_map_get_k(&this.m_unloaded_by_family, family) == none:
+        _ = ak.hash_map_set(&this.m_unloaded_by_family, family, ak.Vector[UnloadedTypeface]())
+    let faces = ak.hash_map_get_k(&this.m_unloaded_by_family, family) else trap("VERIFY_NOT_REACHED")
+    ak.vector_append_t(faces, UnloadedTypeface(file = file, ttc_index = ttc_index))
+
 ## The body of load_all_fonts_from_uri's for_each_descendant_file callback for one file.
 func path_font_provider_load_font_file(this: PathFontProvider*, uri: str):
     var path: ak.LexicalPath = ---
@@ -104,28 +123,89 @@ func path_font_provider_load_font_file(this: PathFontProvider*, uri: str):
     let is_woff = ak.lexical_path_has_extension(&path, ak.sv(".woff"))
     if not is_open_type and not is_woff:
         return
-    # resource.data(): the port reads the file into a ByteBuffer the typefaces share.
-    let buffer = path_font_provider_read_file(path_font_provider_c_string(uri)) else return
     if is_open_type:
-        let font_count = number_of_fonts_in_ttc(ak.byte_buffer_bytes_const(&buffer))
+        let file_path = path_font_provider_terminated_copy(uri)
+        # resource.data(): the file's mapping, kept only while its faces' names are read.
+        let mapped_file: CoreMappedFile*? = core_mapped_file_map((c.str)file_path) catch:
+            recover none
+        if mapped_file == none:
+            free(file_path.bytes)
+            return
+        let mapping = mapped_file else return
+        defer core_mapped_file_destroy(mapping)
+        let bytes = core_mapped_file_bytes(mapping)
+        let file = ak.vector_size(&this.m_font_files)
+        var found = false
+        let font_count = number_of_fonts_in_ttc(bytes)
         for ttc_index in 0..<font_count:
-            let font_data = font_data_create_from_byte_buffer(buffer)
-            let font_or_error: Typeface*? = typeface_try_load_from_font_data(font_data, ttc_index) catch:
+            # Typeface::try_load_from_resource and font->family(), deferred: the face's family
+            # name is all the walk reads.
+            let family_name: str? = opentype.sfnt_family_name(bytes, ttc_index) catch:
                 recover none
-            if let font = font_or_error:
-                path_font_provider_add_typeface(this, font)
+            if let name = family_name:
+                path_font_provider_add_unloaded(this, name, file, ttc_index)
+                if name.length > 0:
+                    free(name.bytes)
+                found = true
+        if found:
+            ak.vector_append_t(&this.m_font_files, PathFontFile(path = file_path, font_data = none))
+        else:
+            free(file_path.bytes)
     else:
+        # WOFF files are decompressed into memory when they load, so they load now, as in the
+        # donor (system font directories rarely hold any).
+        let buffer = path_font_provider_read_file(path_font_provider_c_string(uri)) else return
         let font_or_error: Typeface*? = woff_try_load_from_bytes(ak.byte_buffer_bytes_const(&buffer)) catch:
+            recover none
+        if let font = font_or_error:
+            path_font_provider_add_typeface(this, font)
+
+## The FontData of m_font_files[file], mapped the first time a face of the file loads and
+## shared by its faces (the donor's typefaces of one file share its Core::Resource).
+func path_font_provider_file_data(this: PathFontProvider*, file: usize) -> FontData*?:
+    let font_file = ak.vector_at(&this.m_font_files, file)
+    if let font_data = font_file.font_data:
+        return font_data
+    let mapped_file: CoreMappedFile*? = core_mapped_file_map((c.str)font_file.path) catch:
+        recover none
+    let font_data = font_data_create_from_mapped_file(mapped_file else return none)
+    font_file.font_data = font_data
+    return font_data
+
+## The typefaces of `family` (m_typeface_by_family's entry), loading the family's faces the
+## first time it is asked for; none when no font has that family. The typefaces live in the C
+## heap with the provider, whatever allocator is current.
+func path_font_provider_family(this: PathFontProvider*, family: ak.FlyString) -> ak.Vector[Typeface*]*?:
+    if ak.hash_map_contains_k(&this.m_unloaded_by_family, family):
+        let c_heap = font_allocators_c_heap()
+        let previous = font_allocators_enter(&c_heap)
+        defer font_allocators_leave(previous)
+        with memory.heap:
+            path_font_provider_load_family(this, family)
+    return ak.hash_map_get_k(&this.m_typeface_by_family, family)
+
+## Loads the faces recorded under `family`: Typeface::try_load_from_resource for each, in the
+## order the walk found them.
+func path_font_provider_load_family(this: PathFontProvider*, family: ak.FlyString):
+    var faces = ak.hash_map_take_k(&this.m_unloaded_by_family, family) else return
+    defer ak.vector_clear(&faces)
+    for face in ak.vector_span_const(&faces):
+        let font_data = path_font_provider_file_data(this, face.file) else continue
+        let font_or_error: Typeface*? = typeface_try_load_from_font_data(font_data, face.ttc_index) catch:
             recover none
         if let font = font_or_error:
             path_font_provider_add_typeface(this, font)
 
 ## A NUL-terminated copy of `text` for the C boundary.
 func path_font_provider_c_string(text: str) -> c.str:
+    return (c.str)path_font_provider_terminated_copy(text)
+
+## A copy of `text` with a NUL after its last byte, which the copy does not count.
+func path_font_provider_terminated_copy(text: str) -> str:
     let bytes = new u8[text.length + 1] else trap("out of memory")
     memory.copy(bytes, text.bytes, text.length)
     bytes[text.length] = 0
-    return (c.str)(str)bytes[0..<text.length]
+    return (str)bytes[0..<text.length]
 
 ## Ported from Libraries/LibGfx/Font/PathFontProvider.cpp:42 Gfx::PathFontProvider::load_all_fonts_from_uri.
 ## The fonts' bytes, typefaces and the family table live in the C heap with the provider
@@ -187,7 +267,7 @@ func path_font_provider_compute_default_font_variation_settings(point_size: f32,
 ## Ported from Libraries/LibGfx/Font/PathFontProvider.cpp:81 Gfx::PathFontProvider::get_font (override).
 pub func path_font_provider_get_font_impl(base: SystemFontProvider*, family: ak.FlyString, point_size: f32, weight: u32, width: u32, slope: u32, font_variation_settings: FontVariationSettings?, shape_features: ak.Vector[ShapeFeature]?) -> Font*?:
     let this = (PathFontProvider*)base
-    let typefaces = ak.hash_map_get_k(&this.m_typeface_by_family, family) else return none
+    let typefaces = path_font_provider_family(this, family) else return none
     for typeface in ak.vector_span_const(typefaces):
         if (u32)typeface_weight(typeface) == weight and (u32)typeface_width(typeface) == width and (u32)typeface_slope(typeface) == slope:
             let variations = font_variation_settings else path_font_provider_compute_default_font_variation_settings(point_size, weight, width)
@@ -199,7 +279,7 @@ pub func path_font_provider_get_font_impl(base: SystemFontProvider*, family: ak.
 ## Ported from Libraries/LibGfx/Font/PathFontProvider.cpp:144 Gfx::PathFontProvider::for_each_typeface_with_family_name (override).
 pub func path_font_provider_for_each_typeface_with_family_name_impl(base: SystemFontProvider*, family_name: ak.FlyString, callback: ak.Function1[Typeface*, unit]):
     let this = (PathFontProvider*)base
-    let typefaces = ak.hash_map_get_k(&this.m_typeface_by_family, family_name) else return
+    let typefaces = path_font_provider_family(this, family_name) else return
     for typeface in ak.vector_span_const(typefaces):
         ak.function1_call(&callback, typeface)
 

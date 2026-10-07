@@ -19,3 +19,6 @@
 pub struct FontData:
     pub var m_byte_buffer: ak.ByteBuffer
     pub var m_resource: const ak.CoreResource*?
+    # Port addition: the Core::MappedFile a file Core::Resource holds (mapped_file.lucb), which
+    # the port's PathFontProvider maps without the resource.
+    pub var m_mapped_file: CoreMappedFile*?

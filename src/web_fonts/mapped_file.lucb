@@ -1,0 +1,68 @@
+#==============================================================================================
+#
+#   mapped_file - Core::MappedFile: a file's bytes, mapped read-only
+#
+#   DESCRIPTION:
+#       Port of Libraries/LibCore/MappedFile.cpp (lines 1-72), the read-only mode the font
+#       provider uses: the file is mapped shared and read-only, and its descriptor closed at
+#       once. A font file's pages come into memory only as they are read, belong to the file
+#       (clean, the system drops them under pressure) and are shared with every process that
+#       maps the same file, so the system's fonts cost almost nothing until text uses them.
+#
+#       Addition: luce-std has no mapping of files yet (requested from LUCE_LANG as
+#       `files.map`). Until it does, the mapping is POSIX mmap here, and on Windows the file
+#       is read into memory instead (the donor maps it there through CreateFileMapping).
+#       Mappings live outside every allocator, so a MappedFile may be kept by anything.
+#
+#==============================================================================================
+
+extern func mapped_file_mmap as "mmap"(address: void*?, length: usize, protection: i32, flags: i32, descriptor: i32, offset: i64) -> void*?
+extern func mapped_file_munmap as "munmap"(address: void*, length: usize) -> i32
+
+## PROT_READ and MAP_SHARED, the same on macOS and Linux.
+let mapped_file_protection_read: i32 = 1
+let mapped_file_map_shared: i32 = 1
+
+## Core::MappedFile (Libraries/LibCore/MappedFile.h:20): the bytes of a file, mapped or (where
+## the port cannot map) read, until core_mapped_file_destroy.
+pub struct CoreMappedFile:
+    pub var m_data: const u8[]
+    ## Whether m_data is a mapping to unmap.
+    var m_is_mapping: bool
+    ## The bytes read instead where the port cannot map (Windows), which own m_data.
+    var m_read: interop.Owned[const u8[]]?
+
+## Ported from Libraries/LibCore/MappedFile.cpp:16 Core::MappedFile::map (Mode::ReadOnly):
+## open, then map_from_fd_and_close. The MappedFile itself lives in the C heap.
+pub func core_mapped_file_map(path: c.str) -> CoreMappedFile*!:
+    if os.windows:
+        with memory.heap:
+            let read = try files.read(path)
+            return new CoreMappedFile(m_data = read.value, m_is_mapping = false, m_read = read) else trap("out of memory")
+    var file = try files.File.open(path)
+    # ScopeGuard fd_close_guard: the mapping outlives the descriptor.
+    defer file.destroy()
+    let descriptor = file.descriptor() else error(ak.ak_error, "the file is closed")
+    let size = (usize)(try file.metadata()).size
+    var data: const u8[]
+    # POSIX mmap rejects a zero length: an empty file maps to no bytes.
+    if size > 0:
+        let mapped = mapped_file_mmap(none, size, mapped_file_protection_read, mapped_file_map_shared, descriptor, 0) else error(ak.ak_error, "the file could not be mapped")
+        if (usize)mapped == ~(usize)0:
+            error(ak.ak_error, "the file could not be mapped")
+        data = u8[]((u8*)mapped, size)
+    with memory.heap:
+        return new CoreMappedFile(m_data = data, m_is_mapping = size > 0) else trap("out of memory")
+
+## Ported from Libraries/LibCore/MappedFile.h:31 Core::MappedFile::bytes.
+pub func core_mapped_file_bytes(this: const CoreMappedFile*) -> const u8[]:
+    return this.m_data
+
+## Ported from Libraries/LibCore/MappedFile.cpp:65 Core::MappedFile::~MappedFile: unmaps the
+## file and frees the MappedFile.
+pub func core_mapped_file_destroy(this: CoreMappedFile*):
+    if this.m_is_mapping:
+        _ = mapped_file_munmap((void*)this.m_data.data, this.m_data.length)
+    if let read = this.m_read:
+        read.release()
+    free(this) in memory.heap

@@ -20,5 +20,6 @@ import c
 from luce_browser_foundation import gc
 from luce_std import files, math, math32
 from luce_fonts import opentype, shaping
+import interop
 import memory
 import os

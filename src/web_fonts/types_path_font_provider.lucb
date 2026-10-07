@@ -17,10 +17,27 @@ pub struct PathFontProvider: IsPathFontProvider, IsSystemFontProvider:
     pub var system_font_provider_base: SystemFontProvider  # primary base
     pub var m_typeface_by_family: ak.HashMap[ak.FlyString, ak.Vector[Typeface*], ak.AsciiCaseInsensitiveFlyStringTraits]
     pub var m_name: ak.String  # C++ default: { "Path"_string }
+    # Port addition (path_font_provider.lucb, "Loading fonts"): the font files found, and the
+    # faces not loaded yet by family. A family's faces load when it is first asked for.
+    pub var m_font_files: ak.Vector[PathFontFile]
+    pub var m_unloaded_by_family: ak.HashMap[ak.FlyString, ak.Vector[UnloadedTypeface], ak.AsciiCaseInsensitiveFlyStringTraits]
 
     func path_font_provider() -> PathFontProvider*: return (PathFontProvider*)&self
 
     func system_font_provider() -> SystemFontProvider*: return (SystemFontProvider*)&self
+
+## A font file the provider found (port addition): its path, and its bytes once a face of it
+## is loaded.
+pub struct PathFontFile:
+    ## NUL-terminated (the NUL is not counted).
+    pub var path: str
+    pub var font_data: FontData*?
+
+## A face the provider found but has not loaded (port addition): the face `ttc_index` of the
+## file m_font_files[file].
+pub struct UnloadedTypeface:
+    pub var file: usize
+    pub var ttc_index: u32
 
 ## The non-zero default member initializers of Gfx::PathFontProvider; the constructor runs them first.
 pub func path_font_provider_init_fields(this: PathFontProvider*):
