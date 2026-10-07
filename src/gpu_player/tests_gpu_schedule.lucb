@@ -1,0 +1,156 @@
+#==============================================================================================
+#
+#   tests_gpu_schedule - binning, the raster budget, drawing ahead and idle time
+#
+#   DESCRIPTION:
+#       A tall page of rectangles, shapes under a rotation and a scale, a clipped scroller with
+#       an inner offset and a stream translation crossing many tiles: drawn by the GPU
+#       compositor (tiles playing only their bins' commands) and compared with the CPU player
+#       at several offsets. Then the schedule: with no raster budget a scroll leaves a visible
+#       tile not ready (shown as the background), idle time draws it, and the next frame is the
+#       CPU player's; idle time draws the tiles ahead, so a later scroll finds them kept.
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+## The scroll frame of the scroller inside the page.
+let test_inner_frame: u64 = 2
+
+## A page 3,000 pixels tall: bands of rectangles, a turned and a scaled group, and a clipped
+## scroller (frame 2) whose content moves with its own offset.
+func test_tall_page() -> TestList:
+    let scene = test_list()
+    test_background(&scene)
+    for i in 0..<(i32)60:
+        test_add(&scene, .fill_rect(display_list.FillRect(rect = test_box(10 + (i * 37) % 500, i * 50, 180, 34), color = test_rgba((u8)(i * 4), 90, (u8)(250 - i * 4), 255))), 1)
+    let turned = test_transform(&scene, 25.0, 1.0, 300.0, 700.0, 1)
+    test_shapes(&scene, 250, 650, turned)
+    let scaled = test_transform(&scene, 0.0, 1.5, 100.0, 1500.0, 1)
+    test_shapes(&scene, 100, 1500, scaled)
+    let clip = display_list.accumulated_visual_context_tree_append(scene.tree, display_list.VisualContextData.clip_data(display_list.ClipData(rect = test_box(60, 1900, 500, 400))), 1)
+    let inner = display_list.accumulated_visual_context_tree_append(scene.tree, display_list.VisualContextData.scroll_data(display_list.ScrollData(scroll_frame_index = test_inner_frame, is_sticky = false)), clip)
+    for i in 0..<(i32)20:
+        test_add(&scene, .fill_rect(display_list.FillRect(rect = test_box(70 + i * 9, 1900 + i * 60, 300, 40), color = test_rgba(20, (u8)(i * 12), 60, 255))), inner)
+    # A stream translation: its layer is played whole, still the same pixels.
+    test_add(&scene, .save(display_list.Save()), 0)
+    test_add(&scene, .translate(display_list.Translate(delta = gfx.IntPoint(m_x = 5, m_y = 9))), 0)
+    test_add(&scene, .fill_rect(display_list.FillRect(rect = test_box(600, 20, 60, 60), color = test_rgba(250, 200, 0, 255))), 0)
+    test_add(&scene, .restore(display_list.Restore()), 0)
+    return scene
+
+## A snapshot with the page scrolled by `y` and the scroller by `inner` device pixels.
+func test_tall_snapshot(y: f32, inner: f32) -> display_list.ScrollStateSnapshot:
+    var snapshot = test_snapshot(0.0, y)
+    ak.vector_append_t(&snapshot.m_device_offsets, gfx.FloatPoint(m_x = 0.0, m_y = -inner))
+    return snapshot
+
+test "gpu player: tiles play only their bins' commands, with the same pixels":
+    let scene = test_tall_page()
+    let snapshots = [test_tall_snapshot(0.0, 0.0), test_tall_snapshot(640.0, 0.0), test_tall_snapshot(1480.0, 0.0), test_tall_snapshot(1850.0, 0.0),
+                     test_tall_snapshot(1850.0, 300.0), test_tall_snapshot(2600.0, 120.0)]
+    let stats = test_compare("bins", &scene, snapshots, 3, 400) else return
+    if stats.played_commands * 2 > stats.layer_commands:
+        print(f"bins: tiles played {stats.played_commands} of {stats.layer_commands} commands")
+        trap("binning did not leave out the commands of other tiles")
+
+## The compositor's frame of `scene` at `snapshot` (complete or within the budget) compared
+## with the CPU player's; traps on more than `max_pixels` pixels off by more than 3.
+func test_schedule_frame(name: str, compositor: GpuCompositor*, texture: gpu.Texture, scene: const TestList*, snapshot: const display_list.ScrollStateSnapshot*, complete: bool,
+                         expected: u8[], actual: u8[], max_pixels: usize) -> usize:
+    test_cpu_frame(scene, snapshot, expected)
+    test_gpu_frame(compositor, texture, scene, snapshot, actual, complete) catch failure: trap(f"{name}: {failure.message}")
+    var differing: usize = 0
+    var at: usize = 0
+    while at < expected.length:
+        for channel in 0..<(usize)4:
+            let d = (i32)expected[at + channel] - (i32)actual[at + channel]
+            if d > 3 or d < -3:
+                differing += 1
+                break
+        at += 4
+    if differing > max_pixels:
+        print(f"{name}: {differing} pixels differ")
+        trap("the GPU frame is not the CPU player's")
+    return differing
+
+test "gpu player: the raster budget leaves visible tiles for idle time, which also draws ahead":
+    let scene = test_tall_page()
+    with memory.heap:
+        var device = gpu.Device.open() catch failure: return
+        defer device.destroy()
+        var texture = gpu.Texture.create(device, (u32)test_width, (u32)test_height, gpu.Format.rgba8_linear) catch failure: trap(failure.message)
+        defer texture.destroy()
+        let compositor = gpu_compositor_create()
+        defer gpu_compositor_destroy(compositor)
+        gpu_compositor_set_budget(compositor, 0)
+        let bytes = (usize)test_width * (usize)test_height * 4
+        let expected = (new u8[bytes] --- in memory.heap) else trap("out of memory")
+        let actual = (new u8[bytes] --- in memory.heap) else trap("out of memory")
+        defer free(expected) in memory.heap
+        defer free(actual) in memory.heap
+        gpu_player_reset_stats()
+        # A new list: every visible tile is drawn, whatever the budget.
+        let top = test_tall_snapshot(0.0, 0.0)
+        _ = test_schedule_frame("first frame", compositor, texture, &scene, &top, false, expected, actual, 400)
+        if gpu_compositor_incomplete(compositor):
+            trap("a new list's frame showed tiles before they were ready")
+        # A scroll into the next row of tiles: one visible tile is drawn, the other waits.
+        let down = test_tall_snapshot(400.0, 0.0)
+        let differing = test_schedule_frame("budget", compositor, texture, &scene, &down, false, expected, actual, (usize)(test_width * test_height))
+        if not gpu_compositor_incomplete(compositor) or differing == 0:
+            trap("with no budget, a scroll's uncovered tiles were all drawn")
+        # Idle time draws it and the tiles ahead; the next frame is complete and the CPU's.
+        let deadline = time.now() + 5000000000
+        let tiles_before = gpu_player_stats().idle_tiles
+        var more = true
+        while more:
+            let next = gpu_compositor_idle(compositor, scene.list, &down, test_width, test_height, deadline) catch failure: trap(failure.message)
+            more = next == 0
+        if gpu_player_stats().idle_tiles == tiles_before:
+            trap("idle time drew no tile")
+        _ = test_schedule_frame("after idle", compositor, texture, &scene, &down, false, expected, actual, 400)
+        if gpu_compositor_incomplete(compositor):
+            trap("idle time left visible tiles not ready")
+        # The tile ahead was drawn in idle time: scrolling onto it needs nothing new.
+        let gpu_tiles = gpu_player_stats().gpu_tiles
+        let further = test_tall_snapshot(700.0, 0.0)
+        _ = test_schedule_frame("ahead", compositor, texture, &scene, &further, false, expected, actual, 400)
+        if gpu_compositor_incomplete(compositor) or gpu_player_stats().gpu_tiles != gpu_tiles:
+            trap("the tiles ahead of the scroll were not drawn in idle time")
+        if gpu_player_stats().not_ready_tiles == 0:
+            trap("the frame with no budget counted no tile not ready")
+
+test "gpu player: while the page scrolls, a filtered tile is a preview, drawn in full once asked":
+    let scene = test_list()
+    test_background(&scene)
+    let blur = gfx.filter_blur(6.0, 6.0)
+    let blurred = display_list.accumulated_visual_context_tree_append(scene.tree, .effects_data(value = display_list.EffectsData(opacity = 1.0, blend_mode = gfx.CompositingAndBlendingOperator.normal, gfx_filter = blur)), 1)
+    for i in 0..<(i32)12:
+        test_add(&scene, .fill_rect(display_list.FillRect(rect = test_box(40, 80 + i * 200, 300, 60), color = test_rgba(30, 90, 200, 255))), 1)
+        test_add(&scene, .fill_rect(display_list.FillRect(rect = test_box(380, 100 + i * 200, 120, 80), color = test_rgba(220, 60, 40, 255))), blurred)
+    with memory.heap:
+        var device = gpu.Device.open() catch failure: return
+        defer device.destroy()
+        var texture = gpu.Texture.create(device, (u32)test_width, (u32)test_height, gpu.Format.rgba8_linear) catch failure: trap(failure.message)
+        defer texture.destroy()
+        let compositor = gpu_compositor_create()
+        defer gpu_compositor_destroy(compositor)
+        let bytes = (usize)test_width * (usize)test_height * 4
+        let expected = (new u8[bytes] --- in memory.heap) else trap("out of memory")
+        let actual = (new u8[bytes] --- in memory.heap) else trap("out of memory")
+        defer free(expected) in memory.heap
+        defer free(actual) in memory.heap
+        gpu_player_reset_stats()
+        let top = test_snapshot(0.0, 0.0)
+        _ = test_schedule_frame("top", compositor, texture, &scene, &top, false, expected, actual, 400)
+        # Scrolling: the filtered tiles uncovered are previews (no CPU tile), the frame differs.
+        for step in 1..<(i32)8:
+            let moved = test_snapshot(0.0, (f32)(step * 120))
+            _ = test_schedule_frame("scrolling", compositor, texture, &scene, &moved, false, expected, actual, (usize)(test_width * test_height))
+        if gpu_player_stats().preview_tiles == 0:
+            trap("a filtered tile uncovered by a scroll was not drawn as a preview")
+        # A complete frame draws the previews it shows in full: the CPU player's pixels.
+        let last = test_snapshot(0.0, 840.0)
+        _ = test_schedule_frame("complete", compositor, texture, &scene, &last, true, expected, actual, 400)

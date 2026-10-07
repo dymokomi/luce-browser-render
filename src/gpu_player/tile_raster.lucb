@@ -1,0 +1,116 @@
+#==============================================================================================
+#
+#   tile_raster - one tile of a layer drawn into a texture
+#
+#   DESCRIPTION:
+#       The compositor's raster step for one tile the schedule chose (schedule.lucb): the
+#       layer's bins (bins.lucb, made once per display list and layer key) give the tile's
+#       commands; a tile whose bin draws nothing is kept empty, without a texture or a
+#       recording. Otherwise DisplayListPlayerGpu records the tile's commands through
+#       Ladybird's loop and replays them as texture frames; when the recording gives up, the
+#       CPU player draws the same commands and the tile is uploaded. The main thread's time for
+#       the tile goes into the layer's running cost (one for GPU tiles, one for CPU tiles),
+#       which the schedule's budget predicts with.
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+## Draws the tile at (`x`, `y`) of layer `layer_index`'s plane for `snapshot` and keeps it (with
+## no texture when nothing draws; in place of a preview of it), used in this frame. A `preview`
+## leaves out what filters and clip paths apply to rather than give the tile to the CPU player.
+## Answers the nanoseconds it took.
+func gpu_compositor_raster(this: GpuCompositor*, scratch: GpuCpuScratch*, device: gpu.Device, list: display_list.DisplayList*, snapshot: const display_list.ScrollStateSnapshot*,
+                           layer_index: usize, x: i32, y: i32, preview: bool = false) -> u64!:
+    let start = time.now()
+    let cpu_tiles = gpu_player_stats_the.cpu_tiles
+    let layer = ak.vector_at_const(&this.layers, layer_index)
+    let layer_key = gpu_layer_key(layer, snapshot)
+    let key = gpu_hash(layer_key, (u64)layer_index)
+    var plane = gpu_layer_snapshot(layer, snapshot)
+    defer ak.vector_clear(&plane.m_device_offsets)
+    let state = ak.vector_at(&this.states, layer_index)
+    # Bins for this key: made once, or again when the layer's inner offsets moved. A dynamic
+    # layer's key changes with every scroll; it is played whole.
+    if layer.kind != GpuLayerKind.dynamic and (not state.bins.made or state.bins.key != layer_key):
+        gpu_bins_make(&state.bins, list, layer, &plane, layer_key)
+    let binned = layer.kind != GpuLayerKind.dynamic and state.bins.binned
+    var tile = GpuTile(key = gpu_tile_key(key, x, y), x = x, y = y, used = this.frame)
+    if layer.kind == GpuLayerKind.dynamic:
+        gpu_player_stats_the.dynamic_tiles += 1
+    let layer_size = (u64)(layer.end - layer.first)
+    gpu_player_stats_the.layer_commands += layer_size
+    var draws = true
+    if binned:
+        draws = gpu_bins_commands(&state.bins, x, y, &this.commands)
+        gpu_player_stats_the.played_commands += (u64)ak.vector_size(&this.commands)
+    else:
+        gpu_player_stats_the.played_commands += layer_size
+    if not draws:
+        gpu_player_stats_the.empty_tiles += 1
+    else:
+        let indices: const u32[]? = ak.vector_span_const(&this.commands) if binned else none
+        let player = this.player else trap("gpu_player: no player")
+        player.preview = preview
+        tile.texture = try gpu_compositor_record(this, scratch, device, list, &plane, layer, indices, x, y)
+        player.preview = false
+        tile.preview = preview and display_list_player_gpu_dropped(player)
+        if tile.preview:
+            gpu_player_stats_the.preview_tiles += 1
+        if tile.texture != none:
+            this.protected += 1
+    if let index = this.keys.get(tile.key):
+        # A preview replaced by the tile.
+        let old = ak.vector_at(&this.tiles, (usize)index)
+        if let texture = old.texture:
+            gpu_compositor_recycle(this, texture)
+            if old.used == this.frame:
+                this.protected -= 1
+        *old = tile
+    else:
+        this.keys.put(tile.key, (u32)ak.vector_size(&this.tiles))
+        ak.vector_append_t(&this.tiles, tile)
+    let spent = time.now() - start
+    if gpu_player_stats_the.cpu_tiles > cpu_tiles:
+        state.slow_cost = spent if state.slow_cost == 0 else (state.slow_cost * 3 + spent) // 4
+    else:
+        state.cost = spent if state.cost == 0 else (state.cost * 3 + spent) // 4
+    return spent
+
+## Records the tile at (`x`, `y`) of `layer`'s plane (only `indices` when given) and draws it
+## into a texture: replayed on the GPU, or drawn by the CPU player when the recording gives up.
+## Answers the texture, none when the tile is empty.
+func gpu_compositor_record(this: GpuCompositor*, scratch: GpuCpuScratch*, device: gpu.Device, list: display_list.DisplayList*, plane: const display_list.ScrollStateSnapshot*,
+                           layer: const GpuLayer*, indices: const u32[]?, x: i32, y: i32) -> gpu.Texture?!:
+    let player = this.player else trap("gpu_player: no player")
+    let pipelines = this.pipelines else trap("gpu_player: no pipelines")
+    # The recording may draw into the tile before it ends (when the atlas makes room).
+    let texture = try gpu_compositor_texture(this, device)
+    let origin = gfx.IntPoint(m_x = x, m_y = y)
+    display_list_player_gpu_begin(player, device, pipelines, texture, gpu_tile_size)
+    if let commands = indices:
+        display_list.display_list_player_execute_tile_commands((display_list.DisplayListPlayer*)player, list, plane, none, commands, origin)
+    else:
+        display_list.display_list_player_execute_tile((display_list.DisplayListPlayer*)player, list, plane, none, layer.first, layer.end, origin)
+    if let reason = player.fallback():
+        gpu_player_stats_the.fallbacks[(usize)reason] += 1
+        let met = player.fallback_reasons()
+        for kind in 0..<gpu_fallback_count:
+            if (met >> (u32)kind) & 1 != 0:
+                gpu_player_stats_the.reasons[kind] += 1
+        gpu_player_stats_the.cpu_tiles += 1
+        if let allocator = this.cpu_allocator:
+            with allocator:
+                try gpu_cpu_tile(scratch, list, plane, layer, indices, origin, texture, this.pixels)
+        else:
+            try gpu_cpu_tile(scratch, list, plane, layer, indices, origin, texture, this.pixels)
+        return texture
+    if player.is_empty() and not display_list_player_gpu_flushed(player):
+        gpu_player_stats_the.empty_tiles += 1
+        gpu_compositor_recycle(this, texture)
+        return none
+    gpu_player_stats_the.gpu_tiles += 1
+    if not player.is_empty():
+        try gpu_replay_tile(player, pipelines, texture, gpu_tile_size, display_list_player_gpu_flushed(player))
+    return texture

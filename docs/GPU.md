@@ -57,9 +57,16 @@ Module `gpu_player` (luce-browser-render, Base), per view one `GpuCompositor`:
 2. **Tiles** (`compositor.lucb`). 512-pixel tiles of each layer's plane, found by
    `hash(layer index, offsets of its inner frames, tile position)`, kept in `rgba8_linear`
    textures while the display list stays the same. A tile where nothing draws keeps no
-   texture. A scroll moves tiles by S's offset (rounded as the CPU player rounds it) and
-   draws only the uncovered ones. Least-recently-used tiles go past a budget (96 tiles;
-   the current frame's are never dropped); textures are pooled.
+   texture. A scroll moves tiles by S's offset (rounded as the CPU player rounds it).
+   Least-recently-used tiles go past a budget (96 tiles; the current frame's are never
+   dropped); textures are pooled.
+   **Schedule** (`schedule.lucb`; see Scheduling below): which missing tiles are drawn when:
+   required ones at once, uncovered visible ones within a raster budget per frame, tiles ahead
+   of the scroll in spare budget and in idle time.
+   **Bins** (`bins.lucb`): once per display list and layer key, each command's bounding
+   rectangle, mapped through its visual context to the layer's plane, is sorted into the
+   tiles it meets; a tile plays only its bin's commands
+   (`display_list_player_execute_tile_commands`) and a tile whose bin is empty is not recorded.
 3. **Raster** (`recorder*.lucb`, `replay.lucb`). `DisplayListPlayerGpu` (class id 2) is
    driven by Ladybird's own loop (`display_list_player_execute_tile`: a command range,
    moved by the tile's origin), so visual contexts, culling and scroll offsets are the
@@ -73,8 +80,8 @@ Module `gpu_player` (luce-browser-render, Base), per view one `GpuCompositor`:
    small program (`composite.frag`). Layers (`save_layer`, opacity, blend modes) are
    textures of their own, one per depth, composited when their save is restored. If the
    recording meets a command or state it does not support, it gives the tile up and the
-   CPU player draws that tile (one CPU player and surface per frame, with the engine's
-   allocator) and it is uploaded.
+   CPU player draws that tile's commands (one CPU player and surface per frame, with the
+   engine's allocator) and it is uploaded.
 4. **Composite.** On a target that blends on encoded values (luced-browser's window, an
    encoded luce-gpu surface; or an `rgba8_linear` texture) tiles composite straight onto it.
    On any other they composite into a frame texture of the viewport, which is then drawn
@@ -129,6 +136,67 @@ up to 8 clips each; identical clip stacks share one.
 | `apply_transform` | 2D matrices: whole-pixel translations as state, anything else drawn under the matrix as above; clips it keeps axis-aligned |
 | `paint_nested_display_list` | played by the same player, translated |
 | text shadows, filters, backdrop filters, luminance masks, clip paths, perspective and 3D matrices, pattern paint servers, color-managed and external images, vertical text, text over 256 px, images and shadows under a rotation | the tile goes to the CPU player |
+
+## Scheduling: raster budget, drawing ahead, binning (M3)
+
+What others do. Chrome's compositor rasters on worker threads and never lets raster hold a
+frame: the tile manager gives each tile a priority bin (NOW for the viewport, SOON for the
+"skewport", the viewport extrapolated by the scroll velocity, EVENTUALLY for an interest rect
+around it), rasters by bin and distance within a memory budget, and a visible tile that is
+not ready at draw time is drawn as the layer's background color (checkerboarding). A pending
+tree activates only once its visible tiles are ready. Firefox's APZ paints a display port
+larger than the viewport, skewed toward the scroll. WebRender rasters only the dirty tiles of
+its picture cache each frame and finds each primitive's tiles once. Chrome's raster source
+keeps an R-tree of display items so a tile plays only what it meets; Skia's
+SkPicture playback culls by bounds.
+
+What the player does, on the main thread:
+
+- **Required tiles** are drawn at once, whatever they cost: every visible tile of a new display
+  list (as Chrome activates a tree), of fixed and dynamic layers, and of a layer whose key
+  changed (a sticky header moved). `complete` draws (comparisons, screenshots) mark every
+  visible tile required.
+- **Uncovered visible tiles** are drawn within `GpuSchedule.budget` (4 ms of main-thread raster a
+  frame): largest visible area first, each only when the time so far plus its layer's running
+  cost per tile (a moving average of measured tiles) fits, but at least one a frame. A tile left
+  shows the page's background (the list's first `fill_rect`, in the bottom layer) and counts as
+  not ready; `gpu_compositor_incomplete` asks the embedder to draw again.
+- **Ahead of the scroll**: each scrolled layer's interest area is the viewport grown in the
+  scroll's direction by its velocity (device pixels a frame, smoothed, per scroll frame) over
+  16 frames, at least a tile and at most a viewport; after a pause of 100 ms, a tile on every
+  side. Tiles nearest the viewport first, never past the layer's content (its bins), and only
+  while the tiles used this frame stay within the 96-tile budget. A frame draws, within its
+  budget, only those the scroll reaches within 6 frames (Chrome's SOON); the rest wait for
+  idle time.
+- **CPU tiles become previews while the page scrolls.** A tile whose bin holds a drawing command
+  under a filter or a clip path (a node's, a stream `apply_effects` until its restore, or one
+  inside a nested display list such as an SVG's) is one the GPU player gives to the CPU player,
+  at tens of milliseconds. While scroll offsets change it is drawn on the GPU as a preview,
+  without what the filter or clip path applies to (`DisplayListPlayerGpu.preview`), as Chrome
+  shows low-resolution tiles rather than hold a frame. Once the scroll stops (no offset change
+  for 100 ms) the visible previews are drawn in full, one per idle period or frame whatever it
+  costs; a complete frame draws them in full at once.
+- **Filters are given up lazily.** A filter whose graph makes no pixels from nothing (no shader,
+  image, arithmetic k4 or color filter that lifts transparent black) gives the tile up only when
+  something is drawn under it: Ladybird's loop applies an element's effects for any command of
+  it that reaches the tile, a clip included, and an empty group filters to nothing for the CPU
+  player too.
+- **Idle time** (`gpu_compositor_idle`, `webview_gpu_idle`, `webview_api.gpu_idle`): the embedder
+  calls it when its loop has nothing due, with a deadline; it draws the visible tiles a frame
+  left, then the interest area, then (once the scroll stops) previews in full, commits the work
+  to the GPU (`Device.done` on the last tile frame's submission), and answers when to call
+  again: at once, after the scroll's pause (only previews left), or never. luced-browser calls
+  it each turn while the engine's next deadline is more than 2 ms away, 3 ms at a time (input
+  waits no longer), and wakes when it answers; its page draws again while the last frame was
+  incomplete or idle time drew a visible tile (`gpu_compositor_incomplete`).
+- **Bins** (`bins.lucb`): per layer and layer key, a node table maps each visual context node to
+  the plane (scroll offsets as the player applies them, 2D transforms about their origin, clip
+  rectangles narrowing), each command's Ladybird bounding rectangle is mapped, clipped, grown by
+  2 pixels and put in every tile it meets (counts, prefix sums, indices: one pass). Commands
+  without bounds, clips, scroll bars and commands under perspective go in an `always` list
+  every tile plays, merged in list order. A command left out is one the player's own culling
+  would skip for that tile, so the pixels are the same; a layer with a stream `translate`, or a
+  grid over 65,536 tiles, is played whole.
 
 ## Correctness
 

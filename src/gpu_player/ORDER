@@ -1,6 +1,7 @@
 module.lucb
 index_map.lucb
 layers.lucb
+bins.lucb
 atlas.lucb
 images.lucb
 recorder.lucb
@@ -11,6 +12,9 @@ recorder_matrix.lucb
 recorder_gradients.lucb
 replay.lucb
 compositor.lucb
+tile_raster.lucb
+schedule.lucb
 generated_shaders.lucb
 tests_gpu_player.lucb
 tests_gpu_player_2.lucb
+tests_gpu_schedule.lucb

@@ -71,13 +71,14 @@ func test_cpu_frame(scene: const TestList*, snapshot: const display_list.ScrollS
             out[at + 2] = (u8)(value & 0xff)
             out[at + 3] = (u8)(value >> 24)
 
-## The GPU compositor's frame of `scene` into `texture`, read back into `out`.
-func test_gpu_frame(compositor: GpuCompositor*, texture: gpu.Texture, scene: const TestList*, snapshot: const display_list.ScrollStateSnapshot*, out: u8[]) -> !:
+## The GPU compositor's frame of `scene` into `texture`, read back into `out`: complete (every
+## visible tile drawn) unless `complete` is false.
+func test_gpu_frame(compositor: GpuCompositor*, texture: gpu.Texture, scene: const TestList*, snapshot: const display_list.ScrollStateSnapshot*, out: u8[], complete: bool = true) -> !:
     let frame = try texture.frame()
     defer frame.release()
     let target = try frame.value().target()
     defer target.release()
-    try gpu_compositor_draw(compositor, scene.list, snapshot, target.value(), test_width, test_height)
+    try gpu_compositor_draw(compositor, scene.list, snapshot, target.value(), test_width, test_height, none, complete)
     _ = try frame.value().present(gpu.Color(0.0, 0.0, 0.0, 0.0))
     try texture.read(out)
 

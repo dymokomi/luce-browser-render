@@ -146,8 +146,9 @@ struct GpuMaskJob:
 
 ## The drawing state: a whole-pixel translation, or the whole matrix when the transform is
 ## anything else (recorder_matrix.lucb), a scissor (in tile pixels), a rounded clip, the clip
-## mask around it (1 + the player's mask, 0 for none), and the layer drawn into (1 + the
-## player's layer, 0 for the tile).
+## mask around it (1 + the player's mask, 0 for none), the layer drawn into (1 + the
+## player's layer, 0 for the tile), and whether a filter applies to what is drawn (the GPU
+## player has none: the first draw under one gives the tile up).
 struct GpuState:
     var dx: i32
     var dy: i32
@@ -156,6 +157,7 @@ struct GpuState:
     var rounded: GpuRoundedClip?
     var mask: u32
     var layer: u32
+    var filtered: bool
 
 ## The most layers open at once in a tile's recording.
 let gpu_layer_depth: u32 = 8
@@ -196,6 +198,11 @@ pub struct DisplayListPlayerGpu: display_list.IsDisplayListPlayer:
     var tile: gpu.Texture?
     var tile_size: i32
     var flushed: bool
+    ## A preview recording (the schedule's, while the page scrolls): what a filter or a clip
+    ## path applies to is left out instead of giving the tile up; `dropped` says whether
+    ## anything was.
+    pub var preview: bool
+    var dropped: bool
     var replay: GpuReplay
 
     func display_list_player() -> display_list.DisplayListPlayer*: return (display_list.DisplayListPlayer*)&self
@@ -246,7 +253,12 @@ pub func display_list_player_gpu_begin(this: DisplayListPlayerGpu*, device: gpu.
     this.tile = tile
     this.tile_size = size
     this.flushed = false
+    this.dropped = false
     this.atlas_generation = this.atlas.generation
+
+## Whether a preview recording left out what a filter or a clip path applies to.
+pub func display_list_player_gpu_dropped(this: const DisplayListPlayerGpu*) -> bool:
+    return this.dropped
 
 ## Whether the recording has drawn into its tile already (the rest then draws over it).
 pub func display_list_player_gpu_flushed(this: const DisplayListPlayerGpu*) -> bool:
@@ -300,6 +312,13 @@ func gpu_give_up(this: DisplayListPlayerGpu*, reason: GpuFallback):
     if this.unsupported == none:
         this.unsupported = reason
 
+## A draw under a filter or a clip path: left out of a preview, else the tile is given up.
+func gpu_filtered_draw(this: DisplayListPlayerGpu*):
+    if this.preview:
+        this.dropped = true
+        return
+    gpu_give_up(this, GpuFallback.filter)
+
 ## Whether recording goes on: nothing unsupported met, and the atlas still holds what the
 ## recorded draws read.
 func gpu_recording(this: DisplayListPlayerGpu*) -> bool:
@@ -307,8 +326,12 @@ func gpu_recording(this: DisplayListPlayerGpu*) -> bool:
         this.unsupported = GpuFallback.atlas_full
     return this.unsupported == none
 
-## Appends `draw` under the state's clip mask.
+## Appends `draw` under the state's clip mask; under a filter, gives the tile up instead (or
+## leaves the draw out of a preview).
 func gpu_append(this: DisplayListPlayerGpu*, draw: GpuDraw):
+    if this.state.filtered:
+        gpu_filtered_draw(this)
+        return
     var masked = draw
     masked.mask = this.state.mask
     ak.vector_append_t(&this.draws, masked)
@@ -401,6 +424,9 @@ func gpu_premultiplied(color: gfx.Color) -> f32[4]:
 ## A solid whole-pixel rectangle: joins the last `rects` draw when it has the same scissor.
 func gpu_solid_rect(this: DisplayListPlayerGpu*, rect: GpuRect, color: gfx.Color):
     if (color.m_value >> 24) == 0:
+        return
+    if this.state.filtered:
+        gpu_filtered_draw(this)
         return
     if this.state.mask != 0:
         gpu_fill_shape(this, rect, gpu_no_radii(), color, 0.0, false)

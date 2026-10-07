@@ -12,7 +12,10 @@
 #                     whenever anything scrolls (layers.lucb);
 #         tiles       each layer's plane cut into 512-pixel tiles, kept in textures while
 #                     they stay the same, so a scroll moves tiles and rasters only the ones it
-#                     uncovers (compositor.lucb);
+#                     uncovers (compositor.lucb), mostly ahead of time: a raster budget per
+#                     frame, tiles ahead of the scroll and idle-time drawing (schedule.lucb),
+#                     each tile playing only the commands binned to it (bins.lucb,
+#                     tile_raster.lucb);
 #         raster      a tile is drawn by DisplayListPlayerGpu (recorder*.lucb): the commands
 #                     it supports become GPU draws (rectangles batched into one triangle draw,
 #                     runs of rounded rectangles and of glyph, path and shadow masks from one
@@ -43,7 +46,8 @@ import raster
 import c
 import interop
 import memory
-from luce_std import math32
+from luce_std import math, math32
+import time
 
 ## The side of a tile in device pixels.
 pub let gpu_tile_size: i32 = 512
@@ -91,7 +95,11 @@ pub func gpu_rect_of(rect: gfx.DevicePixelRect) -> GpuRect:
 
 ## Counts of what the players did since the last reset: tiles drawn on the GPU and on the CPU,
 ## tiles composited, and the commands that sent tiles to the CPU, by GpuFallback: `fallbacks`
-## counts the reason that decided, `reasons` every reason a CPU tile met.
+## counts the reason that decided, `reasons` every reason a CPU tile met. The schedule's
+## counts (schedule.lucb): visible tiles composited before they were ready (`not_ready_tiles`,
+## over `not_ready_frames` frames), tiles drawn ahead of the viewport (`prefetched_tiles`) and
+## in idle time (`idle_tiles`), the main thread's raster time in frames and in idle time, and
+## the commands the tiles played against the commands of their layers (binning).
 pub struct GpuPlayerStats:
     pub var gpu_tiles: u64
     pub var cpu_tiles: u64
@@ -101,6 +109,17 @@ pub struct GpuPlayerStats:
     pub var resident_bytes: u64
     pub var fallbacks: u64[24]
     pub var reasons: u64[24]
+    pub var not_ready_tiles: u64
+    pub var not_ready_frames: u64
+    pub var prefetched_tiles: u64
+    pub var idle_tiles: u64
+    pub var frame_raster_ns: u64
+    pub var idle_raster_ns: u64
+    pub var played_commands: u64
+    pub var layer_commands: u64
+    pub var new_lists: u64
+    pub var preview_tiles: u64
+    pub var dynamic_tiles: u64
 
 ## The process's counts (main thread only, as every GPU call is).
 var gpu_player_stats_the: GpuPlayerStats = GpuPlayerStats()

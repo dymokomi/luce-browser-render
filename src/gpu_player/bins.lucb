@@ -1,0 +1,438 @@
+#==============================================================================================
+#
+#   bins - a layer's commands sorted into the tiles of its plane
+#
+#   DESCRIPTION:
+#       Ladybird's loop (display_list.lucb's execute_impl) visits every command of a range and
+#       culls those whose bounding rectangle the painter would clip away. A tile that does so
+#       for every command of its layer costs the whole layer each time, and a page's long
+#       layers cost as much per tile as the whole page. Binning (as WebRender's picture cache
+#       finds each primitive's tiles once, and Chrome's raster sources keep an R-tree of their
+#       display items) finds, once per display list, the tiles each command can touch, so a
+#       tile plays only its own commands (display_list_player_execute_tile_commands):
+#
+#         - a node table first: each visual context node's place in the layer's plane (scroll
+#           offsets as the player applies them, the layer's own frame at zero; 2D transforms
+#           about their origin, as apply_transform concatenates them) and the clip around it
+#           (clip rectangles, the bounds of rounded clips and clip paths). A node under a
+#           perspective or 3D matrix is unbounded;
+#         - a command's bounding rectangle (Ladybird's own, what the loop culls by), mapped
+#           by its node and clipped, grown by gpu_bin_margin pixels (the GPU player's culling
+#           reaches a pixel past its scissor for anti-aliasing), lands in every tile it meets;
+#         - commands without a bounding rectangle (saves, restores, layers, effects), clips
+#           (a culled clip still clips what follows it), scroll bars and commands under an
+#           unbounded node are played by every tile: the `always` list.
+#
+#       Bins also mark the tiles the GPU player will likely give to the CPU player: those with a
+#       drawing command under a filter or a clip path (a node's, an apply_effects of the stream
+#       until its restore, or one inside a nested display list: `slow`), which the schedule keeps out of a busy frame
+#       (schedule.lucb).
+#
+#       A tile's commands are the merge of `always` and its bin, in list order. A command left
+#       out is one whose mapped bounds miss the tile, which the player's own culling would have
+#       skipped, so the pixels are the same. A tile whose bin is empty and whose `always`
+#       commands draw nothing is empty without being recorded. A layer with a translate command
+#       of its own (the stream moving later commands) or a grid of more than gpu_bin_limit
+#       tiles is not binned: its tiles play the whole layer, as before.
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+## How far past a command's mapped bounds its bins reach, in device pixels.
+let gpu_bin_margin: f64 = 2.0
+
+## The most tiles one layer's grid holds before the layer is played whole.
+let gpu_bin_limit: i64 = 65536
+
+## Where a visual context node puts its commands: the 2D matrix to the layer's plane
+## (x' = xx x + xy y + tx, y' = yx x + yy y + ty), the clip around it in the plane, and whether
+## it is bounded at all.
+struct GpuBinNode:
+    var xx: f64
+    var yx: f64
+    var xy: f64
+    var yy: f64
+    var tx: f64
+    var ty: f64
+    var left: f64
+    var top: f64
+    var right: f64
+    var bottom: f64
+    var bounded: bool
+    ## Whether a filter or a clip path lies on the node's chain (the tile goes to the CPU).
+    var slow: bool
+
+## A command's tiles: columns `left..=right`, rows `top..=bottom` of the plane's grid.
+struct GpuBinSpan:
+    var index: u32
+    var slow: bool
+    var left: i32
+    var top: i32
+    var right: i32
+    var bottom: i32
+
+## One layer's bins for the scroll offsets `key` names (see the header).
+pub struct GpuBins:
+    ## Whether bins were made, the layer key they were made for, and whether the layer is
+    ## binned (false: every tile plays the whole layer).
+    pub var made: bool
+    pub var key: u64
+    pub var binned: bool
+    ## The grid: the tile column and row of its first bin, and its size in tiles.
+    var first_column: i32
+    var first_row: i32
+    var columns: i32
+    var rows: i32
+    ## The commands every tile plays, and whether any of them draws.
+    var always: ak.Vector[u32]
+    var always_draws: bool
+    ## Bin `i`'s commands are `indices[offsets[i]..<offsets[i + 1]]`, in list order.
+    var offsets: ak.Vector[u32]
+    var indices: ak.Vector[u32]
+    ## Per bin, whether a command in it is under a filter or a clip path; whether one of
+    ## `always` is.
+    var slow: ak.Vector[u8]
+    var always_slow: bool
+
+    ## Lets the bins go.
+    pub func release():
+        ak.vector_clear(&self.always)
+        ak.vector_clear(&self.offsets)
+        ak.vector_clear(&self.indices)
+        ak.vector_clear(&self.slow)
+        self.made = false
+
+    ## The bytes the bins hold.
+    pub func bytes() -> usize:
+        return (ak.vector_capacity(&self.always) + ak.vector_capacity(&self.offsets) + ak.vector_capacity(&self.indices)) * 4 + ak.vector_capacity(&self.slow)
+
+## Makes `bins` for `layer` of `list` drawn with `plane` (the layer's scroll state, its own
+## frame at zero), whose layer key is `key`.
+pub func gpu_bins_make(bins: GpuBins*, list: const display_list.DisplayList*, layer: const GpuLayer*, plane: const display_list.ScrollStateSnapshot*, key: u64):
+    bins.release()
+    bins.made = true
+    bins.key = key
+    bins.binned = false
+    bins.always_draws = false
+    bins.always_slow = false
+    let commands = display_list.display_list_commands(list)
+    # A translate in the stream moves the commands after it: such a layer is played whole.
+    for index in layer.first..<layer.end:
+        match ak.vector_at_const(commands, index).command:
+            .translate(_): return
+            _: _ = 0
+    let tree = display_list.display_list_visual_context_tree(list)
+    let node_count = ak.vector_size(&tree.m_nodes)
+    let nodes = (new GpuBinNode[node_count + 1] in memory.heap) else trap("gpu_player: out of memory")
+    defer free(nodes) in memory.heap
+    gpu_bin_nodes(tree, plane, nodes)
+
+    var spans: ak.Vector[GpuBinSpan]
+    defer ak.vector_clear(&spans)
+    var low_column: i32 = 0
+    var low_row: i32 = 0
+    var high_column: i32 = -1
+    var high_row: i32 = -1
+    # The stream's own saves: whether each opened a filter (apply_effects with one), so the
+    # commands until its restore are slow too.
+    var filtered: ak.Vector[bool]
+    defer ak.vector_clear(&filtered)
+    var filter_depth: usize = 0
+    for index in layer.first..<layer.end:
+        let item = ak.vector_at_const(commands, index)
+        match item.command:
+            .save(_): ak.vector_append_t(&filtered, false)
+            .save_layer(_): ak.vector_append_t(&filtered, false)
+            .apply_effects(effects):
+                ak.vector_append_t(&filtered, effects.filter != none)
+                if effects.filter != none:
+                    filter_depth += 1
+            .restore(_):
+                if not ak.vector_is_empty(&filtered) and ak.vector_take_last(&filtered):
+                    filter_depth -= 1
+            _: _ = 0
+        var slow = nodes[(usize)item.context_index].slow or filter_depth > 0
+        match item.command:
+            .paint_nested_display_list(nested):
+                if let inner = nested.display_list:
+                    slow = slow or gpu_list_filters(inner, 0)
+            _: _ = 0
+        let found = gpu_bin_span(item, nodes, (u32)index)
+        if found == none:
+            ak.vector_append_t(&bins.always, (u32)index)
+            if not gpu_bin_is_state(&item.command):
+                bins.always_draws = true
+                if slow:
+                    bins.always_slow = true
+            continue
+        var span = found else continue
+        span.slow = slow
+        if span.right < span.left:
+            # Bounds that meet no pixel: culled by every tile.
+            continue
+        if high_column < low_column:
+            low_column = span.left
+            low_row = span.top
+            high_column = span.right
+            high_row = span.bottom
+        else:
+            low_column = gpu_min(low_column, span.left)
+            low_row = gpu_min(low_row, span.top)
+            high_column = gpu_max(high_column, span.right)
+            high_row = gpu_max(high_row, span.bottom)
+        ak.vector_append_t(&spans, span)
+    let columns = (i64)high_column - (i64)low_column + 1
+    let rows = (i64)high_row - (i64)low_row + 1
+    if high_column >= low_column and columns * rows > gpu_bin_limit:
+        bins.release()
+        bins.made = true
+        bins.key = key
+        return
+    bins.binned = true
+    bins.first_column = low_column
+    bins.first_row = low_row
+    bins.columns = (i32)columns if high_column >= low_column else 0
+    bins.rows = (i32)rows if high_column >= low_column else 0
+    gpu_bins_fill(bins, ak.vector_span_const(&spans))
+
+## Sorts `spans` into the bins: counts per bin, their running sums as offsets, then each
+## command's index into every bin it meets (in list order, as the spans are).
+func gpu_bins_fill(bins: GpuBins*, spans: const GpuBinSpan[]):
+    let count = (usize)bins.columns * (usize)bins.rows
+    ak.vector_resize_with_default_value(&bins.offsets, count + 1, (u32)0)
+    let offsets = ak.vector_span(&bins.offsets)
+    ak.vector_resize_with_default_value(&bins.slow, count, (u8)0)
+    let slow = ak.vector_span(&bins.slow)
+    for span in spans:
+        for row in span.top..<span.bottom + 1:
+            for column in span.left..<span.right + 1:
+                let bin = gpu_bin_at(bins, column, row)
+                offsets[bin + 1] += 1
+                if span.slow:
+                    slow[bin] = 1
+    for at in 0..<count:
+        offsets[at + 1] += offsets[at]
+    ak.vector_resize_with_default_value(&bins.indices, (usize)offsets[count], (u32)0)
+    let indices = ak.vector_span(&bins.indices)
+    # Each bin's next free slot, from its start.
+    var next = (new u32[count + 1] in memory.heap) else trap("gpu_player: out of memory")
+    defer free(next) in memory.heap
+    for at in 0..<count:
+        next[at] = offsets[at]
+    for span in spans:
+        for row in span.top..<span.bottom + 1:
+            for column in span.left..<span.right + 1:
+                let bin = gpu_bin_at(bins, column, row)
+                indices[(usize)next[bin]] = span.index
+                next[bin] += 1
+
+## The bin of tile (`column`, `row`), which lies in the grid.
+func gpu_bin_at(bins: const GpuBins*, column: i32, row: i32) -> usize:
+    return (usize)(row - bins.first_row) * (usize)bins.columns + (usize)(column - bins.first_column)
+
+## Whether the tile at plane pixel (`x`, `y`) may draw anything, by bins made for `key`
+## (true when they were not: only drawing tells).
+pub func gpu_bins_may_draw(bins: const GpuBins*, key: u64, x: i32, y: i32) -> bool:
+    if not bins.made or bins.key != key or not bins.binned or bins.always_draws:
+        return true
+    let column = gpu_floor_div(x, gpu_tile_size)
+    let row = gpu_floor_div(y, gpu_tile_size)
+    if column < bins.first_column or column >= bins.first_column + bins.columns or row < bins.first_row or row >= bins.first_row + bins.rows:
+        return false
+    let bin = gpu_bin_at(bins, column, row)
+    let offsets = ak.vector_span_const(&bins.offsets)
+    return offsets[bin + 1] > offsets[bin]
+
+## Whether the tile at plane pixel (`x`, `y`) likely goes to the CPU player (a command under a
+## filter or a clip path reaches it), by bins made for `key` (false when they were not).
+pub func gpu_bins_slow(bins: const GpuBins*, key: u64, x: i32, y: i32) -> bool:
+    if not bins.made or bins.key != key or not bins.binned:
+        return false
+    if bins.always_slow:
+        return true
+    let column = gpu_floor_div(x, gpu_tile_size)
+    let row = gpu_floor_div(y, gpu_tile_size)
+    if column < bins.first_column or column >= bins.first_column + bins.columns or row < bins.first_row or row >= bins.first_row + bins.rows:
+        return false
+    return ak.vector_span_const(&bins.slow)[gpu_bin_at(bins, column, row)] != 0
+
+## Puts into `out` the commands the tile at plane pixel (`x`, `y`) plays, in list order;
+## answers whether any of them can draw (false: the tile is empty).
+pub func gpu_bins_commands(bins: const GpuBins*, x: i32, y: i32, out: ak.Vector[u32]*) -> bool:
+    ak.vector_clear_with_capacity(out)
+    let column = gpu_floor_div(x, gpu_tile_size)
+    let row = gpu_floor_div(y, gpu_tile_size)
+    let always = ak.vector_span_const(&bins.always)
+    var own: const u32[] = always[..<0]
+    if column >= bins.first_column and column < bins.first_column + bins.columns and row >= bins.first_row and row < bins.first_row + bins.rows:
+        let bin = gpu_bin_at(bins, column, row)
+        let offsets = ak.vector_span_const(&bins.offsets)
+        own = ak.vector_span_const(&bins.indices)[(usize)offsets[bin]..<(usize)offsets[bin + 1]]
+    if own.length == 0 and not bins.always_draws:
+        return false
+    ak.vector_ensure_capacity(out, always.length + own.length)
+    var i: usize = 0
+    var j: usize = 0
+    while i < always.length or j < own.length:
+        if j == own.length or (i < always.length and always[i] < own[j]):
+            ak.vector_append_t(out, always[i])
+            i += 1
+        else:
+            ak.vector_append_t(out, own[j])
+            j += 1
+    return true
+
+# mark: Bounds ==================================================================================
+
+## Fills `nodes` (indexed by node, 0 the root) in one pass: a node's parent comes first.
+func gpu_bin_nodes(tree: const display_list.AccumulatedVisualContextTree*, plane: const display_list.ScrollStateSnapshot*, nodes: GpuBinNode[]):
+    let far = 1.0e12
+    nodes[0] = GpuBinNode(xx = 1.0, yy = 1.0, left = -far, top = -far, right = far, bottom = far, bounded = true)
+    let node_count = ak.vector_size(&tree.m_nodes)
+    for index in 1..<node_count:
+        let node = display_list.accumulated_visual_context_tree_node_at(tree, (u64)index)
+        var own = nodes[(usize)node.parent_index]
+        if own.bounded:
+            match node.data:
+                .scroll_data(scroll):
+                    let offset = display_list.float_point_to_int_point(display_list.scroll_state_snapshot_device_offset_for_index(plane, scroll.scroll_frame_index))
+                    own = gpu_bin_concat(own, 1.0, 0.0, 0.0, 1.0, (f64)offset.m_x, (f64)offset.m_y)
+                .transform_data(transform):
+                    let m = transform.matrix.m_elements
+                    let flat = m[0][2] == 0.0 and m[1][2] == 0.0 and m[2][0] == 0.0 and m[2][1] == 0.0 and m[2][2] == 1.0 and m[2][3] == 0.0 and m[3][2] == 0.0
+                    if not flat or m[3][0] != 0.0 or m[3][1] != 0.0 or m[3][3] != 1.0:
+                        own.bounded = false
+                    else:
+                        # The matrix about its origin: translate(o) * M * translate(-o).
+                        let ox = (f64)transform.origin.m_x
+                        let oy = (f64)transform.origin.m_y
+                        let xx = (f64)m[0][0]
+                        let yx = (f64)m[1][0]
+                        let xy = (f64)m[0][1]
+                        let yy = (f64)m[1][1]
+                        let tx = (f64)m[0][3] + ox - xx * ox - xy * oy
+                        let ty = (f64)m[1][3] + oy - yx * ox - yy * oy
+                        own = gpu_bin_concat(own, xx, yx, xy, yy, tx, ty)
+                .perspective_data(_):
+                    own.bounded = false
+                .clip_data(clip):
+                    own = gpu_bin_clip(own, clip.rect)
+                .clip_path_data(clip_path):
+                    own = gpu_bin_clip(own, clip_path.bounding_rect)
+                _: _ = 0
+        # Bounded or not, a filter or a clip path sends the node's commands to the CPU player.
+        match node.data:
+            .clip_path_data(_): own.slow = true
+            .effects_data(effects):
+                if effects.gfx_filter != none:
+                    own.slow = true
+            _: _ = 0
+        nodes[index] = own
+
+## `node`'s matrix after (xx, yx, xy, yy, tx, ty), which applies first: points of the child's
+## space to the plane.
+func gpu_bin_concat(node: GpuBinNode, xx: f64, yx: f64, xy: f64, yy: f64, tx: f64, ty: f64) -> GpuBinNode:
+    var out = node
+    out.xx = node.xx * xx + node.xy * yx
+    out.yx = node.yx * xx + node.yy * yx
+    out.xy = node.xx * xy + node.xy * yy
+    out.yy = node.yx * xy + node.yy * yy
+    out.tx = node.xx * tx + node.xy * ty + node.tx
+    out.ty = node.yx * tx + node.yy * ty + node.ty
+    return out
+
+## `node` with its clip narrowed to `rect` (in its own space) mapped to the plane.
+func gpu_bin_clip(node: GpuBinNode, rect: gfx.DevicePixelRect) -> GpuBinNode:
+    var out = node
+    let mapped = gpu_bin_map(&node, rect)
+    out.left = math.max(node.left, mapped[0])
+    out.top = math.max(node.top, mapped[1])
+    out.right = math.min(node.right, mapped[2])
+    out.bottom = math.min(node.bottom, mapped[3])
+    return out
+
+## The bounds in the plane of `rect` under `node`'s matrix: left, top, right, bottom.
+func gpu_bin_map(node: const GpuBinNode*, rect: gfx.DevicePixelRect) -> f64[4]:
+    let x0 = (f64)rect.m_location.m_x
+    let y0 = (f64)rect.m_location.m_y
+    let x1 = x0 + (f64)rect.m_size.m_width
+    let y1 = y0 + (f64)rect.m_size.m_height
+    let xs: f64[4] = [node.xx * x0 + node.xy * y0, node.xx * x1 + node.xy * y0, node.xx * x0 + node.xy * y1, node.xx * x1 + node.xy * y1]
+    let ys: f64[4] = [node.yx * x0 + node.yy * y0, node.yx * x1 + node.yy * y0, node.yx * x0 + node.yy * y1, node.yx * x1 + node.yy * y1]
+    var bounds: f64[4] = [xs[0], ys[0], xs[0], ys[0]]
+    for corner in 1..<(usize)4:
+        bounds[0] = math.min(bounds[0], xs[corner])
+        bounds[1] = math.min(bounds[1], ys[corner])
+        bounds[2] = math.max(bounds[2], xs[corner])
+        bounds[3] = math.max(bounds[3], ys[corner])
+    return [bounds[0] + node.tx, bounds[1] + node.ty, bounds[2] + node.tx, bounds[3] + node.ty]
+
+## The tiles `item` can touch, none when every tile must play it (see the header); a span
+## whose right is before its left meets no pixel.
+func gpu_bin_span(item: const display_list.DisplayListCommandListItem*, nodes: const GpuBinNode[], index: u32) -> GpuBinSpan?:
+    match item.command:
+        .add_clip_rect(_): return none
+        .add_rounded_rect_clip(_): return none
+        .paint_scroll_bar(_): return none
+        _: _ = 0
+    let rect = display_list.command_bounding_rectangle(&item.command) else return none
+    let node = &nodes[(usize)item.context_index]
+    if not node.bounded:
+        return none
+    let empty = GpuBinSpan(index = index, left = 0, top = 0, right = -1, bottom = -1)
+    if rect.m_size.m_width <= 0 or rect.m_size.m_height <= 0:
+        return empty
+    let mapped = gpu_bin_map(node, rect)
+    let left = math.max(mapped[0], node.left) - gpu_bin_margin
+    let top = math.max(mapped[1], node.top) - gpu_bin_margin
+    let right = math.min(mapped[2], node.right) + gpu_bin_margin
+    let bottom = math.min(mapped[3], node.bottom) + gpu_bin_margin
+    if not (left < right and top < bottom):
+        return empty
+    # Far beyond any plane: every tile plays it rather than a grid that large.
+    let limit = 1.0e9
+    if left < -limit or top < -limit or right > limit or bottom > limit:
+        return none
+    let side = (f64)gpu_tile_size
+    return GpuBinSpan(index = index, left = (i32)math.floor(left / side), top = (i32)math.floor(top / side),
+                      right = (i32)math.floor((right - 1.0e-9) / side), bottom = (i32)math.floor((bottom - 1.0e-9) / side))
+
+## Whether `list` (a nested display list, such as an SVG image's) draws anything under a
+## filter or a clip path: its nodes, its stream's effects, and its own nested lists (to a
+## depth of 8).
+func gpu_list_filters(list: const display_list.DisplayList*, depth: usize) -> bool:
+    if depth > 8:
+        return true
+    let tree = display_list.display_list_visual_context_tree(list)
+    for index in 1..<ak.vector_size(&tree.m_nodes):
+        match display_list.accumulated_visual_context_tree_node_at(tree, (u64)index).data:
+            .clip_path_data(_): return true
+            .effects_data(effects):
+                if effects.gfx_filter != none:
+                    return true
+            _: _ = 0
+    for item in ak.vector_span_const(display_list.display_list_commands(list)):
+        match item.command:
+            .apply_effects(effects):
+                if effects.filter != none:
+                    return true
+            .paint_nested_display_list(nested):
+                if let inner = nested.display_list:
+                    if gpu_list_filters(inner, depth + 1):
+                        return true
+            _: _ = 0
+    return false
+
+## Whether `command` only changes the drawing state (it draws nothing by itself).
+func gpu_bin_is_state(command: const display_list.DisplayListCommand*) -> bool:
+    match *command:
+        .save(_): return true
+        .save_layer(_): return true
+        .restore(_): return true
+        .translate(_): return true
+        .add_clip_rect(_): return true
+        .add_rounded_rect_clip(_): return true
+        .apply_effects(_): return true
+        _: return false

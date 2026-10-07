@@ -1,0 +1,374 @@
+#==============================================================================================
+#
+#   schedule - which tiles are drawn when: a raster budget per frame, prefetch, idle time
+#
+#   DESCRIPTION:
+#       A frame that has to raster a newly uncovered row of tiles costs far more than one that
+#       moves kept tiles. Chrome's compositor never lets raster hold a frame: its tile manager
+#       sorts tiles by priority (NOW for the viewport, SOON for the "skewport" the viewport
+#       will reach at its current velocity, EVENTUALLY for an interest rect around it),
+#       rasters them ahead of need within a memory budget, and when a visible tile is still
+#       not ready at draw time it draws the layer's background color in its place
+#       (checkerboarding). Firefox's APZ paints a display port larger than the viewport,
+#       skewed in the scroll direction. WebRender rasters only the dirty tiles of its picture
+#       cache in a frame. Here, on one thread:
+#
+#         - required tiles are drawn now, whatever they cost: every visible tile of a new
+#           display list (Chrome activates a tree only once its visible tiles are ready), of a
+#           fixed or dynamic layer, and of a layer whose key changed (a sticky header moved);
+#         - visible tiles a scroll uncovers are drawn within the frame's raster budget
+#           (`budget`, 4 ms): largest visible area first, each only when the time spent so
+#           far plus its layer's recent cost per tile fits, but at least one a frame. Those
+#           left show the background (compositor.lucb) and count as not ready;
+#         - a tile the CPU player would draw (its bin holds a filter or a clip path, which the
+#           GPU player does not draw yet: tens of milliseconds a tile) is drawn as a preview
+#           while the page scrolls: on the GPU, without what the filter or clip path applies
+#           to, as Chrome shows low-resolution tiles rather than hold a frame. Once the scroll
+#           stops (no offset change for `gpu_motion_pause`), visible previews are drawn in full,
+#           one a frame or idle period whatever it costs;
+#         - then tiles of each scrolled layer's interest area: the viewport grown ahead of the
+#           scroll by its velocity over `gpu_lookahead_frames` frames (at least a tile, at
+#           most a viewport), or a tile on every side once the scroll has stopped, nearest
+#           first, while the tiles used this frame stay within the tile budget
+#           (gpu_tile_budget; eviction never drops this frame's tiles). A frame draws, within
+#           its budget, only those the scroll reaches within `gpu_urgent_frames` frames
+#           (Chrome's SOON bin); the rest are idle time's (EVENTUALLY);
+#         - between frames (gpu_compositor_idle, which the embedder calls when its loop is idle
+#           until a deadline) the same visible-then-interest order goes on until the deadline,
+#           and the work is committed to the GPU at once.
+#
+#       Velocity is per scroll frame, in device pixels per drawn frame, smoothed over frames;
+#       a frame drawn after a pause of more than `gpu_motion_pause` starts from rest.
+#
+#       Copyright (c) 2026 the luce-browser authors.
+#       SPDX-License-Identifier: BSD-2-Clause
+#
+#==============================================================================================
+
+## How many frames of the current velocity the interest area reaches ahead.
+let gpu_lookahead_frames: f64 = 16.0
+
+## How many frames of the current velocity away a tile ahead must be for a frame to draw it;
+## farther ones wait for idle time.
+let gpu_urgent_frames: f64 = 6.0
+
+## A pause between drawn frames after which the scroll counts as stopped, in nanoseconds.
+let gpu_motion_pause: u64 = 100000000
+
+## What a tile the CPU player will likely draw (bins.lucb's slow tiles: filters, clip paths) is
+## taken to cost before its layer has drawn one, in nanoseconds.
+let gpu_slow_guess: u64 = 30000000
+
+## A tile the schedule may draw: its layer, its place in the layer's plane, whether the
+## viewport shows it, whether the scroll reaches it soon (a frame draws only those ahead),
+## and its priority (lower first).
+struct GpuWanted:
+    var layer: u32
+    var x: i32
+    var y: i32
+    var visible: bool
+    var urgent: bool
+    ## A visible preview to draw again in full (once the scroll stops).
+    var upgrade: bool
+    var priority: f64
+
+## The motion of one scroll frame: where its plane's visible part started at the last frame,
+## and its velocity (device pixels a frame, the direction the viewport moves over the plane).
+struct GpuMotion:
+    var frame: u64
+    var x: i32
+    var y: i32
+    var vx: f64
+    var vy: f64
+    var drawn: u64
+
+## The schedule of one compositor (see the header).
+pub struct GpuSchedule:
+    ## The main thread's raster time a frame may take, in nanoseconds.
+    pub var budget: u64 = 4000000
+    ## Visible tiles the last frame showed before they were ready.
+    pub var not_ready: usize
+    ## Whether the last frame or idle period left tiles it could have drawn, and whether it left
+    ## previews to draw in full once the scroll stops.
+    pub var more: bool
+    pub var later: bool
+    ## Whether idle time drew a tile the viewport shows since the last frame.
+    var redraw: bool
+    ## When the last frame was drawn, and when a scroll offset last changed (time.now()).
+    var last_frame: u64
+    var last_motion: u64
+    var motions: ak.Vector[GpuMotion]
+    var wanted: ak.Vector[GpuWanted]
+
+    ## Lets the schedule's lists go.
+    func release():
+        ak.vector_clear(&self.motions)
+        ak.vector_clear(&self.wanted)
+
+## Sets the main thread's raster budget per frame, in nanoseconds.
+pub func gpu_compositor_set_budget(this: GpuCompositor*, budget: u64):
+    this.schedule.budget = budget
+
+## Whether the last frame is not the page as it can be drawn now: it showed visible tiles before
+## they were ready, or idle time has since drawn visible tiles (or previews in full). The
+## embedder should draw again.
+pub func gpu_compositor_incomplete(this: const GpuCompositor*) -> bool:
+    return this.schedule.not_ready > 0 or this.schedule.redraw
+
+## Step 2 of a frame: notes the scroll's motion, draws the required tiles, then visible and
+## interest tiles while the budget lasts (`budgeted`; every visible tile otherwise). `all`
+## marks every visible tile required (a new list, or a complete frame).
+func gpu_schedule_frame(this: GpuCompositor*, scratch: GpuCpuScratch*, device: gpu.Device, list: display_list.DisplayList*, snapshot: const display_list.ScrollStateSnapshot*,
+                        viewport: GpuRect, start: u64, all: bool, budgeted: bool) -> !:
+    gpu_schedule_note_motion(this, snapshot, viewport, start)
+    this.schedule.redraw = false
+    this.protected = 0
+    var spent: u64 = 0
+    for layer_index in 0..<ak.vector_size(&this.layers):
+        let layer = ak.vector_at_const(&this.layers, layer_index)
+        let layer_key = gpu_layer_key(layer, snapshot)
+        let state = ak.vector_at(&this.states, layer_index)
+        let required = all or layer.kind != GpuLayerKind.scrolled or state.key != layer_key
+        state.key = layer_key
+        let key = gpu_hash(layer_key, (u64)layer_index)
+        let offset = gpu_layer_offset(layer, snapshot)
+        let visible = viewport.translated(-offset.m_x, -offset.m_y)
+        let range = gpu_tile_range(visible)
+        for row in range.y..<range.y + range.height:
+            for column in range.x..<range.x + range.width:
+                let x = column * gpu_tile_size
+                let y = row * gpu_tile_size
+                if let kept = gpu_compositor_touch(this, key, x, y):
+                    if kept.preview and required:
+                        spent += try gpu_compositor_raster(this, scratch, device, list, snapshot, layer_index, x, y)
+                    elif kept.preview:
+                        ak.vector_append_t(&this.schedule.wanted, GpuWanted(layer = (u32)layer_index, x = x, y = y, upgrade = true, priority = 0.0))
+                    continue
+                if required:
+                    spent += try gpu_compositor_raster(this, scratch, device, list, snapshot, layer_index, x, y)
+                    continue
+                let area = GpuRect(x = x, y = y, width = gpu_tile_size, height = gpu_tile_size).intersected(visible)
+                ak.vector_append_t(&this.schedule.wanted, GpuWanted(layer = (u32)layer_index, x = x, y = y, visible = true, priority = -(f64)area.width * (f64)area.height))
+    if budgeted:
+        gpu_schedule_interest(this, snapshot, viewport)
+    gpu_schedule_sort(this)
+    let deadline = start + this.schedule.budget if budgeted else 0xffffffffffffffff
+    spent += try gpu_schedule_draw(this, scratch, device, list, snapshot, deadline, true)
+    gpu_player_stats_the.frame_raster_ns += spent
+    this.schedule.last_frame = time.now()
+
+## Draws between frames until `deadline` (time.now()): the visible tiles the last frame left,
+## then the interest area, then previews in full once the scroll stops, for the list and
+## scroll state the view shows now (nothing when the list is not the one last drawn). Commits
+## the work to the GPU. Answers when to call again: 0 for at the next idle time (tiles are
+## still wanted), the nanoseconds until previews can be drawn in full, none for no work.
+pub func gpu_compositor_idle(this: GpuCompositor*, list: display_list.DisplayList*, snapshot: const display_list.ScrollStateSnapshot*, width: i32, height: i32, deadline: u64,
+                             cpu_allocator: memory.Allocator? = none) -> u64?!:
+    if this.list != list or width <= 0 or height <= 0:
+        return none
+    let device = this.device else return none
+    this.cpu_allocator = cpu_allocator
+    var scratch = GpuCpuScratch()
+    with memory.heap:
+        let viewport = GpuRect(width = width, height = height)
+        # The visible tiles of scrolled layers whose key has not changed since the last frame
+        # (the others are drawn by the next frame anyway).
+        for layer_index in 0..<ak.vector_size(&this.layers):
+            let layer = ak.vector_at_const(&this.layers, layer_index)
+            let layer_key = gpu_layer_key(layer, snapshot)
+            if layer.kind != GpuLayerKind.scrolled or ak.vector_at_const(&this.states, layer_index).key != layer_key:
+                continue
+            let key = gpu_hash(layer_key, (u64)layer_index)
+            let offset = gpu_layer_offset(layer, snapshot)
+            let visible = viewport.translated(-offset.m_x, -offset.m_y)
+            let range = gpu_tile_range(visible)
+            for row in range.y..<range.y + range.height:
+                for column in range.x..<range.x + range.width:
+                    let x = column * gpu_tile_size
+                    let y = row * gpu_tile_size
+                    if let kept = gpu_compositor_touch(this, key, x, y):
+                        if kept.preview:
+                            ak.vector_append_t(&this.schedule.wanted, GpuWanted(layer = (u32)layer_index, x = x, y = y, upgrade = true, priority = 0.0))
+                    else:
+                        ak.vector_append_t(&this.schedule.wanted, GpuWanted(layer = (u32)layer_index, x = x, y = y, visible = true, priority = 0.0))
+        gpu_schedule_interest(this, snapshot, viewport)
+        gpu_schedule_sort(this)
+        let spent = try gpu_schedule_draw(this, &scratch, device, list, snapshot, deadline, false)
+        gpu_player_stats_the.idle_raster_ns += spent
+        if spent > 0:
+            # Committed now, so the GPU draws them while the main thread waits for input.
+            _ = try device.done(gpu_last_submission)
+            gpu_compositor_evict(this)
+    if this.schedule.more:
+        return 0
+    if this.schedule.later:
+        let rest = this.schedule.last_motion + gpu_motion_pause
+        let now = time.now()
+        return rest - now + 1000000 if rest > now else 1000000
+    return none
+
+## Draws the wanted tiles in order until `deadline`: each when the time so far plus its layer's
+## recent cost fits (a frame's first visible tile always), and an interest tile only while the
+## tiles used stay within the tile budget. Clears the list; answers the time spent.
+func gpu_schedule_draw(this: GpuCompositor*, scratch: GpuCpuScratch*, device: gpu.Device, list: display_list.DisplayList*, snapshot: const display_list.ScrollStateSnapshot*,
+                       deadline: u64, in_frame: bool) -> u64!:
+    var spent: u64 = 0
+    var drawn_visible: usize = 0
+    let resting = gpu_schedule_resting(this)
+    this.schedule.more = false
+    this.schedule.later = false
+    for wanted in ak.vector_span_const(&this.schedule.wanted):
+        let layer = ak.vector_at_const(&this.layers, (usize)wanted.layer)
+        let key = gpu_hash(gpu_layer_key(layer, snapshot), (u64)wanted.layer)
+        if wanted.upgrade and not resting:
+            # A preview is drawn in full once the scroll stops.
+            this.schedule.later = true
+            continue
+        if in_frame and not wanted.visible and not wanted.urgent and not wanted.upgrade:
+            # Not needed soon: idle time draws it.
+            this.schedule.more = true
+            continue
+        if not wanted.visible and not wanted.upgrade:
+            # A kept tile of the interest area is kept on while the budget allows.
+            let index = this.keys.get(gpu_tile_key(key, wanted.x, wanted.y))
+            if index != none:
+                if this.protected < gpu_tile_budget:
+                    _ = gpu_compositor_touch(this, key, wanted.x, wanted.y)
+                continue
+            if this.protected >= gpu_tile_budget:
+                continue
+        # The tile's likely cost: its layer's recent GPU or CPU tiles'. A tile the CPU player
+        # would draw is drawn as a preview while the page scrolls (as a GPU tile).
+        let state = ak.vector_at_const(&this.states, (usize)wanted.layer)
+        var cost = state.cost
+        var preview = false
+        if gpu_bins_slow(&state.bins, gpu_layer_key(layer, snapshot), wanted.x, wanted.y):
+            if resting:
+                cost = state.slow_cost if state.slow_cost > 0 else gpu_slow_guess
+            else:
+                preview = true
+        # A frame draws its first visible tile whatever the budget; idle time draws one tile
+        # whatever it costs once the scroll stops.
+        let first = (in_frame and wanted.visible and drawn_visible == 0) or (not in_frame and resting and spent == 0)
+        if not first and time.now() + cost > deadline:
+            this.schedule.more = true
+            continue
+        let protected = this.protected
+        spent += try gpu_compositor_raster(this, scratch, device, list, snapshot, (usize)wanted.layer, wanted.x, wanted.y, preview)
+        # Counted when something was drawn (the tile has a texture).
+        let painted = this.protected > protected
+        if wanted.visible:
+            drawn_visible += 1
+        elif in_frame and painted:
+            gpu_player_stats_the.prefetched_tiles += 1
+        if not in_frame and painted:
+            gpu_player_stats_the.idle_tiles += 1
+        if not in_frame and (wanted.visible or wanted.upgrade):
+            this.schedule.redraw = true
+    ak.vector_clear_with_capacity(&this.schedule.wanted)
+    return spent
+
+## Adds the tiles of each scrolled layer's interest area that the viewport does not show,
+## nearest first (see the header).
+func gpu_schedule_interest(this: GpuCompositor*, snapshot: const display_list.ScrollStateSnapshot*, viewport: GpuRect):
+    let resting = gpu_schedule_resting(this)
+    for layer_index in 0..<ak.vector_size(&this.layers):
+        let layer = ak.vector_at_const(&this.layers, layer_index)
+        if layer.kind != GpuLayerKind.scrolled:
+            continue
+        let offset = gpu_layer_offset(layer, snapshot)
+        let visible = viewport.translated(-offset.m_x, -offset.m_y)
+        let layer_key = gpu_layer_key(layer, snapshot)
+        let bins = &ak.vector_at_const(&this.states, layer_index).bins
+        var vx = 0.0
+        var vy = 0.0
+        if not resting:
+            if let motion = gpu_schedule_motion(this, layer.frame):
+                vx = motion.vx
+                vy = motion.vy
+        let reach_x = gpu_schedule_reach(vx, visible.width)
+        let reach_y = gpu_schedule_reach(vy, visible.height)
+        let area = GpuRect(x = visible.x - reach_x[0], y = visible.y - reach_y[0], width = visible.width + reach_x[0] + reach_x[1], height = visible.height + reach_y[0] + reach_y[1])
+        let range = gpu_tile_range(area)
+        let shown = gpu_tile_range(visible)
+        for row in range.y..<range.y + range.height:
+            for column in range.x..<range.x + range.width:
+                if column >= shown.x and column < shown.x + shown.width and row >= shown.y and row < shown.y + shown.height:
+                    continue
+                let x = column * gpu_tile_size
+                let y = row * gpu_tile_size
+                # Past the layer's content (its bins say so) there is nothing to draw ahead.
+                if not gpu_bins_may_draw(bins, layer_key, x, y):
+                    continue
+                let gap_x = gpu_max(gpu_max(visible.x - (x + gpu_tile_size), x - (visible.x + visible.width)), 0)
+                let gap_y = gpu_max(gpu_max(visible.y - (y + gpu_tile_size), y - (visible.y + visible.height)), 0)
+                let urgent = (f64)gap_x <= math.abs(vx) * gpu_urgent_frames and (f64)gap_y <= math.abs(vy) * gpu_urgent_frames and (vx != 0.0 or vy != 0.0)
+                ak.vector_append_t(&this.schedule.wanted, GpuWanted(layer = (u32)layer_index, x = x, y = y, visible = false, urgent = urgent, priority = (f64)(gap_x + gap_y)))
+
+## How far the interest area reaches before and after the viewport along one axis, for a
+## velocity `v` (pixels a frame) and the viewport's `extent` on that axis.
+func gpu_schedule_reach(v: f64, extent: i32) -> i32[2]:
+    if math.abs(v) < 0.5:
+        return [gpu_tile_size, gpu_tile_size]
+    let ahead = gpu_min(gpu_max((i32)(math.abs(v) * gpu_lookahead_frames), gpu_tile_size), gpu_max(extent, gpu_tile_size))
+    return [ahead, 0] if v < 0.0 else [0, ahead]
+
+## Sorts the wanted tiles: visible ones first, then by priority (insertion sort: tens of tiles).
+func gpu_schedule_sort(this: GpuCompositor*):
+    let wanted = ak.vector_span(&this.schedule.wanted)
+    for i in 1..<wanted.length:
+        let value = wanted[i]
+        var j = i
+        while j > 0 and gpu_schedule_before(&value, &wanted[j - 1]):
+            wanted[j] = wanted[j - 1]
+            j -= 1
+        wanted[j] = value
+
+## Whether `a` is drawn before `b`: visible tiles, then the interest area, then upgrades.
+func gpu_schedule_before(a: const GpuWanted*, b: const GpuWanted*) -> bool:
+    if a.visible != b.visible:
+        return a.visible
+    if a.upgrade != b.upgrade:
+        return b.upgrade
+    return a.priority < b.priority
+
+# mark: Motion ==================================================================================
+
+## The motion kept for scroll frame `frame`, if any.
+func gpu_schedule_motion(this: GpuCompositor*, frame: u64) -> GpuMotion*?:
+    for index in 0..<ak.vector_size(&this.schedule.motions):
+        let motion = ak.vector_at(&this.schedule.motions, index)
+        if motion.frame == frame:
+            return motion
+    return none
+
+## Whether the scroll has stopped: no offset changed for a pause.
+func gpu_schedule_resting(this: const GpuCompositor*) -> bool:
+    return time.now() - this.schedule.last_motion > gpu_motion_pause
+
+## Notes where each scrolled layer's scroll frame shows its plane in this frame, and updates
+## its velocity (from rest after a pause).
+func gpu_schedule_note_motion(this: GpuCompositor*, snapshot: const display_list.ScrollStateSnapshot*, viewport: GpuRect, now: u64):
+    let paused = now - this.schedule.last_frame > gpu_motion_pause
+    for layer_index in 0..<ak.vector_size(&this.layers):
+        let layer = ak.vector_at_const(&this.layers, layer_index)
+        if layer.kind != GpuLayerKind.scrolled:
+            continue
+        let offset = gpu_layer_offset(layer, snapshot)
+        let x = -offset.m_x
+        let y = -offset.m_y
+        if let motion = gpu_schedule_motion(this, layer.frame):
+            if motion.drawn == this.frame:
+                continue
+            if paused:
+                motion.vx = 0.0
+                motion.vy = 0.0
+            if x != motion.x or y != motion.y:
+                this.schedule.last_motion = now
+            motion.vx = motion.vx * 0.5 + (f64)(x - motion.x) * 0.5
+            motion.vy = motion.vy * 0.5 + (f64)(y - motion.y) * 0.5
+            motion.x = x
+            motion.y = y
+            motion.drawn = this.frame
+        else:
+            ak.vector_append_t(&this.schedule.motions, GpuMotion(frame = layer.frame, x = x, y = y, drawn = this.frame))

@@ -72,7 +72,12 @@ func gpu_add_rounded_rect_clip_impl(base: display_list.DisplayListPlayer*, comma
     this.state.rounded = GpuRoundedClip(rect = [(f32)rect.x, (f32)rect.y, (f32)rect.width, (f32)rect.height], radii = radii, mode = 2.0 if keep_outside else 1.0)
 
 func gpu_add_clip_path_impl(base: display_list.DisplayListPlayer*, path: gfx.Path):
-    gpu_give_up(gpu_player_of(base), GpuFallback.clip_path)
+    let this = gpu_player_of(base)
+    # A preview leaves out what the clip path applies to (gpu_filtered_draw).
+    if this.preview:
+        this.state.filtered = true
+        return
+    gpu_give_up(this, GpuFallback.clip_path)
 
 func gpu_apply_transform_impl(base: display_list.DisplayListPlayer*, origin: gfx.FloatPoint, matrix: gfx.FloatMatrix4X4):
     # DisplayListPlayerCpu::apply_transform: the matrix about `origin`, concatenated (the loop
@@ -102,10 +107,51 @@ func gpu_apply_effects_impl(base: display_list.DisplayListPlayer*, command: disp
         if operator == gfx.CompositingAndBlendingOperator.plus_darker:
             blend = 29
         gpu_begin_layer(this, command.opacity, blend, GpuFallback.opacity if command.opacity < 1.0 else GpuFallback.blend)
-    if command.filter != none:
-        gpu_give_up(this, GpuFallback.filter)
+    if let filter = command.filter:
+        # A filter that makes pixels from nothing gives the tile up now; any other only when
+        # something is drawn under it (gpu_append): a tile can apply an element's effects for
+        # a clip of the element without drawing anything of it, and an empty group filters to
+        # nothing, for the CPU player too.
+        if gpu_filter_generates(gfx.filter_impl(&filter).filter):
+            gpu_give_up(this, GpuFallback.filter)
+        else:
+            this.state.filtered = true
     if command.mask_kind != none:
         gpu_give_up(this, GpuFallback.mask)
+
+## Whether `filter` makes pixels where its input has none (SkImageFilter::affectsTransparentBlack
+## through the graph): shaders, images, arithmetic with k4, and color filters that give
+## transparent black an alpha.
+func gpu_filter_generates(filter: gfx.ImageFilter*?) -> bool:
+    let node = filter else return false
+    match node.node:
+        .arithmetic(k1, k2, k3, k4, enforce, background, foreground):
+            return k4 != 0.0 or gpu_filter_generates(background) or gpu_filter_generates(foreground)
+        .compose(outer, inner): return gpu_filter_generates(outer) or gpu_filter_generates(inner)
+        .blend(mode, background, foreground): return gpu_filter_generates(background) or gpu_filter_generates(foreground)
+        .blur(sx, sy, input): return gpu_filter_generates(input)
+        .shader(_): return true
+        .displacement_map(xs, ys, scale, displacement, color): return gpu_filter_generates(displacement) or gpu_filter_generates(color)
+        .drop_shadow(dx, dy, sx, sy, color, input): return gpu_filter_generates(input)
+        .color_filter(color_filter, input):
+            match color_filter.node:
+                .matrix(values, clamp):
+                    if values[19] != 0.0:
+                        return true
+                .table_argb(a, r, g, b):
+                    if a[0] != 0:
+                        return true
+                _: _ = 0
+            return gpu_filter_generates(input)
+        .image(_, _, _, _): return true
+        .merge(inputs):
+            for input in ak.vector_span_const(&inputs):
+                if gpu_filter_generates(input):
+                    return true
+            return false
+        .offset(dx, dy, input): return gpu_filter_generates(input)
+        .erode(rx, ry, input): return gpu_filter_generates(input)
+        .dilate(rx, ry, input): return gpu_filter_generates(input)
 
 func gpu_would_be_fully_clipped_impl(base: display_list.DisplayListPlayer*, rect: gfx.DevicePixelRect) -> bool:
     let this = gpu_player_of(base)

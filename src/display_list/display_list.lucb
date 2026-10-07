@@ -59,7 +59,7 @@ pub func display_list_commands(this: const DisplayList*) -> const ak.Vector[Disp
 
 ## Ported from Libraries/LibWeb/Painting/DisplayList.cpp:21 Web::Painting::command_bounding_rectangle:
 ## the command's `bounding_rect()`, for the commands that have one.
-func command_bounding_rectangle(command: const DisplayListCommand*) -> gfx.DevicePixelRect?:
+pub func command_bounding_rectangle(command: const DisplayListCommand*) -> gfx.DevicePixelRect?:
     match *command:
         .draw_glyph_run(c): return draw_glyph_run_bounding_rect(&c)
         .fill_rect(c): return fill_rect_bounding_rect(&c)
@@ -236,13 +236,36 @@ pub func display_list_player_execute_nested(this: DisplayListPlayer*, display_li
 ## that draws elsewhere, as the GPU player does), with everything moved by `-origin` first, so
 ## the surface shows the part of the list's plane that starts at `origin`.
 pub func display_list_player_execute_tile(this: DisplayListPlayer*, display_list_: DisplayList*, scroll_state: const ScrollStateSnapshot*, surface: gfx.PaintingSurface*?, first: usize, end: usize, origin: gfx.IntPoint):
+    display_list_player_begin_tile(this, surface, origin)
+    display_list_player_execute_range(this, display_list_, scroll_state, first, end)
+    display_list_player_end_tile(this, surface)
+
+## A tile as execute_tile draws it, from only the commands `indices` names (ascending): the
+## ones a tile's bin holds (the GPU player's binning, gpu_player/bins.lucb). A command left
+## out must be one the loop would have culled for this tile; the others play as execute plays
+## them, so the pixels are the same.
+pub func display_list_player_execute_tile_commands(this: DisplayListPlayer*, display_list_: DisplayList*, scroll_state: const ScrollStateSnapshot*, surface: gfx.PaintingSurface*?, indices: const u32[], origin: gfx.IntPoint):
+    display_list_player_begin_tile(this, surface, origin)
+    let commands = display_list_commands(display_list_)
+    var state = DisplayListPlayerExecuteState(player = this, visual_context_tree = display_list_visual_context_tree(display_list_), scroll_state = scroll_state, applied_context_index = 0, applied_depth = 0)
+    for index in indices:
+        display_list_player_execute_command(this, &state, ak.vector_at_const(commands, (usize)index))
+    while state.applied_depth > 0:
+        display_list_player_restore(this, Restore())
+        state.applied_depth -= 1
+    display_list_player_end_tile(this, surface)
+
+## execute_tile's start: the surface locked and the plane moved by `-origin`.
+func display_list_player_begin_tile(this: DisplayListPlayer*, surface: gfx.PaintingSurface*?, origin: gfx.IntPoint):
     if let s = surface:
         gfx.painting_surface_lock_context(s)
     this.m_surface = surface
     display_list_player_save(this, Save())
     if origin.m_x != 0 or origin.m_y != 0:
         display_list_player_translate(this, Translate(delta = gfx.IntPoint(m_x = -origin.m_x, m_y = -origin.m_y)))
-    display_list_player_execute_range(this, display_list_, scroll_state, first, end)
+
+## execute_tile's end: the state restored, the surface flushed and unlocked.
+func display_list_player_end_tile(this: DisplayListPlayer*, surface: gfx.PaintingSurface*?):
     display_list_player_restore(this, Restore())
     if surface != none:
         display_list_player_flush(this)
@@ -258,72 +281,77 @@ func display_list_player_execute_range(this: DisplayListPlayer*, display_list_: 
     var state = DisplayListPlayerExecuteState(player = this, visual_context_tree = visual_context_tree, scroll_state = scroll_state, applied_context_index = 0, applied_depth = 0)
 
     for command_index in first..<end:
-        let item = ak.vector_at_const(commands, command_index)
-        let context_index = item.context_index
-        let command = &item.command
-
-        let bounding_rect = command_bounding_rectangle(command)
-
-        if display_list_player_switch_to_context(&state, context_index, bounding_rect) == SwitchResult.culled_by_effect:
-            continue
-
-        match *command:
-            .paint_scroll_bar(scroll_bar):
-                var paint_scroll_bar = scroll_bar
-                let device_offset = scroll_state_snapshot_device_offset_for_index(scroll_state, paint_scroll_bar.scroll_frame_index)
-                if paint_scroll_bar.vertical:
-                    gfx.device_pixel_rect_translate_by_i32_i32(&paint_scroll_bar.thumb_rect, 0, (i32)(-(f64)gfx.float_point_y(&device_offset) * paint_scroll_bar.scroll_size))
-                else:
-                    gfx.device_pixel_rect_translate_by_i32_i32(&paint_scroll_bar.thumb_rect, (i32)(-(f64)gfx.float_point_x(&device_offset) * paint_scroll_bar.scroll_size), 0)
-                display_list_player_paint_scrollbar(this, paint_scroll_bar)
-                continue
-            _:
-                _ = 0
-
-        if let rect = bounding_rect:
-            if gfx.device_pixel_rect_is_empty(&rect) or display_list_player_would_be_fully_clipped_by_painter(this, rect):
-                # Any clip that's located outside of the visible region is equivalent to a simple clip-rect,
-                # so replace it with one to avoid doing unnecessary work.
-                if command_is_clip(command):
-                    match *command:
-                        .add_clip_rect(clip): display_list_player_add_clip_rect(this, clip)
-                        _: display_list_player_add_clip_rect(this, AddClipRect(rect = rect))
-                continue
-
-        # HANDLE_COMMAND(command_type, executor_method)
-        match *command:
-            .draw_glyph_run(c): display_list_player_draw_glyph_run(this, c)
-            .fill_rect(c): display_list_player_fill_rect(this, c)
-            .draw_scaled_immutable_bitmap(c): display_list_player_draw_scaled_immutable_bitmap(this, c)
-            .draw_repeated_immutable_bitmap(c): display_list_player_draw_repeated_immutable_bitmap(this, c)
-            .draw_external_content(c): display_list_player_draw_external_content(this, c)
-            .add_clip_rect(c): display_list_player_add_clip_rect(this, c)
-            .save(c): display_list_player_save(this, c)
-            .save_layer(c): display_list_player_save_layer(this, c)
-            .restore(c): display_list_player_restore(this, c)
-            .translate(c): display_list_player_translate(this, c)
-            .paint_linear_gradient(c): display_list_player_paint_linear_gradient(this, c)
-            .paint_radial_gradient(c): display_list_player_paint_radial_gradient(this, c)
-            .paint_conic_gradient(c): display_list_player_paint_conic_gradient(this, c)
-            .paint_outer_box_shadow(c): display_list_player_paint_outer_box_shadow(this, c)
-            .paint_inner_box_shadow(c): display_list_player_paint_inner_box_shadow(this, c)
-            .paint_text_shadow(c): display_list_player_paint_text_shadow(this, c)
-            .fill_rect_with_rounded_corners(c): display_list_player_fill_rect_with_rounded_corners(this, c)
-            .fill_path(c): display_list_player_fill_path(this, c)
-            .stroke_path(c): display_list_player_stroke_path(this, c)
-            .draw_ellipse(c): display_list_player_draw_ellipse(this, c)
-            .fill_ellipse(c): display_list_player_fill_ellipse(this, c)
-            .draw_line(c): display_list_player_draw_line(this, c)
-            .apply_backdrop_filter(c): display_list_player_apply_backdrop_filter(this, c)
-            .draw_rect(c): display_list_player_draw_rect(this, c)
-            .add_rounded_rect_clip(c): display_list_player_add_rounded_rect_clip(this, c)
-            .paint_nested_display_list(c): display_list_player_paint_nested_display_list(this, c)
-            .apply_effects(c): display_list_player_apply_effects(this, c)
-            .paint_scroll_bar(_): trap("VERIFY_NOT_REACHED")
+        display_list_player_execute_command(this, &state, ak.vector_at_const(commands, command_index))
 
     while state.applied_depth > 0:
         display_list_player_restore(this, Restore())
         state.applied_depth -= 1
+
+## The body of `execute_impl`'s loop: one command, in its visual context, culled as Ladybird
+## culls it.
+func display_list_player_execute_command(this: DisplayListPlayer*, state: DisplayListPlayerExecuteState*, item: const DisplayListCommandListItem*):
+    let scroll_state = state.scroll_state
+    let context_index = item.context_index
+    let command = &item.command
+
+    let bounding_rect = command_bounding_rectangle(command)
+
+    if display_list_player_switch_to_context(state, context_index, bounding_rect) == SwitchResult.culled_by_effect:
+        return
+
+    match *command:
+        .paint_scroll_bar(scroll_bar):
+            var paint_scroll_bar = scroll_bar
+            let device_offset = scroll_state_snapshot_device_offset_for_index(scroll_state, paint_scroll_bar.scroll_frame_index)
+            if paint_scroll_bar.vertical:
+                gfx.device_pixel_rect_translate_by_i32_i32(&paint_scroll_bar.thumb_rect, 0, (i32)(-(f64)gfx.float_point_y(&device_offset) * paint_scroll_bar.scroll_size))
+            else:
+                gfx.device_pixel_rect_translate_by_i32_i32(&paint_scroll_bar.thumb_rect, (i32)(-(f64)gfx.float_point_x(&device_offset) * paint_scroll_bar.scroll_size), 0)
+            display_list_player_paint_scrollbar(this, paint_scroll_bar)
+            return
+        _:
+            _ = 0
+
+    if let rect = bounding_rect:
+        if gfx.device_pixel_rect_is_empty(&rect) or display_list_player_would_be_fully_clipped_by_painter(this, rect):
+            # Any clip that's located outside of the visible region is equivalent to a simple clip-rect,
+            # so replace it with one to avoid doing unnecessary work.
+            if command_is_clip(command):
+                match *command:
+                    .add_clip_rect(clip): display_list_player_add_clip_rect(this, clip)
+                    _: display_list_player_add_clip_rect(this, AddClipRect(rect = rect))
+            return
+
+    # HANDLE_COMMAND(command_type, executor_method)
+    match *command:
+        .draw_glyph_run(c): display_list_player_draw_glyph_run(this, c)
+        .fill_rect(c): display_list_player_fill_rect(this, c)
+        .draw_scaled_immutable_bitmap(c): display_list_player_draw_scaled_immutable_bitmap(this, c)
+        .draw_repeated_immutable_bitmap(c): display_list_player_draw_repeated_immutable_bitmap(this, c)
+        .draw_external_content(c): display_list_player_draw_external_content(this, c)
+        .add_clip_rect(c): display_list_player_add_clip_rect(this, c)
+        .save(c): display_list_player_save(this, c)
+        .save_layer(c): display_list_player_save_layer(this, c)
+        .restore(c): display_list_player_restore(this, c)
+        .translate(c): display_list_player_translate(this, c)
+        .paint_linear_gradient(c): display_list_player_paint_linear_gradient(this, c)
+        .paint_radial_gradient(c): display_list_player_paint_radial_gradient(this, c)
+        .paint_conic_gradient(c): display_list_player_paint_conic_gradient(this, c)
+        .paint_outer_box_shadow(c): display_list_player_paint_outer_box_shadow(this, c)
+        .paint_inner_box_shadow(c): display_list_player_paint_inner_box_shadow(this, c)
+        .paint_text_shadow(c): display_list_player_paint_text_shadow(this, c)
+        .fill_rect_with_rounded_corners(c): display_list_player_fill_rect_with_rounded_corners(this, c)
+        .fill_path(c): display_list_player_fill_path(this, c)
+        .stroke_path(c): display_list_player_stroke_path(this, c)
+        .draw_ellipse(c): display_list_player_draw_ellipse(this, c)
+        .fill_ellipse(c): display_list_player_fill_ellipse(this, c)
+        .draw_line(c): display_list_player_draw_line(this, c)
+        .apply_backdrop_filter(c): display_list_player_apply_backdrop_filter(this, c)
+        .draw_rect(c): display_list_player_draw_rect(this, c)
+        .add_rounded_rect_clip(c): display_list_player_add_rounded_rect_clip(this, c)
+        .paint_nested_display_list(c): display_list_player_paint_nested_display_list(this, c)
+        .apply_effects(c): display_list_player_apply_effects(this, c)
+        .paint_scroll_bar(_): trap("VERIFY_NOT_REACHED")
 
 # mark: DisplayListPlayer pure virtuals ========================================================
 

@@ -109,6 +109,10 @@ pub struct GpuReplay:
 ## default limit is 4096).
 let gpu_frame_draws: usize = 4000
 
+## The submission of the tile frame presented last: asking whether it is done commits the
+## device's open work (the schedule does after drawing tiles in idle time).
+var gpu_last_submission: gpu.Submission = gpu.Submission()
+
 ## One texture frame of a tile and its root target.
 struct GpuTileFrame:
     var frame: interop.Reference[gpu.Frame]?
@@ -136,6 +140,7 @@ struct GpuTileFrame:
         self.frame = none
         defer frame.release()
         _ = try frame.value().present(gpu.Color(0.0, 0.0, 0.0, 0.0))
+        gpu_last_submission = frame.value().submission()
 
     ## Lets the frame go without presenting it.
     func release():
@@ -484,11 +489,12 @@ pub struct GpuCpuScratch:
     var player: display_list.DisplayListPlayerCpu*?
     var surface: gfx.PaintingSurface*?
 
-## Draws commands `layer.first..<layer.end` with the CPU player into the scratch tile surface
-## (cleared first) from `origin` of the layer's plane, then uploads it into `texture` through
-## `pixels` (a tile's bytes).
+## Draws commands `layer.first..<layer.end` (only those `commands` names, when it names them:
+## the tile's bin) with the CPU player into the scratch tile surface (cleared first) from
+## `origin` of the layer's plane, then uploads it into `texture` through `pixels` (a tile's
+## bytes).
 pub func gpu_cpu_tile(scratch: GpuCpuScratch*, list: display_list.DisplayList*, snapshot: const display_list.ScrollStateSnapshot*, layer: const GpuLayer*,
-                      origin: gfx.IntPoint, texture: gpu.Texture, pixels: u8[]) -> !:
+                      commands: const u32[]?, origin: gfx.IntPoint, texture: gpu.Texture, pixels: u8[]) -> !:
     if scratch.player == none:
         scratch.player = display_list.display_list_player_cpu_create()
     let player = scratch.player else trap("gpu_player: no CPU player")
@@ -500,7 +506,10 @@ pub func gpu_cpu_tile(scratch: GpuCpuScratch*, list: display_list.DisplayList*, 
             for x in 0..<gfx.bitmap_width(bitmap):
                 row[(usize)x] = 0
     scratch.surface = surface
-    display_list.display_list_player_execute_tile((display_list.DisplayListPlayer*)player, list, snapshot, surface, layer.first, layer.end, origin)
+    if let indices = commands:
+        display_list.display_list_player_execute_tile_commands((display_list.DisplayListPlayer*)player, list, snapshot, surface, indices, origin)
+    else:
+        display_list.display_list_player_execute_tile((display_list.DisplayListPlayer*)player, list, snapshot, surface, layer.first, layer.end, origin)
     let width = gfx.bitmap_width(bitmap)
     let height = gfx.bitmap_height(bitmap)
     for y in 0..<height:
