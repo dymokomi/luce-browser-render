@@ -148,7 +148,7 @@ pub func cpu_rrect_path_for(rect: gfx.DevicePixelRect, corner_radii: const Corne
     return cpu_rrect_path(r, cpu_radii(corner_radii))
 
 ## SkPath::addOval of `rect`; none for an empty rectangle.
-func cpu_oval_path(rect: raster.Rect) -> raster.Path?:
+pub func cpu_oval_path(rect: raster.Rect) -> raster.Path?:
     return raster.PathBuilder.from_oval(rect)
 
 # mark: Inner shadow paths =====================================================================

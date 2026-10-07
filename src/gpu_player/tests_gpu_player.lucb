@@ -431,3 +431,39 @@ test "gpu player: gradients run the raster pipeline's stages on the GPU":
     let stats = test_compare("gradients", &scene, snapshots, 2, 0) else return
     if stats.cpu_tiles > 0:
         trap("a gradient sent a tile to the CPU player")
+
+test "gpu player: ellipses and repeated images are drawn on the GPU":
+    let scene = test_list()
+    test_background(&scene)
+    test_add(&scene, .fill_ellipse(display_list.FillEllipse(rect = test_box(20, 20, 120, 70), color = test_rgba(200, 60, 20, 255))), 1)
+    test_add(&scene, .fill_ellipse(display_list.FillEllipse(rect = test_box(160, 30, 9, 9), color = test_rgba(20, 20, 20, 255))), 1)
+    test_add(&scene, .draw_ellipse(display_list.DrawEllipse(rect = test_box(190, 20, 140, 90), color = test_rgba(30, 90, 200, 255), thickness = 3)), 1)
+    let tilted = test_transform(&scene, 25.0, 1.0, 400.0, 60.0, 1)
+    test_add(&scene, .fill_ellipse(display_list.FillEllipse(rect = test_box(350, 30, 120, 60), color = test_rgba(40, 160, 90, 200))), tilted)
+    # A small image repeated along x, along y, and both, at its size and scaled up bilinearly.
+    let bitmap = gfx.bitmap_create_alpha_type(gfx.BitmapFormat.bgra8888, gfx.AlphaType.premultiplied, gfx.IntSize(m_width = 6, m_height = 5)) else trap("bitmap")
+    for j in 0..<(i32)5:
+        let row = gfx.bitmap_scanline(bitmap, j) else trap("scanline")
+        for i in 0..<(i32)6:
+            row[(usize)i] = 0xff000000 | ((u32)(i * 40) << 16) | ((u32)(j * 50) << 8) | (u32)(255 - i * 30)
+    var color_space: gfx.ColorSpace = ---
+    gfx.color_space_construct(&color_space)
+    let image = gfx.immutable_bitmap_create_color_space(bitmap, color_space)
+    let repeats = [display_list.DrawRepeatedImmutableBitmapRepeat(x = true, y = false), display_list.DrawRepeatedImmutableBitmapRepeat(x = false, y = true),
+                   display_list.DrawRepeatedImmutableBitmapRepeat(x = true, y = true)]
+    for i in 0..<(usize)3:
+        let x = 20 + (i32)i * 230
+        test_add(&scene, .save(display_list.Save()), 1)
+        test_add(&scene, .add_clip_rect(display_list.AddClipRect(rect = test_box(x, 130, 210, 160))), 1)
+        test_add(&scene, .draw_repeated_immutable_bitmap(display_list.DrawRepeatedImmutableBitmap(dst_rect = test_box(x + 30, 150, 6, 5), clip_rect = test_box(x, 130, 210, 160), bitmap = image,
+                                                                                                  scaling_mode = gfx.ScalingMode.nearest_neighbor, repeat = repeats[i])), 1)
+        test_add(&scene, .draw_repeated_immutable_bitmap(display_list.DrawRepeatedImmutableBitmap(dst_rect = test_box(x + 100, 200, 27, 22), clip_rect = test_box(x, 130, 210, 160), bitmap = image,
+                                                                                                  scaling_mode = gfx.ScalingMode.bilinear, repeat = repeats[i])), 1)
+        test_add(&scene, .restore(display_list.Restore()), 1)
+    let snapshots = [test_snapshot(0.0, 0.0), test_snapshot(0.0, 3.0)]
+    # The raster port's anti-aliased fill of an oval is not quite translation-invariant: the
+    # oval rastered at another whole-pixel offset (as the GPU player rasters it, for its tile)
+    # differs on its last row by up to 30 levels, about 25 pixels here.
+    let stats = test_compare("ellipses and patterns", &scene, snapshots, 3, 40) else return
+    if stats.cpu_tiles > 0:
+        trap("an ellipse or a repeated image sent a tile to the CPU player")

@@ -186,10 +186,10 @@ func gpu_stroke_path_impl(base: display_list.DisplayListPlayer*, command: displa
     gpu_give_up(gpu_player_of(base), GpuFallback.stroke)
 
 func gpu_draw_ellipse_impl(base: display_list.DisplayListPlayer*, command: display_list.DrawEllipse):
-    gpu_give_up(gpu_player_of(base), GpuFallback.ellipse)
+    gpu_ellipse(gpu_player_of(base), command.rect, command.color, command.thickness)
 
 func gpu_fill_ellipse_impl(base: display_list.DisplayListPlayer*, command: display_list.FillEllipse):
-    gpu_give_up(gpu_player_of(base), GpuFallback.ellipse)
+    gpu_ellipse(gpu_player_of(base), command.rect, command.color, none)
 
 func gpu_backdrop_filter_impl(base: display_list.DisplayListPlayer*, command: display_list.ApplyBackdropFilter):
     gpu_give_up(gpu_player_of(base), GpuFallback.backdrop_filter)
@@ -199,9 +199,6 @@ func gpu_nested_display_list_impl(base: display_list.DisplayListPlayer*, command
 
 func gpu_external_content_impl(base: display_list.DisplayListPlayer*, command: display_list.DrawExternalContent):
     gpu_give_up(gpu_player_of(base), GpuFallback.external_content)
-
-func gpu_repeated_bitmap_impl(base: display_list.DisplayListPlayer*, command: display_list.DrawRepeatedImmutableBitmap):
-    gpu_give_up(gpu_player_of(base), GpuFallback.repeated_image)
 
 # mark: Class ===================================================================================
 

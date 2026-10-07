@@ -20,7 +20,8 @@
 //   kind 3  image       the image at binding 1 scaled onto k0 (x, y, width, height): k1 its
 //                       width, height, filter (0 nearest, 1 bilinear clamped to its edges as
 //                       Skia's kClamp image shader samples, 2 the sampler's trilinear) and
-//                       opacity
+//                       opacity; k2.x 1 when it repeats (Skia's kRepeat on both axes: texel
+//                       coordinates wrap rather than clamp)
 //   kind 4  composite   a layer: the texture at binding 1 with its top left at k0.xy, texel for
 //                       pixel, times k0.w (its opacity)
 //   kind 5  clip        one clip of a nested clip into an r8 clip mask cleared to 1: an `over`
@@ -86,9 +87,11 @@ float mask_texel(ivec2 q) {
     return texelFetch(source, q + ivec2(a.zw), 0).r;
 }
 
-// A texel of the image, its coordinates clamped to its edges.
+// A texel of the image, its coordinates clamped to its edges or wrapped.
 vec4 image_texel(ivec2 at) {
-    return texelFetch(source, clamp(at, ivec2(0), ivec2(params.k1.xy) - 1), 0);
+    ivec2 size = ivec2(params.k1.xy);
+    ivec2 texel = params.k2.x > 0.5 ? (at % size + size) % size : clamp(at, ivec2(0), size - 1);
+    return texelFetch(source, texel, 0);
 }
 
 // The image at pixel center `p`: nearest, bilinear or trilinear.

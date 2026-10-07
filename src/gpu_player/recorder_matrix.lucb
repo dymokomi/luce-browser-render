@@ -6,7 +6,8 @@
 #       Skia draws under the canvas's whole matrix, and so does the GPU player, in the ways that
 #       keep the CPU player's pixels:
 #
-#         - shapes (rectangles, rounded rectangles, rectangle frames, paths, lines) are the CPU
+#         - shapes (rectangles, rounded rectangles, rectangle frames, paths, lines, ellipses,
+#           which are drawn so under any transform) are the CPU
 #           rasterizer's coverage under the matrix, made for the part of the tile they cover
 #           and drawn as masks, as the software path renderer of Ganesh draws what it has no
 #           GPU method for;
@@ -156,6 +157,20 @@ func gpu_matrix_draw_rect(this: DisplayListPlayerGpu*, rect: gfx.DevicePixelRect
     defer path.release()
     let stroke = raster.Stroke(width = 1.0)
     gpu_coverage_draw(this, .stroke(path = &path, stroke = &stroke), gpu_mapped_bounds(this, r, 1.0), color)
+
+## fill_ellipse and draw_ellipse (`thickness` wide), under any transform: the oval's path filled
+## or stroked, anti-aliased, as DisplayListPlayerCpu draws them.
+func gpu_ellipse(this: DisplayListPlayerGpu*, rect: gfx.DevicePixelRect, color: gfx.Color, thickness: i32?):
+    if not gpu_recording(this):
+        return
+    let r = gpu_raster_rect(rect) else return
+    var oval = display_list.cpu_oval_path(r) else return
+    defer oval.release()
+    if let width = thickness:
+        let stroke = raster.Stroke(width = (f32)width)
+        gpu_coverage_draw(this, .stroke(path = &oval, stroke = &stroke), gpu_mapped_bounds(this, r, (f32)width), color)
+        return
+    gpu_coverage_draw(this, .fill(path = &oval, fill_rule = raster.FillRule.winding, anti_alias = true), r.transform(gpu_ctm(this)), color)
 
 # mark: Clips ===================================================================================
 
